@@ -5,9 +5,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from sky import backends
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.client.sdk_async import get, stream_and_get
+from sky.client.sdk_async import get
+from sky.client.sdk_async import stream_and_get
 from sky.jobs.client import sdk
-from sky.server import common as server_common
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
@@ -35,7 +35,8 @@ async def launch(
     stream_logs: bool = True,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
-    request_id = await context_utils.to_thread(sdk.launch, task, name, _need_confirmation)
+    request_id = await context_utils.to_thread(sdk.launch, task, name,
+                                               _need_confirmation)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -48,7 +49,8 @@ async def queue(refresh: bool,
                 all_users: bool = False,
                 stream_logs: bool = True) -> List[Dict[str, Any]]:
     """Async version of queue() that gets statuses of managed jobs."""
-    request_id = await context_utils.to_thread(sdk.queue, refresh, skip_finished, all_users)
+    request_id = await context_utils.to_thread(sdk.queue, refresh,
+                                               skip_finished, all_users)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -64,7 +66,8 @@ async def cancel(
     stream_logs: bool = True,
 ) -> None:
     """Async version of cancel() that cancels managed jobs."""
-    request_id = await context_utils.to_thread(sdk.cancel, name, job_ids, all, all_users)
+    request_id = await context_utils.to_thread(sdk.cancel, name, job_ids, all,
+                                               all_users)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -96,7 +99,8 @@ async def download_logs(
         controller: bool,
         local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
     """Async version of download_logs() that syncs down logs of managed jobs."""
-    return await context_utils.to_thread(sdk.download_logs, name, job_id, refresh, controller, local_dir)
+    return await context_utils.to_thread(sdk.download_logs, name, job_id,
+                                         refresh, controller, local_dir)
 
 
 @usage_lib.entrypoint

@@ -27,11 +27,13 @@ from sky.client import common as client_common
 from sky.client import sdk
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
+from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import annotations, context_utils
+from sky.utils import annotations
 from sky.utils import common
+from sky.utils import context_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
 
@@ -63,23 +65,25 @@ async def get(request_id: str) -> Any:
             above.
     """
     async with aiohttp.ClientSession() as session:
-        async with server_common.make_authenticated_request_async(
-                session,
-                'GET',
-                f'/api/get?request_id={request_id}',
-                retry=False,
-                timeout=aiohttp.ClientTimeout(
-                    total=None,
-                    connect=client_common.
-                    API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS)) as response:
+        response = await server_common.make_authenticated_request_async(
+            session,
+            'GET',
+            f'/api/get?request_id={request_id}',
+            retry=False,
+            timeout=aiohttp.ClientTimeout(
+                total=None,
+                connect=client_common.
+                API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS))
+
+        try:
             request_task = None
             if response.status == 200:
                 request_task = requests_lib.Request.decode(
-                    requests_lib.RequestPayload(**await response.json()))
+                    payloads.RequestPayload(**await response.json()))
             elif response.status == 500:
                 try:
                     request_task = requests_lib.Request.decode(
-                        requests_lib.RequestPayload(**await response.json()))
+                        payloads.RequestPayload(**await response.json()))
                     logger.debug(f'Got request with error: {request_task.name}')
                 except Exception:  # pylint: disable=broad-except
                     request_task = None
@@ -105,15 +109,19 @@ async def get(request_id: str) -> Any:
                         f'request ({request_task.request_id}) is cancelled by '
                         f'another process. {colorama.Style.RESET_ALL}')
             return request_task.get_return_value()
+        finally:
+            response.close()
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-async def stream_response_async(request_id: Optional[str],
-                                response: 'aiohttp.ClientResponse',
-                                output_stream: Optional['io.TextIOBase'] = None) -> Any:
-    """Async version of stream_response that streams the response to the console.
+async def stream_response_async(
+        request_id: Optional[str],
+        response: 'aiohttp.ClientResponse',
+        output_stream: Optional['io.TextIOBase'] = None) -> Any:
+    """Async version of stream_response that streams the response to the
+    console.
 
     Args:
         request_id: The request ID.
@@ -124,7 +132,7 @@ async def stream_response_async(request_id: Optional[str],
     try:
         # Buffer to store incomplete UTF-8 bytes between chunks
         undecoded_buffer = b''
-        
+
         async for chunk in response.content.iter_chunked(8192):
             if chunk is None:
                 break
@@ -143,13 +151,13 @@ async def stream_response_async(request_id: Optional[str],
                     # Decode the valid part
                     encoded_msg = current_bytes[:e.start].decode('utf-8')
                     print(encoded_msg, flush=True, end='', file=output_stream)
-                    
+
                     # Store remaining bytes for next iteration
                     undecoded_buffer = current_bytes[e.start:]
                 else:
                     # Invalid UTF-8 at the beginning, skip this chunk
                     continue
-        
+
         # Handle any remaining bytes
         if undecoded_buffer:
             try:
@@ -158,7 +166,7 @@ async def stream_response_async(request_id: Optional[str],
             except UnicodeDecodeError:
                 # Skip malformed trailing bytes
                 pass
-                
+
         if request_id is not None:
             return await get(request_id)
     except Exception:  # pylint: disable=broad-except
@@ -200,12 +208,12 @@ async def stream_and_get(
         'request_id': request_id,
         'log_path': log_path,
         'tail': str(tail) if tail is not None else None,
-        'follow': follow,
+        'follow': str(follow).lower(),  # Convert boolean to string for aiohttp
         'format': 'console',
     }
     # Filter out None values
     params = {k: v for k, v in params.items() if v is not None}
-    
+
     async with aiohttp.ClientSession() as session:
         response = await server_common.make_authenticated_request_async(
             session,
@@ -215,18 +223,21 @@ async def stream_and_get(
             retry=False,
             timeout=aiohttp.ClientTimeout(
                 total=None,
-                connect=client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS))
-        
-        if response.status in [404, 400]:
-            detail = (await response.json()).get('detail')
-            await response.close()
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(f'Failed to stream logs: {detail}')
-        elif response.status != 200:
-            await response.close()
-            return await get(request_id)
-        
-        return await stream_response_async(request_id, response, output_stream)
+                connect=client_common.
+                API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS))
+
+        try:
+            if response.status in [404, 400]:
+                detail = (await response.json()).get('detail')
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(f'Failed to stream logs: {detail}')
+            elif response.status != 200:
+                return await get(request_id)
+
+            return await stream_response_async(request_id, response,
+                                               output_stream)
+        finally:
+            response.close()
 
 
 @usage_lib.entrypoint
@@ -236,7 +247,8 @@ async def check(infra_list: Optional[Tuple[str, ...]],
                 workspace: Optional[str] = None,
                 stream_logs: bool = True) -> Dict[str, List[str]]:
     """Async version of check() that checks the credentials to enable clouds."""
-    request_id = await context_utils.to_thread(sdk.check, infra_list, verbose, workspace)
+    request_id = await context_utils.to_thread(sdk.check, infra_list, verbose,
+                                               workspace)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -249,7 +261,8 @@ async def enabled_clouds(workspace: Optional[str] = None,
                          expand: bool = False,
                          stream_logs: bool = True) -> List[str]:
     """Async version of enabled_clouds() that gets the enabled clouds."""
-    request_id = await context_utils.to_thread(sdk.enabled_clouds, workspace, expand)
+    request_id = await context_utils.to_thread(sdk.enabled_clouds, workspace,
+                                               expand)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -271,9 +284,11 @@ async def list_accelerators(
 ) -> Dict[str, List[sky.catalog.common.InstanceTypeInfo]]:
     """Async version of list_accelerators() that lists the names of all
     accelerators offered by Sky."""
-    request_id = await context_utils.to_thread(
-        sdk.list_accelerators, gpus_only, name_filter, region_filter,
-        quantity_filter, clouds, all_regions, require_price, case_sensitive)
+    request_id = await context_utils.to_thread(sdk.list_accelerators, gpus_only,
+                                               name_filter, region_filter,
+                                               quantity_filter, clouds,
+                                               all_regions, require_price,
+                                               case_sensitive)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -291,9 +306,10 @@ async def list_accelerator_counts(
         stream_logs: bool = True) -> Dict[str, List[int]]:
     """Async version of list_accelerator_counts() that lists all accelerators
       offered by Sky and available counts."""
-    request_id = await context_utils.to_thread(
-        sdk.list_accelerator_counts, gpus_only, name_filter,
-        region_filter, quantity_filter, clouds)
+    request_id = await context_utils.to_thread(sdk.list_accelerator_counts,
+                                               gpus_only, name_filter,
+                                               region_filter, quantity_filter,
+                                               clouds)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -302,15 +318,15 @@ async def list_accelerator_counts(
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def optimize(
-    dag: 'sky.Dag',
-    minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None,
-    stream_logs: bool = True
-) -> sky.dag.Dag:
+async def optimize(dag: 'sky.Dag',
+                   minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
+                   admin_policy_request_options: Optional[
+                       admin_policy.RequestOptions] = None,
+                   stream_logs: bool = True) -> sky.dag.Dag:
     """Async version of optimize() that finds the best execution plan for the
       given DAG."""
-    request_id = await context_utils.to_thread(sdk.optimize, dag, minimize, admin_policy_request_options)
+    request_id = await context_utils.to_thread(sdk.optimize, dag, minimize,
+                                               admin_policy_request_options)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -353,10 +369,10 @@ async def launch(
     """Async version of launch() that launches a cluster or task."""
     request_id = await context_utils.to_thread(
         sdk.launch, task, cluster_name, retry_until_up,
-        idle_minutes_to_autostop, dryrun, down, backend,
-        optimize_target, no_setup, clone_disk_from, fast,
-        _need_confirmation, _is_launched_by_jobs_controller,
-        _is_launched_by_sky_serve_controller, _disable_controller_check)
+        idle_minutes_to_autostop, dryrun, down, backend, optimize_target,
+        no_setup, clone_disk_from, fast, _need_confirmation,
+        _is_launched_by_jobs_controller, _is_launched_by_sky_serve_controller,
+        _disable_controller_check)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -374,7 +390,8 @@ async def exec(  # pylint: disable=redefined-builtin
     stream_logs: bool = True,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of exec() that executes a task on an existing cluster."""
-    request_id = await context_utils.to_thread(sdk.exec, task, cluster_name, dryrun, down, backend)
+    request_id = await context_utils.to_thread(sdk.exec, task, cluster_name,
+                                               dryrun, down, backend)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -389,7 +406,8 @@ async def tail_logs(cluster_name: str,
                     tail: int = 0,
                     output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
-    return await context_utils.to_thread(sdk.tail_logs, cluster_name, job_id, follow, tail, output_stream)
+    return await context_utils.to_thread(sdk.tail_logs, cluster_name, job_id,
+                                         follow, tail, output_stream)
 
 
 @usage_lib.entrypoint
@@ -397,7 +415,8 @@ async def tail_logs(cluster_name: str,
 async def download_logs(cluster_name: str,
                         job_ids: Optional[List[str]]) -> Dict[str, str]:
     """Async version of download_logs() that downloads the logs of jobs."""
-    return await context_utils.to_thread(sdk.download_logs, cluster_name, job_ids)
+    return await context_utils.to_thread(sdk.download_logs, cluster_name,
+                                         job_ids)
 
 
 @usage_lib.entrypoint
@@ -411,9 +430,9 @@ async def start(
     stream_logs: bool = True,
 ) -> backends.CloudVmRayResourceHandle:
     """Async version of start() that restarts a cluster."""
-    request_id = await context_utils.to_thread(
-        sdk.start, cluster_name, idle_minutes_to_autostop,
-        retry_until_up, down, force)
+    request_id = await context_utils.to_thread(sdk.start, cluster_name,
+                                               idle_minutes_to_autostop,
+                                               retry_until_up, down, force)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -422,7 +441,9 @@ async def start(
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def down(cluster_name: str, purge: bool = False, stream_logs: bool = True) -> None:
+async def down(cluster_name: str,
+               purge: bool = False,
+               stream_logs: bool = True) -> None:
     """Async version of down() that tears down a cluster."""
     request_id = await context_utils.to_thread(sdk.down, cluster_name, purge)
     if stream_logs:
@@ -433,7 +454,9 @@ async def down(cluster_name: str, purge: bool = False, stream_logs: bool = True)
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def stop(cluster_name: str, purge: bool = False, stream_logs: bool = True) -> None:
+async def stop(cluster_name: str,
+               purge: bool = False,
+               stream_logs: bool = True) -> None:
     """Async version of stop() that stops a cluster."""
     request_id = await context_utils.to_thread(sdk.stop, cluster_name, purge)
     if stream_logs:
@@ -448,11 +471,11 @@ async def autostop(
         cluster_name: str,
         idle_minutes: int,
         down: bool = False,  # pylint: disable=redefined-outer-name
-        stream_logs: bool = True
-) -> None:
+        stream_logs: bool = True) -> None:
     """Async version of autostop() that schedules an autostop/autodown for a
       cluster."""
-    request_id = await context_utils.to_thread(sdk.autostop, cluster_name, idle_minutes, down)
+    request_id = await context_utils.to_thread(sdk.autostop, cluster_name,
+                                               idle_minutes, down)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -466,7 +489,8 @@ async def queue(cluster_name: str,
                 all_users: bool = False,
                 stream_logs: bool = True) -> List[dict]:
     """Async version of queue() that gets the job queue of a cluster."""
-    request_id = await context_utils.to_thread(sdk.queue, cluster_name, skip_finished, all_users)
+    request_id = await context_utils.to_thread(sdk.queue, cluster_name,
+                                               skip_finished, all_users)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -482,7 +506,8 @@ async def job_status(
 ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
     """Async version of job_status() that gets the status of jobs on a
       cluster."""
-    request_id = await context_utils.to_thread(sdk.job_status, cluster_name, job_ids)
+    request_id = await context_utils.to_thread(sdk.job_status, cluster_name,
+                                               job_ids)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -492,18 +517,17 @@ async def job_status(
 @usage_lib.entrypoint
 @annotations.client_api
 async def cancel(
-    cluster_name: str,
-    all: bool = False,  # pylint: disable=redefined-builtin
-    all_users: bool = False,
-    job_ids: Optional[List[int]] = None,
-    # pylint: disable=invalid-name
-    _try_cancel_if_cluster_is_init: bool = False,
-    stream_logs: bool = True
-) -> None:
+        cluster_name: str,
+        all: bool = False,  # pylint: disable=redefined-builtin
+        all_users: bool = False,
+        job_ids: Optional[List[int]] = None,
+        # pylint: disable=invalid-name
+        _try_cancel_if_cluster_is_init: bool = False,
+        stream_logs: bool = True) -> None:
     """Async version of cancel() that cancels jobs on a cluster."""
-    request_id = await context_utils.to_thread(
-        sdk.cancel, cluster_name, all, all_users, job_ids,
-        _try_cancel_if_cluster_is_init)
+    request_id = await context_utils.to_thread(sdk.cancel, cluster_name, all,
+                                               all_users, job_ids,
+                                               _try_cancel_if_cluster_is_init)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -519,7 +543,8 @@ async def status(
     stream_logs: bool = True,
 ) -> List[Dict[str, Any]]:
     """Async version of status() that gets cluster statuses."""
-    request_id = await context_utils.to_thread(sdk.status, cluster_names, refresh, all_users)
+    request_id = await context_utils.to_thread(sdk.status, cluster_names,
+                                               refresh, all_users)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -585,9 +610,9 @@ async def local_up(gpus: bool,
                    stream_logs: bool = True) -> None:
     """Async version of local_up() that launches a Kubernetes cluster on
     local machines."""
-    request_id = await context_utils.to_thread(
-        sdk.local_up, gpus, ips, ssh_user, ssh_key, cleanup,
-        context_name, password)
+    request_id = await context_utils.to_thread(sdk.local_up, gpus, ips,
+                                               ssh_user, ssh_key, cleanup,
+                                               context_name, password)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -620,7 +645,8 @@ async def ssh_up(infra: Optional[str] = None, stream_logs: bool = True) -> None:
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def ssh_down(infra: Optional[str] = None, stream_logs: bool = True) -> None:
+async def ssh_down(infra: Optional[str] = None,
+                   stream_logs: bool = True) -> None:
     """Async version of ssh_down() that tears down a Kubernetes cluster on SSH
     targets."""
     request_id = await context_utils.to_thread(sdk.ssh_down, infra)
@@ -642,8 +668,8 @@ async def realtime_kubernetes_gpu_availability(
     """Async version of realtime_kubernetes_gpu_availability() that gets the
       real-time Kubernetes GPU availability."""
     request_id = await context_utils.to_thread(
-        sdk.realtime_kubernetes_gpu_availability,
-        context, name_filter, quantity_filter, is_ssh)
+        sdk.realtime_kubernetes_gpu_availability, context, name_filter,
+        quantity_filter, is_ssh)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -657,7 +683,8 @@ async def kubernetes_node_info(
         stream_logs: bool = True) -> models.KubernetesNodesInfo:
     """Async version of kubernetes_node_info() that gets the resource
     information for all the nodes in the cluster."""
-    request_id = await context_utils.to_thread(sdk.kubernetes_node_info, context)
+    request_id = await context_utils.to_thread(sdk.kubernetes_node_info,
+                                               context)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -667,7 +694,7 @@ async def kubernetes_node_info(
 @usage_lib.entrypoint
 @annotations.client_api
 async def status_kubernetes(
-        stream_logs: bool = True
+    stream_logs: bool = True
 ) -> Tuple[List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
            List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
            List[Dict[str, Any]], Optional[str]]:
@@ -687,7 +714,8 @@ async def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
                      silent: bool = False,
                      stream_logs: bool = True) -> List[str]:
     """Async version of api_cancel() that aborts a request or all requests."""
-    request_id = await context_utils.to_thread(sdk.api_cancel, request_ids, all_users, silent)
+    request_id = await context_utils.to_thread(sdk.api_cancel, request_ids,
+                                               all_users, silent)
     if stream_logs:
         return await stream_and_get(request_id)
     else:
@@ -697,9 +725,10 @@ async def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
 @usage_lib.entrypoint
 @annotations.client_api
 async def api_status(request_ids: Optional[List[str]] = None,
-               all_status: bool = False) -> List[requests_lib.RequestPayload]:
+                     all_status: bool = False) -> List[payloads.RequestPayload]:
     """Async version of api_status() that lists all requests."""
-    return await context_utils.to_thread(sdk.api_status, request_ids, all_status)
+    return await context_utils.to_thread(sdk.api_status, request_ids,
+                                         all_status)
 
 
 @usage_lib.entrypoint
@@ -726,13 +755,15 @@ async def api_stop() -> None:
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
+async def api_server_logs(follow: bool = True,
+                          tail: Optional[int] = None) -> None:
     """Async version of api_server_logs() that streams the API server logs."""
     return await context_utils.to_thread(sdk.api_server_logs, follow, tail)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
+async def api_login(endpoint: Optional[str] = None,
+                    get_token: bool = False) -> None:
     """Async version of api_login() that logs into a SkyPilot API server."""
     return await context_utils.to_thread(sdk.api_login, endpoint, get_token)

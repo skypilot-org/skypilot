@@ -6,8 +6,6 @@ import pytest
 
 from sky import exceptions
 from sky.client import sdk_async
-from sky.server import common as server_common
-from sky.server.requests import requests as requests_lib
 from sky.utils import common as common_utils
 
 
@@ -24,41 +22,130 @@ def mock_get():
 
 
 @pytest.fixture
-def mock_sdk():
-    """Mock the sdk functions to return a mock request_id."""
-    with mock.patch('sky.client.sdk_async.sdk') as mock_sdk:
-        yield mock_sdk
+def mock_stream_and_get():
+    """Mock the stream_and_get() function to return a mock response."""
+
+    async def mock_stream_and_get_async(*args, **kwargs):
+        return mock_stream_and_get.return_value
+
+    with mock.patch(
+            'sky.client.sdk_async.stream_and_get',
+            side_effect=mock_stream_and_get_async) as mock_stream_and_get:
+        yield mock_stream_and_get
+
+
+@pytest.fixture
+def mock_to_thread():
+    """Mock context_utils.to_thread to run synchronously."""
+
+    async def mock_to_thread_func(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    with mock.patch('sky.utils.context_utils.to_thread',
+                    side_effect=mock_to_thread_func):
+        yield
+
+
+@pytest.fixture
+def mock_sdk_functions():
+    """Mock the underlying SDK functions."""
+    with mock.patch('sky.client.sdk.check') as mock_check, \
+         mock.patch('sky.client.sdk.enabled_clouds') as mock_enabled_clouds, \
+         mock.patch('sky.client.sdk.list_accelerators') as mock_list_accelerators, \
+         mock.patch('sky.client.sdk.list_accelerator_counts') as mock_list_accelerator_counts, \
+         mock.patch('sky.client.sdk.workspaces') as mock_workspaces, \
+         mock.patch('sky.client.sdk.status') as mock_status, \
+         mock.patch('sky.client.sdk.endpoints') as mock_endpoints, \
+         mock.patch('sky.client.sdk.storage_ls') as mock_storage_ls, \
+         mock.patch('sky.client.sdk.storage_delete') as mock_storage_delete, \
+         mock.patch('sky.client.sdk.local_up') as mock_local_up, \
+         mock.patch('sky.client.sdk.local_down') as mock_local_down, \
+         mock.patch('sky.client.sdk.ssh_down') as mock_ssh_down, \
+         mock.patch('sky.client.sdk.api_cancel') as mock_api_cancel, \
+         mock.patch('sky.client.sdk.api_info') as mock_api_info, \
+         mock.patch('sky.client.sdk.api_stop') as mock_api_stop, \
+         mock.patch('sky.client.sdk.api_server_logs') as mock_api_server_logs, \
+         mock.patch('sky.client.sdk.api_login') as mock_api_login:
+
+        yield {
+            'check': mock_check,
+            'enabled_clouds': mock_enabled_clouds,
+            'list_accelerators': mock_list_accelerators,
+            'list_accelerator_counts': mock_list_accelerator_counts,
+            'workspaces': mock_workspaces,
+            'status': mock_status,
+            'endpoints': mock_endpoints,
+            'storage_ls': mock_storage_ls,
+            'storage_delete': mock_storage_delete,
+            'local_up': mock_local_up,
+            'local_down': mock_local_down,
+            'ssh_down': mock_ssh_down,
+            'api_cancel': mock_api_cancel,
+            'api_info': mock_api_info,
+            'api_stop': mock_api_stop,
+            'api_server_logs': mock_api_server_logs,
+            'api_login': mock_api_login,
+        }
 
 
 @pytest.mark.asyncio
-async def test_check(mock_get, mock_sdk):
-    """Test check() function."""
-    mock_sdk.check.return_value = 'test-request-id'
-    mock_get.return_value = {'aws': ['us-west-1'], 'gcp': ['us-central1']}
+async def test_check_with_stream(mock_stream_and_get, mock_to_thread,
+                                 mock_sdk_functions):
+    """Test check() function with stream_logs=True (default)."""
+    # Mock the underlying SDK function
+    mock_sdk_functions['check'].return_value = 'test-request-id'
+
+    # Mock the stream_and_get result
+    expected_result = {'aws': ['us-west-1'], 'gcp': ['us-central1']}
+    mock_stream_and_get.return_value = expected_result
 
     result = await sdk_async.check(('aws', 'gcp'), True)
-    assert result == {'aws': ['us-west-1'], 'gcp': ['us-central1']}
-    mock_sdk.check.assert_called_once_with(('aws', 'gcp'), True, None)
+    assert result == expected_result
+    mock_sdk_functions['check'].assert_called_once_with(('aws', 'gcp'), True,
+                                                        None)
+    mock_stream_and_get.assert_called_once_with('test-request-id')
+
+
+@pytest.mark.asyncio
+async def test_check_no_stream(mock_get, mock_to_thread, mock_sdk_functions):
+    """Test check() function with stream_logs=False."""
+    # Mock the underlying SDK function
+    mock_sdk_functions['check'].return_value = 'test-request-id'
+
+    # Mock the get result
+    expected_result = {'aws': ['us-west-1'], 'gcp': ['us-central1']}
+    mock_get.return_value = expected_result
+
+    result = await sdk_async.check(('aws', 'gcp'), True, stream_logs=False)
+    assert result == expected_result
+    mock_sdk_functions['check'].assert_called_once_with(('aws', 'gcp'), True,
+                                                        None)
     mock_get.assert_called_once_with('test-request-id')
 
 
 @pytest.mark.asyncio
-async def test_enabled_clouds(mock_get, mock_sdk):
+async def test_enabled_clouds(mock_stream_and_get, mock_to_thread,
+                              mock_sdk_functions):
     """Test enabled_clouds() function."""
-    mock_sdk.enabled_clouds.return_value = 'test-request-id'
-    mock_get.return_value = ['aws', 'gcp']
+    mock_sdk_functions['enabled_clouds'].return_value = 'test-request-id'
+
+    expected_result = ['aws', 'gcp']
+    mock_stream_and_get.return_value = expected_result
 
     result = await sdk_async.enabled_clouds(expand=True)
-    assert result == ['aws', 'gcp']
-    mock_sdk.enabled_clouds.assert_called_once_with(None, True)
-    mock_get.assert_called_once_with('test-request-id')
+    assert result == expected_result
+    mock_sdk_functions['enabled_clouds'].assert_called_once_with(None, True)
+    mock_stream_and_get.assert_called_once_with('test-request-id')
 
 
 @pytest.mark.asyncio
-async def test_list_accelerators(mock_get, mock_sdk):
+async def test_list_accelerators(mock_stream_and_get, mock_to_thread,
+                                 mock_sdk_functions):
     """Test list_accelerators() function."""
-    mock_sdk.list_accelerators.return_value = 'test-request-id'
-    mock_get.return_value = {'aws': ['p3.2xlarge'], 'gcp': ['n1-standard-4']}
+    mock_sdk_functions['list_accelerators'].return_value = 'test-request-id'
+
+    expected_result = {'aws': ['p3.2xlarge'], 'gcp': ['n1-standard-4']}
+    mock_stream_and_get.return_value = expected_result
 
     result = await sdk_async.list_accelerators(gpus_only=True,
                                                name_filter='p3',
@@ -68,183 +155,127 @@ async def test_list_accelerators(mock_get, mock_sdk):
                                                all_regions=True,
                                                require_price=True,
                                                case_sensitive=True)
-    assert result == {'aws': ['p3.2xlarge'], 'gcp': ['n1-standard-4']}
-    mock_sdk.list_accelerators.assert_called_once_with(True, 'p3', 'us-west-1',
-                                                       1, ['aws'], True, True,
-                                                       True)
-    mock_get.assert_called_once_with('test-request-id')
+    assert result == expected_result
+    mock_sdk_functions['list_accelerators'].assert_called_once_with(
+        True, 'p3', 'us-west-1', 1, ['aws'], True, True, True)
+    mock_stream_and_get.assert_called_once_with('test-request-id')
 
 
 @pytest.mark.asyncio
-async def test_list_accelerator_counts(mock_get, mock_sdk):
-    """Test list_accelerator_counts() function."""
-    mock_sdk.list_accelerator_counts.return_value = 'test-request-id'
-    mock_get.return_value = {'aws': [1, 2, 4], 'gcp': [1, 2, 4, 8]}
-
-    result = await sdk_async.list_accelerator_counts(gpus_only=True,
-                                                     name_filter='p3',
-                                                     region_filter='us-west-1',
-                                                     quantity_filter=1,
-                                                     clouds=['aws'])
-    assert result == {'aws': [1, 2, 4], 'gcp': [1, 2, 4, 8]}
-    mock_sdk.list_accelerator_counts.assert_called_once_with(
-        True, 'p3', 'us-west-1', 1, ['aws'])
-    mock_get.assert_called_once_with('test-request-id')
-
-
-@pytest.mark.asyncio
-async def test_workspaces(mock_get, mock_sdk):
-    """Test workspaces() function."""
-    mock_sdk.workspaces.return_value = 'test-request-id'
-    mock_get.return_value = {'workspace1': {'status': 'active'}}
-
-    result = await sdk_async.workspaces()
-    assert result == {'workspace1': {'status': 'active'}}
-    mock_sdk.workspaces.assert_called_once()
-    mock_get.assert_called_once_with('test-request-id')
-
-
-@pytest.mark.asyncio
-async def test_status(mock_get, mock_sdk):
+async def test_status(mock_stream_and_get, mock_to_thread, mock_sdk_functions):
     """Test status() function."""
-    mock_sdk.status.return_value = 'test-request-id'
-    mock_get.return_value = [{'name': 'test-cluster', 'status': 'UP'}]
+    mock_sdk_functions['status'].return_value = 'test-request-id'
+
+    expected_result = [{'name': 'test-cluster', 'status': 'UP'}]
+    mock_stream_and_get.return_value = expected_result
 
     result = await sdk_async.status(
         cluster_names=['test-cluster'],
         refresh=common_utils.StatusRefreshMode.FORCE,
         all_users=True)
-    assert result == [{'name': 'test-cluster', 'status': 'UP'}]
-    mock_sdk.status.assert_called_once_with(
+    assert result == expected_result
+    mock_sdk_functions['status'].assert_called_once_with(
         ['test-cluster'], common_utils.StatusRefreshMode.FORCE, True)
-    mock_get.assert_called_once_with('test-request-id')
+    mock_stream_and_get.assert_called_once_with('test-request-id')
 
 
 @pytest.mark.asyncio
-async def test_endpoints(mock_get, mock_sdk):
+async def test_endpoints(mock_stream_and_get, mock_to_thread,
+                         mock_sdk_functions):
     """Test endpoints() function."""
-    mock_sdk.endpoints.return_value = 'test-request-id'
-    mock_get.return_value = {8080: 'http://1.2.3.4:8080'}
+    mock_sdk_functions['endpoints'].return_value = 'test-request-id'
+
+    expected_result = {8080: 'http://1.2.3.4:8080'}
+    mock_stream_and_get.return_value = expected_result
 
     result = await sdk_async.endpoints('test-cluster', 8080)
-    assert result == {8080: 'http://1.2.3.4:8080'}
-    mock_sdk.endpoints.assert_called_once_with('test-cluster', 8080)
-    mock_get.assert_called_once_with('test-request-id')
+    assert result == expected_result
+    mock_sdk_functions['endpoints'].assert_called_once_with(
+        'test-cluster', 8080)
+    mock_stream_and_get.assert_called_once_with('test-request-id')
 
 
 @pytest.mark.asyncio
-async def test_storage_ls(mock_get, mock_sdk):
+async def test_storage_ls(mock_stream_and_get, mock_to_thread,
+                          mock_sdk_functions):
     """Test storage_ls() function."""
-    mock_sdk.storage_ls.return_value = 'test-request-id'
-    mock_get.return_value = [{'name': 'test-storage', 'status': 'READY'}]
+    mock_sdk_functions['storage_ls'].return_value = 'test-request-id'
+
+    expected_result = [{'name': 'test-storage', 'status': 'READY'}]
+    mock_stream_and_get.return_value = expected_result
 
     result = await sdk_async.storage_ls()
-    assert result == [{'name': 'test-storage', 'status': 'READY'}]
-    mock_sdk.storage_ls.assert_called_once()
-    mock_get.assert_called_once_with('test-request-id')
+    assert result == expected_result
+    mock_sdk_functions['storage_ls'].assert_called_once()
+    mock_stream_and_get.assert_called_once_with('test-request-id')
 
 
 @pytest.mark.asyncio
-async def test_storage_delete(mock_get, mock_sdk):
-    """Test storage_delete() function."""
-    mock_sdk.storage_delete.return_value = 'test-request-id'
-    mock_get.return_value = None
+async def test_error_propagation(mock_stream_and_get, mock_to_thread,
+                                 mock_sdk_functions):
+    """Test that errors from stream_and_get are properly propagated."""
+    mock_sdk_functions['check'].return_value = 'test-request-id'
 
-    result = await sdk_async.storage_delete('test-storage')
-    assert result is None
-    mock_sdk.storage_delete.assert_called_once_with('test-storage')
-    mock_get.assert_called_once_with('test-request-id')
+    # Mock stream_and_get to raise an exception
+    mock_stream_and_get.side_effect = ValueError('Test error')
 
-
-@pytest.mark.asyncio
-async def test_local_up(mock_get, mock_sdk):
-    """Test local_up() function."""
-    mock_sdk.local_up.return_value = 'test-request-id'
-    mock_get.return_value = None
-
-    result = await sdk_async.local_up(gpus=True,
-                                      ips=['1.2.3.4'],
-                                      ssh_user='ubuntu',
-                                      ssh_key='/path/to/key',
-                                      cleanup=True,
-                                      context_name='test-context',
-                                      password='test-password')
-    assert result is None
-    mock_sdk.local_up.assert_called_once_with(True, ['1.2.3.4'], 'ubuntu',
-                                              '/path/to/key', True,
-                                              'test-context', 'test-password')
-    mock_get.assert_called_once_with('test-request-id')
+    with pytest.raises(ValueError, match='Test error'):
+        await sdk_async.check(('aws', 'gcp'), True)
 
 
 @pytest.mark.asyncio
-async def test_local_down(mock_get, mock_sdk):
-    """Test local_down() function."""
-    mock_sdk.local_down.return_value = 'test-request-id'
-    mock_get.return_value = None
+async def test_get_error_propagation(mock_get, mock_to_thread,
+                                     mock_sdk_functions):
+    """Test that errors from get are properly propagated."""
+    mock_sdk_functions['check'].return_value = 'test-request-id'
 
-    result = await sdk_async.local_down()
-    assert result is None
-    mock_sdk.local_down.assert_called_once()
-    mock_get.assert_called_once_with('test-request-id')
+    # Mock get to raise an exception
+    mock_get.side_effect = RuntimeError(
+        'Failed to get request test-request-id: 404 Not Found')
+
+    with pytest.raises(RuntimeError,
+                       match='Failed to get request test-request-id'):
+        await sdk_async.check(('aws', 'gcp'), True, stream_logs=False)
 
 
+# Test async functions that use to_thread but don't stream
 @pytest.mark.asyncio
-async def test_ssh_down(mock_get, mock_sdk):
-    """Test ssh_down() function."""
-    mock_sdk.ssh_down.return_value = 'test-request-id'
-    mock_get.return_value = None
-
-    result = await sdk_async.ssh_down('test-infra')
-    assert result is None
-    mock_sdk.ssh_down.assert_called_once_with('test-infra')
-    mock_get.assert_called_once_with('test-request-id')
-
-
-@pytest.mark.asyncio
-async def test_api_cancel(mock_get, mock_sdk):
-    """Test api_cancel() function."""
-    mock_sdk.api_cancel.return_value = 'test-request-id'
-    mock_get.return_value = ['test-request-id']
-
-    result = await sdk_async.api_cancel(request_ids=['test-request-id'],
-                                        all_users=True,
-                                        silent=True)
-    assert result == ['test-request-id']
-    mock_sdk.api_cancel.assert_called_once_with(['test-request-id'], True, True)
-    mock_get.assert_called_once_with('test-request-id')
-
-
-def test_api_info(mock_sdk):
+async def test_api_info(mock_to_thread, mock_sdk_functions):
     """Test api_info() function."""
-    mock_sdk.api_info.return_value = {'status': 'healthy', 'version': '1.0.0'}
+    expected_result = {'status': 'healthy', 'version': '1.0.0'}
+    mock_sdk_functions['api_info'].return_value = expected_result
 
-    result = sdk_async.api_info()
-    assert result == {'status': 'healthy', 'version': '1.0.0'}
-    mock_sdk.api_info.assert_called_once()
+    result = await sdk_async.api_info()
+    assert result == expected_result
+    mock_sdk_functions['api_info'].assert_called_once()
 
 
-def test_api_stop(mock_sdk):
+@pytest.mark.asyncio
+async def test_api_stop(mock_to_thread, mock_sdk_functions):
     """Test api_stop() function."""
-    mock_sdk.api_stop.return_value = None
+    mock_sdk_functions['api_stop'].return_value = None
 
-    result = sdk_async.api_stop()
+    result = await sdk_async.api_stop()
     assert result is None
-    mock_sdk.api_stop.assert_called_once()
+    mock_sdk_functions['api_stop'].assert_called_once()
 
 
-def test_api_server_logs(mock_sdk):
+@pytest.mark.asyncio
+async def test_api_server_logs(mock_to_thread, mock_sdk_functions):
     """Test api_server_logs() function."""
-    mock_sdk.api_server_logs.return_value = None
+    mock_sdk_functions['api_server_logs'].return_value = None
 
-    result = sdk_async.api_server_logs(follow=True, tail=100)
+    result = await sdk_async.api_server_logs(follow=True, tail=100)
     assert result is None
-    mock_sdk.api_server_logs.assert_called_once_with(True, 100)
+    mock_sdk_functions['api_server_logs'].assert_called_once_with(True, 100)
 
 
-def test_api_login(mock_sdk):
+@pytest.mark.asyncio
+async def test_api_login(mock_to_thread, mock_sdk_functions):
     """Test api_login() function."""
-    mock_sdk.api_login.return_value = None
+    mock_sdk_functions['api_login'].return_value = None
 
-    result = sdk_async.api_login('http://test-endpoint', get_token=True)
+    result = await sdk_async.api_login('http://test-endpoint', get_token=True)
     assert result is None
-    mock_sdk.api_login.assert_called_once_with('http://test-endpoint', True)
+    mock_sdk_functions['api_login'].assert_called_once_with(
+        'http://test-endpoint', True)

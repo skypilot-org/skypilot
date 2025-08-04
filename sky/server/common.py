@@ -178,12 +178,11 @@ def get_cookies_from_response(
 
 
 def _prepare_authenticated_request_params(
-        method: str,
         path: str,
         server_url: Optional[str] = None,
         **kwargs) -> Tuple[str, Dict[str, Any]]:
     """Prepare common parameters for authenticated requests (sync or async).
-    
+
     Returns:
         Tuple of (url, updated_kwargs)
     """
@@ -216,7 +215,7 @@ def _convert_requests_cookies_to_aiohttp(
     cookies = {}
     for cookie in cookie_jar:
         cookies[cookie.name] = cookie.value
-    return cookies
+    return cookies  # type: ignore
 
 
 def make_authenticated_request(method: str,
@@ -239,8 +238,8 @@ def make_authenticated_request(method: str,
     Returns:
         requests.Response object
     """
-    url, kwargs = _prepare_authenticated_request_params(
-        method, path, server_url, **kwargs)
+    url, kwargs = _prepare_authenticated_request_params(path, server_url,
+                                                        **kwargs)
 
     # Make the request
     if retry:
@@ -284,21 +283,33 @@ async def make_authenticated_request_async(
         exceptions.ServerTemporarilyUnavailableError: When server returns 503
         exceptions.RequestInterruptedError: When request is interrupted
     """
-    url, kwargs = _prepare_authenticated_request_params(
-        method, path, server_url, **kwargs)
+    url, kwargs = _prepare_authenticated_request_params(path, server_url,
+                                                        **kwargs)
 
     # Convert cookies to aiohttp format if needed
-    if 'cookies' in kwargs and isinstance(kwargs['cookies'], 
-                                         requests.cookies.RequestsCookieJar):
+    if 'cookies' in kwargs and isinstance(kwargs['cookies'],
+                                          requests.cookies.RequestsCookieJar):
         kwargs['cookies'] = _convert_requests_cookies_to_aiohttp(
             kwargs['cookies'])
+
+    # Convert params to strings for aiohttp compatibility
+    if 'params' in kwargs and kwargs['params'] is not None:
+        normalized_params = {}
+        for key, value in kwargs['params'].items():
+            if isinstance(value, bool):
+                normalized_params[key] = str(value).lower()
+            elif value is not None:
+                normalized_params[key] = str(value)
+            # Skip None values
+        kwargs['params'] = normalized_params
 
     # Make the request
     if retry:
         return await rest.request_async(session, method, url, **kwargs)
     else:
         assert method == 'GET', 'Only GET requests can be done without retry'
-        return await rest.request_without_retry_async(session, method, url, **kwargs)
+        return await rest.request_without_retry_async(session, method, url,
+                                                      **kwargs)
 
 
 @annotations.lru_cache(scope='global')
