@@ -1555,7 +1555,7 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         # compatibility for existing ochestration solutions (e.g. helm chart).
         # So we serve these two usages in a backward compatible manner below.
         client_version = versions.get_remote_api_version()
-        # - For Client with API version >= 13, we return 200 response with
+        # - For Client with API version >= 14, we return 200 response with
         #   status=NEEDS_AUTH, new client will handle the login process.
         # - For health check from `sky api start`, the client code always uses
         #   the same API version with the server, thus there is no compatibility
@@ -1569,9 +1569,9 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
             #   without authentication since no sensitive information is
             #   returned.
             return {'status': common.ApiServerStatus.HEALTHY}
-        # TODO(aylei): remove this after min_compatible_api_version >= 13.
-        if client_version < 13:
-            # For Client with API version < 13, the NEEDS_AUTH status is not
+        # TODO(aylei): remove this after min_compatible_api_version >= 14.
+        if client_version < 14:
+            # For Client with API version < 14, the NEEDS_AUTH status is not
             # honored. Return 401 to trigger the login process.
             raise fastapi.HTTPException(status_code=401,
                                         detail='Authentication required')
