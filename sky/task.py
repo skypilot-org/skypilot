@@ -256,6 +256,16 @@ class Task:
         file_mounts_mapping: Optional[Dict[str, str]] = None,
         volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        require_prelaunch_setup: bool = False,
+        # Internal use (setup only).
+        file_mounts_config: Optional[Dict[str, str]] = None,
+        service_config: Optional[Dict[str, str]] = None,
+        pool_config: Optional[Dict[str, str]] = None,
+        input_config: Optional[Dict[str, str]] = None,
+        output_config: Optional[Dict[str, str]] = None,
+        resources_config: Optional[Dict[str, str]] = None,
+        volume_mounts_config: Optional[Dict[str, str]] = None,
+        # Internal use only.
         _user_specified_yaml: Optional[str] = None,
     ):
         """Initializes a Task.
@@ -377,6 +387,17 @@ class Task:
             volume_mounts)
 
         self._metadata = metadata if metadata is not None else {}
+
+        self._require_prelaunch_setup = require_prelaunch_setup
+
+        # For internal use, setup only. Will be cleaned up after setup.
+        self._file_mounts_config = file_mounts_config
+        self._service_config = service_config
+        self._pool_config = pool_config
+        self._input_config = input_config
+        self._output_config = output_config
+        self._resources_config = resources_config
+        self._volume_mounts_config = volume_mounts_config
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
@@ -522,6 +543,137 @@ class Task:
 
         self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
 
+    def yaml_prelaunch_setup(self):
+        """Setup based on possibly modified envvars right before task is launched"""
+        assert self.require_prelaunch_setup, 'Prelaunch setup not required'
+
+        # Fill in any Task.envs into file_mounts (src/dst paths, storage
+        # name/source).
+        env_and_secrets = self.envs_and_secrets
+        if self._file_mounts_config is not None:
+            self._file_mounts_config = _fill_in_env_vars(self._file_mounts_config,
+                                                         env_and_secrets)
+
+        # Fill in any Task.envs into service (e.g. MODEL_NAME).
+        if self._service_config is not None:
+            self._service_config = _fill_in_env_vars(self._service_config,
+                                                     env_and_secrets)
+
+        # Fill in any Task.envs into workdir
+        if self.workdir is not None:
+            self.workdir = _fill_in_env_vars(self.workdir,
+                                             env_and_secrets)
+            
+        # Create lists to store storage objects inlined in file_mounts.
+        # These are retained in dicts in the YAML schema and later parsed to
+        # storage objects with the storage/storage_mount objects.
+        fm_storages = []
+        file_mounts = self._file_mounts_config
+        volumes = []
+        if file_mounts is not None:
+            copy_mounts = {}
+            for dst_path, src in file_mounts.items():
+                # Check if it is str path
+                if isinstance(src, str):
+                    copy_mounts[dst_path] = src
+                # If the src is not a str path, it is likely a dict. Try to
+                # parse storage object.
+                elif isinstance(src, dict):
+                    if (src.get('store') ==
+                            storage_lib.StoreType.VOLUME.value.lower()):
+                        # Build the volumes config for resources.
+                        volume_config = {
+                            'path': dst_path,
+                        }
+                        if src.get('name'):
+                            volume_config['name'] = src.get('name')
+                        persistent = src.get('persistent', False)
+                        volume_config['auto_delete'] = not persistent
+                        volume_config_detail = src.get('config', {})
+                        volume_config.update(volume_config_detail)
+                        volumes.append(volume_config)
+                        source_path = src.get('source')
+                        if source_path:
+                            # For volume, copy the source path to the
+                            # data directory of the volume mount point.
+                            copy_mounts[
+                                f'{dst_path.rstrip("/")}/data'] = source_path
+                    else:
+                        fm_storages.append((dst_path, src))
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Unable to parse file_mount '
+                                         f'{dst_path}:{src}')
+            self.set_file_mounts(copy_mounts)
+
+        task_storage_mounts: Dict[str, storage_lib.Storage] = {}
+        all_storages = fm_storages
+        for storage in all_storages:
+            mount_path = storage[0]
+            assert mount_path, 'Storage mount path cannot be empty.'
+            try:
+                storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
+            except exceptions.StorageSourceError as e:
+                # Patch the error message to include the mount path, if included
+                e.args = (e.args[0].replace('<destination_path>',
+                                            mount_path),) + e.args[1:]
+                raise e
+            task_storage_mounts[mount_path] = storage_obj
+        self.set_storage_mounts(task_storage_mounts)
+
+        if self._input_config is not None:
+            assert len(self._input_config) == 1, 'Only one input is allowed.'
+            inputs = list(self._input_config.keys())[0]
+            estimated_size_gigabytes = list(self._input_config.values())[0]
+            # TODO: allow option to say (or detect) no download/egress cost.
+            self.set_inputs(inputs=inputs,
+                            estimated_size_gigabytes=estimated_size_gigabytes)
+
+        if self._output_config is not None:
+            assert len(self._output_config) == 1, 'Only one output is allowed.'
+            outputs = list(self._output_config.keys())[0]
+            estimated_size_gigabytes = list(self._output_config.values())[0]
+            self.set_outputs(outputs=outputs,
+                             estimated_size_gigabytes=estimated_size_gigabytes)
+        
+        if volumes:
+            self._resources_config['volumes'] = volumes
+        self.set_resources(sky.Resources.from_yaml_config(self._resources_config))
+
+        service = self._service_config
+        pool = self._pool_config
+        if service is not None and pool is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot set both service and pool in the same task.')
+
+        if service is not None:
+            service = service_spec.SkyServiceSpec.from_yaml_config(service)
+            self.set_service(service)
+        elif pool is not None:
+            pool['pool'] = True
+            pool = service_spec.SkyServiceSpec.from_yaml_config(pool)
+            self.set_service(pool)
+
+        if self._volume_mounts_config is not None:
+            self.volume_mounts = []
+            for vol in self._volume_mounts_config:
+                common_utils.validate_schema(vol,
+                                             schemas.get_volume_mount_schema(),
+                                             'Invalid volume mount config: ')
+                volume_mount = volume_lib.VolumeMount.from_yaml_config(vol)
+                self.volume_mounts.append(volume_mount)
+        
+        # clean up
+        self._file_mounts_config = None
+        self._service_config = None
+        self._pool_config = None
+        self._input_config = None
+        self._output_config = None
+        self._resources_config = None
+        self._volume_mounts_config = None
+        self._require_prelaunch_setup = False
+
     @staticmethod
     def from_yaml_config(
         config: Dict[str, Any],
@@ -593,115 +745,6 @@ class Task:
                         f'To set it to be empty, use an empty string ({k}: "" '
                         f'in task YAML or --secret {k}="" in CLI).')
 
-        # Fill in any Task.envs into file_mounts (src/dst paths, storage
-        # name/source).
-        env_vars = config.get('envs', {})
-        secrets = config.get('secrets', {})
-        env_and_secrets = env_vars.copy()
-        env_and_secrets.update(secrets)
-        if config.get('file_mounts') is not None:
-            config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
-                                                      env_and_secrets)
-
-        # Fill in any Task.envs into service (e.g. MODEL_NAME).
-        if config.get('service') is not None:
-            config['service'] = _fill_in_env_vars(config['service'],
-                                                  env_and_secrets)
-
-        # Fill in any Task.envs into workdir
-        if config.get('workdir') is not None:
-            config['workdir'] = _fill_in_env_vars(config['workdir'],
-                                                  env_and_secrets)
-
-        task = Task(
-            config.pop('name', None),
-            run=config.pop('run', None),
-            workdir=config.pop('workdir', None),
-            setup=config.pop('setup', None),
-            num_nodes=config.pop('num_nodes', None),
-            envs=config.pop('envs', None),
-            secrets=config.pop('secrets', None),
-            event_callback=config.pop('event_callback', None),
-            file_mounts_mapping=config.pop('file_mounts_mapping', None),
-            volumes=config.pop('volumes', None),
-            metadata=config.pop('_metadata', None),
-            _user_specified_yaml=user_specified_yaml,
-        )
-
-        # Create lists to store storage objects inlined in file_mounts.
-        # These are retained in dicts in the YAML schema and later parsed to
-        # storage objects with the storage/storage_mount objects.
-        fm_storages = []
-        file_mounts = config.pop('file_mounts', None)
-        volumes = []
-        if file_mounts is not None:
-            copy_mounts = {}
-            for dst_path, src in file_mounts.items():
-                # Check if it is str path
-                if isinstance(src, str):
-                    copy_mounts[dst_path] = src
-                # If the src is not a str path, it is likely a dict. Try to
-                # parse storage object.
-                elif isinstance(src, dict):
-                    if (src.get('store') ==
-                            storage_lib.StoreType.VOLUME.value.lower()):
-                        # Build the volumes config for resources.
-                        volume_config = {
-                            'path': dst_path,
-                        }
-                        if src.get('name'):
-                            volume_config['name'] = src.get('name')
-                        persistent = src.get('persistent', False)
-                        volume_config['auto_delete'] = not persistent
-                        volume_config_detail = src.get('config', {})
-                        volume_config.update(volume_config_detail)
-                        volumes.append(volume_config)
-                        source_path = src.get('source')
-                        if source_path:
-                            # For volume, copy the source path to the
-                            # data directory of the volume mount point.
-                            copy_mounts[
-                                f'{dst_path.rstrip("/")}/data'] = source_path
-                    else:
-                        fm_storages.append((dst_path, src))
-                else:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(f'Unable to parse file_mount '
-                                         f'{dst_path}:{src}')
-            task.set_file_mounts(copy_mounts)
-
-        task_storage_mounts: Dict[str, storage_lib.Storage] = {}
-        all_storages = fm_storages
-        for storage in all_storages:
-            mount_path = storage[0]
-            assert mount_path, 'Storage mount path cannot be empty.'
-            try:
-                storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
-            except exceptions.StorageSourceError as e:
-                # Patch the error message to include the mount path, if included
-                e.args = (e.args[0].replace('<destination_path>',
-                                            mount_path),) + e.args[1:]
-                raise e
-            task_storage_mounts[mount_path] = storage_obj
-        task.set_storage_mounts(task_storage_mounts)
-
-        if config.get('inputs') is not None:
-            inputs_dict = config.pop('inputs')
-            assert len(inputs_dict) == 1, 'Only one input is allowed.'
-            inputs = list(inputs_dict.keys())[0]
-            estimated_size_gigabytes = list(inputs_dict.values())[0]
-            # TODO: allow option to say (or detect) no download/egress cost.
-            task.set_inputs(inputs=inputs,
-                            estimated_size_gigabytes=estimated_size_gigabytes)
-
-        if config.get('outputs') is not None:
-            outputs_dict = config.pop('outputs')
-            assert len(outputs_dict) == 1, 'Only one output is allowed.'
-            outputs = list(outputs_dict.keys())[0]
-            estimated_size_gigabytes = list(outputs_dict.values())[0]
-            task.set_outputs(outputs=outputs,
-                             estimated_size_gigabytes=estimated_size_gigabytes)
-
         # Experimental configs.
         experimental_configs = config.pop('experimental', None)
 
@@ -741,36 +784,31 @@ class Task:
                 'experimental.config_overrides')
             resources_config[
                 '_cluster_config_overrides'] = cluster_config_override
-        if volumes:
-            resources_config['volumes'] = volumes
-        task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
-        service = config.pop('service', None)
-        pool = config.pop('pool', None)
-        if service is not None and pool is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cannot set both service and pool in the same task.')
-
-        if service is not None:
-            service = service_spec.SkyServiceSpec.from_yaml_config(service)
-            task.set_service(service)
-        elif pool is not None:
-            pool['pool'] = True
-            pool = service_spec.SkyServiceSpec.from_yaml_config(pool)
-            task.set_service(pool)
-
-        volume_mounts = config.pop('volume_mounts', None)
-        if volume_mounts is not None:
-            task.volume_mounts = []
-            for vol in volume_mounts:
-                common_utils.validate_schema(vol,
-                                             schemas.get_volume_mount_schema(),
-                                             'Invalid volume mount config: ')
-                volume_mount = volume_lib.VolumeMount.from_yaml_config(vol)
-                task.volume_mounts.append(volume_mount)
-
+        task = Task(
+            config.pop('name', None),
+            run=config.pop('run', None),
+            workdir=config.pop('workdir', None),
+            setup=config.pop('setup', None),
+            num_nodes=config.pop('num_nodes', None),
+            envs=config.pop('envs', None),
+            secrets=config.pop('secrets', None),
+            event_callback=config.pop('event_callback', None),
+            file_mounts_mapping=config.pop('file_mounts_mapping', None),
+            volumes=config.pop('volumes', None),
+            metadata=config.pop('_metadata', None),
+            require_prelaunch_setup=True,
+            file_mounts_config=config.pop('file_mounts', None),
+            service_config=config.pop('service', None),
+            pool_config=config.pop('pool', None),
+            input_config=config.pop('inputs', None),
+            output_config=config.pop('outputs', None),
+            resources_config=resources_config,
+            volumn_mounts_config=config.pop('volume_mounts', None),
+            _user_specified_yaml=user_specified_yaml,
+        )
         assert not config, f'Invalid task args: {config.keys()}'
+        task.yaml_prelaunch_setup()
         return task
 
     @staticmethod
@@ -1046,6 +1084,10 @@ class Task:
         envs = self.envs.copy()
         envs.update(self.secrets)
         return envs
+    
+    @property
+    def require_prelaunch_setup(self) -> bool:
+        return self._require_prelaunch_setup
 
     def set_inputs(self, inputs: str,
                    estimated_size_gigabytes: float) -> 'Task':
