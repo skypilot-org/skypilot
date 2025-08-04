@@ -62,7 +62,6 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
-from sky.server import versions
 from sky.server.requests import requests
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -1832,9 +1831,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
-    remote_api_version = versions.get_remote_api_version()
-    if remote_api_version is None or remote_api_version < 12:
-        show_pools = False
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
@@ -1886,7 +1882,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         return serve_lib.status(service_names=None)
 
     def submit_pools() -> Optional[str]:
-        return managed_jobs.pool_status(pool_names=None)
+        try:
+            return managed_jobs.pool_status(pool_names=None)
+        except exceptions.APINotSupportedError as e:
+            logger.debug(f'Pools are not supported in the remote server: {e}')
+            return None
 
     def submit_workspace() -> Optional[str]:
         try:
@@ -2009,7 +2009,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 controller_utils.Controllers.JOBS_CONTROLLER.value.
                 in_progress_hint(False).format(job_info=job_info))
 
-    if show_pools:
+    if show_pools and pool_status_request_id:
         num_pools = None
         if managed_jobs_query_interrupted:
             msg = 'KeyboardInterrupt'
