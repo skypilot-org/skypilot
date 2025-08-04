@@ -38,7 +38,7 @@ def reload_config() -> None:
     ...
 
 
-def stream_response(request_id: Optional[str],
+def stream_response(request_id: Optional[server_common.RequestId],
                     response: requests.Response,
                     output_stream: Optional['io.TextIOBase'] = ...,
                     resumable: bool = ...) -> Any:
@@ -249,11 +249,11 @@ def status_kubernetes() -> server_common.RequestId:
     ...
 
 
-def get(request_id: str) -> Any:
+def get(request_id: server_common.RequestId) -> Any:
     ...
 
 
-def stream_and_get(request_id: Optional[str] = ...,
+def stream_and_get(request_id: Optional[server_common.RequestId] = ...,
                    log_path: Optional[str] = ...,
                    tail: Optional[int] = ...,
                    follow: bool = ...,
@@ -261,13 +261,14 @@ def stream_and_get(request_id: Optional[str] = ...,
     ...
 
 
-def api_cancel(request_ids: Optional[Union[str, List[str]]] = ...,
+def api_cancel(request_ids: Optional[Union[
+    server_common.RequestId, List[server_common.RequestId]]] = ...,
                all_users: bool = ...,
                silent: bool = ...) -> server_common.RequestId:
     ...
 
 
-def api_status(request_ids: Optional[List[str]] = ...,
+def api_status(request_ids: Optional[List[server_common.RequestId]] = ...,
                all_status: bool = ...) -> List[payloads.RequestPayload]:
     ...
 
