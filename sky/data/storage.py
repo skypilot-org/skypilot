@@ -1889,13 +1889,8 @@ class S3CompatibleStore(AbstractStore):
             # Handle credentials file via environment
             cmd = ' '.join(cmd_parts)
             if self.config.credentials_file:
-<<<<<<< HEAD
                 cmd = f'AWS_SHARED_CREDENTIALS_FILE=\
                     {self.config.credentials_file} {cmd}'
-=======
-                cmd = 'AWS_SHARED_CREDENTIALS_FILE=' + \
-                f'{self.config.credentials_file} {cmd}'
->>>>>>> master
 
             return cmd
 
@@ -1939,13 +1934,8 @@ class S3CompatibleStore(AbstractStore):
 
             cmd = ' '.join(cmd_parts)
             if self.config.credentials_file:
-<<<<<<< HEAD
                 cmd = f'AWS_SHARED_CREDENTIALS_FILE=\
                     {self.config.credentials_file} {cmd}'
-=======
-                cmd = 'AWS_SHARED_CREDENTIALS_FILE=' + \
-                f'{self.config.credentials_file} {cmd}'
->>>>>>> master
 
             return cmd
 
@@ -4523,7 +4513,6 @@ class S3Store(S3CompatibleStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
-<<<<<<< HEAD
 
 @register_s3_compatible_store
 class R2Store(S3CompatibleStore):
@@ -4681,98 +4670,6 @@ class TigrisStore(S3CompatibleStore):
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.TIGRIS.get_profile_name(self.name))
         rclone_config = data_utils.Rclone.RcloneStores.TIGRIS.get_config(
-=======
-
-@register_s3_compatible_store
-class R2Store(S3CompatibleStore):
-    """R2Store inherits from S3CompatibleStore and represents the backend
-    for R2 buckets.
-    """
-
-    def __init__(self,
-                 name: str,
-                 source: str,
-                 region: Optional[str] = 'auto',
-                 is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None):
-        super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction, _bucket_sub_path)
-
-    @classmethod
-    def get_config(cls) -> S3CompatibleConfig:
-        """Return the configuration for Cloudflare R2."""
-        return S3CompatibleConfig(
-            store_type='R2',
-            url_prefix='r2://',
-            client_factory=lambda region: data_utils.create_r2_client(region or
-                                                                      'auto'),
-            resource_factory=lambda name: cloudflare.resource('s3').Bucket(name
-                                                                          ),
-            split_path=data_utils.split_r2_path,
-            verify_bucket=data_utils.verify_r2_bucket,
-            credentials_file=cloudflare.R2_CREDENTIALS_PATH,
-            aws_profile=cloudflare.R2_PROFILE_NAME,
-            get_endpoint_url=lambda: cloudflare.create_endpoint(),  # pylint: disable=unnecessary-lambda
-            extra_cli_args=['--checksum-algorithm', 'CRC32'],  # R2 specific
-            cloud_name=cloudflare.NAME,
-            default_region='auto',
-            mount_cmd_factory=mounting_utils.get_r2_mount_cmd,
-        )
-
-    def mount_cached_command(self, mount_path: str) -> str:
-        """R2-specific cached mount implementation using rclone."""
-        install_cmd = mounting_utils.get_rclone_install_cmd()
-        rclone_profile_name = (
-            data_utils.Rclone.RcloneStores.R2.get_profile_name(self.name))
-        rclone_config = data_utils.Rclone.RcloneStores.R2.get_config(
-            rclone_profile_name=rclone_profile_name)
-        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
-            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cached_cmd)
-
-
-@register_s3_compatible_store
-class NebiusStore(S3CompatibleStore):
-    """NebiusStore inherits from S3CompatibleStore and represents the backend
-    for Nebius Object Storage buckets.
-    """
-
-    @classmethod
-    def get_config(cls) -> S3CompatibleConfig:
-        """Return the configuration for Nebius Object Storage."""
-        return S3CompatibleConfig(
-            store_type='NEBIUS',
-            url_prefix='nebius://',
-            client_factory=lambda region: data_utils.create_nebius_client(),
-            resource_factory=lambda name: nebius.resource('s3').Bucket(name),
-            split_path=data_utils.split_nebius_path,
-            verify_bucket=data_utils.verify_nebius_bucket,
-            aws_profile=nebius.NEBIUS_PROFILE_NAME,
-            cloud_name=str(clouds.Nebius()),
-            mount_cmd_factory=cls._get_nebius_mount_cmd,
-        )
-
-    @classmethod
-    def _get_nebius_mount_cmd(cls, bucket_name: str, mount_path: str,
-                              bucket_sub_path: Optional[str]) -> str:
-        """Factory method for Nebius mount command."""
-        # We need to get the endpoint URL, but since this is a static method,
-        # we'll need to create a client to get it
-        client = data_utils.create_nebius_client()
-        endpoint_url = client.meta.endpoint_url
-        return mounting_utils.get_nebius_mount_cmd(nebius.NEBIUS_PROFILE_NAME,
-                                                   bucket_name, endpoint_url,
-                                                   mount_path, bucket_sub_path)
-
-    def mount_cached_command(self, mount_path: str) -> str:
-        """Nebius-specific cached mount implementation using rclone."""
-        install_cmd = mounting_utils.get_rclone_install_cmd()
-        rclone_profile_name = (
-            data_utils.Rclone.RcloneStores.NEBIUS.get_profile_name(self.name))
-        rclone_config = data_utils.Rclone.RcloneStores.NEBIUS.get_config(
->>>>>>> master
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path)
