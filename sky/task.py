@@ -319,6 +319,13 @@ class Task:
             setup/run command, where ``run`` can either be a str, meaning all
             nodes get the same command, or a lambda, with the semantics
             documented above.
+          file_mounts: An optional dict of ``{remote_path: (local_path|cloud
+            URI)}``, where remote means the VM(s) on which this Task will
+            eventually run on, and local means the node from which the task is
+            launched.
+          resources: either a sky.Resources, a set of them, or a list of them.
+            A set or a list of resources asks the optimizer to "pick the
+            best of these resources" to run this task.
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
