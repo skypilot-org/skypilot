@@ -244,6 +244,109 @@ class TestServiceAccountDatabaseOperations:
             update_call = mock_session.query.return_value.filter_by.return_value.update
             update_call.assert_called_once()
 
+    def test_get_service_account_tokens_by_sa_user_id_multiple_tokens(
+            self, mock_engine, mock_session):
+        """Test getting multiple service account tokens for a service account."""
+        mock_row1 = mock.Mock()
+        mock_row1.token_id = 'token1'
+        mock_row1.token_name = 'test-token-1'
+        mock_row1.token_hash = 'hash1'
+        mock_row1.created_at = 1234567890
+        mock_row1.last_used_at = 1234567900
+        mock_row1.expires_at = 1234567890 + 2592000
+        mock_row1.creator_user_hash = 'creator1'
+        mock_row1.service_account_user_id = 'sa123'
+
+        mock_row2 = mock.Mock()
+        mock_row2.token_id = 'token2'
+        mock_row2.token_name = 'test-token-2'
+        mock_row2.token_hash = 'hash2'
+        mock_row2.created_at = 1234567900
+        mock_row2.last_used_at = None
+        mock_row2.expires_at = None
+        mock_row2.creator_user_hash = 'creator2'
+        mock_row2.service_account_user_id = 'sa123'
+
+        mock_session.query.return_value.filter_by.return_value.all.return_value = [
+            mock_row1, mock_row2
+        ]
+
+        result = global_user_state.get_service_account_tokens_by_sa_user_id(
+            'sa123')
+
+        assert len(result) == 2
+        assert result[0] == {
+            'token_id': 'token1',
+            'token_name': 'test-token-1',
+            'token_hash': 'hash1',
+            'created_at': 1234567890,
+            'last_used_at': 1234567900,
+            'expires_at': 1234567890 + 2592000,
+            'creator_user_hash': 'creator1',
+            'service_account_user_id': 'sa123'
+        }
+        assert result[1] == {
+            'token_id': 'token2',
+            'token_name': 'test-token-2',
+            'token_hash': 'hash2',
+            'created_at': 1234567900,
+            'last_used_at': None,
+            'expires_at': None,
+            'creator_user_hash': 'creator2',
+            'service_account_user_id': 'sa123'
+        }
+
+        mock_session.query.assert_called_once()
+        mock_session.query.return_value.filter_by.assert_called_once_with(
+            service_account_user_id='sa123')
+
+    def test_get_service_account_tokens_by_sa_user_id_single_token(
+            self, mock_engine, mock_session):
+        """Test getting a single service account token for a service account."""
+        mock_row = mock.Mock()
+        mock_row.token_id = 'token1'
+        mock_row.token_name = 'test-token'
+        mock_row.token_hash = 'hash1'
+        mock_row.created_at = 1234567890
+        mock_row.last_used_at = 1234567900
+        mock_row.expires_at = 1234567890 + 2592000
+        mock_row.creator_user_hash = 'creator1'
+        mock_row.service_account_user_id = 'sa456'
+
+        mock_session.query.return_value.filter_by.return_value.all.return_value = [
+            mock_row
+        ]
+
+        result = global_user_state.get_service_account_tokens_by_sa_user_id(
+            'sa456')
+
+        assert len(result) == 1
+        assert result[0] == {
+            'token_id': 'token1',
+            'token_name': 'test-token',
+            'token_hash': 'hash1',
+            'created_at': 1234567890,
+            'last_used_at': 1234567900,
+            'expires_at': 1234567890 + 2592000,
+            'creator_user_hash': 'creator1',
+            'service_account_user_id': 'sa456'
+        }
+
+        mock_session.query.return_value.filter_by.assert_called_once_with(
+            service_account_user_id='sa456')
+
+    def test_get_service_account_tokens_by_sa_user_id_no_tokens(
+            self, mock_engine, mock_session):
+        """Test getting service account tokens when none exist for the service account."""
+        mock_session.query.return_value.filter_by.return_value.all.return_value = []
+
+        result = global_user_state.get_service_account_tokens_by_sa_user_id(
+            'nonexistent_sa')
+
+        assert result == []
+        mock_session.query.return_value.filter_by.assert_called_once_with(
+            service_account_user_id='nonexistent_sa')
+
     def test_function_decorators_present(self):
         """Test that all service account functions have proper attributes."""
         # This test ensures that all functions exist and are callable
@@ -251,6 +354,7 @@ class TestServiceAccountDatabaseOperations:
             global_user_state.add_service_account_token,
             global_user_state.get_service_account_token,
             global_user_state.get_all_service_account_tokens,
+            global_user_state.get_service_account_tokens_by_sa_user_id,
             global_user_state.update_service_account_token_last_used,
             global_user_state.delete_service_account_token,
             global_user_state.rotate_service_account_token,

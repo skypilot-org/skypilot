@@ -652,7 +652,8 @@ async def rotate_service_account_token(
             creator_user_id=token_info['creator_user_hash'],
             service_account_user_id=token_info['service_account_user_id'],
             token_name=token_info['token_name'],
-            expires_in_days=expires_in_days)
+            expires_in_days=expires_in_days,
+            token_id=token_body.token_id)
 
         # Update token in database with new token hash
         global_user_state.rotate_service_account_token(
