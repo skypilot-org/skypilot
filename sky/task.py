@@ -544,15 +544,14 @@ class Task:
         self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
 
     def yaml_prelaunch_setup(self):
-        """Setup based on possibly modified envvars right before task is launched"""
         assert self.require_prelaunch_setup, 'Prelaunch setup not required'
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
         env_and_secrets = self.envs_and_secrets
         if self._file_mounts_config is not None:
-            self._file_mounts_config = _fill_in_env_vars(self._file_mounts_config,
-                                                         env_and_secrets)
+            self._file_mounts_config = _fill_in_env_vars(
+                self._file_mounts_config, env_and_secrets)
 
         # Fill in any Task.envs into service (e.g. MODEL_NAME).
         if self._service_config is not None:
@@ -561,9 +560,8 @@ class Task:
 
         # Fill in any Task.envs into workdir
         if self.workdir is not None:
-            self.workdir = _fill_in_env_vars(self.workdir,
-                                             env_and_secrets)
-            
+            self.workdir = _fill_in_env_vars(self.workdir, env_and_secrets)
+
         # Create lists to store storage objects inlined in file_mounts.
         # These are retained in dicts in the YAML schema and later parsed to
         # storage objects with the storage/storage_mount objects.
@@ -635,10 +633,11 @@ class Task:
             estimated_size_gigabytes = list(self._output_config.values())[0]
             self.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
-        
+
         if volumes:
             self._resources_config['volumes'] = volumes
-        self.set_resources(sky.Resources.from_yaml_config(self._resources_config))
+        self.set_resources(
+            sky.Resources.from_yaml_config(self._resources_config))
 
         service = self._service_config
         pool = self._pool_config
@@ -663,7 +662,7 @@ class Task:
                                              'Invalid volume mount config: ')
                 volume_mount = volume_lib.VolumeMount.from_yaml_config(vol)
                 self.volume_mounts.append(volume_mount)
-        
+
         # clean up
         self._file_mounts_config = None
         self._service_config = None
@@ -804,7 +803,7 @@ class Task:
             input_config=config.pop('inputs', None),
             output_config=config.pop('outputs', None),
             resources_config=resources_config,
-            volumn_mounts_config=config.pop('volume_mounts', None),
+            volume_mounts_config=config.pop('volume_mounts', None),
             _user_specified_yaml=user_specified_yaml,
         )
         assert not config, f'Invalid task args: {config.keys()}'
@@ -1084,7 +1083,7 @@ class Task:
         envs = self.envs.copy()
         envs.update(self.secrets)
         return envs
-    
+
     @property
     def require_prelaunch_setup(self) -> bool:
         return self._require_prelaunch_setup
