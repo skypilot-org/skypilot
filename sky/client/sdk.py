@@ -95,7 +95,8 @@ def stream_response(request_id: Optional[str],
     """Streams the response to the console.
 
     Args:
-        request_id: The request ID.
+        request_id: The request ID of the request to stream. May be a full
+            request ID or a prefix.
         response: The HTTP response.
         output_stream: The output stream to write to. If None, print to the
             console.
@@ -1764,7 +1765,8 @@ def get(request_id: str) -> Any:
     may cause GET /api/get being sent to a restarted API server.
 
     Args:
-        request_id: The request ID of the request to get.
+        request_id: The request ID of the request to get. May be a full request
+            ID or a prefix.
 
     Returns:
         The ``Request Returns`` of the specified request. See the documentation
@@ -1830,7 +1832,8 @@ def stream_and_get(
     prefix of the full request id.
 
     Args:
-        request_id: The prefix of the request ID of the request to stream.
+        request_id: The request ID of the request to stream. May be a full
+            request ID or a prefix.
         log_path: The path to the log file to stream.
         tail: The number of lines to show from the end of the logs.
             If None, show all logs.
