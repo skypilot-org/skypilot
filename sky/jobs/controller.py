@@ -149,7 +149,8 @@ class JobsController:
             task.update_envs(task_envs)
 
     def _download_log_and_stream(
-        self, task_id: Optional[int],
+        self,
+        task_id: Optional[int],
         handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
         job_id_on_pool_cluster: Optional[int],
     ) -> None:
@@ -185,13 +186,12 @@ class JobsController:
 
         self._logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
-    async def _cleanup_cluster(self, cluster_name: str) -> None:
+    async def _cleanup_cluster(self, cluster_name: Optional[str]) -> None:
+        if cluster_name is None:
+            return
         if self._pool is None:
             await managed_job_utils.to_thread(
                 managed_job_utils.terminate_cluster, cluster_name)
-        else:
-            await managed_job_utils.to_thread(serve_utils.release_cluster_name,
-                                              self._pool, cluster_name)
 
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
@@ -409,8 +409,10 @@ class JobsController:
             if not force_transit_to_recovering:
                 try:
                     job_status = await managed_job_utils.to_thread(
-                        managed_job_utils.get_job_status, self._backend,
-                        cluster_name, self._logger,
+                        managed_job_utils.get_job_status,
+                        self._backend,
+                        cluster_name,
+                        self._logger,
                         job_id=job_id_on_pool_cluster)
                 except exceptions.FetchClusterInfoError as fetch_e:
                     self._logger.info(
@@ -446,8 +448,8 @@ class JobsController:
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
                         await managed_job_utils.to_thread(
-                            self._download_log_and_stream,
-                            task_id, handle, job_id_on_pool_cluster)
+                            self._download_log_and_stream, task_id, handle,
+                            job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     self._logger.warning(
@@ -524,8 +526,8 @@ class JobsController:
                     # event loop. We should make _download_log_and_stream async
                     # however that will require a lot of changes to the code.
                     await managed_job_utils.to_thread(
-                        self._download_log_and_stream,
-                        task_id, handle, job_id_on_pool_cluster)
+                        self._download_log_and_stream, task_id, handle,
+                        job_id_on_pool_cluster)
 
                     failure_reason = (
                         'To see the details, run: '
@@ -770,15 +772,13 @@ class Controller:
                         task.name, job_id))
                 managed_job_utils.terminate_cluster(cluster_name)
             else:
-                cluster_name, job_id_on_pm = (
+                cluster_name, job_id_on_pool_cluster = (
                     managed_job_state.get_pool_submit_info(job_id))
                 if cluster_name is not None:
-                    serve_utils.release_cluster_name(pool, cluster_name)
-                    if job_id_on_pm is not None:
+                    if job_id_on_pool_cluster is not None:
                         core.cancel(cluster_name=cluster_name,
-                                    job_ids=[job_id_on_pm],
+                                    job_ids=[job_id_on_pool_cluster],
                                     _try_cancel_if_cluster_is_init=True)
-
             # Clean up Storages with persistent=False.
             # TODO(zhwu): this assumes the specific backend.
             backend = cloud_vm_ray_backend.CloudVmRayBackend()

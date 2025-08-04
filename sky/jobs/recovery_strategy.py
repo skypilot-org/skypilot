@@ -79,7 +79,7 @@ class StrategyExecutor:
         self.max_restarts_on_errors = max_restarts_on_errors
         self.job_id = job_id
         self.task_id = task_id
-        self.poo = pool
+        self.pool = pool
         self.restart_cnt_on_failure = 0
         self._logger = job_logger
         self.job_id_on_pool_cluster: Optional[int] = None
@@ -332,7 +332,7 @@ class StrategyExecutor:
                         usage_lib.messages.usage.set_internal()
                         if self.pool is None:
                             assert self.cluster_name is not None
-                            
+
                             request_id = sdk.launch(
                                 self.dag,
                                 cluster_name=self.cluster_name,
