@@ -1,8 +1,8 @@
 resources:
   infra: k8s
   accelerators: H100:8
-  # network_tier: best
-  # image_id: docker:cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.23.4-ubu22.04-cu12.4
+  network_tier: best
+  image_id: docker:cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.23.4-ubu22.04-cu12.4
 
 file_mounts:
   /e2e: ./e2e
@@ -34,3 +34,5 @@ run: |
   # accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/node_train.py
   accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/node_train.py --enable_profiling
   # accelerate launch --config_file /e2e/deepspeed_zero3_file.yaml --deepspeed_config_file /e2e/zero3.json /e2e/node_train.py
+  # /home/sky/training/bin/python3 /home/sky/training/bin/accelerate launch --config_file /e2e/fsdp2.yaml --num_machines 2 --num_processes 16 --machine_rank 1 --main_process_ip 10.113.50.29 --main_process_port 29500 /e2e/node_train.py --enable_profiling
+  
