@@ -247,7 +247,11 @@ class Task:
         secrets: Optional[Dict[str, str]] = None,
         workdir: Optional[Union[str, Dict[str, Any]]] = None,
         num_nodes: Optional[int] = None,
+        file_mounts: Optional[Dict[str, str]] = None,
         volumes: Optional[Dict[str, str]] = None,
+        resources: Optional[Union['resources_lib.Resources',
+                                  List['resources_lib.Resources'],
+                                  Set['resources_lib.Resources']]] = None,
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
@@ -350,8 +354,11 @@ class Task:
         self.estimated_inputs_size_gigabytes: Optional[float] = None
         self.estimated_outputs_size_gigabytes: Optional[float] = None
         # Default to CPU VM
-        self.resources: Union[List[sky.Resources],
-                              Set[sky.Resources]] = {sky.Resources()}
+        if resources is None:
+            self.resources: Union[List[sky.Resources],
+                                  Set[sky.Resources]] = {sky.Resources()}
+        else:
+            self.set_resources(resources)
         self._service: Optional[service_spec.SkyServiceSpec] = None
 
         # Resources that this task cannot run on.
@@ -359,7 +366,7 @@ class Task:
 
         self.time_estimator_func: Optional[Callable[['sky.Resources'],
                                                     int]] = None
-        self.file_mounts: Optional[Dict[str, str]] = None
+        self.file_mounts: Optional[Dict[str, str]] = self.set_file_mounts(file_mounts)
 
         # Only set when 'self' is a jobs controller task: 'self.managed_job_dag'
         # is the underlying managed job dag (sky.Dag object).
