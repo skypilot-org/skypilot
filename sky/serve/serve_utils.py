@@ -840,6 +840,7 @@ def _terminate_failed_services(
 
     if not remaining_replica_clusters:
         return None
+    # TODO(tian): Try to terminate those replica clusters.
     remaining_identity = ', '.join(remaining_replica_clusters)
     return (f'{colorama.Fore.YELLOW}terminate service {service_name!r} with '
             f'failed status ({service_status}). This may indicate a resource '
