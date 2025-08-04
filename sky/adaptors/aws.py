@@ -34,6 +34,7 @@ import time
 import typing
 from typing import Callable, Literal, Optional, TypeVar
 
+from sky import skypilot_config
 from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -122,17 +123,47 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], T],
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
 @_thread_local_lru_cache()
-def session(check_credentials: bool = True):
+def session(check_credentials: bool = True, profile_name: Optional[str] = None):
     """Create an AWS session."""
-    s = _create_aws_object(boto3.session.Session, 'session')
-    if check_credentials and s.get_credentials() is None:
-        # s.get_credentials() can be None if there are actually no credentials,
-        # or if we fail to get credentials from IMDS (e.g. due to throttling).
-        # Technically, it could be okay to have no credentials, as certain AWS
-        # APIs don't actually need them. But afaik everything we use AWS for
-        # needs credentials.
-        raise botocore_exceptions().NoCredentialsError()
-    return s
+    # Check for workspace-specific profile_name configuration
+    workspace_profile_name = (profile_name or
+                              skypilot_config.get_workspace_cloud('aws').get(
+                                  'profile_name', None))
+
+    if workspace_profile_name:
+        # Use the specified profile directly
+        try:
+            profile_session = _create_aws_object(
+                lambda: boto3.session.Session(
+                    profile_name=workspace_profile_name), 'session')
+
+            if check_credentials and profile_session.get_credentials() is None:
+                raise botocore_exceptions().NoCredentialsError()
+
+            return profile_session
+        except Exception as e:
+            # Provide helpful error message
+            error_msg = ('Failed to create session with profile'
+                         f'"{workspace_profile_name}".')
+
+            if 'could not be found' in str(e).lower():
+                error_msg += (
+                    f'\n\nProfile "{workspace_profile_name}" not found. '
+                    'Available options: \n1. Configure the profile: aws '
+                    f'configure --profile {workspace_profile_name}\n2. For '
+                    'AWS SSO: aws configure sso --profile '
+                    f'{workspace_profile_name} \n3. Check existing profiles:'
+                    'aws configure list-profiles')
+
+            error_msg += f'\n\nOriginal error: {e}'
+
+            raise RuntimeError(error_msg) from e
+    else:
+        # No workspace profile_name configured, use standard session
+        s = _create_aws_object(boto3.session.Session, 'session')
+        if check_credentials and s.get_credentials() is None:
+            raise botocore_exceptions().NoCredentialsError()
+        return s
 
 
 # New typing overloads can be added as needed.
@@ -180,13 +211,15 @@ def resource(service_name: str, **kwargs):
         kwargs['config'] = config
 
     check_credentials = kwargs.pop('check_credentials', True)
+    profile_name = kwargs.pop('profile_name', None)
 
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.resource()
     # is not thread-safe). Reference: https://stackoverflow.com/a/59635814
     return _create_aws_object(
-        lambda: session(check_credentials=check_credentials).resource(
-            service_name, **kwargs), 'resource')
+        lambda: session(check_credentials=check_credentials,
+                        profile_name=profile_name).resource(
+                            service_name, **kwargs), 'resource')
 
 
 # New typing overloads can be added as needed.
