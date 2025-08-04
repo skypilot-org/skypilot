@@ -338,14 +338,13 @@ class Task:
           event_callback: A bash script that will be executed when the task
             changes state.
           blocked_resources: A set of resources that this task cannot run on.
-          _file_mounts_mapping: A dictionary of file mounts mapping.
-            Internal use only.
-          _volume_mounts: A list of volume mounts.
-            Internal use only.
-          _metadata: A dictionary of metadata to be added to the task.
-            Internal use only.
-          _user_specified_yaml: A string of user-specified YAML config.
-            Internal use only.
+          _file_mounts_mapping: (Internal use only) A dictionary of file mounts
+            mapping.
+          _volume_mounts: (Internal use only) A list of volume mounts.
+          _metadata: (Internal use only) A dictionary of metadata to be added to
+            the task.
+          _user_specified_yaml: (Internal use only) A string of user-specified
+            YAML config.
         """
         self.name = name
         self.run = run
