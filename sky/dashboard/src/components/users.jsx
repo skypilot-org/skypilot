@@ -603,8 +603,8 @@ export function Users() {
           )}
         </div>
 
-        {/* Create Service Account Button for Service Accounts Tab */}
-        {activeMainTab === 'service-accounts' && (
+        {/* Create Service Account Button for Service Accounts Tab - only show for admin */}
+        {activeMainTab === 'service-accounts' && userRoleCache?.role === 'admin' && (
           <button
             onClick={() => {
               checkPermissionAndAct(
@@ -1827,7 +1827,10 @@ function ServiceAccountTokensView({
                   <TableHead>Created</TableHead>
                   <TableHead>Last used</TableHead>
                   <TableHead>Expires</TableHead>
-                  <TableHead>Actions</TableHead>
+                  {/* Actions column - only show for admin */}
+                  {userRoleCache?.role === 'admin' && (
+                    <TableHead>Actions</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1880,10 +1883,8 @@ function ServiceAccountTokensView({
                             <span className="capitalize">
                               {token.primaryRole}
                             </span>
-                            {/* Only show edit role button if admin or owner */}
-                            {(userRoleCache?.role === 'admin' ||
-                              token.creator_user_hash ===
-                                userRoleCache?.id) && (
+                            {/* Only show edit role button if admin */}
+                            {userRoleCache?.role === 'admin' && (
                               <button
                                 onClick={() =>
                                   handleEditClick(
@@ -1956,11 +1957,10 @@ function ServiceAccountTokensView({
                         />
                       )}
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center space-x-2">
-                        {/* Show rotate button only if user owns the token or is admin */}
-                        {(userRoleCache?.role === 'admin' ||
-                          token.creator_user_hash === userRoleCache?.id) && (
+                    {/* Actions cell - only show for admin */}
+                    {userRoleCache?.role === 'admin' && (
+                      <TableCell>
+                        <div className="flex items-center space-x-2">
                           <CustomTooltip
                             content={`Rotate token`}
                             className="capitalize text-sm text-muted-foreground"
@@ -1980,10 +1980,6 @@ function ServiceAccountTokensView({
                               <RotateCwIcon className="h-4 w-4" />
                             </button>
                           </CustomTooltip>
-                        )}
-                        {/* Show delete button only if user owns the token or is admin */}
-                        {(userRoleCache?.role === 'admin' ||
-                          token.creator_user_hash === userRoleCache?.id) && (
                           <Tooltip
                             content={`Delete ${token.token_name}`}
                             className="capitalize text-sm text-muted-foreground"
@@ -2003,9 +1999,9 @@ function ServiceAccountTokensView({
                               <Trash2Icon className="h-4 w-4" />
                             </button>
                           </Tooltip>
-                        )}
-                      </div>
-                    </TableCell>
+                        </div>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
