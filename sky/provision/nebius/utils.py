@@ -41,10 +41,7 @@ def get_project_by_region(region: str) -> str:
 
     #  Check is there project if in config
     project_id = skypilot_config.get_effective_region_config(
-        cloud='nebius',
-        region=None,
-        keys=(region, 'project_id'),
-        default_value=None)
+        cloud='nebius', region=region, keys=('project_id',), default_value=None)
     if project_id is not None:
         return project_id
     for project in projects.items:
@@ -189,8 +186,8 @@ def launch(cluster_name_on_cloud: str,
         if preset == '8gpu-128vcpu-1600gb':
             fabric = skypilot_config.get_effective_region_config(
                 cloud='nebius',
-                region=None,
-                keys=(region, 'fabric'),
+                region=region,
+                keys=('fabric',),
                 default_value=None)
 
             # Auto-select fabric if network_tier=best and no fabric configured

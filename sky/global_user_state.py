@@ -9,15 +9,14 @@ Concepts:
 import functools
 import json
 import os
-import pathlib
 import pickle
 import re
+import threading
 import time
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
-from alembic import command as alembic_command
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
@@ -49,6 +48,7 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
@@ -238,36 +238,34 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Get alembic config for state db and run migrations
-    alembic_config = migration_utils.get_alembic_config(
-        engine, migration_utils.GLOBAL_USER_STATE_DB_NAME)
-    # pylint: disable=line-too-long
-    alembic_config.config_ini_section = migration_utils.GLOBAL_USER_STATE_DB_NAME
-    alembic_command.upgrade(alembic_config,
-                            migration_utils.GLOBAL_USER_STATE_VERSION)
+    migration_utils.safe_alembic_upgrade(
+        engine, migration_utils.GLOBAL_USER_STATE_DB_NAME,
+        migration_utils.GLOBAL_USER_STATE_VERSION)
 
 
+# We wrap the sqlalchemy engine initialization in a thread
+# lock to ensure that multiple threads do not initialize the
+# engine which could result in a rare race condition where
+# a session has already been created with _SQLALCHEMY_ENGINE = e1,
+# and then another thread overwrites _SQLALCHEMY_ENGINE = e2
+# which could result in e1 being garbage collected unexpectedly.
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
+
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
-    with migration_utils.db_lock(migration_utils.GLOBAL_USER_STATE_DB_NAME):
-        if _SQLALCHEMY_ENGINE is None:
-            conn_string = None
-            if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-                conn_string = skypilot_config.get_nested(('db',), None)
-            if conn_string:
-                logger.debug(f'using db URI from {conn_string}')
-                engine = sqlalchemy.create_engine(conn_string,
-                                                  poolclass=sqlalchemy.NullPool)
-            else:
-                db_path = os.path.expanduser('~/.sky/state.db')
-                pathlib.Path(db_path).parents[0].mkdir(parents=True,
-                                                       exist_ok=True)
-                engine = sqlalchemy.create_engine('sqlite:///' + db_path)
-            create_table(engine)
-            _SQLALCHEMY_ENGINE = engine
-    return _SQLALCHEMY_ENGINE
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+        # get an engine to the db
+        engine = migration_utils.get_engine('state')
+
+        # run migrations if needed
+        create_table(engine)
+
+        # return engine
+        _SQLALCHEMY_ENGINE = engine
+        return _SQLALCHEMY_ENGINE
 
 
 def _init_db(func):

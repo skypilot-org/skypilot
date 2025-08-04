@@ -326,8 +326,9 @@ By default, the provisioned nodes will be in the root `compartment <https://docs
 .. code-block:: text
 
   oci:
-    default:
-      compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
+    region_configs:
+      default:
+        compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
 
 
 Lambda Cloud
@@ -358,7 +359,8 @@ Vast
 .. code-block:: shell
 
   pip install "vastai-sdk>=0.1.12"
-  echo "<your_api_key_here>" > ~/.vast_api_key
+  mkdir -p ~/.config/vastai
+  echo "<your_api_key_here>" > ~/.config/vastai/vast_api_key
 
 RunPod
 ~~~~~~~~~~
@@ -503,6 +505,8 @@ Here is an example of configuration within the credential file:
         clusters: []
 
 After configuring the vSphere credentials, ensure that the necessary preparations for vSphere are completed. Please refer to this guide for more information: :ref:`Cloud Preparation for vSphere <cloud-prepare-vsphere>`
+
+.. _cloudflare-r2-installation:
 
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~

@@ -6,6 +6,7 @@ https://json-schema.org/
 import enum
 from typing import Any, Dict, List, Tuple
 
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import kubernetes_enums
 
@@ -65,6 +66,11 @@ _AUTOSTOP_SCHEMA = {
                 'down': {
                     'type': 'boolean',
                 },
+                'wait_for': {
+                    'type': 'string',
+                    'case_insensitive_enum':
+                        autostop_lib.AutostopWaitFor.supported_modes(),
+                }
             },
         },
     ],
@@ -421,7 +427,7 @@ def get_resources_schema():
 
 def get_volume_schema():
     # pylint: disable=import-outside-toplevel
-    from sky.volumes import volume
+    from sky.utils import volume
 
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -605,7 +611,6 @@ def get_service_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': ['readiness_probe'],
         'additionalProperties': False,
         'properties': {
             'readiness_probe': {
@@ -640,6 +645,9 @@ def get_service_schema():
                         },
                     }
                 }]
+            },
+            'pool': {
+                'type': 'boolean',
             },
             'replica_policy': {
                 'type': 'object',
@@ -686,6 +694,9 @@ def get_service_schema():
                 'type': 'integer',
             },
             'replicas': {
+                'type': 'integer',
+            },
+            'workers': {
                 'type': 'integer',
             },
             'load_balancing_policy': {
@@ -823,6 +834,9 @@ def get_task_schema():
             },
             # service config is validated separately using SERVICE_SCHEMA
             'service': {
+                'type': 'object',
+            },
+            'pool': {
                 'type': 'object',
             },
             'setup': {
@@ -1128,6 +1142,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
+    from sky.server import daemons
 
     resources_schema = {
         k: v
@@ -1137,21 +1152,7 @@ def get_config_schema():
     }
     resources_schema['properties'].pop('ports')
 
-    def _get_controller_schema(add_consolidation_mode: bool = False):
-        controller_properties = {
-            'resources': resources_schema,
-            'high_availability': {
-                'type': 'boolean',
-                'default': False,
-            },
-            'autostop': _AUTOSTOP_SCHEMA,
-        }
-        if add_consolidation_mode:
-            controller_properties['consolidation_mode'] = {
-                'type': 'boolean',
-                'default': False,
-            }
-
+    def _get_controller_schema():
         return {
             'type': 'object',
             'required': [],
@@ -1161,13 +1162,28 @@ def get_config_schema():
                     'type': 'object',
                     'required': [],
                     'additionalProperties': False,
-                    'properties': controller_properties,
+                    'properties': {
+                        'resources': resources_schema,
+                        'high_availability': {
+                            'type': 'boolean',
+                            'default': False,
+                        },
+                        'autostop': _AUTOSTOP_SCHEMA,
+                        'consolidation_mode': {
+                            'type': 'boolean',
+                            'default': False,
+                        }
+                    },
                 },
                 'bucket': {
                     'type': 'string',
                     'pattern': '^(https|s3|gs|r2|cos)://.+',
                     'required': [],
-                }
+                },
+                'force_disable_cloud_bucket': {
+                    'type': 'boolean',
+                    'default': False,
+                },
             }
         }
 
@@ -1197,6 +1213,19 @@ def get_config_schema():
                     }, {
                         'type': 'null',
                     }],
+                },
+                'post_provision_runcmd': {
+                    'type': 'array',
+                    'items': {
+                        'oneOf': [{
+                            'type': 'string'
+                        }, {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string'
+                            }
+                        }]
+                    },
                 },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
@@ -1323,27 +1352,33 @@ def get_config_schema():
         'oci': {
             'type': 'object',
             'required': [],
-            'properties': {},
-            # Properties are either 'default' or a region name.
-            'additionalProperties': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'compartment_ocid': {
-                        'type': 'string',
-                    },
-                    'image_tag_general': {
-                        'type': 'string',
-                    },
-                    'image_tag_gpu': {
-                        'type': 'string',
-                    },
-                    'vcn_ocid': {
-                        'type': 'string',
-                    },
-                    'vcn_subnet': {
-                        'type': 'string',
+            'properties': {
+                'region_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    # Properties are either 'default' or a region name.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'compartment_ocid': {
+                                'type': 'string',
+                            },
+                            'image_tag_general': {
+                                'type': 'string',
+                            },
+                            'image_tag_gpu': {
+                                'type': 'string',
+                            },
+                            'vcn_ocid': {
+                                'type': 'string',
+                            },
+                            'vcn_subnet': {
+                                'type': 'string',
+                            },
+                        }
                     },
                 }
             },
@@ -1352,43 +1387,47 @@ def get_config_schema():
             'type': 'object',
             'required': [],
             'properties': {
-                **_NETWORK_CONFIG_SCHEMA,
-                'tenant_id': {
+                **_NETWORK_CONFIG_SCHEMA, 'tenant_id': {
                     'type': 'string',
                 },
-            },
-            'additionalProperties': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'project_id': {
-                        'type': 'string',
-                    },
-                    'fabric': {
-                        'type': 'string',
-                    },
-                    'filesystems': {
-                        'type': 'array',
-                        'items': {
-                            'type': 'object',
-                            'additionalProperties': False,
-                            'properties': {
-                                'filesystem_id': {
-                                    'type': 'string',
-                                },
-                                'attach_mode': {
-                                    'type': 'string',
-                                    'case_sensitive_enum': [
-                                        'READ_WRITE', 'READ_ONLY'
-                                    ]
-                                },
-                                'mount_path': {
-                                    'type': 'string',
+                'region_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'project_id': {
+                                'type': 'string',
+                            },
+                            'fabric': {
+                                'type': 'string',
+                            },
+                            'filesystems': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'additionalProperties': False,
+                                    'properties': {
+                                        'filesystem_id': {
+                                            'type': 'string',
+                                        },
+                                        'attach_mode': {
+                                            'type': 'string',
+                                            'case_sensitive_enum': [
+                                                'READ_WRITE', 'READ_ONLY'
+                                            ]
+                                        },
+                                        'mount_path': {
+                                            'type': 'string',
+                                        }
+                                    }
                                 }
-                            }
-                        }
-                    },
+                            },
+                        },
+                    }
                 }
             },
         }
@@ -1446,6 +1485,27 @@ def get_config_schema():
             },
         }
     }
+
+    daemon_config = {
+        'type': 'object',
+        'required': [],
+        'properties': {
+            'log_level': {
+                'type': 'string',
+                'case_insensitive_enum': ['DEBUG', 'INFO', 'WARNING'],
+            },
+        }
+    }
+
+    daemon_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {}
+    }
+
+    for daemon in daemons.INTERNAL_REQUEST_DAEMONS:
+        daemon_schema['properties'][daemon.id] = daemon_config
 
     api_server = {
         'type': 'object',
@@ -1611,7 +1671,7 @@ def get_config_schema():
         'properties': {
             'store': {
                 'type': 'string',
-                'case_insensitive_enum': ['gcp'],
+                'case_insensitive_enum': ['gcp', 'aws'],
             },
             'gcp': {
                 'type': 'object',
@@ -1623,6 +1683,32 @@ def get_config_schema():
                         'type': 'string',
                     },
                     'additional_labels': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
+            'aws': {
+                'type': 'object',
+                'properties': {
+                    'region': {
+                        'type': 'string',
+                    },
+                    'credentials_file': {
+                        'type': 'string',
+                    },
+                    'log_group_name': {
+                        'type': 'string',
+                    },
+                    'log_stream_prefix': {
+                        'type': 'string',
+                    },
+                    'auto_create_group': {
+                        'type': 'boolean',
+                    },
+                    'additional_tags': {
                         'type': 'object',
                         'additionalProperties': {
                             'type': 'string',
@@ -1654,8 +1740,8 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(add_consolidation_mode=True),
-            'serve': _get_controller_schema(add_consolidation_mode=False),
+            'jobs': _get_controller_schema(),
+            'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,
@@ -1666,6 +1752,7 @@ def get_config_schema():
             'provision': provision_configs,
             'rbac': rbac_schema,
             'logs': logs_schema,
+            'daemons': daemon_schema,
             **cloud_configs,
         },
     }

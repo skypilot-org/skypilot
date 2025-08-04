@@ -100,6 +100,11 @@ class SkyServeController:
 
     def run(self) -> None:
 
+        @self._app.get('/autoscaler/info')
+        async def get_autoscaler_info() -> fastapi.Response:
+            return responses.JSONResponse(content=self._autoscaler.info(),
+                                          status_code=200)
+
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(
                 request: fastapi.Request) -> fastapi.Response:
@@ -156,9 +161,13 @@ class SkyServeController:
                 return responses.JSONResponse(content={'message': 'Success'},
                                               status_code=200)
             except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error in update_service: '
-                             f'{common_utils.format_exception(e)}')
-                return responses.JSONResponse(content={'message': 'Error'},
+                exception_str = common_utils.format_exception(e)
+                logger.error(f'Error in update_service: {exception_str}')
+                return responses.JSONResponse(content={
+                    'message': 'Error',
+                    'exception': exception_str,
+                    'traceback': traceback.format_exc()
+                },
                                               status_code=500)
 
         @self._app.post('/controller/terminate_replica')

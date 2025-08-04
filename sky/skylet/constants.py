@@ -1,4 +1,5 @@
 """Constants for SkyPilot."""
+import os
 from typing import List, Tuple
 
 from packaging import version
@@ -89,11 +90,11 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '15'
+SKYLET_VERSION = '16'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 3
+SKYLET_LIB_VERSION = 4
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # Docker default options
@@ -368,6 +369,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
     ('nvidia_gpus', 'disable_ecc'),
     ('ssh', 'pod_config'),
+    ('kubernetes', 'custom_metadata'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
@@ -381,7 +383,8 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
 # we skip the following keys because they are meant to be client-side configs.
 SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('api_server',),
                                                        ('allowed_clouds',),
-                                                       ('workspaces',), ('db',)]
+                                                       ('workspaces',), ('db',),
+                                                       ('daemons',)]
 
 # Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
@@ -491,3 +494,6 @@ DEFAULT_PRIORITY = 0
 
 GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
 COST_REPORT_DEFAULT_DAYS = 30
+
+# The directory for file locks.
+SKY_LOCKS_DIR = os.path.expanduser('~/.sky/locks')

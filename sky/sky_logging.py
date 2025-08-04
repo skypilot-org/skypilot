@@ -171,6 +171,36 @@ def set_logging_level(logger: str, level: int):
         logger.setLevel(original_level)
 
 
+@contextlib.contextmanager
+def set_sky_logging_levels(level: int):
+    """Set the logging level for all loggers."""
+    # Turn off logger
+    previous_levels = {}
+    for logger_name in logging.Logger.manager.loggerDict:
+        if logger_name.startswith('sky'):
+            logger = logging.getLogger(logger_name)
+            previous_levels[logger_name] = logger.level
+            logger.setLevel(level)
+    if level == logging.DEBUG:
+        previous_show_debug_info = env_options.Options.SHOW_DEBUG_INFO.get()
+        os.environ[env_options.Options.SHOW_DEBUG_INFO.env_key] = '1'
+    try:
+        yield
+    finally:
+        # Restore logger
+        for logger_name in logging.Logger.manager.loggerDict:
+            if logger_name.startswith('sky'):
+                logger = logging.getLogger(logger_name)
+                try:
+                    logger.setLevel(previous_levels[logger_name])
+                except KeyError:
+                    # New loggers maybe initialized after the context manager,
+                    # no need to restore the level.
+                    pass
+        if level == logging.DEBUG and not previous_show_debug_info:
+            os.environ.pop(env_options.Options.SHOW_DEBUG_INFO.env_key)
+
+
 def logging_enabled(logger: logging.Logger, level: int) -> bool:
     return logger.level <= level
 

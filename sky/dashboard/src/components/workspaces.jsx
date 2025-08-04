@@ -748,18 +748,18 @@ export function Workspaces() {
                     Workspace{getSortDirection('name')}
                   </TableHead>
                   <TableHead
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 hidden sm:table-cell"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
                     onClick={() => handleSort('totalClusterCount')}
                   >
                     Clusters {getSortDirection('totalClusterCount')}
                   </TableHead>
                   <TableHead
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 hidden md:table-cell"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
                     onClick={() => handleSort('managedJobsCount')}
                   >
                     Jobs{getSortDirection('managedJobsCount')}
                   </TableHead>
-                  <TableHead className="whitespace-nowrap hidden lg:table-cell">
+                  <TableHead className="whitespace-nowrap">
                     Enabled infra
                   </TableHead>
                   <TableHead className="whitespace-nowrap">Actions</TableHead>
@@ -802,7 +802,7 @@ export function Workspaces() {
                             <WorkspaceBadge isPrivate={isPrivate} />
                           </span>
                         </TableCell>
-                        <TableCell className="hidden sm:table-cell">
+                        <TableCell>
                           <button
                             onClick={() => {
                               router.push({
@@ -816,7 +816,7 @@ export function Workspaces() {
                             {workspace.totalClusterCount} total
                           </button>
                         </TableCell>
-                        <TableCell className="hidden md:table-cell">
+                        <TableCell>
                           <button
                             onClick={() => {
                               router.push({
@@ -829,7 +829,7 @@ export function Workspaces() {
                             {workspace.managedJobsCount}
                           </button>
                         </TableCell>
-                        <TableCell className="hidden lg:table-cell">
+                        <TableCell>
                           {workspace.clouds.length > 0 ? (
                             [...workspace.clouds].sort().map((cloud, index) => {
                               const canonicalCloudName =

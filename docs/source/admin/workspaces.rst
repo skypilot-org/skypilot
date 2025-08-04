@@ -165,6 +165,11 @@ Then, ``/monorepo/team-a/.sky.yaml`` may set:
 
 All SkyPilot CLI or API calls with ``/monorepo/team-a`` as the PWD will use the workspace ``team-a``.
 
+.. code-block:: console
+
+   $ cd /monorepo/team-a
+   $ sky launch -c training training.sky.yaml
+
 Similarly, ``/monorepo/team-b/.sky.yaml`` may set:
 
 .. code-block:: yaml

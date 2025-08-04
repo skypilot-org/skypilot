@@ -107,19 +107,13 @@ class OCIConfig:
         # Allow task(cluster)-specific compartment/VCN parameters.
         default_compartment_ocid = skypilot_config.get_effective_region_config(
             cloud='oci',
-            region=None,
-            keys=(
-                'default',
-                'compartment_ocid',
-            ),
+            region='default',
+            keys=('compartment_ocid',),
             default_value=None)
         compartment = skypilot_config.get_effective_region_config(
             cloud='oci',
-            region=None,
-            keys=(
-                region,
-                'compartment_ocid',
-            ),
+            region=region,
+            keys=('compartment_ocid',),
             default_value=default_compartment_ocid)
         return compartment
 
@@ -127,11 +121,8 @@ class OCIConfig:
     def get_vcn_ocid(cls, region):
         # Will reuse the regional VCN if specified.
         vcn = skypilot_config.get_effective_region_config(cloud='oci',
-                                                          region=None,
-                                                          keys=(
-                                                              region,
-                                                              'vcn_ocid',
-                                                          ),
+                                                          region=region,
+                                                          keys=('vcn_ocid',),
                                                           default_value=None)
         return vcn
 
@@ -139,11 +130,8 @@ class OCIConfig:
     def get_vcn_subnet(cls, region):
         # Will reuse the subnet if specified.
         vcn = skypilot_config.get_effective_region_config(cloud='oci',
-                                                          region=None,
-                                                          keys=(
-                                                              region,
-                                                              'vcn_subnet',
-                                                          ),
+                                                          region=region,
+                                                          keys=('vcn_subnet',),
                                                           default_value=None)
         return vcn
 
@@ -155,11 +143,8 @@ class OCIConfig:
         # last)
         return skypilot_config.get_effective_region_config(
             cloud='oci',
-            region=None,
-            keys=(
-                'default',
-                'image_tag_gpu',
-            ),
+            region='default',
+            keys=('image_tag_gpu',),
             default_value='skypilot:gpu-ubuntu-2204')
 
     @classmethod
@@ -169,11 +154,8 @@ class OCIConfig:
         # specified, use the hardcode one at last)
         return skypilot_config.get_effective_region_config(
             cloud='oci',
-            region=None,
-            keys=(
-                'default',
-                'image_tag_general',
-            ),
+            region='default',
+            keys=('image_tag_general',),
             default_value='skypilot:cpu-ubuntu-2204')
 
     @classmethod
@@ -190,11 +172,8 @@ class OCIConfig:
     def get_profile(cls) -> str:
         return skypilot_config.get_effective_region_config(
             cloud='oci',
-            region=None,
-            keys=(
-                'default',
-                'oci_config_profile',
-            ),
+            region='default',
+            keys=('oci_config_profile',),
             default_value='DEFAULT')
 
     @classmethod
@@ -204,11 +183,8 @@ class OCIConfig:
         # specified, use the hardcode one at last)
         return skypilot_config.get_effective_region_config(
             cloud='oci',
-            region=None,
-            keys=(
-                'default',
-                'image_os_type',
-            ),
+            region='default',
+            keys=('image_os_type',),
             default_value='ubuntu')
 
 

@@ -173,7 +173,18 @@ export function Clusters() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
-  const [showHistory, setShowHistory] = useState(false); // 'active' or 'history'
+
+  // Initialize showHistory from URL parameter immediately
+  const getInitialShowHistory = () => {
+    if (typeof window !== 'undefined' && router.isReady) {
+      const historyParam = router.query.history;
+      return historyParam === 'true';
+    }
+    return false;
+  };
+
+  const [showHistory, setShowHistory] = useState(getInitialShowHistory);
+  const [shouldAnimate, setShouldAnimate] = useState(true); // Track if toggle should animate
   const isMobile = useMobile();
 
   const [filters, setFilters] = useState([]);
@@ -185,12 +196,24 @@ export function Clusters() {
     infra: [],
   }); /// Option values for properties
 
-  // Handle URL query parameters for workspace and user filtering
+  // Handle URL query parameters for workspace and user filtering and show history
   useEffect(() => {
     if (router.isReady) {
       updateFiltersByURLParams();
+
+      // Sync showHistory state with URL if it has changed
+      const historyParam = router.query.history;
+      const expectedState = historyParam === 'true';
+
+      if (showHistory !== expectedState) {
+        setShouldAnimate(false); // Disable animation for programmatic changes
+        setShowHistory(expectedState);
+        // Re-enable animation after a short delay
+        setTimeout(() => setShouldAnimate(true), 50);
+      }
     }
-  }, [router.isReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.history]);
 
   useEffect(() => {
     const fetchFilterData = async () => {
@@ -298,6 +321,22 @@ export function Clusters() {
     );
   };
 
+  // Helper function to update show history in URL
+  const updateShowHistoryURL = (showHistoryValue) => {
+    const query = { ...router.query };
+    query.history = showHistoryValue.toString();
+
+    // Use replace to avoid adding to browser history for show history changes
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
   const updateFiltersByURLParams = () => {
     const query = { ...router.query };
 
@@ -354,15 +393,16 @@ export function Clusters() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-2 h-5">
-        <div className="text-base flex items-center">
+      <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
+        <div className="flex items-center gap-2">
           <Link
             href="/clusters"
-            className="text-sky-blue hover:underline leading-none"
+            className="text-sky-blue hover:underline leading-none text-base"
           >
             Sky Clusters
           </Link>
-
+        </div>
+        <div className="w-full sm:w-auto">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
             valueList={optionValues}
@@ -371,47 +411,47 @@ export function Clusters() {
             placeholder="Filter clusters"
           />
         </div>
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center">
-            <label className="flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showHistory}
-                onChange={(e) => setShowHistory(e.target.checked)}
-                className="sr-only"
-              />
-              <div
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                  showHistory ? 'bg-sky-600' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                    showHistory ? 'translate-x-5' : 'translate-x-1'
-                  }`}
-                />
-              </div>
-              <span className="ml-2 text-sm text-gray-700">
-                Show history (Last 30 days)
-              </span>
-            </label>
-          </div>
-          <div className="flex items-center">
-            {loading && (
-              <div className="flex items-center mr-2">
-                <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">Loading...</span>
-              </div>
-            )}
-            <button
-              onClick={handleRefresh}
-              disabled={loading}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+        <div className="flex items-center gap-2 ml-auto">
+          <label className="flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showHistory}
+              onChange={(e) => {
+                const newValue = e.target.checked;
+                setShowHistory(newValue);
+                updateShowHistoryURL(newValue);
+              }}
+              className="sr-only"
+            />
+            <div
+              className={`relative inline-flex h-5 w-9 items-center rounded-full ${shouldAnimate ? 'transition-colors' : ''} ${
+                showHistory ? 'bg-sky-600' : 'bg-gray-300'
+              }`}
             >
-              <RotateCwIcon className="h-4 w-4 mr-1.5" />
-              {!isMobile && <span>Refresh</span>}
-            </button>
-          </div>
+              <span
+                className={`inline-block h-3 w-3 transform rounded-full bg-white ${shouldAnimate ? 'transition-transform' : ''} ${
+                  showHistory ? 'translate-x-5' : 'translate-x-1'
+                }`}
+              />
+            </div>
+            <span className="ml-2 text-sm text-gray-700">
+              Show history (Last 30 days)
+            </span>
+          </label>
+          {loading && (
+            <div className="flex items-center">
+              <CircularProgress size={15} className="mt-0" />
+              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+            </div>
+          )}
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+          >
+            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            {!isMobile && <span>Refresh</span>}
+          </button>
         </div>
       </div>
 
@@ -554,7 +594,7 @@ export function ClusterTable({
     setLoading(false);
     setLocalLoading(false);
     setIsInitialLoad(false);
-  }, [setLoading, showHistory]);
+  }, [setLoading, showHistory, setOptionValues]);
 
   // Utility: checks a condition based on operator
   const evaluateCondition = (item, filter) => {
@@ -700,25 +740,25 @@ export function ClusterTable({
                   Cluster{getSortDirection('cluster')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap hidden sm:table-cell"
+                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('user')}
                 >
                   User{getSortDirection('user')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap hidden md:table-cell"
+                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('workspace')}
                 >
                   Workspace{getSortDirection('workspace')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap hidden lg:table-cell"
+                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('infra')}
                 >
                   Infra{getSortDirection('infra')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap hidden xl:table-cell"
+                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('resources_str')}
                 >
                   Resources{getSortDirection('resources_str')}
@@ -731,19 +771,19 @@ export function ClusterTable({
                 </TableHead>
                 {showHistory && (
                   <TableHead
-                    className="sortable whitespace-nowrap hidden lg:table-cell"
+                    className="sortable whitespace-nowrap"
                     onClick={() => requestSort('duration')}
                   >
                     Duration{getSortDirection('duration')}
                   </TableHead>
                 )}
                 <TableHead
-                  className="sortable whitespace-nowrap hidden md:table-cell"
+                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('autostop')}
                 >
                   Autostop{getSortDirection('autostop')}
                 </TableHead>
-                <TableHead className="sticky right-0 bg-white">
+                <TableHead className="md:sticky md:right-0 md:bg-white">
                   Actions
                 </TableHead>
               </TableRow>
@@ -777,13 +817,13 @@ export function ClusterTable({
                           {item.cluster || item.name}
                         </Link>
                       </TableCell>
-                      <TableCell className="hidden sm:table-cell">
+                      <TableCell>
                         <UserDisplay
                           username={item.user}
                           userHash={item.user_hash}
                         />
                       </TableCell>
-                      <TableCell className="hidden md:table-cell">
+                      <TableCell>
                         <Link
                           href="/workspaces"
                           className="text-gray-700 hover:text-blue-600 hover:underline"
@@ -791,7 +831,7 @@ export function ClusterTable({
                           {item.workspace || 'default'}
                         </Link>
                       </TableCell>
-                      <TableCell className="hidden lg:table-cell">
+                      <TableCell>
                         <NonCapitalizedTooltip
                           content={item.full_infra || item.infra}
                           className="text-sm text-muted-foreground"
@@ -812,7 +852,7 @@ export function ClusterTable({
                           </span>
                         </NonCapitalizedTooltip>
                       </TableCell>
-                      <TableCell className="hidden xl:table-cell">
+                      <TableCell>
                         <NonCapitalizedTooltip
                           content={
                             item.resources_str_full || item.resources_str
@@ -826,16 +866,14 @@ export function ClusterTable({
                         <TimestampWithTooltip date={item.time} />
                       </TableCell>
                       {showHistory && (
-                        <TableCell className="hidden lg:table-cell">
-                          {formatDuration(item.duration)}
-                        </TableCell>
+                        <TableCell>{formatDuration(item.duration)}</TableCell>
                       )}
-                      <TableCell className="hidden md:table-cell">
+                      <TableCell>
                         {item.isHistorical
                           ? '-'
                           : formatAutostop(item.autostop, item.to_down)}
                       </TableCell>
-                      <TableCell className="text-left sticky right-0 bg-white">
+                      <TableCell className="text-left md:sticky md:right-0 md:bg-white">
                         {!item.isHistorical && (
                           <Status2Actions
                             cluster={item.cluster}
@@ -1197,14 +1235,14 @@ const FilterDropdown = ({
   };
 
   return (
-    <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md overflow-visible">
-      <div className="border-r border-gray-300">
+    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible">
+      <div className="border-r border-gray-300 flex-shrink-0">
         <Select onValueChange={setPropertValue} value={propertyValue}>
           <SelectTrigger
             aria-label="Filter Property"
-            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-32 h-8"
+            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-20 sm:w-24 md:w-32 h-8 text-xs sm:text-sm"
           >
-            <SelectValue placeholder="Select Property" />
+            <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
             {propertyList.map((item, index) => (
@@ -1224,7 +1262,7 @@ const FilterDropdown = ({
           onChange={handleValueChange}
           onFocus={handleInputFocus}
           onKeyDown={handleKeyDown}
-          className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
+          className="h-8 w-full sm:w-96 px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
           autoComplete="off"
         />
         {value && (
