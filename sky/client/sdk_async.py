@@ -10,6 +10,7 @@ Usage example:
     statuses = await sky.get(request_id)
 
 """
+import dataclasses
 import logging
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -36,7 +37,6 @@ from sky.utils import annotations
 from sky.utils import common
 from sky.utils import context_utils
 from sky.utils import env_options
-from sky.utils import message_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -47,6 +47,27 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
+
+
+@dataclasses.dataclass
+class StreamConfig:
+    """Configuration class for stream_and_get behavior.
+
+    Attributes:
+        log_path: The path to the log file to stream.
+        tail: The number of lines to show from the end of the logs.
+            If None, show all logs.
+        follow: Whether to follow the logs.
+        output_stream: The output stream to write to. If None, print to the
+            console.
+    """
+    log_path: Optional[str] = None
+    tail: Optional[int] = None
+    follow: bool = True
+    output_stream: Optional['io.TextIOBase'] = None
+
+
+DEFAULT_STREAM_CONFIG = StreamConfig()
 
 
 @usage_lib.entrypoint
@@ -116,124 +137,6 @@ async def get(request_id: str) -> Any:
             response.close()
 
 
-async def decode_rich_status_async(
-        response: 'aiohttp.ClientResponse'
-) -> typing.AsyncIterator[Optional[str]]:
-    """Async version of rich_utils.decode_rich_status that decodes rich status
-    messages from an aiohttp response.
-
-    Args:
-        response: The aiohttp response.
-
-    Yields:
-        Optional[str]: Decoded lines or None for control messages.
-    """
-    decoding_status = None
-    try:
-        last_line = ''
-        # Buffer to store incomplete UTF-8 bytes between chunks
-        undecoded_buffer = b''
-
-        # Iterate over the response content in chunks
-        async for chunk in response.content.iter_chunked(8192):
-            if chunk is None:
-                return
-
-            # Append the new chunk to any leftover bytes from previous iteration
-            current_bytes = undecoded_buffer + chunk
-            undecoded_buffer = b''
-
-            # Try to decode the combined bytes
-            try:
-                encoded_msg = current_bytes.decode('utf-8')
-            except UnicodeDecodeError as e:
-                # Check if this is potentially an incomplete sequence at the end
-                if e.start > 0:
-                    # Decode the valid part
-                    encoded_msg = current_bytes[:e.start].decode('utf-8')
-
-                    # Check if the remaining bytes are likely a partial char
-                    # or actually invalid UTF-8
-                    remaining_bytes = current_bytes[e.start:]
-                    if len(remaining_bytes) < 4:  # Max UTF-8 char is 4 bytes
-                        # Likely incomplete - save for next chunk
-                        undecoded_buffer = remaining_bytes
-                    else:
-                        # Likely invalid - replace with replacement character
-                        encoded_msg += remaining_bytes.decode('utf-8',
-                                                              errors='replace')
-                        undecoded_buffer = b''
-                else:
-                    # Error at the very beginning of the buffer - invalid UTF-8
-                    encoded_msg = current_bytes.decode('utf-8',
-                                                       errors='replace')
-                    undecoded_buffer = b''
-
-            lines = encoded_msg.splitlines(keepends=True)
-
-            # Skip processing if lines is empty to avoid IndexError
-            if not lines:
-                continue
-
-            lines[0] = last_line + lines[0]
-            last_line = lines[-1]
-            # If the last line is not ended with `\r` or `\n` (with ending
-            # spaces stripped), it means the last line is not a complete line.
-            # We keep the last line in the buffer and continue.
-            if (not last_line.strip(' ').endswith('\r') and
-                    not last_line.strip(' ').endswith('\n')):
-                lines = lines[:-1]
-            else:
-                # Reset the buffer for the next line, as the last line is a
-                # complete line.
-                last_line = ''
-
-            for line in lines:
-                if line.endswith('\r\n'):
-                    # Replace `\r\n` with `\n`, as printing a line ends with
-                    # `\r\n` in linux will cause the line to be empty.
-                    line = line[:-2] + '\n'
-                is_payload, line = message_utils.decode_payload(
-                    line, raise_for_mismatch=False)
-                control = None
-                if is_payload:
-                    control, encoded_status = rich_utils.Control.decode(line)
-                if control is None:
-                    yield line
-                    continue
-
-                if control == rich_utils.Control.RETRY:
-                    raise exceptions.RequestInterruptedError(
-                        'Streaming interrupted. Please retry.')
-                # control is not None, i.e. it is a rich status control message.
-                # In async context, we'll handle rich status controls normally
-                # since async typically runs in main thread
-                if control == rich_utils.Control.INIT:
-                    decoding_status = rich_utils.client_status(encoded_status)
-                else:
-                    if decoding_status is None:
-                        # status may not be initialized if a user use --tail for
-                        # sky api logs.
-                        continue
-                    assert decoding_status is not None, (
-                        f'Rich status not initialized: {line}')
-                    if control == rich_utils.Control.UPDATE:
-                        decoding_status.update(encoded_status)
-                    elif control == rich_utils.Control.STOP:
-                        decoding_status.stop()
-                    elif control == rich_utils.Control.EXIT:
-                        decoding_status.__exit__(None, None, None)
-                    elif control == rich_utils.Control.START:
-                        decoding_status.start()
-                    elif control == rich_utils.Control.HEARTBEAT:
-                        # Heartbeat is not displayed to the user, so we do not
-                        # need to update the status.
-                        pass
-    finally:
-        if decoding_status is not None:
-            decoding_status.__exit__(None, None, None)
-
-
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -258,7 +161,7 @@ async def stream_response_async(request_id: Optional[str],
         retry_context = rest.get_retry_context()
     try:
         line_count = 0
-        async for line in decode_rich_status_async(response):
+        async for line in rich_utils.decode_rich_status_async(response):
             if line is not None:
                 line_count += 1
                 if retry_context is None:
@@ -271,6 +174,21 @@ async def stream_response_async(request_id: Optional[str],
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
+
+
+async def _stream_and_get(
+    request_id: Optional[str] = None,
+    config: StreamConfig = DEFAULT_STREAM_CONFIG,
+) -> Any:
+    """Streams the logs of a request or a log file and gets the final result.
+    """
+    return await stream_and_get(
+        request_id,
+        config.log_path,
+        config.tail,
+        config.follow,
+        config.output_stream,
+    )
 
 
 async def stream_and_get(
@@ -287,12 +205,7 @@ async def stream_and_get(
 
     Args:
         request_id: The prefix of the request ID of the request to stream.
-        log_path: The path to the log file to stream.
-        tail: The number of lines to show from the end of the logs.
-            If None, show all logs.
-        follow: Whether to follow the logs.
-        output_stream: The output stream to write to. If None, print to the
-            console.
+        config: Configuration for streaming behavior.
 
     Returns:
         The ``Request Returns`` of the specified request. See the documentation
@@ -341,29 +254,33 @@ async def stream_and_get(
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def check(infra_list: Optional[Tuple[str, ...]],
-                verbose: bool,
-                workspace: Optional[str] = None,
-                stream_logs: bool = True) -> Dict[str, List[str]]:
+async def check(
+    infra_list: Optional[Tuple[str, ...]],
+    verbose: bool,
+    workspace: Optional[str] = None,
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> Dict[str, List[str]]:
     """Async version of check() that checks the credentials to enable clouds."""
     request_id = await context_utils.to_thread(sdk.check, infra_list, verbose,
                                                workspace)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def enabled_clouds(workspace: Optional[str] = None,
-                         expand: bool = False,
-                         stream_logs: bool = True) -> List[str]:
+async def enabled_clouds(
+        workspace: Optional[str] = None,
+        expand: bool = False,
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> List[str]:
     """Async version of enabled_clouds() that gets the enabled clouds."""
     request_id = await context_utils.to_thread(sdk.enabled_clouds, workspace,
                                                expand)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -379,7 +296,7 @@ async def list_accelerators(
     all_regions: bool = False,
     require_price: bool = True,
     case_sensitive: bool = True,
-    stream_logs: bool = True
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
 ) -> Dict[str, List[sky.catalog.common.InstanceTypeInfo]]:
     """Async version of list_accelerators() that lists the names of all
     accelerators offered by Sky."""
@@ -388,8 +305,8 @@ async def list_accelerators(
                                                quantity_filter, clouds,
                                                all_regions, require_price,
                                                case_sensitive)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -397,48 +314,53 @@ async def list_accelerators(
 @usage_lib.entrypoint
 @annotations.client_api
 async def list_accelerator_counts(
-        gpus_only: bool = True,
-        name_filter: Optional[str] = None,
-        region_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None,
-        clouds: Optional[Union[List[str], str]] = None,
-        stream_logs: bool = True) -> Dict[str, List[int]]:
+    gpus_only: bool = True,
+    name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    clouds: Optional[Union[List[str], str]] = None,
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> Dict[str, List[int]]:
     """Async version of list_accelerator_counts() that lists all accelerators
       offered by Sky and available counts."""
     request_id = await context_utils.to_thread(sdk.list_accelerator_counts,
                                                gpus_only, name_filter,
                                                region_filter, quantity_filter,
                                                clouds)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def optimize(dag: 'sky.Dag',
-                   minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
-                   admin_policy_request_options: Optional[
-                       admin_policy.RequestOptions] = None,
-                   stream_logs: bool = True) -> sky.dag.Dag:
+async def optimize(
+        dag: 'sky.Dag',
+        minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
+        admin_policy_request_options: Optional[
+            admin_policy.RequestOptions] = None,
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> sky.dag.Dag:
     """Async version of optimize() that finds the best execution plan for the
       given DAG."""
     request_id = await context_utils.to_thread(sdk.optimize, dag, minimize,
                                                admin_policy_request_options)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def workspaces(stream_logs: bool = True) -> Dict[str, Any]:
+async def workspaces(
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> Dict[str, Any]:
     """Async version of workspaces() that gets the workspaces."""
     request_id = await context_utils.to_thread(sdk.workspaces)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -463,7 +385,7 @@ async def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
-    stream_logs: bool = True,
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a cluster or task."""
     request_id = await context_utils.to_thread(
@@ -472,8 +394,8 @@ async def launch(
         no_setup, clone_disk_from, fast, _need_confirmation,
         _is_launched_by_jobs_controller, _is_launched_by_sky_serve_controller,
         _disable_controller_check)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -486,13 +408,13 @@ async def exec(  # pylint: disable=redefined-builtin
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     backend: Optional[backends.Backend] = None,
-    stream_logs: bool = True,
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of exec() that executes a task on an existing cluster."""
     request_id = await context_utils.to_thread(sdk.exec, task, cluster_name,
                                                dryrun, down, backend)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -526,40 +448,42 @@ async def start(
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
-    stream_logs: bool = True,
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
 ) -> backends.CloudVmRayResourceHandle:
     """Async version of start() that restarts a cluster."""
     request_id = await context_utils.to_thread(sdk.start, cluster_name,
                                                idle_minutes_to_autostop,
                                                retry_until_up, down, force)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def down(cluster_name: str,
-               purge: bool = False,
-               stream_logs: bool = True) -> None:
+async def down(
+        cluster_name: str,
+        purge: bool = False,
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of down() that tears down a cluster."""
     request_id = await context_utils.to_thread(sdk.down, cluster_name, purge)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def stop(cluster_name: str,
-               purge: bool = False,
-               stream_logs: bool = True) -> None:
+async def stop(
+        cluster_name: str,
+        purge: bool = False,
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of stop() that stops a cluster."""
     request_id = await context_utils.to_thread(sdk.stop, cluster_name, purge)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -567,31 +491,34 @@ async def stop(cluster_name: str,
 @usage_lib.entrypoint
 @annotations.client_api
 async def autostop(
-        cluster_name: str,
-        idle_minutes: int,
-        down: bool = False,  # pylint: disable=redefined-outer-name
-        stream_logs: bool = True) -> None:
+    cluster_name: str,
+    idle_minutes: int,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> None:
     """Async version of autostop() that schedules an autostop/autodown for a
       cluster."""
     request_id = await context_utils.to_thread(sdk.autostop, cluster_name,
                                                idle_minutes, down)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def queue(cluster_name: str,
-                skip_finished: bool = False,
-                all_users: bool = False,
-                stream_logs: bool = True) -> List[dict]:
+async def queue(
+        cluster_name: str,
+        skip_finished: bool = False,
+        all_users: bool = False,
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> List[dict]:
     """Async version of queue() that gets the job queue of a cluster."""
     request_id = await context_utils.to_thread(sdk.queue, cluster_name,
                                                skip_finished, all_users)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -601,14 +528,14 @@ async def queue(cluster_name: str,
 async def job_status(
     cluster_name: str,
     job_ids: Optional[List[int]] = None,
-    stream_logs: bool = True
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
 ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
     """Async version of job_status() that gets the status of jobs on a
       cluster."""
     request_id = await context_utils.to_thread(sdk.job_status, cluster_name,
                                                job_ids)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -622,13 +549,13 @@ async def cancel(
         job_ids: Optional[List[int]] = None,
         # pylint: disable=invalid-name
         _try_cancel_if_cluster_is_init: bool = False,
-        stream_logs: bool = True) -> None:
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of cancel() that cancels jobs on a cluster."""
     request_id = await context_utils.to_thread(sdk.cancel, cluster_name, all,
                                                all_users, job_ids,
                                                _try_cancel_if_cluster_is_init)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -639,118 +566,131 @@ async def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-    stream_logs: bool = True,
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
 ) -> List[Dict[str, Any]]:
     """Async version of status() that gets cluster statuses."""
     request_id = await context_utils.to_thread(sdk.status, cluster_names,
                                                refresh, all_users)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def endpoints(cluster: str,
-                    port: Optional[Union[int, str]] = None,
-                    stream_logs: bool = True) -> Dict[int, str]:
+async def endpoints(
+    cluster: str,
+    port: Optional[Union[int, str]] = None,
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> Dict[int, str]:
     """Async version of endpoints() that gets the endpoint for a given cluster
       and port number."""
     request_id = await context_utils.to_thread(sdk.endpoints, cluster, port)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def cost_report(stream_logs: bool = True) -> List[Dict[str, Any]]:
+async def cost_report(
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> List[Dict[str, Any]]:
     """Async version of cost_report() that gets all cluster cost reports."""
     request_id = await context_utils.to_thread(sdk.cost_report)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def storage_ls(stream_logs: bool = True) -> List[Dict[str, Any]]:
+async def storage_ls(
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> List[Dict[str, Any]]:
     """Async version of storage_ls() that gets the storages."""
     request_id = await context_utils.to_thread(sdk.storage_ls)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def storage_delete(name: str, stream_logs: bool = True) -> None:
+async def storage_delete(
+        name: str,
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of storage_delete() that deletes a storage."""
     request_id = await context_utils.to_thread(sdk.storage_delete, name)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def local_up(gpus: bool,
-                   ips: Optional[List[str]],
-                   ssh_user: Optional[str],
-                   ssh_key: Optional[str],
-                   cleanup: bool,
-                   context_name: Optional[str] = None,
-                   password: Optional[str] = None,
-                   stream_logs: bool = True) -> None:
+async def local_up(
+        gpus: bool,
+        ips: Optional[List[str]],
+        ssh_user: Optional[str],
+        ssh_key: Optional[str],
+        cleanup: bool,
+        context_name: Optional[str] = None,
+        password: Optional[str] = None,
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of local_up() that launches a Kubernetes cluster on
     local machines."""
     request_id = await context_utils.to_thread(sdk.local_up, gpus, ips,
                                                ssh_user, ssh_key, cleanup,
                                                context_name, password)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def local_down(stream_logs: bool = True) -> None:
+async def local_down(
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of local_down() that tears down the Kubernetes cluster
     started by local_up."""
     request_id = await context_utils.to_thread(sdk.local_down)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def ssh_up(infra: Optional[str] = None, stream_logs: bool = True) -> None:
+async def ssh_up(
+        infra: Optional[str] = None,
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of ssh_up() that deploys the SSH Node Pools defined in
       ~/.sky/ssh_targets.yaml."""
     request_id = await context_utils.to_thread(sdk.ssh_up, infra)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def ssh_down(infra: Optional[str] = None,
-                   stream_logs: bool = True) -> None:
+async def ssh_down(
+        infra: Optional[str] = None,
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of ssh_down() that tears down a Kubernetes cluster on SSH
     targets."""
     request_id = await context_utils.to_thread(sdk.ssh_down, infra)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -762,15 +702,15 @@ async def realtime_kubernetes_gpu_availability(
     name_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None,
     is_ssh: Optional[bool] = None,
-    stream_logs: bool = True
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
 ) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
     """Async version of realtime_kubernetes_gpu_availability() that gets the
       real-time Kubernetes GPU availability."""
     request_id = await context_utils.to_thread(
         sdk.realtime_kubernetes_gpu_availability, context, name_filter,
         quantity_filter, is_ssh)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -778,14 +718,15 @@ async def realtime_kubernetes_gpu_availability(
 @usage_lib.entrypoint
 @annotations.client_api
 async def kubernetes_node_info(
-        context: Optional[str] = None,
-        stream_logs: bool = True) -> models.KubernetesNodesInfo:
+    context: Optional[str] = None,
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> models.KubernetesNodesInfo:
     """Async version of kubernetes_node_info() that gets the resource
     information for all the nodes in the cluster."""
     request_id = await context_utils.to_thread(sdk.kubernetes_node_info,
                                                context)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
@@ -793,30 +734,32 @@ async def kubernetes_node_info(
 @usage_lib.entrypoint
 @annotations.client_api
 async def status_kubernetes(
-    stream_logs: bool = True
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
 ) -> Tuple[List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
            List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
            List[Dict[str, Any]], Optional[str]]:
     """Async version of status_kubernetes() that gets all SkyPilot clusters
       and jobs in the Kubernetes cluster."""
     request_id = await context_utils.to_thread(sdk.status_kubernetes)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
-                     all_users: bool = False,
-                     silent: bool = False,
-                     stream_logs: bool = True) -> List[str]:
+async def api_cancel(
+        request_ids: Optional[Union[str, List[str]]] = None,
+        all_users: bool = False,
+        silent: bool = False,
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> List[str]:
     """Async version of api_cancel() that aborts a request or all requests."""
     request_id = await context_utils.to_thread(sdk.api_cancel, request_ids,
                                                all_users, silent)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await _stream_and_get(request_id, stream_logs)
     else:
         return await get(request_id)
 

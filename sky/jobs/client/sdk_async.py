@@ -5,8 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from sky import backends
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.client.sdk_async import get
-from sky.client.sdk_async import stream_and_get
+from sky.client import sdk_async
 from sky.jobs.client import sdk
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -32,29 +31,33 @@ async def launch(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
-    stream_logs: bool = True,
+    stream_logs: Optional[
+        sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
     request_id = await context_utils.to_thread(sdk.launch, task, name,
                                                _need_confirmation)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
-        return await get(request_id)
+        return await sdk_async.get(request_id)
 
 
 @usage_lib.entrypoint
-async def queue(refresh: bool,
-                skip_finished: bool = False,
-                all_users: bool = False,
-                stream_logs: bool = True) -> List[Dict[str, Any]]:
+async def queue(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    stream_logs: Optional[
+        sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG
+) -> List[Dict[str, Any]]:
     """Async version of queue() that gets statuses of managed jobs."""
     request_id = await context_utils.to_thread(sdk.queue, refresh,
                                                skip_finished, all_users)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
-        return await get(request_id)
+        return await sdk_async.get(request_id)
 
 
 @usage_lib.entrypoint
@@ -63,15 +66,16 @@ async def cancel(
     job_ids: Optional[List[int]] = None,
     all: bool = False,  # pylint: disable=redefined-builtin
     all_users: bool = False,
-    stream_logs: bool = True,
+    stream_logs: Optional[
+        sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
 ) -> None:
     """Async version of cancel() that cancels managed jobs."""
     request_id = await context_utils.to_thread(sdk.cancel, name, job_ids, all,
                                                all_users)
-    if stream_logs:
-        return await stream_and_get(request_id)
+    if stream_logs is not None:
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
-        return await get(request_id)
+        return await sdk_async.get(request_id)
 
 
 @usage_lib.entrypoint
