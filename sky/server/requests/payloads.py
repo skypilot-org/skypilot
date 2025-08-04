@@ -677,41 +677,6 @@ class JobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
-class JobsPoolUpBody(RequestBody):
-    """The request body for the jobs pool up endpoint."""
-    task: str
-    pool_name: str
-
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
-        assert len(
-            dag.tasks) == 1, ('Must only specify one task in the DAG for '
-                              'a pool.', dag)
-        kwargs['task'] = dag.tasks[0]
-        return kwargs
-
-
-class JobsPoolUpdateBody(RequestBody):
-    """The request body for the jobs pool update endpoint."""
-    task: str
-    pool_name: str
-    mode: serve.UpdateMode
-
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
-        assert len(
-            dag.tasks) == 1, ('Must only specify one task in the DAG for '
-                              'a pool.', dag)
-        kwargs['task'] = dag.tasks[0]
-        return kwargs
-
-
 class JobsPoolApplyBody(RequestBody):
     """The request body for the jobs pool apply endpoint."""
     task: str
