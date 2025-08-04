@@ -3503,13 +3503,13 @@ def show_gpus(
 
     def _list_to_str(lst):
 
-        def format_number(e):
+        def format_number(n):
             # If it's a float that's a whole number, display as int
-            if isinstance(e, float) and e.is_integer():
-                return str(int(e))
-            return str(e)
+            if isinstance(n, float) and n.is_integer():
+                return str(int(n))
+            return str(n)
 
-        return ', '.join([format_number(e) for e in lst])
+        return ', '.join([format_number(n) for n in lst])
 
     # TODO(zhwu,romilb): We should move most of these kubernetes related
     # queries into the backend, especially behind the server.
