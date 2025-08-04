@@ -168,7 +168,7 @@ def main():
 
         profile_kwargs = ProfileKwargs(
             activities=["cpu", "cuda"],
-            schedule_option={"wait": 1, "warmup": 1, "active": 3, "repeat": 0, "skip_first": 1},
+            schedule_option={"wait": 0, "warmup": 1, "active": 3, "repeat": 0, "skip_first": 6},
             on_trace_ready=trace_handler
         )
         accelerator_kwargs['kwargs_handlers'] = [profile_kwargs]

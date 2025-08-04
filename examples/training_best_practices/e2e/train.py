@@ -32,6 +32,7 @@ import functools
 import json
 import os
 from pathlib import Path
+import random
 import shutil
 import subprocess
 import time
@@ -495,13 +496,15 @@ def main():
     accelerator_kwargs = {}
     if args.enable_profiling:
         def trace_handler(p):
-            output = p.key_averages().table(sort_by="self_cuda_time_total", row_limit=10)
-            print(output)
-            p.export_chrome_trace(f"/tmp/trace_{p.step_num}_{local_process_index}.json")
+            # output = p.key_averages().table(sort_by="self_cuda_time_total", row_limit=10)
+            # print(output)
+            trace_filename = f"/tmp/trace_{p.step_num}_{local_process_index}.json"
+            p.export_chrome_trace(trace_filename)
+            print(f"Chrome trace exported to: {trace_filename}")
 
         profile_kwargs = ProfileKwargs(
             activities=["cpu", "cuda"],
-            schedule_option={"wait": 1, "warmup": 1, "active": 3, "repeat": 2, "skip_first": 1},
+            schedule_option={"wait": 0, "warmup": 1, "active": 3, "repeat": 0, "skip_first": 6},
             on_trace_ready=trace_handler
         )
         accelerator_kwargs['kwargs_handlers'] = [profile_kwargs]
@@ -535,7 +538,7 @@ def main():
         # 4. Cache directories
         dataset_cache_dir = output_dir / "dataset_cache"
         model_cache_dir = output_dir / "model_cache"
-        checkpoint_saving_dir = output_dir / "checkpoints"
+        checkpoint_saving_dir = output_dir / "checkpoints" / f"{accelerator.process_index}"
 
         print(f"Dataset: {dataset_name}")
         print(f"Dataset cache: {dataset_cache_dir}")
@@ -580,16 +583,17 @@ def main():
             output_dir=str(checkpoint_saving_dir),
             bf16=True,
             use_liger_kernel=True,
-            gradient_checkpointing=True,
-            gradient_checkpointing_kwargs={"use_reentrant": False},
+            # gradient_checkpointing=True,
+            # gradient_checkpointing_kwargs={"use_reentrant": False},
             max_length=8192,
             per_device_train_batch_size=1,
             gradient_accumulation_steps=8,
             dataset_num_proc=num_proc,
-            num_train_epochs=1,
-            max_steps=5,
+            num_train_epochs=5,
+            max_steps=25,  # 25 steps per epoch * 4 epochs = 100 total steps
+            # save_strategy='epoch',
             save_strategy='steps',
-            save_steps=1,
+            save_steps=5,
             # save_total_limit=3,
             save_safetensors=False,
         )
@@ -707,6 +711,34 @@ def main():
     with open(timing_summary_path, 'w+') as f:
         json.dump(timing_summary, f, indent=2)
     print(f"Saved timing summary to: {timing_summary_path}")
+
+    # Cat the JSON files only if this is the main process
+    if local_process_index == 0:
+        print("\n" + "="*80)
+        print("JSON OUTPUT FROM MAIN PROCESS")
+        print("="*80)
+        
+        # Cat individual training run files
+        for i, dir_path in enumerate(args.dirs):
+            individual_json_path = Path(dir_path) / f"training_run_{local_process_index}_{i+1}_info.json"
+            if individual_json_path.exists():
+                print(f"\n--- Training Run {i+1} Info (Directory: {dir_path}) ---")
+                with open(individual_json_path, 'r') as f:
+                    print(f.read())
+        
+        # Cat overall summary file
+        if summary_path.exists():
+            print(f"\n--- All Training Runs Summary ---")
+            with open(summary_path, 'r') as f:
+                print(f.read())
+        
+        # Cat timing summary file
+        if timing_summary_path.exists():
+            print(f"\n--- Timing Summary ---")
+            with open(timing_summary_path, 'r') as f:
+                print(f.read())
+        
+        print("="*80)
 
 if __name__ == "__main__":
     main()
