@@ -412,8 +412,9 @@ class JobsController:
                         managed_job_utils.get_job_status,
                         self._backend,
                         cluster_name,
-                        self._logger,
-                        job_id=job_id_on_pool_cluster)
+                        job_id=job_id_on_pool_cluster,
+                        job_logger=self._logger,
+                    )
                 except exceptions.FetchClusterInfoError as fetch_e:
                     self._logger.info(
                         'Failed to fetch the job status. Start recovery.\n'
