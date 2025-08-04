@@ -114,20 +114,20 @@ SkyPilot also provides an async SDK that automatically streams logs by default, 
 .. code-block:: python
 
   import asyncio
-  from sky.client import sdk_async as sky
-  import sky as sky_o
+  from sky.client import sdk_async as sdk
+  import sky
 
   async def main():
-    task = sky_o.Task(
+    task = sky.Task(
         run="echo hello SkyPilot")
     # Async functions stream logs by default and return results directly
-    job_id, handle = await sky.launch(task, cluster_name="my-cluster")
+    job_id, handle = await sdk.launch(task, cluster_name="my-cluster")
 
     # Get cluster status with live streaming
-    status = await sky.status()
+    status = await sdk.status()
 
     # Or disable streaming for simple result retrieval
-    status = await sky.status(stream_logs=False)
+    status = await sdk.status(stream_logs=None)
 
   asyncio.run(main())
 
