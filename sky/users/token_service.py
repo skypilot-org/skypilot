@@ -95,11 +95,14 @@ class TokenService:
 
             return new_secret
 
-    def create_token(self,
-                     creator_user_id: str,
-                     service_account_user_id: str,
-                     token_name: str,
-                     expires_in_days: Optional[int] = None) -> Dict[str, Any]:
+    def create_token(
+        self,
+        creator_user_id: str,
+        service_account_user_id: str,
+        token_name: str,
+        expires_in_days: Optional[int] = None,
+        token_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Create a new JWT service account token.
 
         Args:
@@ -107,13 +110,15 @@ class TokenService:
             service_account_user_id: The service account's own user ID
             token_name: Descriptive name for the token
             expires_in_days: Optional expiration in days
+            token_id: Optional token ID
 
         Returns:
             Dict containing token info including the JWT token
         """
         self._lazy_initialize()
         now = datetime.datetime.now(datetime.timezone.utc)
-        token_id = secrets.token_urlsafe(12)  # Shorter ID for JWT
+        if token_id is None:
+            token_id = secrets.token_urlsafe(12)  # Shorter ID for JWT
 
         # Build minimal JWT payload with single-character field names for
         # compactness
