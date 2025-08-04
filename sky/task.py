@@ -258,9 +258,9 @@ class Task:
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
-        file_mounts_mapping: Optional[Dict[str, str]] = None,
-        volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        _file_mounts_mapping: Optional[Dict[str, str]] = None,
+        _volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
+        _metadata: Optional[Dict[str, Any]] = None,
         _user_specified_yaml: Optional[str] = None,
     ):
         """Initializes a Task.
@@ -327,14 +327,25 @@ class Task:
           storage_mounts: an optional dict of ``{mount_path: sky.Storage
             object}``, where mount_path is the path inside the remote VM(s)
             where the Storage object will be mounted on.
+          volumes: A dict of volumes to be mounted for the task. The dict has
+            the form of ``{mount_path: volume_name}``.
           resources: either a sky.Resources, a set of them, or a list of them.
             A set or a list of resources asks the optimizer to "pick the
             best of these resources" to run this task.
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
+          event_callback: A bash script that will be executed when the task
+            changes state.
           blocked_resources: A set of resources that this task cannot run on.
-          metadata: A dictionary of metadata to be added to the task.
+          _file_mounts_mapping: A dictionary of file mounts mapping.
+            Internal use only.
+          _volume_mounts: A list of volume mounts.
+            Internal use only.
+          _metadata: A dictionary of metadata to be added to the task.
+            Internal use only.
+          _user_specified_yaml: A string of user-specified YAML config.
+            Internal use only.
         """
         self.name = name
         self.run = run
@@ -387,11 +398,11 @@ class Task:
         self.best_resources: Optional[sky.Resources] = None
 
         # For internal use only.
-        self.file_mounts_mapping: Optional[Dict[str, str]] = file_mounts_mapping
+        self.file_mounts_mapping: Optional[Dict[str, str]] = _file_mounts_mapping
         self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
-            volume_mounts)
+            _volume_mounts)
 
-        self._metadata = metadata if metadata is not None else {}
+        self._metadata = _metadata if _metadata is not None else {}
 
         if resources is not None:
             self.set_resources(resources)
@@ -644,9 +655,9 @@ class Task:
             envs=config.pop('envs', None),
             secrets=config.pop('secrets', None),
             event_callback=config.pop('event_callback', None),
-            file_mounts_mapping=config.pop('file_mounts_mapping', None),
-            volumes=config.pop('volumes', None),
-            metadata=config.pop('_metadata', None),
+            _file_mounts_mapping=config.pop('file_mounts_mapping', None),
+            _volume_mounts=config.pop('volume_mounts', None),
+            _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
         )
 
