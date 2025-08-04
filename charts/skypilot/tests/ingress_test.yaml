@@ -77,7 +77,7 @@ tests:
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
       ingress.oauth2-proxy.use-https: false
-      auth.oauth2Proxy.enabled: false
+      auth.oauth.enabled: false
     asserts:
       - equal:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]

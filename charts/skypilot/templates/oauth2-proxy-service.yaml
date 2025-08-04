@@ -1,4 +1,4 @@
-{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") }}
+{{- if or .Values.auth.oauth.enabled (and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled")) }}
 apiVersion: v1
 kind: Service
 metadata:

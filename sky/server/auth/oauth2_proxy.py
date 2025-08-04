@@ -52,6 +52,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # Forward /oauth2/* to oauth2-proxy, including /oauth2/start and
         # /oauth2/callback.
         if request.url.path.startswith('/oauth2'):
+            logger.info('Forwarding to oauth2-proxy: %s', request.url.path)
             return await self.forward_to_oauth2_proxy(request)
 
         return await self.authenticate(request, call_next)

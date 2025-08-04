@@ -120,7 +120,7 @@ spec:
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"
         {{- end }}
-        {{- if .Values.auth.oauth2Proxy.enabled }}
+        {{- if .Values.auth.oauth.enabled }}
         - name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
           value: "true"
         - name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL

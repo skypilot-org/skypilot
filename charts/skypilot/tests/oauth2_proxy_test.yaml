@@ -173,8 +173,8 @@ tests:
       - templates/ingress.yaml
     set:
       ingress.enabled: true
-      auth.oauth2Proxy.enabled: true
-      auth.oauth2Proxy.baseUrl: "https://external-oauth2-proxy.example.com"
+      auth.oauth.enabled: true
+      auth.oauth.baseUrl: "https://external-oauth2-proxy.example.com"
       ingress.oauth2-proxy.enabled: false
       apiService.metrics.enabled: false
       apiService.skipResourceCheck: true

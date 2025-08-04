@@ -97,31 +97,8 @@ false
 --deploy{{ if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }} --enable-basic-auth{{ end }}
 {{- end -}}
 
-{{/* Validate the oauth2 proxy based auth config */}}
-{{- define "skypilot.validateOAuth2Config" -}}
-{{- $oauth2ProxyConfig := .Values.auth.oauth2Proxy -}}
-{{- $deployOAuth2Proxy := index .Values.ingress "oauth2-proxy" "enabled" -}}
-{{- $baseUrl := $oauth2ProxyConfig.baseUrl -}}
-{{- $oauth2ProxyAuthEnabled := $oauth2ProxyConfig.enabled -}}
-{{/* External oauth2-proxy url and oauth2-proxy deployment are mutually exclusive */}}
-{{- if and $baseUrl $deployOAuth2Proxy -}}
-{{- fail "auth.oauth2Proxy.baseUrl and ingress.oauth2-proxy.enabled are mutually exclusive. Set only one of them." -}}
-{{- end -}}
-{{/* If oauth2-proxy base authentication is enabled, either an external url or an oauth2-proxy deployment must be configured */}}
-{{- if $oauth2ProxyAuthEnabled -}}
-{{- if not (or $baseUrl $deployOAuth2Proxy) -}}
-{{- fail "When auth.oauth2Proxy.enabled is true, either auth.oauth2Proxy.baseUrl or ingress.oauth2-proxy.enabled must be set." -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
-
 {{- define "skypilot.oauth2ProxyURL" -}}
-{{- include "skypilot.validateOAuth2Config" . }}
-{{- if .Values.auth.oauth2Proxy.baseUrl -}}
-{{ .Values.auth.oauth2Proxy.baseUrl }}
-{{- else -}}
 http://{{ .Release.Name }}-oauth2-proxy:4180
-{{- end -}}
 {{- end -}}
 
 {{- define "skypilot.serviceAccountAuthEnabled" -}}
@@ -129,5 +106,36 @@ http://{{ .Release.Name }}-oauth2-proxy:4180
 {{- .Values.auth.serviceAccount.enabled -}}
 {{- else -}}
 {{- .Values.apiService.enableServiceAccounts -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "skypilot.ingressBasicAuthEnabled" -}}
+{{- if and .Values.ingress.enabled (or .Values.ingress.authSecret .Values.ingress.authCredentials) -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{- define "skypilot.ingressOAuthEnabled" -}}
+{{- if and .Values.ingress.enabled .Values.ingress.oauth2-proxy.enabled}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{/* Validate the oauth config */}}
+{{- define "skypilot.validateOAuthConfig" -}}
+{{- $authOAuthEnabled := .Values.auth.oauth.enabled -}}
+{{- $ingressBasicAuthEnabled := include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" -}}
+{{- $ingressOAuthEnabled := include "skypilot.ingressOAuthEnabled" . | trim | eq "true" -}}
+
+{{- if and $authOAuthEnabled $ingressBasicAuthEnabled -}}
+  {{- fail "Error\nauth.oauth.enabled cannot be used together with ingress basic authentication (ingress.authSecret or ingress.authCredentials). These authentication methods are mutually exclusive. Please:\n1. Disable auth.oauth.enabled, OR\n2. Remove ingress.authSecret and ingress.authCredentials\nThen try again." -}}
+{{- end -}}
+
+{{- if and $authOAuthEnabled $ingressOAuthEnabled -}}
+  {{- fail "Error\nauth.oauth.enabled cannot be used together with ingress OAuth2 proxy authentication (ingress.oauth2-proxy.enabled). These authentication methods are mutually exclusive. Please:\n1. Disable auth.oauth.enabled, OR\n2. Set ingress.oauth2-proxy.enabled to false\nThen try again." -}}
 {{- end -}}
 {{- end -}}

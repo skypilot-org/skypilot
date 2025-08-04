@@ -148,24 +148,50 @@ apiService:
 auth:
   # OAuth2 Proxy based authentication for the API server
   # @schema type: [object, null]
-  oauth2Proxy:
-    # Enable/disable OAuth2 Proxy based authentication
+  oauth:
+    # Enable/disable OAuth2 Proxy based authentication on API server
+    # Mutually exclusive with authentication on ingress, including basic auth and OAuth2 Proxy on ingress.
     # @schema type: [boolean]
     enabled: false
-    # Base URL of the OAuth2 Proxy:
-    # - If you are using a self-hosted OAuth2 Proxy, set this to the base URL of the OAuth2 Proxy.
-    # - If you want this chart to provision an OAuth2 Proxy, leave this unset and enable the OAuth2 Proxy deployment via `ingress.oauth2-proxy` config.
-    # Therefore, a non-empty base-url is mutually exclusive with `ingress.oauth2-proxy.enabled`.
+    # OIDC issuer URL (e.g. Okta domain URL), required when enabled=true
     # @schema type: [string, null]
-    baseUrl: null
+    oidc-issuer-url: null
+    # Client ID from OIDC provider (Okta) (required when enabled=true)
+    client-id: ""
+    # Client Secret from OIDC provider (Okta) (required when enabled=true)
+    client-secret: ""
+    # Alternative: Get both client ID and client secret from a Kubernetes secret
+    # If set to a secret name, both client-id and client-secret values above are ignored
+    # The secret must contain keys named either "client-id" and "client-secret" OR "client_id" and "client_secret"
+    # Both dash and underscore formats are supported for compatibility with different secret managers
+    # (e.g., HashiCorp Vault requires underscore format due to key naming constraints)
+    # If empty/null, the above client-id and client-secret values are used instead
+    # See https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#auth-proxy-client-secret
+    client-details-from-secret: ""
+    # Email domains to allow (use "*" for all domains)
+    email-domain: "*"
+    # Session storage settings ("cookie" or "redis")
+    session-store-type: "redis"
+    # Redis connection URL (redis://host[:port][/db-number])
+    # If left as null and session-store-type is redis, a Redis instance will be deployed automatically
+    # If set, this external Redis instance will be used
+    # @schema type: [string, null]
+    redis-url: null
+    # Cookie timing settings (in seconds)
+    # @schema type: [string, number, null]
+    cookie-refresh: null  # refresh tokens after this duration (Access token lifespan minus 1 min)
+    # @schema type: [string, number, null]
+    cookie-expire: null  # cookie expiration time (should match refresh token lifespan)
+
   # Service account token based authentication for the API server
   # @schema type: [object, null]
   serviceAccount:
     # Enable service account tokens for automated API access
-    # If enabled, users can create bearer tokens to bypass SSO authentication
-    # for automated systems. This works independently of enableUserManagement.
+    # If enabled, users can create bearer tokens (JWT based) for authentication.
     # JWT secrets are automatically stored in the database for persistence across restarts.
     # Default to `.apiService.enableServiceAccounts` (true) for backward compatibility, setting this will override the default value.
+    # This is mutually exclusive with basic auth on ingress.
+    # For backward compatibility, this can be used with OAuth2 Proxy on ingress at the same time.
     # @schema type: [boolean, null]
     enabled: null
 
@@ -193,8 +219,10 @@ ingress:
   # Name of the secret containing basic auth credentials for ingress. If not specified, a new secret will be created using authCredentials
   # @schema type: [string, null]
   authSecret: null
-  # Basic auth credentials in format "username:encrypted_password" (only used if ingress.authSecret is not set)
-  authCredentials: "username:$apr1$encrypted_password"
+  # TODO(aylei): deprecate skypilot managed proxy auth to reduce our maintenance burden, replace with examples instead.
+  # Basic auth credentials in format "username:encrypted_password" (only used if ingress.authSecret is not set).
+  # This will only be honored when ingress-nginx is used.
+  authCredentials: null
   # Host to exclusively accept traffic from (optional) - will respond to all host requests if not set
   # @schema type: [string, null]
   host: null
@@ -228,6 +256,7 @@ ingress:
   # @schema type: [number, null]
   httpsNodePort: 30051 # Set to null to automatically assign a random port
 
+  # TODO(aylei): deprecate skypilot managed proxy auth to reduce our maintenance burden, replace with examples instead.
   # OAuth2 Proxy configuration for authentication
   oauth2-proxy:
     # Enable/disable OAuth2 Proxy deployment

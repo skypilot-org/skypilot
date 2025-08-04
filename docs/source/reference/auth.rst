@@ -5,6 +5,13 @@ Authentication and RBAC
 
 SkyPilot API server supports two authentication methods:
 
+.. We will eventually support N+1 kinds of authentications:
+.. 1. Service account token based authentication, which will enabled by default in helm deployment to ensure the deployed server is protected;
+.. 2. SSO;
+.. N: (another authentication method, authentication schemes 1~N are handled by the API server and can be used at the same time, a.k.a. unified authentication)
+.. N+1: Proxy authentication, where the reverse proxy in front of the API server handles the authentication and pass the identity header to the API server. This is mutually exclusive with authentication schemes 1~N. For clarity maybe this part will be hosted in another doc.
+.. TODO(aylei): replace basic auth with proxy auth for clarity after we support service account token based authentication to be used along.
+
 - **Basic auth**: Use an admin-configured username and password to authenticate.
 - **SSO (recommended)**: Use an auth proxy (e.g.,
   `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__) to
@@ -42,7 +49,7 @@ Example login command:
 SSO (recommended)
 ------------------
 
-You can deploy the SkyPilot API server behind an web authentication proxy, such as `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__, to use SSO providers such as :ref:`Okta or Google Workspace <oauth2-proxy-oidc>`.
+You can configure the SkyPilot API server to use an web authentication proxy, such as `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__, to use SSO providers such as :ref:`Okta or Google Workspace <oauth2-proxy-oidc>`.
 
 The SkyPilot implementation is flexible and will work with most cookie-based browser auth proxies. See :ref:`auth-proxy-user-flow` and :ref:`auth-proxy-byo` for details. To set up Okta or Google Workspace, see :ref:`oauth2-proxy-oidc`.
 
@@ -234,6 +241,7 @@ Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-o
 
     $ # --reuse-values is critical to keep the old values that aren't being updated here.
     $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+      --set auth.oauth2Proxy.enabled=true \
       --set ingress.oauth2-proxy.enabled=true \
       --set ingress.oauth2-proxy.oidc-issuer-url=https://<ISSUER URL> \
       --set ingress.oauth2-proxy.client-id=<CLIENT ID> \
@@ -253,6 +261,7 @@ For better security, you can also store the client details in a Kubernetes secre
 
     $ # Deploy using the secret
     $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+      --set auth.oauth2Proxy.enabled=true \
       --set ingress.oauth2-proxy.enabled=true \
       --set ingress.oauth2-proxy.oidc-issuer-url=https://<ISSUER URL> \
       --set ingress.oauth2-proxy.client-details-from-secret=oauth2-proxy-credentials \

@@ -23,7 +23,7 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-next-upstream-tries: "3"
     {{- end }}
     {{/* If oauth2-proxy based authentication is enabled on the API server, disable the oauth2-proxy at ingress to avoid conflicts */}}
-    {{- if and (index .Values.ingress "oauth2-proxy" "enabled") (not .Values.auth.oauth2Proxy.enabled) }}
+    {{- if and (index .Values.ingress "oauth2-proxy" "enabled") (not .Values.auth.oauth.enabled) }}
     # OAuth2 Proxy authentication for browser-based access
     # Bearer token requests bypass OAuth2 proxy and go directly to the application
     nginx.ingress.kubernetes.io/auth-signin: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/start?rd=$escaped_request_uri
