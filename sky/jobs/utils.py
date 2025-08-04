@@ -337,7 +337,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                     task_name, job_id)
             else:
                 cluster_name, _ = (
-                    managed_job_state.get_pool_submit_info(job_id))
+                    managed_job_state.get_pool_submit_info_async(job_id))
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             if handle is not None:
@@ -575,7 +575,7 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         event_callback = event_callback.strip()
         pool = managed_job_state.get_pool_from_job_id(job_id)
         if pool is not None:
-            cluster_name, _ = (managed_job_state.get_pool_submit_info(job_id))
+            cluster_name, _ = (managed_job_state.get_pool_submit_info_async(job_id))
         else:
             cluster_name = generate_managed_job_cluster_name(
                 task.name, job_id) if task.name else None
@@ -847,7 +847,7 @@ def stream_logs_by_id(job_id: int,
                 pool = managed_job_state.get_pool_from_job_id(job_id)
                 if pool is not None:
                     cluster_name, job_id_to_tail = (
-                        managed_job_state.get_pool_submit_info(job_id))
+                        managed_job_state.get_pool_submit_info_async(job_id))
                 else:
                     task_name = managed_job_state.get_task_name(job_id, task_id)
                     cluster_name = generate_managed_job_cluster_name(
@@ -1206,7 +1206,7 @@ def dump_managed_job_queue() -> str:
 
         pool = managed_job_state.get_pool_from_job_id(job['job_id'])
         if pool is not None:
-            cluster_name, _ = managed_job_state.get_pool_submit_info(
+            cluster_name, _ = managed_job_state.get_pool_submit_info_async(
                 job['job_id'])
         else:
             cluster_name = generate_managed_job_cluster_name(

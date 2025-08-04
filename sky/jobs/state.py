@@ -1517,6 +1517,21 @@ def get_pool_submit_info(job_id: int) -> Tuple[Optional[str], Optional[int]]:
         return info[0], info[1]
 
 
+@_init_db_async
+async def get_pool_submit_info_async(job_id: int) -> Tuple[Optional[str], Optional[int]]:
+    """Get the cluster name and job id on the pool from the managed job id."""
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with orm.Session(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        info = await session.execute(
+            sqlalchemy.select(
+                job_info_table.c.current_cluster_name,
+                job_info_table.c.job_id_on_pool_cluster).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+        if info is None:
+            return None, None
+        return info[0], info[1]
+
+
 @_init_db
 def scheduler_set_launching(job_id: int,
                             current_state: ManagedJobScheduleState) -> None:

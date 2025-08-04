@@ -330,8 +330,8 @@ class JobsController:
             job_id_on_pool_cluster = None
         else:
             # Update the cluster name when using cluster pool.
-            cluster_name, job_id_on_pool_cluster = (
-                managed_job_state.get_pool_submit_info(self._job_id))
+            cluster_name, job_id_on_pool_cluster = (await
+                managed_job_state.get_pool_submit_info_async(self._job_id))
         assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
         if not is_resume:
@@ -635,8 +635,8 @@ class JobsController:
                 self._strategy_executor.recover)
 
             if self._pool is not None:
-                cluster_name, job_id_on_pool_cluster = (
-                    managed_job_state.get_pool_submit_info(self._job_id))
+                cluster_name, job_id_on_pool_cluster = (await
+                    managed_job_state.get_pool_submit_info_async(self._job_id))
                 assert cluster_name is not None
             await managed_job_state.set_recovered(self._job_id,
                                                   task_id,
