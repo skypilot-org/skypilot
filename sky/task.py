@@ -354,11 +354,11 @@ class Task:
         self.estimated_inputs_size_gigabytes: Optional[float] = None
         self.estimated_outputs_size_gigabytes: Optional[float] = None
         # Default to CPU VM
-        if resources is None:
-            self.resources: Union[List[sky.Resources],
-                                  Set[sky.Resources]] = {sky.Resources()}
-        else:
+        self.resources: Union[List[sky.Resources],
+                              Set[sky.Resources]] = {sky.Resources()}
+        if resources is not None:
             self.set_resources(resources)
+
         self._service: Optional[service_spec.SkyServiceSpec] = None
 
         # Resources that this task cannot run on.
@@ -366,7 +366,9 @@ class Task:
 
         self.time_estimator_func: Optional[Callable[['sky.Resources'],
                                                     int]] = None
-        self.file_mounts: Optional[Dict[str, str]] = self.set_file_mounts(file_mounts)
+        self.file_mounts: Optional[Dict[str, str]] = file_mounts
+        if file_mounts is not None:
+            self.set_file_mounts(file_mounts)
 
         # Only set when 'self' is a jobs controller task: 'self.managed_job_dag'
         # is the underlying managed job dag (sky.Dag object).
