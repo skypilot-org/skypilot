@@ -3,7 +3,7 @@
 Deploy SkyPilot API Server in Docker
 =====================================
 
-You can run the SkyPilot API server in a Docker container to share it with multiple users on a single machine. This is useful when you want to provide centralized access to SkyPilot in organizations that already adopt a bastion host paradigm.
+You can run the SkyPilot API server in a Docker container to share it with multiple users on a single machine. This is useful when you want to provide centralized access to SkyPilot in organizations that already have a single login node for everyone.
 
 Prerequisites
 -------------

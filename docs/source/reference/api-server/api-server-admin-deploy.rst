@@ -14,7 +14,7 @@ The SkyPilot API server is packaged as a Helm chart which deploys a Kubernetes i
     Deploying the API server to a Kubernetes cluster using Helm provides the best reliability and enables additional features such as :ref:`OAuth2 authentication <api-server-auth-proxy>` and :ref:`metrics <api-server-metrics-setup>`. However, there are two alternative options available for special cases:
 
     * :ref:`Deploying the API server on cloud VMs <sky-api-server-cloud-deploy>` if you do not have a Kubernetes cluster and do not need the additional features.
-    * :ref:`Sharing an API server on a single machine <sky-api-server-in-docker>` if you want to share the API server with multiple users on a single machine instead of exposing it to the public internet (e.g. a shared bastion machine).
+    * :ref:`Sharing an API server for multiple users on a single machine <sky-api-server-in-docker>` if you want to share the API server with multiple users on a single machine instead of exposing it to the public internet (e.g. a shared bastion machine).
 
 Prerequisites
 -------------
