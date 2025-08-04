@@ -696,27 +696,28 @@ def set_starting(job_id: int, task_id: int, run_timestamp: str,
     callback_func('STARTING')
 
 
-@_init_db
-def set_backoff_pending(job_id: int, task_id: int):
+@_init_db_async
+async def set_backoff_pending_async(job_id: int, task_id: int):
     """Set the task to PENDING state if it is in backoff.
 
     This should only be used to transition from STARTING or RECOVERING back to
     PENDING.
     """
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(spot_table).filter(
-            sqlalchemy.and_(
-                spot_table.c.spot_job_id == job_id,
-                spot_table.c.task_id == task_id,
-                spot_table.c.status.in_([
-                    ManagedJobStatus.STARTING.value,
-                    ManagedJobStatus.RECOVERING.value
-                ]),
-                spot_table.c.end_at.is_(None),
-            )).update({spot_table.c.status: ManagedJobStatus.PENDING.value})
-        session.commit()
-        logger.debug('back to PENDING')
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        count = await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    spot_table.c.status.in_([
+                        ManagedJobStatus.STARTING.value,
+                        ManagedJobStatus.RECOVERING.value
+                    ]),
+                    spot_table.c.end_at.is_(None),
+                )).values({spot_table.c.status: ManagedJobStatus.PENDING.value})
+        )
+        await session.commit()
         if count != 1:
             raise exceptions.ManagedJobStatusError(
                 'Failed to set the task back to pending. '
@@ -725,7 +726,7 @@ def set_backoff_pending(job_id: int, task_id: int):
 
 
 @_init_db
-def set_restarting(job_id: int, task_id: int, recovering: bool):
+async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
     """Set the task back to STARTING or RECOVERING from PENDING.
 
     This should not be used for the initial transition from PENDING to STARTING.
@@ -733,19 +734,20 @@ def set_restarting(job_id: int, task_id: int, recovering: bool):
     after using set_backoff_pending to transition back to PENDING during
     launch retry backoff.
     """
-    assert _SQLALCHEMY_ENGINE is not None
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
     target_status = ManagedJobStatus.STARTING.value
     if recovering:
         target_status = ManagedJobStatus.RECOVERING.value
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(spot_table).filter(
-            sqlalchemy.and_(
-                spot_table.c.spot_job_id == job_id,
-                spot_table.c.task_id == task_id,
-                spot_table.c.status == ManagedJobStatus.PENDING.value,
-                spot_table.c.end_at.is_(None),
-            )).update({spot_table.c.status: target_status})
-        session.commit()
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        count = await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    spot_table.c.status == ManagedJobStatus.PENDING.value,
+                    spot_table.c.end_at.is_(None),
+                )).values({spot_table.c.status: target_status}))
+        await session.commit()
         logger.debug(f'back to {target_status}')
         if count != 1:
             raise exceptions.ManagedJobStatusError(
@@ -1489,17 +1491,15 @@ def set_current_cluster_name(job_id: int, current_cluster_name: str) -> None:
         session.commit()
 
 
-@_init_db
-def set_job_id_on_pool_cluster(job_id: int,
-                               job_id_on_pool_cluster: int) -> None:
+@_init_db_async
+async def set_job_id_on_pool_cluster_async(job_id: int,
+                                           job_id_on_pool_cluster: int) -> None:
     """Set the job id on the pool cluster for a job."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(job_info_table).filter(
-            job_info_table.c.spot_job_id == job_id).update({
-                job_info_table.c.job_id_on_pool_cluster: job_id_on_pool_cluster
-            })
-        session.commit()
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        await session.execute(job_info_table.c.spot_job_id == job_id).update(
+            {job_info_table.c.job_id_on_pool_cluster: job_id_on_pool_cluster})
+        await session.commit()
 
 
 @_init_db
@@ -1518,15 +1518,16 @@ def get_pool_submit_info(job_id: int) -> Tuple[Optional[str], Optional[int]]:
 
 
 @_init_db_async
-async def get_pool_submit_info_async(job_id: int) -> Tuple[Optional[str], Optional[int]]:
+async def get_pool_submit_info_async(
+        job_id: int) -> Tuple[Optional[str], Optional[int]]:
     """Get the cluster name and job id on the pool from the managed job id."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with orm.Session(_SQLALCHEMY_ENGINE_ASYNC) as session:
         info = await session.execute(
-            sqlalchemy.select(
-                job_info_table.c.current_cluster_name,
-                job_info_table.c.job_id_on_pool_cluster).where(
-                    job_info_table.c.spot_job_id == job_id)).fetchone()
+            sqlalchemy.select(job_info_table.c.current_cluster_name,
+                              job_info_table.c.job_id_on_pool_cluster).where(
+                                  job_info_table.c.spot_job_id == job_id)
+        ).fetchone()
         if info is None:
             return None, None
         return info[0], info[1]
@@ -1550,21 +1551,21 @@ def scheduler_set_launching(job_id: int,
         assert updated_count == 1, (job_id, updated_count)
 
 
-@_init_db
-def scheduler_set_alive(job_id: int) -> None:
+@_init_db_async
+async def scheduler_set_alive_async(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        updated_count = session.query(job_info_table).filter(
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        updated_count = await session.execute(
             sqlalchemy.and_(
                 job_info_table.c.spot_job_id == job_id,
                 job_info_table.c.schedule_state ==
                 ManagedJobScheduleState.LAUNCHING.value,
-            )).update({
-                job_info_table.c.schedule_state:
-                    ManagedJobScheduleState.ALIVE.value
-            })
-        session.commit()
+            )
+        ).update({
+            job_info_table.c.schedule_state: ManagedJobScheduleState.ALIVE.value
+        })
+        await session.commit()
         assert updated_count == 1, (job_id, updated_count)
 
 
@@ -1586,22 +1587,23 @@ def scheduler_set_alive_backoff(job_id: int) -> None:
         assert updated_count == 1, (job_id, updated_count)
 
 
-@_init_db
-def scheduler_set_alive_waiting(job_id: int) -> None:
+@_init_db_async
+async def scheduler_set_alive_waiting_async(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        updated_count = session.query(job_info_table).filter(
-            sqlalchemy.and_(
-                job_info_table.c.spot_job_id == job_id,
-                job_info_table.c.schedule_state.in_([
-                    ManagedJobScheduleState.ALIVE.value,
-                    ManagedJobScheduleState.ALIVE_BACKOFF.value,
-                ]))).update({
-                    job_info_table.c.schedule_state:
-                        ManagedJobScheduleState.ALIVE_WAITING.value
-                })
-        session.commit()
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        updated_count = await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job_id,
+                    job_info_table.c.schedule_state.in_([
+                        ManagedJobScheduleState.ALIVE.value,
+                        ManagedJobScheduleState.ALIVE_BACKOFF.value,
+                    ]))).values({
+                        job_info_table.c.schedule_state:
+                            ManagedJobScheduleState.ALIVE_WAITING.value
+                    }))
+        await session.commit()
         assert updated_count == 1, (job_id, updated_count)
 
 

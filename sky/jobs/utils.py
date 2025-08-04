@@ -35,6 +35,7 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -236,15 +237,18 @@ def ha_recovery_for_consolidation_mode():
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
-def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
-                   job_id: Optional[int],
-                   job_logger: logging.Logger) -> Optional['job_lib.JobStatus']:
+async def get_job_status(
+        backend: 'backends.CloudVmRayBackend', cluster_name: str,
+        job_id: Optional[int],
+        job_logger: logging.Logger) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
     FAILED_SETUP or CANCELLED.
     """
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    # TODO(luca) make this async
+    handle = await managed_job_utils.to_thread(
+        global_user_state.get_handle_from_cluster_name, cluster_name)
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
@@ -255,9 +259,10 @@ def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
         try:
             job_logger.info('=== Checking the job status... ===')
-            statuses = backend.get_job_status(handle,
-                                              job_ids=job_ids,
-                                              stream_logs=False)
+            statuses = await managed_job_utils.to_thread(backend.get_job_status,
+                                                         handle,
+                                                         job_ids=job_ids,
+                                                         stream_logs=False)
             status = list(statuses.values())[0]
             if status is None:
                 job_logger.info('No job found.')
@@ -273,7 +278,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                 job_logger.info('Failed to connect to the cluster. Retrying '
                                 f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
                 job_logger.info('=' * 34)
-                time.sleep(1)
+                await asyncio.sleep(1)
             else:
                 job_logger.info(
                     f'Failed to get job status: {e.detailed_reason}')
@@ -575,7 +580,8 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         event_callback = event_callback.strip()
         pool = managed_job_state.get_pool_from_job_id(job_id)
         if pool is not None:
-            cluster_name, _ = (managed_job_state.get_pool_submit_info_async(job_id))
+            cluster_name, _ = (
+                managed_job_state.get_pool_submit_info_async(job_id))
         else:
             cluster_name = generate_managed_job_cluster_name(
                 task.name, job_id) if task.name else None

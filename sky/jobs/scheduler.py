@@ -44,13 +44,11 @@ from argparse import ArgumentParser
 import contextlib
 import os
 import sys
-import time
 import typing
 from typing import Optional
 
 import filelock
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
@@ -83,7 +81,7 @@ JOB_CONTROLLER_ENV_PATH = os.path.expanduser('~/.sky/job_controller_env')
 JOB_MEMORY_MB = 400
 # Number of ongoing launches launches allowed per worker. Can probably be
 # increased a bit to around 16 but keeping it lower to just to be safe
-LAUNCHES_PER_WORKER = 8
+LAUNCHES_PER_WORKER = 32
 # this can probably be increased to around 300-400 but keeping it lower to just
 # to be safe
 JOBS_PER_WORKER = 200
@@ -208,8 +206,8 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
     maybe_start_controllers()
 
 
-@contextlib.contextmanager
-def scheduled_launch(job_id: int):
+@contextlib.asynccontextmanager
+async def scheduled_launch(job_id: int):
     """Launch as part of an ongoing job.
 
     A newly started job will already be LAUNCHING, and this will immediately
@@ -233,24 +231,12 @@ def scheduled_launch(job_id: int):
 
     # If we're already in LAUNCHING schedule_state, we don't need to wait.
     # This may be the case for the first launch of a job.
-    if (state.get_job_schedule_state(job_id) !=
+    if (await state.get_job_schedule_state_async(job_id) !=
             state.ManagedJobScheduleState.LAUNCHING):
         # Since we aren't LAUNCHING, we need to wait to be scheduled.
-        _set_alive_waiting(job_id)
-
-        while (state.get_job_schedule_state(job_id) !=
-               state.ManagedJobScheduleState.LAUNCHING):
-            time.sleep(_ALIVE_JOB_LAUNCH_WAIT_INTERVAL)
-
-    try:
-        yield
-    except exceptions.NoClusterLaunchedError:
-        # NoClusterLaunchedError is indicates that the job is in retry backoff.
-        # We should transition to ALIVE_BACKOFF instead of ALIVE.
-        state.scheduler_set_alive_backoff(job_id)
-        raise
-    else:
-        state.scheduler_set_alive(job_id)
+        await state.scheduler_set_alive_waiting_async(job_id)
+    yield
+    await state.scheduler_set_alive_async(job_id)
 
 
 def job_done(job_id: int, idempotent: bool = False) -> None:
@@ -269,11 +255,6 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
         return
 
     state.scheduler_set_done(job_id, idempotent)
-
-
-def _set_alive_waiting(job_id: int) -> None:
-    """Should use wait_until_launch_okay() to transition to this state."""
-    state.scheduler_set_alive_waiting(job_id)
 
 
 # === Async versions of functions called by controller.py ===

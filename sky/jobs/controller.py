@@ -320,8 +320,7 @@ class JobsController:
             # Run the launch in a separate thread to avoid blocking the event
             # loop. The scheduler functions used internally already have their
             # own file locks.
-            remote_job_submitted_at = await managed_job_utils.to_thread(
-                self._strategy_executor.launch)
+            remote_job_submitted_at = await self._strategy_executor.launch()
 
             launch_time = time.time() - launch_start
             self._logger.info(f'Cluster launch completed in {launch_time:.2f}s')
@@ -330,7 +329,8 @@ class JobsController:
             job_id_on_pool_cluster = None
         else:
             # Update the cluster name when using cluster pool.
-            cluster_name, job_id_on_pool_cluster = (await
+            cluster_name, job_id_on_pool_cluster = (
+                await
                 managed_job_state.get_pool_submit_info_async(self._job_id))
         assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
@@ -408,8 +408,7 @@ class JobsController:
             job_status = None
             if not force_transit_to_recovering:
                 try:
-                    job_status = await managed_job_utils.to_thread(
-                        managed_job_utils.get_job_status,
+                    job_status = await managed_job_utils.get_job_status(
                         self._backend,
                         cluster_name,
                         job_id=job_id_on_pool_cluster,
@@ -631,11 +630,11 @@ class JobsController:
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func)
 
-            recovered_time = await managed_job_utils.to_thread(
-                self._strategy_executor.recover)
+            recovered_time = await self._strategy_executor.recover()
 
             if self._pool is not None:
-                cluster_name, job_id_on_pool_cluster = (await
+                cluster_name, job_id_on_pool_cluster = (
+                    await
                     managed_job_state.get_pool_submit_info_async(self._job_id))
                 assert cluster_name is not None
             await managed_job_state.set_recovered(self._job_id,
@@ -1009,7 +1008,7 @@ class Controller:
 
                         os.remove(f'{jobs_constants.CONSOLIDATED_SIGNAL_PATH}/'
                                   f'{job_id}')
-            await asyncio.sleep(1)
+            await asyncio.sleep(15)
 
     async def monitor_loop(self):
         """Monitor the job loop."""
