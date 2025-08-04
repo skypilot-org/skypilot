@@ -266,10 +266,13 @@ class AnonymousAccessMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                           'false').lower() == 'false':
             return await call_next(request)
 
-        # TODO(hailong): Need to remove this when the new API for health check
-        # is ready.
-        if request.url.path.startswith('/api/health'):
-            # Try to set the auth user from basic auth
+        # TODO(hailong): Need to remove the /api/health when the new API for
+        # health check is ready.
+        # Allow anonymous access for dashboard and root path (redirect to
+        # dashboard).
+        if (request.url.path.startswith('/api/health') or
+                request.url.path.startswith('/dashboard') or
+                request.url.path == '/'):
             return await call_next(request)
 
         return fastapi.responses.JSONResponse(

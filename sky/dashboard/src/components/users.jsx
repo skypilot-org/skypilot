@@ -604,23 +604,24 @@ export function Users() {
         </div>
 
         {/* Create Service Account Button for Service Accounts Tab - only show for admin */}
-        {activeMainTab === 'service-accounts' && userRoleCache?.role === 'admin' && (
-          <button
-            onClick={() => {
-              checkPermissionAndAct(
-                'cannot create service account tokens',
-                () => {
-                  setShowCreateDialog(true);
-                }
-              );
-            }}
-            className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
-            title="Create Service Account"
-          >
-            <PlusIcon className="h-4 w-4 mr-2" />
-            Create Service Account
-          </button>
-        )}
+        {activeMainTab === 'service-accounts' &&
+          userRoleCache?.role === 'admin' && (
+            <button
+              onClick={() => {
+                checkPermissionAndAct(
+                  'cannot create service account tokens',
+                  () => {
+                    setShowCreateDialog(true);
+                  }
+                );
+              }}
+              className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
+              title="Create Service Account"
+            >
+              <PlusIcon className="h-4 w-4 mr-2" />
+              Create Service Account
+            </button>
+          )}
       </div>
 
       {/* Error/Success messages positioned at top right, below navigation bar */}
