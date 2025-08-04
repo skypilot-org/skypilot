@@ -556,17 +556,17 @@ def _parse_override_params(
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
-        if cloud.lower() == 'none':
+        if cloud.lower() == 'none' or cloud == '*':
             override_params['cloud'] = None
         else:
             override_params['cloud'] = registry.CLOUD_REGISTRY.from_str(cloud)
     if region is not None:
-        if region.lower() == 'none':
+        if region.lower() == 'none' or region == '*':
             override_params['region'] = None
         else:
             override_params['region'] = region
     if zone is not None:
-        if zone.lower() == 'none':
+        if zone.lower() == 'none' or zone == '*':
             override_params['zone'] = None
         else:
             override_params['zone'] = zone
@@ -964,9 +964,10 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
 
     if infra is not None:
         infra_info = infra_utils.InfraInfo.from_str(infra)
-        cloud = infra_info.cloud
-        region = infra_info.region
-        zone = infra_info.zone
+        # Convert None to '*' to ensure proper override behavior
+        cloud = infra_info.cloud if infra_info.cloud is not None else '*'
+        region = infra_info.region if infra_info.region is not None else '*'
+        zone = infra_info.zone if infra_info.zone is not None else '*'
     return cloud, region, zone
 
 
@@ -3502,7 +3503,14 @@ def show_gpus(
                               (cloud_name is None or cloud_is_ssh))
 
     def _list_to_str(lst):
-        return ', '.join([str(e) for e in lst])
+
+        def format_number(n):
+            # If it's a float that's a whole number, display as int
+            if isinstance(n, float) and n.is_integer():
+                return str(int(n))
+            return str(n)
+
+        return ', '.join([format_number(n) for n in lst])
 
     # TODO(zhwu,romilb): We should move most of these kubernetes related
     # queries into the backend, especially behind the server.

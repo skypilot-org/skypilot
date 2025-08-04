@@ -128,11 +128,11 @@ def managed_job_status_refresh_event():
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 
 
-def sky_serve_status_refresh_event():
+def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.serve import serve_utils
-    if not serve_utils.is_consolidation_mode():
+    if not serve_utils.is_consolidation_mode(pool=pool):
         return
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
@@ -143,10 +143,18 @@ def sky_serve_status_refresh_event():
         serve_utils.ha_recovery_for_consolidation_mode()
     # After recovery, we start the event loop.
     from sky.skylet import events
-    event = events.ServiceUpdateEvent()
+    event = events.ServiceUpdateEvent(pool=pool)
     logger.info('=== Running serve status refresh event ===')
     event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
+
+
+def sky_serve_status_refresh_event():
+    _serve_status_refresh_event(pool=False)
+
+
+def pool_status_refresh_event():
+    _serve_status_refresh_event(pool=True)
 
 
 # Register the events to run in the background.
@@ -168,4 +176,7 @@ INTERNAL_REQUEST_DAEMONS = [
     InternalRequestDaemon(id='sky-serve-status-refresh-daemon',
                           name='sky-serve-status',
                           event_fn=sky_serve_status_refresh_event),
+    InternalRequestDaemon(id='pool-status-refresh-daemon',
+                          name='pool-status',
+                          event_fn=pool_status_refresh_event),
 ]
