@@ -268,18 +268,22 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
         return _SQLALCHEMY_ENGINE
 
 
-def _init_db(func):
+def _init_engine(func):
     """Initialize the database."""
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        initialize_and_get_db()
+        global _SQLALCHEMY_ENGINE
+        if _SQLALCHEMY_ENGINE is None:
+            with _SQLALCHEMY_ENGINE_LOCK:
+                if _SQLALCHEMY_ENGINE is None:
+                    # get an engine to the db
+                    _SQLALCHEMY_ENGINE = migration_utils.get_engine('state')
         return func(*args, **kwargs)
-
     return wrapper
 
 
-@_init_db
+@_init_engine
 def add_or_update_user(user: models.User,
                        allow_duplicate_name: bool = True) -> bool:
     """Store the mapping from user hash to user name for display purposes.
@@ -373,7 +377,7 @@ def add_or_update_user(user: models.User,
             raise ValueError('Unsupported database dialect')
 
 
-@_init_db
+@_init_engine
 def get_user(user_id: str) -> Optional[models.User]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -386,7 +390,7 @@ def get_user(user_id: str) -> Optional[models.User]:
                        created_at=row.created_at)
 
 
-@_init_db
+@_init_engine
 def get_user_by_name(username: str) -> List[models.User]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).filter_by(name=username).all()
@@ -400,14 +404,14 @@ def get_user_by_name(username: str) -> List[models.User]:
     ]
 
 
-@_init_db
+@_init_engine
 def delete_user(user_id: str) -> None:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(user_table).filter_by(id=user_id).delete()
         session.commit()
 
 
-@_init_db
+@_init_engine
 def get_all_users() -> List[models.User]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -420,7 +424,7 @@ def get_all_users() -> List[models.User]:
     ]
 
 
-@_init_db
+@_init_engine
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
@@ -610,7 +614,7 @@ def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
     return common_utils.get_user_hash()
 
 
-@_init_db
+@_init_engine
 def update_cluster_handle(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle'):
     assert _SQLALCHEMY_ENGINE is not None
@@ -621,7 +625,7 @@ def update_cluster_handle(cluster_name: str,
         session.commit()
 
 
-@_init_db
+@_init_engine
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -630,7 +634,7 @@ def update_last_use(cluster_name: str):
         session.commit()
 
 
-@_init_db
+@_init_engine
 def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -667,7 +671,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
         session.commit()
 
 
-@_init_db
+@_init_engine
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.ResourceHandle']:
     assert _SQLALCHEMY_ENGINE is not None
@@ -679,7 +683,7 @@ def get_handle_from_cluster_name(
     return pickle.loads(row.handle)
 
 
-@_init_db
+@_init_engine
 def get_glob_cluster_names(cluster_name: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     assert cluster_name is not None, 'cluster_name cannot be None'
@@ -698,7 +702,7 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
     return [row.name for row in rows]
 
 
-@_init_db
+@_init_engine
 def set_cluster_status(cluster_name: str,
                        status: status_lib.ClusterStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -715,7 +719,7 @@ def set_cluster_status(cluster_name: str,
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-@_init_db
+@_init_engine
 def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
                                to_down: bool) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -731,7 +735,7 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-@_init_db
+@_init_engine
 def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -741,7 +745,7 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
     return int(row.launched_at)
 
 
-@_init_db
+@_init_engine
 def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -751,7 +755,7 @@ def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     return json.loads(row.metadata)
 
 
-@_init_db
+@_init_engine
 def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -764,7 +768,7 @@ def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-@_init_db
+@_init_engine
 def get_cluster_storage_mounts_metadata(
         cluster_name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
@@ -775,7 +779,7 @@ def get_cluster_storage_mounts_metadata(
     return pickle.loads(row.storage_mounts_metadata)
 
 
-@_init_db
+@_init_engine
 def set_cluster_storage_mounts_metadata(
         cluster_name: str, storage_mounts_metadata: Dict[str, Any]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -791,7 +795,7 @@ def set_cluster_storage_mounts_metadata(
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-@_init_db
+@_init_engine
 def _get_cluster_usage_intervals(
         cluster_hash: Optional[str]
 ) -> Optional[List[Tuple[int, Optional[int]]]]:
@@ -832,7 +836,7 @@ def _get_cluster_duration(cluster_hash: str) -> int:
     return total_duration
 
 
-@_init_db
+@_init_engine
 def _set_cluster_usage_intervals(
         cluster_hash: str, usage_intervals: List[Tuple[int,
                                                        Optional[int]]]) -> None:
@@ -849,7 +853,7 @@ def _set_cluster_usage_intervals(
         raise ValueError(f'Cluster hash {cluster_hash} not found.')
 
 
-@_init_db
+@_init_engine
 def set_owner_identity_for_cluster(cluster_name: str,
                                    owner_identity: Optional[List[str]]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -866,7 +870,7 @@ def set_owner_identity_for_cluster(cluster_name: str,
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-@_init_db
+@_init_engine
 def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -876,7 +880,7 @@ def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     return row.cluster_hash
 
 
-@_init_db
+@_init_engine
 def get_launched_resources_from_cluster_hash(
         cluster_hash: str) -> Optional[Tuple[int, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
@@ -922,7 +926,7 @@ def _load_storage_mounts_metadata(
     return pickle.loads(record_storage_mounts_metadata)
 
 
-@_init_db
+@_init_engine
 @context_utils.cancellation_guard
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -961,7 +965,7 @@ def get_cluster_from_name(
     return record
 
 
-@_init_db
+@_init_engine
 def get_clusters() -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1000,7 +1004,7 @@ def get_clusters() -> List[Dict[str, Any]]:
     return records
 
 
-@_init_db
+@_init_engine
 def get_clusters_from_history(
         days: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
@@ -1120,7 +1124,7 @@ def get_clusters_from_history(
     return records
 
 
-@_init_db
+@_init_engine
 def get_cluster_names_start_with(starts_with: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1129,7 +1133,7 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     return [row.name for row in rows]
 
 
-@_init_db
+@_init_engine
 def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
                               workspace: str) -> List['clouds.Cloud']:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1154,7 +1158,7 @@ def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
     return enabled_clouds
 
 
-@_init_db
+@_init_engine
 def set_enabled_clouds(enabled_clouds: List[str],
                        cloud_capability: 'cloud.CloudCapability',
                        workspace: str) -> None:
@@ -1183,7 +1187,7 @@ def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
     return _ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' + cloud_capability.value
 
 
-@_init_db
+@_init_engine
 def get_allowed_clouds(workspace: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1194,7 +1198,7 @@ def get_allowed_clouds(workspace: str) -> List[str]:
     return []
 
 
-@_init_db
+@_init_engine
 def set_allowed_clouds(allowed_clouds: List[str], workspace: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1220,7 +1224,7 @@ def _get_allowed_clouds_key(workspace: str) -> str:
     return _ALLOWED_CLOUDS_KEY_PREFIX + workspace
 
 
-@_init_db
+@_init_engine
 def add_or_update_storage(storage_name: str,
                           storage_handle: 'Storage.StorageMetadata',
                           storage_status: status_lib.StorageStatus):
@@ -1262,7 +1266,7 @@ def add_or_update_storage(storage_name: str,
         session.commit()
 
 
-@_init_db
+@_init_engine
 def remove_storage(storage_name: str):
     """Removes Storage from Database"""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1271,7 +1275,7 @@ def remove_storage(storage_name: str):
         session.commit()
 
 
-@_init_db
+@_init_engine
 def set_storage_status(storage_name: str,
                        status: status_lib.StorageStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1284,7 +1288,7 @@ def set_storage_status(storage_name: str,
         raise ValueError(f'Storage {storage_name} not found.')
 
 
-@_init_db
+@_init_engine
 def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
     assert _SQLALCHEMY_ENGINE is not None
     assert storage_name is not None, 'storage_name cannot be None'
@@ -1295,7 +1299,7 @@ def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
     return None
 
 
-@_init_db
+@_init_engine
 def set_storage_handle(storage_name: str,
                        handle: 'Storage.StorageMetadata') -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1309,7 +1313,7 @@ def set_storage_handle(storage_name: str,
         raise ValueError(f'Storage{storage_name} not found.')
 
 
-@_init_db
+@_init_engine
 def get_handle_from_storage_name(
         storage_name: Optional[str]) -> Optional['Storage.StorageMetadata']:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1322,7 +1326,7 @@ def get_handle_from_storage_name(
     return None
 
 
-@_init_db
+@_init_engine
 def get_glob_storage_name(storage_name: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     assert storage_name is not None, 'storage_name cannot be None'
@@ -1341,7 +1345,7 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
     return [row.name for row in rows]
 
 
-@_init_db
+@_init_engine
 def get_storage_names_start_with(starts_with: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1350,7 +1354,7 @@ def get_storage_names_start_with(starts_with: str) -> List[str]:
     return [row.name for row in rows]
 
 
-@_init_db
+@_init_engine
 def get_storage() -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1368,7 +1372,7 @@ def get_storage() -> List[Dict[str, Any]]:
     return records
 
 
-@_init_db
+@_init_engine
 def get_volume_names_start_with(starts_with: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1377,7 +1381,7 @@ def get_volume_names_start_with(starts_with: str) -> List[str]:
     return [row.name for row in rows]
 
 
-@_init_db
+@_init_engine
 def get_volumes() -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1397,7 +1401,7 @@ def get_volumes() -> List[Dict[str, Any]]:
     return records
 
 
-@_init_db
+@_init_engine
 def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1416,7 +1420,7 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-@_init_db
+@_init_engine
 def add_volume(name: str, config: models.VolumeConfig,
                status: status_lib.VolumeStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1450,7 +1454,7 @@ def add_volume(name: str, config: models.VolumeConfig,
         session.commit()
 
 
-@_init_db
+@_init_engine
 def update_volume(name: str, last_attached_at: int,
                   status: status_lib.VolumeStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1462,7 +1466,7 @@ def update_volume(name: str, last_attached_at: int,
         session.commit()
 
 
-@_init_db
+@_init_engine
 def update_volume_status(name: str, status: status_lib.VolumeStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1472,7 +1476,7 @@ def update_volume_status(name: str, status: status_lib.VolumeStatus) -> None:
         session.commit()
 
 
-@_init_db
+@_init_engine
 def delete_volume(name: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1480,7 +1484,7 @@ def delete_volume(name: str) -> None:
         session.commit()
 
 
-@_init_db
+@_init_engine
 def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1491,7 +1495,7 @@ def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
     return '', '', False
 
 
-@_init_db
+@_init_engine
 def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1517,7 +1521,7 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
         session.commit()
 
 
-@_init_db
+@_init_engine
 def add_service_account_token(token_id: str,
                               token_name: str,
                               token_hash: str,
@@ -1550,7 +1554,7 @@ def add_service_account_token(token_id: str,
         session.commit()
 
 
-@_init_db
+@_init_engine
 def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
     """Get a service account token by token_id."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1571,7 +1575,7 @@ def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
     }
 
 
-@_init_db
+@_init_engine
 def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
     """Get all service account tokens for a user (as creator)."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1590,7 +1594,7 @@ def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
     } for row in rows]
 
 
-@_init_db
+@_init_engine
 def update_service_account_token_last_used(token_id: str) -> None:
     """Update the last_used_at timestamp for a service account token."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1603,7 +1607,7 @@ def update_service_account_token_last_used(token_id: str) -> None:
         session.commit()
 
 
-@_init_db
+@_init_engine
 def delete_service_account_token(token_id: str) -> bool:
     """Delete a service account token.
 
@@ -1618,7 +1622,7 @@ def delete_service_account_token(token_id: str) -> bool:
     return result > 0
 
 
-@_init_db
+@_init_engine
 def rotate_service_account_token(token_id: str,
                                  new_token_hash: str,
                                  new_expires_at: Optional[int] = None) -> None:
@@ -1648,7 +1652,7 @@ def rotate_service_account_token(token_id: str,
         raise ValueError(f'Service account token {token_id} not found.')
 
 
-@_init_db
+@_init_engine
 def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
     """Get the cluster yaml from the database or the local file system.
     If the cluster yaml is not in the database, check if it exists on the
@@ -1689,7 +1693,7 @@ def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
     return yaml.safe_load(yaml_str)
 
 
-@_init_db
+@_init_engine
 def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
     """Set the cluster yaml in the database."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1711,7 +1715,7 @@ def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
         session.commit()
 
 
-@_init_db
+@_init_engine
 def remove_cluster_yaml(cluster_name: str):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1720,7 +1724,7 @@ def remove_cluster_yaml(cluster_name: str):
         session.commit()
 
 
-@_init_db
+@_init_engine
 def get_all_service_account_tokens() -> List[Dict[str, Any]]:
     """Get all service account tokens across all users (for admin access)."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1738,7 +1742,7 @@ def get_all_service_account_tokens() -> List[Dict[str, Any]]:
     } for row in rows]
 
 
-@_init_db
+@_init_engine
 def get_system_config(config_key: str) -> Optional[str]:
     """Get a system configuration value by key."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1750,7 +1754,7 @@ def get_system_config(config_key: str) -> Optional[str]:
     return row.config_value
 
 
-@_init_db
+@_init_engine
 def set_system_config(config_key: str, config_value: str) -> None:
     """Set a system configuration value."""
     assert _SQLALCHEMY_ENGINE is not None
