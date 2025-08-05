@@ -324,6 +324,9 @@ class Task:
             URI)}``, where remote means the VM(s) on which this Task will
             eventually run on, and local means the node from which the task is
             launched.
+          storage_mounts: an optional dict of ``{mount_path: sky.Storage
+            object}``, where mount_path is the path inside the remote VM(s)
+            where the Storage object will be mounted on.
           resources: either a sky.Resources, a set of them, or a list of them.
             A set or a list of resources asks the optimizer to "pick the
             best of these resources" to run this task.
@@ -336,8 +339,6 @@ class Task:
         self.name = name
         self.run = run
         self.storage_mounts: Dict[str, storage_lib.Storage] = {}
-        if storage_mounts is not None:
-            self.set_storage_mounts(storage_mounts)
         self.storage_plans: Dict[storage_lib.Storage,
                                  storage_lib.StoreType] = {}
         self.setup = setup
@@ -366,9 +367,6 @@ class Task:
         # Default to CPU VM
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
-        if resources is not None:
-            self.set_resources(resources)
-
         self._service: Optional[service_spec.SkyServiceSpec] = None
 
         # Resources that this task cannot run on.
@@ -377,8 +375,6 @@ class Task:
         self.time_estimator_func: Optional[Callable[['sky.Resources'],
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
-        if file_mounts is not None:
-            self.set_file_mounts(file_mounts)
 
         # Only set when 'self' is a jobs controller task: 'self.managed_job_dag'
         # is the underlying managed job dag (sky.Dag object).
@@ -396,6 +392,13 @@ class Task:
             volume_mounts)
 
         self._metadata = metadata if metadata is not None else {}
+
+        if resources is not None:
+            self.set_resources(resources)
+        if storage_mounts is not None:
+            self.set_storage_mounts(storage_mounts)
+        if file_mounts is not None:
+            self.set_file_mounts(file_mounts)
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
