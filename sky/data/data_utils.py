@@ -769,6 +769,7 @@ class Rclone:
                     endpoint = {endpoint_url}
                     region = auto
                     acl = private
+                    force_path_style = false
                     """)
             else:
                 with ux_utils.print_exception_no_traceback():
