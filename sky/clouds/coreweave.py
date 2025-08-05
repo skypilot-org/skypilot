@@ -166,7 +166,7 @@ class CoreWeave(clouds.Cloud):
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> resources_utils.FeasibleResources:
-        return resources_utils.FeasibleResources([], [], [])
+        return resources_utils.FeasibleResources([], [], None)
 
     @classmethod
     @annotations.lru_cache(scope='request')

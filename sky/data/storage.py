@@ -4633,6 +4633,7 @@ class CoreWeaveStore(S3CompatibleStore):
             verify_bucket=data_utils.verify_coreweave_bucket,
             aws_profile=coreweave.COREWEAVE_PROFILE_NAME,
             cloud_name='CoreWeave',
+            default_region=coreweave.DEFAULT_REGION,
             mount_cmd_factory=cls._get_coreweave_mount_cmd,
         )
 
