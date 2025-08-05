@@ -617,7 +617,7 @@ class CoreWeaveCloudStorage(CloudStorage):
         Args:
             url: coreweave object URL.
         """
-        assert 'coreweave://' in url, 'coreweave:// is not in source'
+        assert 'cw://' in url, 'cw:// is not in source'
         bucket_name, path = data_utils.split_coreweave_path(url)
         if path.endswith('/') or path == '':
             return True
@@ -632,8 +632,8 @@ class CoreWeaveCloudStorage(CloudStorage):
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
-        assert 'coreweave://' in source, 'coreweave:// is not in source'
-        source = source.replace('coreweave://', 's3://')
+        assert 'cw://' in source, 'cw:// is not in source'
+        source = source.replace('cw://', 's3://')
         download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
                                'sync --no-follow-symlinks '
                                f'{source} {destination} '
@@ -645,8 +645,8 @@ class CoreWeaveCloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        assert 'coreweave://' in source, 'coreweave:// is not in source'
-        source = source.replace('coreweave://', 's3://')
+        assert 'cw://' in source, 'cw:// is not in source'
+        source = source.replace('cw://', 's3://')
         download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
                                f'cp {source} {destination} '
                                f'--profile={coreweave.COREWEAVE_PROFILE_NAME}')
@@ -673,7 +673,7 @@ _REGISTRY = {
     'cos': IBMCosCloudStorage(),
     'oci': OciCloudStorage(),
     'nebius': NebiusCloudStorage(),
-    'coreweave': CoreWeaveCloudStorage(),
+    'cw': CoreWeaveCloudStorage(),
     # TODO: This is a hack, as Azure URL starts with https://, we should
     # refactor the registry to be able to take regex, so that Azure blob can
     # be identified with `https://(.*?)\.blob\.core\.windows\.net`

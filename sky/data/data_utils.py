@@ -940,9 +940,9 @@ def create_coreweave_client() -> Client:
 
 
 def split_coreweave_path(coreweave_path: str) -> Tuple[str, str]:
-    """Split coreweave://bucket/key into (bucket, key)."""
-    if coreweave_path.startswith('coreweave://'):
-        path_parts = coreweave_path.replace('coreweave://', '').split('/', 1)
+    """Split cw://bucket/key into (bucket, key)."""
+    if coreweave_path.startswith('cw://'):
+        path_parts = coreweave_path.replace('cw://', '').split('/', 1)
     else:
         path_parts = coreweave_path.split('/', 1)
     bucket = path_parts[0]
