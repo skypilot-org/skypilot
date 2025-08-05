@@ -4,6 +4,7 @@ Responsible for autoscaling and replica management.
 """
 import contextlib
 import logging
+import os
 import threading
 import time
 import traceback
@@ -242,7 +243,7 @@ class SkyServeController:
         threading.Thread(target=self._run_autoscaler).start()
 
         logger.info('SkyServe Controller started on '
-                    f'http://{self._host}:{self._port}')
+                    f'http://{self._host}:{self._port}. PID: {os.getpid()}')
 
         uvicorn.run(self._app, host=self._host, port=self._port)
 

@@ -47,6 +47,10 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         service_name TEXT,
         spec BLOB,
         PRIMARY KEY (service_name, version))""")
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS ha_recovery_script (
+        service_name TEXT PRIMARY KEY,
+        script TEXT)""")
     conn.commit()
 
     # Backward compatibility.
@@ -71,6 +75,13 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     # Whether the service is a cluster pool.
     db_utils.add_column_to_table(cursor, conn, 'services', 'pool',
                                  'INTEGER DEFAULT 0')
+    # Add controller_pid for status tracking.
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'services',
+                                 'controller_pid',
+                                 'INTEGER DEFAULT NULL',
+                                 value_to_replace_existing_entries=-1)
     conn.commit()
 
 
@@ -272,7 +283,8 @@ _SERVICE_STATUS_TO_COLOR = {
 @init_db
 def add_service(name: str, controller_job_id: int, policy: str,
                 requested_resources_str: str, load_balancing_policy: str,
-                status: ServiceStatus, tls_encrypted: bool, pool: bool) -> bool:
+                status: ServiceStatus, tls_encrypted: bool, pool: bool,
+                controller_pid: int) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -287,17 +299,33 @@ def add_service(name: str, controller_job_id: int, policy: str,
                 INSERT INTO services
                 (name, controller_job_id, status, policy,
                 requested_resources_str, load_balancing_policy, tls_encrypted,
-                pool)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                pool, controller_pid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (name, controller_job_id, status.value, policy,
                  requested_resources_str, load_balancing_policy,
-                 int(tls_encrypted), int(pool)))
+                 int(tls_encrypted), int(pool), controller_pid))
 
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
             raise RuntimeError('Unexpected database error') from e
         return False
     return True
+
+
+@init_db
+def update_service_controller_pid(service_name: str,
+                                  controller_pid: int) -> None:
+    """Updates the controller pid of a service.
+
+    This is used to update the controller pid of a service on ha recovery.
+    """
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE services SET
+            controller_pid=(?) WHERE name=(?)""",
+            (controller_pid, service_name))
 
 
 @init_db
@@ -368,7 +396,8 @@ def set_service_load_balancer_port(service_name: str,
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
-     _, active_versions, load_balancing_policy, tls_encrypted, pool) = row[:16]
+     _, active_versions, load_balancing_policy, tls_encrypted, pool,
+     controller_pid) = row[:17]
     record = {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -388,6 +417,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'load_balancing_policy': load_balancing_policy,
         'tls_encrypted': bool(tls_encrypted),
         'pool': bool(pool),
+        'controller_pid': controller_pid,
     }
     latest_spec = get_spec(name, current_version)
     if latest_spec is not None:
@@ -666,3 +696,38 @@ def get_service_load_balancer_port(service_name: str) -> int:
         if row is None:
             raise ValueError(f'Service {service_name} does not exist.')
         return row[0]
+
+
+@init_db
+def get_ha_recovery_script(service_name: str) -> Optional[str]:
+    """Gets the HA recovery script for a service."""
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            'SELECT script FROM ha_recovery_script WHERE service_name = ?',
+            (service_name,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
+
+@init_db
+def set_ha_recovery_script(service_name: str, script: str) -> None:
+    """Sets the HA recovery script for a service."""
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            INSERT OR REPLACE INTO ha_recovery_script
+            (service_name, script)
+            VALUES (?, ?)""", (service_name, script))
+
+
+@init_db
+def remove_ha_recovery_script(service_name: str) -> None:
+    """Removes the HA recovery script for a service."""
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute('DELETE FROM ha_recovery_script WHERE service_name = ?',
+                       (service_name,))

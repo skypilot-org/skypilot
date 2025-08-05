@@ -112,6 +112,10 @@ def cleanup_storage(task_yaml: str) -> bool:
 
 def _cleanup(service_name: str) -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
+    # Cleanup the HA recovery script first as it is possible that some error
+    # was raised when we construct the task object (e.g.,
+    # sky.exceptions.ResourcesUnavailableError).
+    serve_state.remove_ha_recovery_script(service_name)
     failed = False
     replica_infos = serve_state.get_replica_infos(service_name)
     info2proc: Dict[replica_managers.ReplicaInfo,
@@ -223,7 +227,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             load_balancing_policy=service_spec.load_balancing_policy,
             status=serve_state.ServiceStatus.CONTROLLER_INIT,
             tls_encrypted=service_spec.tls_credential is not None,
-            pool=service_spec.pool)
+            pool=service_spec.pool,
+            controller_pid=os.getpid())
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:
@@ -241,6 +246,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         # sync to a tmp file first and then copy it to the final name
         # if there is no name conflict.
         shutil.copy(tmp_task_yaml, service_task_yaml)
+    else:
+        serve_state.update_service_controller_pid(service_name, os.getpid())
 
     controller_process = None
     load_balancer_process = None
