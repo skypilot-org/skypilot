@@ -7,6 +7,7 @@ import pytest
 from sky import exceptions
 from sky.client import sdk_async
 from sky.utils import common as common_utils
+from sky.server import responses
 
 
 @pytest.fixture
@@ -260,8 +261,9 @@ async def test_get_error_propagation(mock_get, mock_to_thread,
 @pytest.mark.asyncio
 async def test_api_info(mock_to_thread, mock_sdk_functions):
     """Test api_info() function."""
-    expected_result = {'status': 'healthy', 'version': '1.0.0'}
-    mock_sdk_functions['api_info'].return_value = expected_result
+    return_value = {'status': 'healthy', 'version': '1.0.0'}
+    mock_sdk_functions['api_info'].return_value = return_value
+    expected_result = responses.APIHealthResponse(**return_value)
 
     result = await sdk_async.api_info()
     assert result == expected_result
