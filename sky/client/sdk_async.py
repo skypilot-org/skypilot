@@ -28,6 +28,7 @@ from sky.client import common as client_common
 from sky.client import sdk
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
+from sky.server import responses
 from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
@@ -39,7 +40,6 @@ from sky.utils import context_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import ux_utils
-from sky.server import responses
 
 if typing.TYPE_CHECKING:
     import io

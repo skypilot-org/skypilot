@@ -1,17 +1,19 @@
-import dataclasses
-from typing import Literal, Optional
+"""Responses for the API server."""
 
-from sky.server import common
+from typing import Optional
+
+from pydantic import BaseModel
+
 from sky import models
+from sky.server import common
 
 
-@dataclasses.dataclass
-class APIHealthResponse:
-    status: Literal[common.ApiServerStatus.NEEDS_AUTH, common.ApiServerStatus.HEALTHY]
-    api_version: str
-    version: str
-    version_on_disk: str
-    commit: str
-    user: Optional[models.User]
-    basic_auth_enabled: bool
-
+class APIHealthResponse(BaseModel):
+    """Response for the API health endpoint."""
+    status: common.ApiServerStatus
+    api_version: Optional[str] = None
+    version: Optional[str] = None
+    version_on_disk: Optional[str] = None
+    commit: Optional[str] = None
+    user: Optional[models.User] = None
+    basic_auth_enabled: Optional[bool] = None
