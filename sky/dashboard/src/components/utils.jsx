@@ -240,11 +240,13 @@ export function formatLogs(str) {
     .split('\n')
     .filter((line) => {
       // Filter out empty lines and rich terminal formatting artifacts
-      return line.trim() !== '' && // remove empty
+      return (
+        line.trim() !== '' && // remove empty
         !line.match(/<rich_.*?\[bold cyan\]/) &&
         !line.match(/<rich_.*>.*<\/rich_.*>/) &&
         !line.match(/├──/) &&
-        !line.match(/└──/);
+        !line.match(/└──/)
+      );
     })
     .map((line) => {
       // Wrap each line in log formatting
@@ -252,7 +254,6 @@ export function formatLogs(str) {
     })
     .join('\n');
 }
-
 
 export const logStyles = `
   .logs-container {

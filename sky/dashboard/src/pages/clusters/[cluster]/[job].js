@@ -107,16 +107,16 @@ export function JobDetailPage() {
 
   useEffect(() => {
     let active = true;
-  
+
     if (!cluster || !job || isPending) {
       setIsLoadingLogs(false);
       return () => {
         active = false;
       };
     }
-  
+
     setIsLoadingLogs(true);
-  
+
     streamClusterJobLogs({
       clusterName: cluster,
       jobId: job,
@@ -124,32 +124,36 @@ export function JobDetailPage() {
         if (active) {
           setLogs((prevLogs) => {
             // Split the chunk into lines
-            const newLines = chunk.split('\n').filter(line => line.trim());
-            
+            const newLines = chunk.split('\n').filter((line) => line.trim());
+
             let updatedLogs = prevLogs;
-            
+
             for (const line of newLines) {
               // Clean the line (remove ANSI codes)
               const cleanLine = stripAnsiCodes(line);
-              
+
               // Check if this is a progress bar line
               const isProgressBar = /\d+%\s*\|/.test(cleanLine);
-              
+
               if (isProgressBar) {
                 // Extract process identifier from the new line
                 const processMatch = cleanLine.match(/^\(([^)]+)\)/);
-                
+
                 if (processMatch && updatedLogs) {
                   // Look for the last progress bar from the same process in existing logs
                   const existingLines = updatedLogs.split('\n');
                   let replaced = false;
-                  
+
                   // Search from the end for efficiency
                   for (let i = existingLines.length - 1; i >= 0; i--) {
                     const existingLine = existingLines[i];
                     if (/\d+%\s*\|/.test(existingLine)) {
-                      const existingProcessMatch = existingLine.match(/^\(([^)]+)\)/);
-                      if (existingProcessMatch && existingProcessMatch[1] === processMatch[1]) {
+                      const existingProcessMatch =
+                        existingLine.match(/^\(([^)]+)\)/);
+                      if (
+                        existingProcessMatch &&
+                        existingProcessMatch[1] === processMatch[1]
+                      ) {
                         // Found a progress bar from the same process, replace it
                         existingLines[i] = cleanLine;
                         updatedLogs = existingLines.join('\n');
@@ -158,7 +162,7 @@ export function JobDetailPage() {
                       }
                     }
                   }
-                  
+
                   if (!replaced) {
                     // No existing progress bar from this process, append
                     updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
@@ -172,7 +176,7 @@ export function JobDetailPage() {
                 updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
               }
             }
-            
+
             return updatedLogs;
           });
         }
@@ -190,11 +194,11 @@ export function JobDetailPage() {
           setIsLoadingLogs(false);
         }
       });
-  
+
     return () => {
       active = false;
     };
-  }, [cluster, job, isRefreshingLogs, isPending, clusterData]);  
+  }, [cluster, job, isRefreshingLogs, isPending, clusterData]);
 
   // Handle manual refresh
   const handleManualRefresh = async () => {

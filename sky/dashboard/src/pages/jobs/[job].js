@@ -502,8 +502,6 @@ function JobDetailsContent({
     setHasReceivedFirstChunk(false);
   }, [activeTab, jobData.id]);
 
-
-
   // Define a function to handle both log types with simplified logic
   const fetchLogs = useCallback(
     (logType, jobId, setLogs, setIsLoading, isRefreshing = false) => {
@@ -565,36 +563,43 @@ function JobDetailsContent({
                 setHasReceivedFirstChunk(true);
               }
 
-              const setLogsFunction = logType === 'logs' ? setLogs : setControllerLogs;
-              
+              const setLogsFunction =
+                logType === 'logs' ? setLogs : setControllerLogs;
+
               setLogsFunction((prevLogs) => {
                 // Split the chunk into lines
-                const newLines = chunk.split('\n').filter(line => line.trim());
-                
+                const newLines = chunk
+                  .split('\n')
+                  .filter((line) => line.trim());
+
                 let updatedLogs = prevLogs;
-                
+
                 for (const line of newLines) {
                   // Clean the line (remove ANSI codes)
                   const cleanLine = stripAnsiCodes(line);
-                  
+
                   // Check if this is a progress bar line
                   const isProgressBar = /\d+%\s*\|/.test(cleanLine);
-                  
+
                   if (isProgressBar) {
                     // Extract process identifier from the new line
                     const processMatch = cleanLine.match(/^\(([^)]+)\)/);
-                    
+
                     if (processMatch && updatedLogs) {
                       // Look for the last progress bar from the same process in existing logs
                       const existingLines = updatedLogs.split('\n');
                       let replaced = false;
-                      
+
                       // Search from the end for efficiency
                       for (let i = existingLines.length - 1; i >= 0; i--) {
                         const existingLine = existingLines[i];
                         if (/\d+%\s*\|/.test(existingLine)) {
-                          const existingProcessMatch = existingLine.match(/^\(([^)]+)\)/);
-                          if (existingProcessMatch && existingProcessMatch[1] === processMatch[1]) {
+                          const existingProcessMatch =
+                            existingLine.match(/^\(([^)]+)\)/);
+                          if (
+                            existingProcessMatch &&
+                            existingProcessMatch[1] === processMatch[1]
+                          ) {
                             // Found a progress bar from the same process, replace it
                             existingLines[i] = cleanLine;
                             updatedLogs = existingLines.join('\n');
@@ -603,7 +608,7 @@ function JobDetailsContent({
                           }
                         }
                       }
-                      
+
                       if (!replaced) {
                         // No existing progress bar from this process, append
                         updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
@@ -617,14 +622,14 @@ function JobDetailsContent({
                     updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
                   }
                 }
-                
+
                 // Update length tracking
                 if (logType === 'logs') {
                   setCurrentLogLength(updatedLogs.length);
                 } else {
                   setCurrentControllerLogLength(updatedLogs.length);
                 }
-                
+
                 return updatedLogs;
               });
 
