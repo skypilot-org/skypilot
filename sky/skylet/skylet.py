@@ -24,7 +24,9 @@ EVENTS = [
     # This is for monitoring controller job status. If it becomes
     # unhealthy, this event will correctly update the controller
     # status to CONTROLLER_FAILED.
-    events.ServiceUpdateEvent(),
+    events.ServiceUpdateEvent(pool=False),
+    # Status refresh for pool.
+    events.ServiceUpdateEvent(pool=True),
     # Report usage heartbeat every 10 minutes.
     events.UsageHeartbeatReportEvent(),
 ]

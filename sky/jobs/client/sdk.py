@@ -2,11 +2,11 @@
 import json
 import typing
 from typing import Dict, List, Optional, Union
-import webbrowser
 
 import click
 
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.serve.client import impl
@@ -23,9 +23,13 @@ from sky.utils import dag_utils
 
 if typing.TYPE_CHECKING:
     import io
+    import webbrowser
 
     import sky
     from sky.serve import serve_utils
+else:
+    # only used in dashboard()
+    webbrowser = adaptors_common.LazyImport('webbrowser')
 
 logger = sky_logging.init_logger(__name__)
 

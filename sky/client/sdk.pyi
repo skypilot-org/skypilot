@@ -14,6 +14,7 @@ from sky import skypilot_config as skypilot_config
 from sky.server import common as server_common
 from sky.server import rest as rest
 from sky.server.requests import payloads as payloads
+from sky.skylet import autostop_lib as autostop_lib
 from sky.skylet import constants as constants
 from sky.usage import usage_lib as usage_lib
 from sky.utils import admin_policy_utils as admin_policy_utils
@@ -37,7 +38,7 @@ def reload_config() -> None:
     ...
 
 
-def stream_response(request_id: Optional[str],
+def stream_response(request_id: Optional[server_common.RequestId],
                     response: requests.Response,
                     output_stream: Optional['io.TextIOBase'] = ...,
                     resumable: bool = ...) -> Any:
@@ -104,6 +105,7 @@ def launch(task: Union['sky.Task', 'sky.Dag'],
            cluster_name: Optional[str] = ...,
            retry_until_up: bool = ...,
            idle_minutes_to_autostop: Optional[int] = ...,
+           wait_for: Optional[autostop_lib.AutostopWaitFor] = ...,
            dryrun: bool = ...,
            down: bool = ...,
            backend: Optional['backends.Backend'] = ...,
@@ -142,6 +144,7 @@ def download_logs(cluster_name: str,
 
 def start(cluster_name: str,
           idle_minutes_to_autostop: Optional[int] = ...,
+          wait_for: Optional[autostop_lib.AutostopWaitFor] = ...,
           retry_until_up: bool = ...,
           down: bool = ...,
           force: bool = ...) -> server_common.RequestId:
@@ -158,6 +161,7 @@ def stop(cluster_name: str, purge: bool = ...) -> server_common.RequestId:
 
 def autostop(cluster_name: str,
              idle_minutes: int,
+             wait_for: Optional[autostop_lib.AutostopWaitFor] = ...,
              down: bool = ...) -> server_common.RequestId:
     ...
 
@@ -245,11 +249,11 @@ def status_kubernetes() -> server_common.RequestId:
     ...
 
 
-def get(request_id: str) -> Any:
+def get(request_id: server_common.RequestId) -> Any:
     ...
 
 
-def stream_and_get(request_id: Optional[str] = ...,
+def stream_and_get(request_id: Optional[server_common.RequestId] = ...,
                    log_path: Optional[str] = ...,
                    tail: Optional[int] = ...,
                    follow: bool = ...,
@@ -257,13 +261,14 @@ def stream_and_get(request_id: Optional[str] = ...,
     ...
 
 
-def api_cancel(request_ids: Optional[Union[str, List[str]]] = ...,
+def api_cancel(request_ids: Optional[Union[
+    server_common.RequestId, List[server_common.RequestId]]] = ...,
                all_users: bool = ...,
                silent: bool = ...) -> server_common.RequestId:
     ...
 
 
-def api_status(request_ids: Optional[List[str]] = ...,
+def api_status(request_ids: Optional[List[server_common.RequestId]] = ...,
                all_status: bool = ...) -> List[payloads.RequestPayload]:
     ...
 

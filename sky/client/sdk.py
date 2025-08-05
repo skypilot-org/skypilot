@@ -10,19 +10,14 @@ Usage example:
     statuses = sky.get(request_id)
 
 """
-import base64
-import binascii
 from http import cookiejar
 import json
 import logging
 import os
-import pathlib
 import subprocess
-import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib import parse as urlparse
-import webbrowser
 
 import click
 import colorama
@@ -37,8 +32,10 @@ from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.server import common as server_common
 from sky.server import rest
+from sky.server import versions
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -57,7 +54,12 @@ from sky.utils import ux_utils
 from sky.utils.kubernetes import ssh_utils
 
 if typing.TYPE_CHECKING:
+    import base64
+    import binascii
     import io
+    import pathlib
+    import time
+    import webbrowser
 
     import psutil
     import requests
@@ -65,6 +67,14 @@ if typing.TYPE_CHECKING:
     import sky
     from sky import backends
 else:
+    # only used in api_login()
+    base64 = adaptors_common.LazyImport('base64')
+    binascii = adaptors_common.LazyImport('binascii')
+    pathlib = adaptors_common.LazyImport('pathlib')
+    time = adaptors_common.LazyImport('time')
+    # only used in dashboard() and api_login()
+    webbrowser = adaptors_common.LazyImport('webbrowser')
+    # only used in api_stop()
     psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
@@ -78,14 +88,17 @@ def reload_config() -> None:
     skypilot_config.safe_reload_config()
 
 
-def stream_response(request_id: Optional[str],
+def stream_response(request_id: Optional[server_common.RequestId],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
                     resumable: bool = False) -> Any:
     """Streams the response to the console.
 
     Args:
-        request_id: The request ID.
+        request_id: The request ID of the request to stream. May be a full
+            request ID or a prefix.
+            If None, the latest request submitted to the API server is streamed.
+            Using None request_id is not recommended in multi-user environments.
         response: The HTTP response.
         output_stream: The output stream to write to. If None, print to the
             console.
@@ -375,6 +388,7 @@ def launch(
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     backend: Optional['backends.Backend'] = None,
@@ -424,6 +438,15 @@ def launch(
             ``sky.autostop(idle_minutes=<minutes>)``. If set, the autostop
             config specified in the task' resources will be overridden by
             this parameter.
+        wait_for: determines the condition for resetting the idleness timer.
+            This option works in conjunction with ``idle_minutes_to_autostop``.
+            Choices:
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         dryrun: if True, do not actually launch the cluster.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
@@ -487,12 +510,27 @@ def launch(
             raise NotImplementedError('clone_disk_from is not implemented yet. '
                                       'Please contact the SkyPilot team if you '
                                       'need this feature at slack.skypilot.co.')
+
+    remote_api_version = versions.get_remote_api_version()
+    if wait_for is not None and (remote_api_version is None or
+                                 remote_api_version < 13):
+        logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
     dag = dag_utils.convert_entrypoint_to_dag(task)
     # Override the autostop config from command line flags to task YAML.
     for task in dag.tasks:
         for resource in task.resources:
-            resource.override_autostop_config(
-                down=down, idle_minutes=idle_minutes_to_autostop)
+            if remote_api_version is None or remote_api_version < 13:
+                # An older server would not recognize the wait_for field
+                # in the schema, so we need to omit it.
+                resource.override_autostop_config(
+                    down=down, idle_minutes=idle_minutes_to_autostop)
+            else:
+                resource.override_autostop_config(
+                    down=down,
+                    idle_minutes=idle_minutes_to_autostop,
+                    wait_for=wait_for)
             if resource.autostop_config is not None:
                 # For backward-compatbility, get the final autostop config for
                 # admin policy.
@@ -825,6 +863,7 @@ def download_logs(cluster_name: str,
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -851,6 +890,15 @@ def start(
             flag is equivalent to running ``sky.launch()`` and then
             ``sky.autostop(idle_minutes=<minutes>)``. If not set, the
             cluster will not be autostopped.
+        wait_for: determines the condition for resetting the idleness timer.
+            This option works in conjunction with ``idle_minutes_to_autostop``.
+            Choices:
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         retry_until_up: whether to retry launching the cluster until it is
             up.
         down: Autodown the cluster: tear down the cluster after specified
@@ -879,9 +927,16 @@ def start(
         sky.exceptions.ClusterOwnerIdentitiesMismatchError: if the cluster to
             restart was launched by a different user.
     """
+    remote_api_version = versions.get_remote_api_version()
+    if wait_for is not None and (remote_api_version is None or
+                                 remote_api_version < 13):
+        logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
     body = payloads.StartBody(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        wait_for=wait_for,
         retry_until_up=retry_until_up,
         down=down,
         force=force,
@@ -982,9 +1037,10 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def autostop(
-    cluster_name: str,
-    idle_minutes: int,
-    down: bool = False  # pylint: disable=redefined-outer-name
+        cluster_name: str,
+        idle_minutes: int,
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
+        down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> server_common.RequestId:
     """Schedules an autostop/autodown for a cluster.
 
@@ -1015,6 +1071,15 @@ def autostop(
         idle_minutes: the number of minutes of idleness (no pending/running
             jobs) after which the cluster will be stopped automatically. Setting
             to a negative number cancels any autostop/autodown setting.
+        wait_for: determines the condition for resetting the idleness timer.
+            This option works in conjunction with ``idle_minutes``.
+            Choices:
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         down: if true, use autodown (tear down the cluster; non-restartable),
             rather than autostop (restartable).
 
@@ -1034,9 +1099,16 @@ def autostop(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
             user identity.
     """
+    remote_api_version = versions.get_remote_api_version()
+    if wait_for is not None and (remote_api_version is None or
+                                 remote_api_version < 13):
+        logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
         idle_minutes=idle_minutes,
+        wait_for=wait_for,
         down=down,
     )
     response = server_common.make_authenticated_request(
@@ -1687,7 +1759,7 @@ def status_kubernetes() -> server_common.RequestId:
 # === API request APIs ===
 @usage_lib.entrypoint
 @annotations.client_api
-def get(request_id: str) -> Any:
+def get(request_id: server_common.RequestId) -> Any:
     """Waits for and gets the result of a request.
 
     This function will not check the server health since /api/get is typically
@@ -1695,7 +1767,8 @@ def get(request_id: str) -> Any:
     may cause GET /api/get being sent to a restarted API server.
 
     Args:
-        request_id: The request ID of the request to get.
+        request_id: The request ID of the request to get. May be a full request
+            ID or a prefix.
 
     Returns:
         The ``Request Returns`` of the specified request. See the documentation
@@ -1749,7 +1822,7 @@ def get(request_id: str) -> Any:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def stream_and_get(
-    request_id: Optional[str] = None,
+    request_id: Optional[server_common.RequestId] = None,
     log_path: Optional[str] = None,
     tail: Optional[int] = None,
     follow: bool = True,
@@ -1761,7 +1834,10 @@ def stream_and_get(
     prefix of the full request id.
 
     Args:
-        request_id: The prefix of the request ID of the request to stream.
+        request_id: The request ID of the request to stream. May be a full
+            request ID or a prefix.
+            If None, the latest request submitted to the API server is streamed.
+            Using None request_id is not recommended in multi-user environments.
         log_path: The path to the log file to stream.
         tail: The number of lines to show from the end of the logs.
             If None, show all logs.
@@ -1804,7 +1880,8 @@ def stream_and_get(
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
+def api_cancel(request_ids: Optional[Union[
+    server_common.RequestId, List[server_common.RequestId]]] = None,
                all_users: bool = False,
                silent: bool = False) -> server_common.RequestId:
     """Aborts a request or all requests.
@@ -1869,7 +1946,7 @@ def _local_api_server_running(kill: bool = False) -> bool:
 @usage_lib.entrypoint
 @annotations.client_api
 def api_status(
-    request_ids: Optional[List[str]] = None,
+    request_ids: Optional[List[server_common.RequestId]] = None,
     # pylint: disable=redefined-builtin
     all_status: bool = False
 ) -> List[payloads.RequestPayload]:
@@ -2343,6 +2420,7 @@ def api_login(endpoint: Optional[str] = None,
     _save_config_updates(endpoint=endpoint)
     dashboard_url = server_common.get_dashboard_url(endpoint)
 
+    server_common.get_api_server_status.cache_clear()
     # After successful authentication, check server health again to get user
     # identity
     server_status, final_api_server_info = server_common.check_server_healthy(

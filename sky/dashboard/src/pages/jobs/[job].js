@@ -16,7 +16,7 @@ import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
 } from '@/components/utils';
-import { LogFilter, formatLogs } from '@/components/utils';
+import { LogFilter, formatLogs, stripAnsiCodes } from '@/components/utils';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
@@ -502,22 +502,6 @@ function JobDetailsContent({
     setHasReceivedFirstChunk(false);
   }, [activeTab, jobData.id]);
 
-  // Performance-optimized log update function
-  const updateLogsWithBatching = useCallback(
-    (logType, newChunk) => {
-      const setLogsFunction = logType === 'logs' ? setLogs : setControllerLogs;
-
-      // Simple string append - no batching needed with backend tail
-      setLogsFunction((prevLogs) => prevLogs + newChunk);
-
-      // Auto-scroll after update
-      requestAnimationFrame(() => {
-        scrollToBottom(logType);
-      });
-    },
-    [scrollToBottom]
-  );
-
   // Define a function to handle both log types with simplified logic
   const fetchLogs = useCallback(
     (logType, jobId, setLogs, setIsLoading, isRefreshing = false) => {
@@ -572,26 +556,87 @@ function JobDetailsContent({
           jobId: jobId,
           controller: logType === 'controllerlogs',
           signal: controller.signal,
-          onNewLog: (log) => {
+          onNewLog: (chunk) => {
             if (active) {
-              const strippedLog = formatLogs(log);
-
               // Set first chunk received flag for immediate display
               if (!hasReceivedFirstChunk) {
                 setHasReceivedFirstChunk(true);
               }
 
-              // Use batched updates for performance
-              updateLogsWithBatching(logType, strippedLog);
+              const setLogsFunction =
+                logType === 'logs' ? setLogs : setControllerLogs;
 
-              // Update length tracking
-              if (logType === 'logs') {
-                setCurrentLogLength((prev) => prev + strippedLog.length);
-              } else {
-                setCurrentControllerLogLength(
-                  (prev) => prev + strippedLog.length
-                );
-              }
+              setLogsFunction((prevLogs) => {
+                // Split the chunk into lines
+                const newLines = chunk
+                  .split('\n')
+                  .filter((line) => line.trim());
+
+                let updatedLogs = prevLogs;
+
+                for (const line of newLines) {
+                  // Clean the line (remove ANSI codes)
+                  const cleanLine = stripAnsiCodes(line);
+
+                  // Check if this is a progress bar line
+                  const isProgressBar = /\d+%\s*\|/.test(cleanLine);
+
+                  if (isProgressBar) {
+                    // Extract process identifier from the new line
+                    const processMatch = cleanLine.match(/^\(([^)]+)\)/);
+
+                    if (processMatch && updatedLogs) {
+                      // Look for the last progress bar from the same process in existing logs
+                      const existingLines = updatedLogs.split('\n');
+                      let replaced = false;
+
+                      // Search from the end for efficiency
+                      for (let i = existingLines.length - 1; i >= 0; i--) {
+                        const existingLine = existingLines[i];
+                        if (/\d+%\s*\|/.test(existingLine)) {
+                          const existingProcessMatch =
+                            existingLine.match(/^\(([^)]+)\)/);
+                          if (
+                            existingProcessMatch &&
+                            existingProcessMatch[1] === processMatch[1]
+                          ) {
+                            // Found a progress bar from the same process, replace it
+                            existingLines[i] = cleanLine;
+                            updatedLogs = existingLines.join('\n');
+                            replaced = true;
+                            break;
+                          }
+                        }
+                      }
+
+                      if (!replaced) {
+                        // No existing progress bar from this process, append
+                        updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
+                      }
+                    } else {
+                      // First line or no process match, just append
+                      updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
+                    }
+                  } else {
+                    // Regular log line, just append
+                    updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
+                  }
+                }
+
+                // Update length tracking
+                if (logType === 'logs') {
+                  setCurrentLogLength(updatedLogs.length);
+                } else {
+                  setCurrentControllerLogLength(updatedLogs.length);
+                }
+
+                return updatedLogs;
+              });
+
+              // Auto-scroll after update
+              requestAnimationFrame(() => {
+                scrollToBottom(logType);
+              });
             }
           },
         })
@@ -694,7 +739,6 @@ function JobDetailsContent({
       hasReceivedFirstChunk,
       safeAbort,
       scrollToBottom,
-      updateLogsWithBatching,
     ]
   );
 
