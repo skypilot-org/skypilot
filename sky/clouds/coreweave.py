@@ -3,10 +3,7 @@ import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
-from sky import catalog
 from sky import clouds
-from sky import exceptions
-from sky import skypilot_config
 from sky.adaptors import coreweave
 from sky.utils import annotations
 from sky.utils import registry

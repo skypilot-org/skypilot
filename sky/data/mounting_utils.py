@@ -153,8 +153,7 @@ def get_coreweave_mount_cmd(coreweave_profile_name: str,
                             endpoint_url: str,
                             mount_path: str,
                             _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to mount CoreWeave bucket (goofys by default, rclone for
-    ARM64)."""
+    """Returns a command to mount CoreWeave bucket"""
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:

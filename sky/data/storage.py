@@ -912,8 +912,8 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://, coreweave://. Got: {source}'
-                    )
+                        f'r2://, cos://, oci://, nebius://, coreweave://. '
+                        f'Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self, name: Optional[str]) -> None:
@@ -4617,10 +4617,6 @@ class CoreWeaveStore(S3CompatibleStore):
     for CoreWeave Object Storage buckets.
     """
 
-    NAME = "coreweave"
-    DISPLAY_NAME = "CoreWeave Buckets"
-    URL_PATTERNS = ["coreweave://"]
-
     @classmethod
     def get_config(cls) -> S3CompatibleConfig:
         """Return the configuration for CoreWeave Object Storage."""
@@ -4638,7 +4634,7 @@ class CoreWeaveStore(S3CompatibleStore):
         )
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
-        """Get or create bucket using CoreWeave's S3 API with custom verification."""
+        """Get or create bucket using CoreWeave's S3 API"""
         bucket = self.config.resource_factory(self.name)
 
         # Use our custom bucket verification instead of head_bucket
