@@ -14,6 +14,10 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
+def _default_should_skip():
+    return False
+
+
 @dataclasses.dataclass
 class InternalRequestDaemon:
     """Internal daemon that runs an event in the background."""
@@ -22,6 +26,7 @@ class InternalRequestDaemon:
     name: str
     event_fn: Callable[[], None]
     default_log_level: str = 'INFO'
+    should_skip: Callable[[], bool] = _default_should_skip
 
     def refresh_log_level(self) -> int:
         # pylint: disable=import-outside-toplevel
@@ -110,11 +115,10 @@ def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
-    if not managed_job_utils.is_consolidation_mode():
-        return
+    from sky.utils import controller_utils
+
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
-    from sky.utils import controller_utils
     if controller_utils.high_availability_specified(
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name):
         managed_job_utils.ha_recovery_for_consolidation_mode()
@@ -128,12 +132,16 @@ def managed_job_status_refresh_event():
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 
 
+def should_skip_managed_job_status_refresh():
+    """Check if the managed job status refresh event should be skipped."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+    return not managed_job_utils.is_consolidation_mode()
+
+
 def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
-    from sky.serve import serve_utils
-    if not serve_utils.is_consolidation_mode(pool=pool):
-        return
     # TODO(tian): Add HA recovery logic.
     from sky.skylet import events
     event = events.ServiceUpdateEvent(pool=pool)
@@ -142,12 +150,27 @@ def _serve_status_refresh_event(pool: bool):
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 
 
+def _should_skip_serve_status_refresh_event(pool: bool):
+    """Check if the serve status refresh event should be skipped."""
+    # pylint: disable=import-outside-toplevel
+    from sky.serve import serve_utils
+    return not serve_utils.is_consolidation_mode(pool=pool)
+
+
 def sky_serve_status_refresh_event():
     _serve_status_refresh_event(pool=False)
 
 
+def should_skip_sky_serve_status_refresh():
+    return _should_skip_serve_status_refresh_event(pool=False)
+
+
 def pool_status_refresh_event():
     _serve_status_refresh_event(pool=True)
+
+
+def should_skip_pool_status_refresh():
+    return _should_skip_serve_status_refresh_event(pool=True)
 
 
 # Register the events to run in the background.
@@ -165,11 +188,14 @@ INTERNAL_REQUEST_DAEMONS = [
                           event_fn=refresh_volume_status_event),
     InternalRequestDaemon(id='managed-job-status-refresh-daemon',
                           name='managed-job-status',
-                          event_fn=managed_job_status_refresh_event),
+                          event_fn=managed_job_status_refresh_event,
+                          should_skip=should_skip_managed_job_status_refresh),
     InternalRequestDaemon(id='sky-serve-status-refresh-daemon',
                           name='sky-serve-status',
-                          event_fn=sky_serve_status_refresh_event),
+                          event_fn=sky_serve_status_refresh_event,
+                          should_skip=should_skip_sky_serve_status_refresh),
     InternalRequestDaemon(id='pool-status-refresh-daemon',
                           name='pool-status',
-                          event_fn=pool_status_refresh_event),
+                          event_fn=pool_status_refresh_event,
+                          should_skip=should_skip_pool_status_refresh),
 ]

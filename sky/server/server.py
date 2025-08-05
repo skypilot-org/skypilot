@@ -451,6 +451,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     del app  # unused
     # Startup: Run background tasks
     for event in daemons.INTERNAL_REQUEST_DAEMONS:
+        if event.should_skip():
+            continue
         try:
             executor.schedule_request(
                 request_id=event.id,
