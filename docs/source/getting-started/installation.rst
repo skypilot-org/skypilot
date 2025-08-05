@@ -720,7 +720,7 @@ Then set the endpoint URL and S3 addressing style:
 
 .. code-block:: shell
 
-  aws configure set endpoint_url https://cwobject.com --profile coreweave
+  aws configure set endpoint_url https://cwlota.com --profile coreweave
   aws configure set s3.addressing_style virtual --profile coreweave
 
 To obtain your CoreWeave Object Storage credentials:
