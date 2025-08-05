@@ -165,8 +165,8 @@ class CoreWeave(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> 'resources_utils.FeasibleResources':
-        return resources_utils.FeasibleResources()
+    ) -> resources_utils.FeasibleResources:
+        return resources_utils.FeasibleResources([], [], [])
 
     @classmethod
     @annotations.lru_cache(scope='request')
@@ -199,4 +199,4 @@ class CoreWeave(clouds.Cloud):
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
-        return None 
+        return None
