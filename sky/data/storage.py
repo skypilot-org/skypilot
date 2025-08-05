@@ -887,7 +887,7 @@ class Storage(object):
                 is_local_source = True
             elif split_path.scheme in [
                     's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius',
-                    'coreweave'
+                    'cw'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -912,7 +912,7 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://, coreweave://. '
+                        f'r2://, cos://, oci://, nebius://, cw://. '
                         f'Got: {source}')
         return source, is_local_source
 
@@ -929,8 +929,14 @@ class Storage(object):
             prefix = name.split('://')[0]
             prefix = prefix.lower()
             if prefix in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius',
-                    'coreweave', 'coreweave'
+                    's3',
+                    'gs',
+                    'https',
+                    'r2',
+                    'cos',
+                    'oci',
+                    'nebius',
+                    'cw',
             ]:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
@@ -4622,7 +4628,7 @@ class CoreWeaveStore(S3CompatibleStore):
         """Return the configuration for CoreWeave Object Storage."""
         return S3CompatibleConfig(
             store_type='COREWEAVE',
-            url_prefix='coreweave://',
+            url_prefix='cw://',
             client_factory=lambda region: data_utils.create_coreweave_client(),
             resource_factory=lambda name: coreweave.resource('s3').Bucket(name),
             split_path=data_utils.split_coreweave_path,

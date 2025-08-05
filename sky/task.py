@@ -1555,10 +1555,10 @@ class Task:
                 elif store_type is storage_lib.StoreType.COREWEAVE:
                     if storage.source is not None and not isinstance(
                             storage.source,
-                            list) and storage.source.startswith('coreweave://'):
+                            list) and storage.source.startswith('cw://'):
                         blob_path = storage.source
                     else:
-                        blob_path = 'coreweave://' + storage.name
+                        blob_path = 'cw://' + storage.name
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
