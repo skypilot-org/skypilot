@@ -310,6 +310,7 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
+    dag_utils.run_prelaunch_setup(dag)
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -349,6 +350,7 @@ def validate(
             validation. This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
+    dag_utils.run_prelaunch_setup(dag)
     for task in dag.tasks:
         task.expand_and_validate_workdir()
         if not workdir_only:

@@ -61,14 +61,15 @@ def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
                 'Expected a sky.Task or sky.Dag but received argument of type: '
                 f'{type(entrypoint)}')
 
+    run_prelaunch_setup(dag)
     return converted_dag
 
 
 def _load_chain_dag(
         configs: List[Dict[str, Any]],
         env_overrides: Optional[List[Tuple[str, str]]] = None,
-        secrets_overrides: Optional[List[Tuple[str,
-                                               str]]] = None) -> dag_lib.Dag:
+        secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+        complete_setup: bool = True) -> dag_lib.Dag:
     """Loads a chain DAG from a list of YAML configs."""
     dag_name = None
     if set(configs[0].keys()) == {'name'}:
@@ -86,8 +87,10 @@ def _load_chain_dag(
         for task_config in configs:
             if task_config is None:
                 continue
-            task = task_lib.Task.from_yaml_config(task_config, env_overrides,
-                                                  secrets_overrides)
+            task = task_lib.Task.from_yaml_config(task_config,
+                                                  env_overrides,
+                                                  secrets_overrides,
+                                                  complete_setup)
             if current_task is not None:
                 current_task >> task  # pylint: disable=pointless-statement
             current_task = task
@@ -99,6 +102,7 @@ def load_chain_dag_from_yaml(
     path: str,
     env_overrides: Optional[List[Tuple[str, str]]] = None,
     secret_overrides: Optional[List[Tuple[str, str]]] = None,
+    complete_setup: bool = True,
 ) -> dag_lib.Dag:
     """Loads a chain DAG from a YAML file.
 
@@ -118,13 +122,14 @@ def load_chain_dag_from_yaml(
       trivial task).
     """
     configs = common_utils.read_yaml_all(path)
-    return _load_chain_dag(configs, env_overrides, secret_overrides)
+    return _load_chain_dag(configs, env_overrides, secret_overrides, complete_setup)
 
 
 def load_chain_dag_from_yaml_str(
     yaml_str: str,
     env_overrides: Optional[List[Tuple[str, str]]] = None,
     secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+    complete_setup: bool = True,
 ) -> dag_lib.Dag:
     """Loads a chain DAG from a YAML string.
 
@@ -144,7 +149,7 @@ def load_chain_dag_from_yaml_str(
       trivial task).
     """
     configs = common_utils.read_yaml_all_str(yaml_str)
-    return _load_chain_dag(configs, env_overrides, secrets_overrides)
+    return _load_chain_dag(configs, env_overrides, secrets_overrides, complete_setup)
 
 
 def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag,
@@ -159,6 +164,7 @@ def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag,
         The YAML string.
     """
     assert dag.is_chain(), dag
+    run_prelaunch_setup(dag)
     configs = [{'name': dag.name}]
     for task in dag.tasks:
         configs.append(
@@ -205,8 +211,8 @@ def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
 
 
 def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
+    run_prelaunch_setup(dag)
     for task_ in dag.tasks:
-
         new_resources_list = []
         default_strategy = registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
         assert default_strategy is not None
@@ -237,3 +243,9 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
                                      'the same job recovery strategy.')
 
         task_.set_resources(type(task_.resources)(new_resources_list))
+
+
+def run_prelaunch_setup(entrypoint: 'dag_lib.Dag'):
+    """Finish setting up dag"""
+    for task in entrypoint.tasks:
+        task.maybe_run_yaml_prelaunch_setup()
