@@ -43,6 +43,7 @@ if typing.TYPE_CHECKING:
     from sky import models
     import sky.catalog
     from sky.provision.kubernetes import utils as kubernetes_utils
+    from sky.skylet import autostop_lib
     from sky.skylet import job_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -372,6 +373,7 @@ async def launch(
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional['autostop_lib.AutostopWaitFor'] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     backend: Optional['backends.Backend'] = None,
@@ -390,8 +392,8 @@ async def launch(
     """Async version of launch() that launches a cluster or task."""
     request_id = await context_utils.to_thread(
         sdk.launch, task, cluster_name, retry_until_up,
-        idle_minutes_to_autostop, dryrun, down, backend, optimize_target,
-        no_setup, clone_disk_from, fast, _need_confirmation,
+        idle_minutes_to_autostop, wait_for, dryrun, down, backend,
+        optimize_target, no_setup, clone_disk_from, fast, _need_confirmation,
         _is_launched_by_jobs_controller, _is_launched_by_sky_serve_controller,
         _disable_controller_check)
     if stream_logs is not None:

@@ -1554,19 +1554,21 @@ def scheduler_set_launching(job_id: int,
 @_init_db_async
 async def scheduler_set_alive_async(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
-    assert _SQLALCHEMY_ENGINE is not None
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        updated_count = await session.execute(
-            sqlalchemy.and_(
-                job_info_table.c.spot_job_id == job_id,
-                job_info_table.c.schedule_state ==
-                ManagedJobScheduleState.LAUNCHING.value,
-            )
-        ).update({
-            job_info_table.c.schedule_state: ManagedJobScheduleState.ALIVE.value
-        })
+        result = await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job_id,
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.LAUNCHING.value,
+                )).values({
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.ALIVE.value
+                }))
+        changes = result.rowcount
         await session.commit()
-        assert updated_count == 1, (job_id, updated_count)
+        assert changes == 1, (job_id, changes)
 
 
 @_init_db
