@@ -57,9 +57,25 @@ from sky.server import common as server_common
 # To only run tests for managed jobs (without generic tests), use
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius', 'hyperbolic', 'coreweave',
+    'aws',
+    'gcp',
+    'azure',
+    'lambda',
+    'cloudflare',
+    'ibm',
+    'scp',
+    'oci',
+    'do',
+    'kubernetes',
+    'vsphere',
+    'cudo',
+    'fluidstack',
+    'paperspace',
+    'runpod',
+    'vast',
+    'nebius',
+    'hyperbolic',
+    'coreweave',
 ]
 default_clouds_to_run = ['aws', 'azure']
 
