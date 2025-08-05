@@ -2032,9 +2032,7 @@ class KubernetesInstanceType:
             accelerator_type = match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = int(accelerator_count)
-                # This is to revert the accelerator types with spaces back to
-                # the original format.
-                accelerator_type = str(accelerator_type).replace('_', ' ')
+                accelerator_type = str(accelerator_type)
             else:
                 accelerator_count = None
                 accelerator_type = None
@@ -2047,7 +2045,7 @@ class KubernetesInstanceType:
             accelerator_type = prev_match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = int(accelerator_count)
-                accelerator_type = str(accelerator_type).replace('_', ' ')
+                accelerator_type = str(accelerator_type)
             else:
                 accelerator_count = None
                 accelerator_type = None
