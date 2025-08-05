@@ -886,7 +886,8 @@ class Storage(object):
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'coreweave'
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius',
+                    'coreweave'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -911,7 +912,8 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://, coreweave://. Got: {source}')
+                        f'r2://, cos://, oci://, nebius://, coreweave://. Got: {source}'
+                    )
         return source, is_local_source
 
     def _validate_storage_spec(self, name: Optional[str]) -> None:
@@ -926,7 +928,10 @@ class Storage(object):
             """
             prefix = name.split('://')[0]
             prefix = prefix.lower()
-            if prefix in ['s3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'coreweave', 'coreweave']:
+            if prefix in [
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius',
+                    'coreweave', 'coreweave'
+            ]:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
                         'Prefix detected: `name` cannot start with '
@@ -4639,7 +4644,7 @@ class CoreWeaveStore(S3CompatibleStore):
         if data_utils.verify_coreweave_bucket(self.name):
             self._validate_existing_bucket()
             return bucket, False
-        
+
         # Check if this is a source with URL prefix (existing bucket case)
         if isinstance(self.source, str) and self.source.startswith(
                 self.config.url_prefix):
@@ -4663,15 +4668,16 @@ class CoreWeaveStore(S3CompatibleStore):
         """Factory method for CoreWeave mount command."""
         client = data_utils.create_coreweave_client()
         endpoint_url = client.meta.endpoint_url
-        return mounting_utils.get_coreweave_mount_cmd(coreweave.COREWEAVE_PROFILE_NAME,
-                                                     bucket_name, endpoint_url,
-                                                     mount_path, bucket_sub_path)
+        return mounting_utils.get_coreweave_mount_cmd(
+            coreweave.COREWEAVE_PROFILE_NAME, bucket_name, endpoint_url,
+            mount_path, bucket_sub_path)
 
     def mount_cached_command(self, mount_path: str) -> str:
         """CoreWeave-specific cached mount implementation using rclone."""
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
-            data_utils.Rclone.RcloneStores.COREWEAVE.get_profile_name(self.name))
+            data_utils.Rclone.RcloneStores.COREWEAVE.get_profile_name(
+                self.name))
         rclone_config = data_utils.Rclone.RcloneStores.COREWEAVE.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(

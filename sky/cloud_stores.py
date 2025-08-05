@@ -602,6 +602,7 @@ class NebiusCloudStorage(CloudStorage):
         all_commands.append(download_via_awscli)
         return ' && '.join(all_commands)
 
+
 class CoreWeaveCloudStorage(CloudStorage):
     """CoreWeave Cloud Storage."""
 
@@ -622,8 +623,8 @@ class CoreWeaveCloudStorage(CloudStorage):
             return True
         coreweave_client = data_utils.create_coreweave_client()
         objects = coreweave_client.list_objects_v2(Bucket=bucket_name,
-                                                Prefix=path,
-                                                MaxKeys=1)
+                                                   Prefix=path,
+                                                   MaxKeys=1)
         return objects.get('KeyCount', 0) > 0
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:

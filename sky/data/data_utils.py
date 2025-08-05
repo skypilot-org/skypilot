@@ -672,8 +672,6 @@ class Rclone:
             Raises:
                 NotImplementedError: If the storage type is not supported.
             """
-            print(rclone_profile_name)
-            aa()
             if rclone_profile_name is None:
                 assert bucket_name is not None
                 rclone_profile_name = self.get_profile_name(bucket_name)
@@ -769,12 +767,9 @@ class Rclone:
                     access_key_id = {access_key_id}
                     secret_access_key = {secret_access_key}
                     endpoint = {endpoint_url}
-                    s3_addressing_style = virtual
                     region = auto
                     acl = private
                     """)
-                print(config)
-                aa()
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise NotImplementedError(
