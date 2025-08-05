@@ -282,7 +282,7 @@ OAuth migration guide
 
     .. TODO(aylei): Add the nightly version after this change get released
 
-    After SkyPilot v0.10.2, the API server supports built-in OAuth2 integration (delegate authentication to `OAuth2 Proxy <https://github.com/oauth2-proxy/oauth2-proxy>`_ under the hood) without ingress support. This is more flexible and can work seamlessly with other authentication schemes supported by the API server.
+    Starting with SkyPilot v0.10.2, the API server supports built-in OAuth2 integration (delegate authentication to `OAuth2 Proxy <https://github.com/oauth2-proxy/oauth2-proxy>`_ under the hood) without ingress support. This is more flexible and can work seamlessly with other authentication schemes supported by the API server.
 
     If you are using the auth proxy in ingress (enabled by setting ``ingress.oauth2-proxy.enabled=true`` in the Helm chart), you can migrate to the new OAuth2 integration by setting ``auth.oauth.enabled=true`` and migrate other settings from ``ingress.oauth2-proxy.*`` to ``auth.oauth.*`` in the Helm chart:
 
