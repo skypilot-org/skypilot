@@ -77,6 +77,7 @@ MULTI_WORD_TERMS = {
     'Google Workspace',
     'Google Auth Platform',
     'Google Cloud Logging',
+    'AWS Systems Manager',
 }
 
 
