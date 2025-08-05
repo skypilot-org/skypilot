@@ -412,13 +412,14 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         # The response is 200, so we can parse the response.
         try:
             result = response.json()
+            server_status = result.get('status')
             api_version = result.get('api_version')
             version = result.get('version')
             version_on_disk = result.get('version_on_disk')
             commit = result.get('commit')
             user = result.get('user')
             basic_auth_enabled = result.get('basic_auth_enabled')
-            server_info = ApiServerInfo(status=ApiServerStatus.HEALTHY,
+            server_info = ApiServerInfo(status=ApiServerStatus(server_status),
                                         api_version=api_version,
                                         version=version,
                                         version_on_disk=version_on_disk,
