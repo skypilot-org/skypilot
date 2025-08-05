@@ -6,8 +6,8 @@ import pytest
 
 from sky import exceptions
 from sky.client import sdk_async
-from sky.utils import common as common_utils
 from sky.server import responses
+from sky.utils import common as common_utils
 
 
 @pytest.fixture
