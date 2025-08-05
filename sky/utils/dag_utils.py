@@ -65,11 +65,10 @@ def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
     return converted_dag
 
 
-def _load_chain_dag(
-        configs: List[Dict[str, Any]],
-        env_overrides: Optional[List[Tuple[str, str]]] = None,
-        secrets_overrides: Optional[List[Tuple[str, str]]] = None,
-        complete_setup: bool = True) -> dag_lib.Dag:
+def _load_chain_dag(configs: List[Dict[str, Any]],
+                    env_overrides: Optional[List[Tuple[str, str]]] = None,
+                    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+                    complete_setup: bool = True) -> dag_lib.Dag:
     """Loads a chain DAG from a list of YAML configs."""
     dag_name = None
     if set(configs[0].keys()) == {'name'}:
@@ -87,8 +86,7 @@ def _load_chain_dag(
         for task_config in configs:
             if task_config is None:
                 continue
-            task = task_lib.Task.from_yaml_config(task_config,
-                                                  env_overrides,
+            task = task_lib.Task.from_yaml_config(task_config, env_overrides,
                                                   secrets_overrides,
                                                   complete_setup)
             if current_task is not None:
@@ -122,7 +120,8 @@ def load_chain_dag_from_yaml(
       trivial task).
     """
     configs = common_utils.read_yaml_all(path)
-    return _load_chain_dag(configs, env_overrides, secret_overrides, complete_setup)
+    return _load_chain_dag(configs, env_overrides, secret_overrides,
+                           complete_setup)
 
 
 def load_chain_dag_from_yaml_str(
@@ -149,7 +148,8 @@ def load_chain_dag_from_yaml_str(
       trivial task).
     """
     configs = common_utils.read_yaml_all_str(yaml_str)
-    return _load_chain_dag(configs, env_overrides, secrets_overrides, complete_setup)
+    return _load_chain_dag(configs, env_overrides, secrets_overrides,
+                           complete_setup)
 
 
 def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag,

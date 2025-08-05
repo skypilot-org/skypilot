@@ -258,13 +258,13 @@ class Task:
         metadata: Optional[Dict[str, Any]] = None,
         require_prelaunch_setup: bool = False,
         # Internal use (setup only).
-        file_mounts_config: Optional[Dict[str, str]] = None,
-        service_config: Optional[Dict[str, str]] = None,
-        pool_config: Optional[Dict[str, str]] = None,
-        input_config: Optional[Dict[str, str]] = None,
-        output_config: Optional[Dict[str, str]] = None,
-        resources_config: Optional[Dict[str, str]] = None,
-        volume_mounts_config: Optional[Dict[str, str]] = None,
+        file_mounts_config: Optional[Dict[str, Any]] = None,
+        service_config: Optional[Dict[str, Any]] = None,
+        pool_config: Optional[Dict[str, Any]] = None,
+        input_config: Optional[Dict[str, Any]] = None,
+        output_config: Optional[Dict[str, Any]] = None,
+        resources_config: Optional[Dict[str, Any]] = None,
+        volume_mounts_config: Optional[Dict[str, Any]] = None,
         # Internal use only.
         _user_specified_yaml: Optional[str] = None,
     ):
@@ -414,7 +414,7 @@ class Task:
             skip_file_mounts: Whether to skip validating file mounts.
             skip_workdir: Whether to skip validating workdir.
         """
-        assert self.require_prelaunch_setup, 'Task prelaunch setup not done.'
+        assert not self.require_prelaunch_setup, 'Task prelaunch setup needed.'
         self.validate_name()
         self.validate_run()
         if not skip_workdir:
@@ -426,7 +426,7 @@ class Task:
 
     def validate_name(self):
         """Validates if the task name is valid."""
-        assert self.require_prelaunch_setup, 'Task prelaunch setup not done.'
+        assert not self.require_prelaunch_setup, 'Task prelaunch setup needed.'
         if not _is_valid_name(self.name):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid task name {self.name}. Valid name: '
@@ -434,7 +434,7 @@ class Task:
 
     def validate_run(self):
         """Validates if the run command is valid."""
-        assert self.require_prelaunch_setup, 'Task prelaunch setup not done.'
+        assert not self.require_prelaunch_setup, 'Task prelaunch setup needed.'
         if callable(self.run):
             run_sig = inspect.signature(self.run)
             # Check that run is a function with 2 arguments.
@@ -480,7 +480,7 @@ class Task:
         it must be after the client side has sync-ed all files to the
         remote server.
         """
-        assert self.require_prelaunch_setup, 'Task prelaunch setup not done.'
+        assert not self.require_prelaunch_setup, 'Task prelaunch setup needed.'
         if self.file_mounts is None:
             return
         for target, source in self.file_mounts.items():
@@ -503,7 +503,7 @@ class Task:
                             'the path.')
 
     def _validate_mount_path(self, path: str, location: str):
-        assert self.require_prelaunch_setup, 'Task prelaunch setup not done.'
+        assert not self.require_prelaunch_setup, 'Task prelaunch setup needed.'
         self._validate_path(path, location)
         # TODO(zhwu): /home/username/sky_workdir as the target path need
         # to be filtered out as well.
@@ -529,7 +529,7 @@ class Task:
         it must be after the client side has sync-ed all files to the
         remote server.
         """
-        assert self.require_prelaunch_setup, 'Task prelaunch setup not done.'
+        assert not self.require_prelaunch_setup, 'Task prelaunch setup needed.'
         if self.workdir is None:
             return
         # Only expand the workdir if it is a string
@@ -549,7 +549,7 @@ class Task:
 
         self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
 
-    def maybe_run_yaml_prelaunch_setup(self) -> None:
+    def maybe_run_yaml_prelaunch_setup(self):
         if not self.require_prelaunch_setup:
             logger.debug(
                 'Not running task prelaunch setup as it is not required')
@@ -864,7 +864,7 @@ class Task:
             exceptions.VolumeTopologyConflictError: if there is conflict in the
               volumes and compute topology.
         """
-        assert self.require_prelaunch_setup, 'Task prelaunch setup not done.'
+        assert not self.require_prelaunch_setup, 'Task prelaunch setup needed.'
         # Volumes has been resolved, a typical case is that the API server
         # has resolved the volumes and the dag was then submitted to
         # controllers.
