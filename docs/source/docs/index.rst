@@ -38,7 +38,7 @@ Welcome to SkyPilot!
 
 
 
-SkyPilot is an open-source framework for running AI and batch workloads on any infra.
+SkyPilot is an open-source system for running AI and batch workloads on any infra.
 
 
 SkyPilot **is easy to use for AI users**:
