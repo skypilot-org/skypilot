@@ -190,12 +190,13 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     assert task.service is not None, task
     service_spec = task.service
 
-    service_status_before = serve_state.get_service_status_from_name(
-        service_name)
-    logger.info(f'Service status before: {service_status_before}')
-    is_recovery = (
-        service_status_before is not None and
-        service_status_before != serve_state.ServiceStatus.LAUNCHER_INIT)
+    def is_recovery_mode(service_name: str) -> bool:
+        """Check if service exists in database to determine recovery mode.
+        """
+        service = serve_state.get_service_from_name(service_name)
+        return service is not None
+
+    is_recovery = is_recovery_mode(service_name)
     logger.info(f'It is a {"first" if not is_recovery else "recovery"} run')
 
     if is_recovery:
@@ -213,7 +214,12 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         service_name, version)
 
     if not is_recovery:
-        success = serve_state.set_service_info(
+        if (len(serve_state.get_services()) >=
+                serve_utils.get_num_service_threshold()):
+            cleanup_storage(tmp_task_yaml)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Max number of services reached.')
+        success = serve_state.add_service(
             service_name,
             controller_job_id=job_id,
             policy=service_spec.autoscaling_policy_str(),
@@ -221,13 +227,15 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             load_balancing_policy=service_spec.load_balancing_policy,
             status=serve_state.ServiceStatus.CONTROLLER_INIT,
             tls_encrypted=service_spec.tls_credential is not None,
-            pool=service_spec.pool)
+            pool=service_spec.pool,
+            controller_pid=os.getpid())
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:
             cleanup_storage(tmp_task_yaml)
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Service {service_name} already exists.')
+                raise ValueError(f'Service {service_name} already exists '
+                                 'in service.py.')
 
         # Create the service working directory.
         os.makedirs(service_dir, exist_ok=True)

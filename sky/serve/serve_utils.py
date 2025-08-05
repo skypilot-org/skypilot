@@ -309,7 +309,9 @@ def ha_recovery_for_consolidation_mode(pool: bool):
                 f.write(f'{capnoun} {service_name}\'s recovery script does '
                         'not exist. Skipping recovery.\n')
                 continue
-            runner.run(script)
+            rc, out, err = runner.run(script, require_outputs=True)
+            f.write(f'Recovery script returned {rc}. '
+                    f'Output: {out}. Error: {err}\n')
             f.write(f'{capnoun} {service_name} completed recovery at '
                     f'{datetime.datetime.now()}\n')
         f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
@@ -542,8 +544,6 @@ def update_service_status(pool: bool) -> None:
 
         controller_pid = record['controller_pid']
         if controller_pid is None:
-            if service_status == serve_state.ServiceStatus.LAUNCHER_INIT:
-                continue
             logger.info(f'{capnoun} {service_name!r} controller pid is None. '
                         f'Unexpected status {service_status}. Set to failure.')
         elif controller_pid < 0:
