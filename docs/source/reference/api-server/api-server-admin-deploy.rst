@@ -11,7 +11,7 @@ The SkyPilot API server is packaged as a Helm chart which deploys a Kubernetes i
 
 .. tip::
 
-    Deploying the API server to a Kubernetes cluster using Helm provides the best reliability and enables additional features such as :ref:`OAuth2 authentication <api-server-auth-proxy>` and :ref:`metrics <api-server-metrics-setup>`. However, there are two alternative options available for special cases:
+    Deploying the API server to a Kubernetes cluster using Helm provides the best reliability and enables additional features such as :ref:`OAuth2 authentication <api-server-oauth>` and :ref:`metrics <api-server-metrics-setup>`. However, there are two alternative options available for special cases:
 
     * :ref:`Deploying the API server on cloud VMs <sky-api-server-cloud-deploy>` if you do not have a Kubernetes cluster and do not need the additional features.
     * :ref:`Sharing an API server for multiple users on a single machine <sky-api-server-in-docker>` if you want to share the API server with multiple users on a single machine instead of exposing it to the public internet (e.g. a shared bastion machine).
@@ -85,7 +85,7 @@ After the API server is deployed, you can inspect the API server pod status with
 
 You should see the pod is initializing and finally becomes running and ready. If not, refer to :ref:`sky-api-server-troubleshooting-helm` to diagnose the issue.
 
-The API server above is deployed with a basic auth provided by Nginx. To use advanced OAuth2 authentication, refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>`.
+The API server above is deployed with a basic auth provided by Nginx. To use advanced OAuth2 authentication, refer to :ref:`Using OAuth for API server <api-server-oauth>`.
 
 .. _sky-get-api-server-url:
 
@@ -558,12 +558,12 @@ Following tabs describe how to configure credentials for different clouds on the
         Support for configuring other clouds through secrets is coming soon!
 
 
-Optional: Set up OAuth2 proxy
------------------------------
+Optional: Set up OAuth
+----------------------
 
-In addition to basic HTTP authentication, SkyPilot also supports using an OAuth2 proxy to securely authenticate users.
+In addition to basic HTTP authentication, SkyPilot also supports using OAuth2 to securely authenticate users.
 
-Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
+Refer to :ref:`Setup OAuth for SkyPilot API Server <api-server-oauth>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth-okta>` or Google Workspace.
 
 .. _api-server-persistence-db:
 
@@ -981,7 +981,9 @@ By default, the SkyPilot helm chart will deploy a new ingress-nginx controller w
 
 .. note::
 
-    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` and :ref:`OAuth2 <helm-values-ingress-oauth2-proxy>` are only supported when using ingress-nginx controller.
+    .. TODO(aylei): document service account token based authentication and proxy auth for custom ingress controllers.
+
+    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` is only supported when using ingress-nginx controller. Consider using :ref:`OAuth2 <api-server-oauth>` to protect your API server instead.
 
 
 .. _sky-api-server-cloud-deploy:

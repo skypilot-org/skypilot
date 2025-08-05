@@ -88,14 +88,15 @@ def reload_config() -> None:
     skypilot_config.safe_reload_config()
 
 
-def stream_response(request_id: Optional[str],
+def stream_response(request_id: Optional[server_common.RequestId],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
                     resumable: bool = False) -> Any:
     """Streams the response to the console.
 
     Args:
-        request_id: The request ID.
+        request_id: The request ID of the request to stream. May be a full
+            request ID or a prefix.
         response: The HTTP response.
         output_stream: The output stream to write to. If None, print to the
             console.
@@ -1756,7 +1757,7 @@ def status_kubernetes() -> server_common.RequestId:
 # === API request APIs ===
 @usage_lib.entrypoint
 @annotations.client_api
-def get(request_id: str) -> Any:
+def get(request_id: server_common.RequestId) -> Any:
     """Waits for and gets the result of a request.
 
     This function will not check the server health since /api/get is typically
@@ -1764,7 +1765,8 @@ def get(request_id: str) -> Any:
     may cause GET /api/get being sent to a restarted API server.
 
     Args:
-        request_id: The request ID of the request to get.
+        request_id: The request ID of the request to get. May be a full request
+            ID or a prefix.
 
     Returns:
         The ``Request Returns`` of the specified request. See the documentation
@@ -1818,7 +1820,7 @@ def get(request_id: str) -> Any:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def stream_and_get(
-    request_id: Optional[str] = None,
+    request_id: Optional[server_common.RequestId] = None,
     log_path: Optional[str] = None,
     tail: Optional[int] = None,
     follow: bool = True,
@@ -1830,7 +1832,8 @@ def stream_and_get(
     prefix of the full request id.
 
     Args:
-        request_id: The prefix of the request ID of the request to stream.
+        request_id: The request ID of the request to stream. May be a full
+            request ID or a prefix.
         log_path: The path to the log file to stream.
         tail: The number of lines to show from the end of the logs.
             If None, show all logs.
@@ -1873,7 +1876,8 @@ def stream_and_get(
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
+def api_cancel(request_ids: Optional[Union[
+    server_common.RequestId, List[server_common.RequestId]]] = None,
                all_users: bool = False,
                silent: bool = False) -> server_common.RequestId:
     """Aborts a request or all requests.
@@ -1938,7 +1942,7 @@ def _local_api_server_running(kill: bool = False) -> bool:
 @usage_lib.entrypoint
 @annotations.client_api
 def api_status(
-    request_ids: Optional[List[str]] = None,
+    request_ids: Optional[List[server_common.RequestId]] = None,
     # pylint: disable=redefined-builtin
     all_status: bool = False
 ) -> List[payloads.RequestPayload]:
