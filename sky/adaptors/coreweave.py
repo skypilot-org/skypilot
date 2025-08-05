@@ -1,5 +1,4 @@
 """CoreWeave cloud adaptor."""
-import os
 import threading
 from typing import List, Optional
 
@@ -55,7 +54,7 @@ def get_coreweave_credentials(boto3_session):
     Args:
         boto3_session: The boto3 session object.
     Returns:
-        botocore.credentials.ReadOnlyCredentials object with the CoreWeave credentials.
+        botocore.credentials.ReadOnlyCredentials
     """
     coreweave_credentials = boto3_session.get_credentials()
     if coreweave_credentials is None:
@@ -66,9 +65,6 @@ def get_coreweave_credentials(boto3_session):
     return coreweave_credentials.get_frozen_credentials()
 
 
-# lru_cache() is thread-safe and it will return the same session object
-# for different threads.
-# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache
 @annotations.lru_cache(scope='global')
 def session():
     """Create an AWS session for CoreWeave."""
