@@ -22,6 +22,7 @@ import {
   REFRESH_INTERVAL,
   JobStatusBadges as SharedJobStatusBadges,
   InfraBadges as SharedInfraBadges,
+  renderPoolLink,
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
 import { getManagedJobs, getPoolStatus } from '@/data/connectors/jobs';
@@ -1114,29 +1115,11 @@ export function ManagedJobsTable({
                           >
                             {poolsLoading
                               ? '-'
-                              : item.pool
-                                ? (() => {
-                                    // Check if pool hash matches to determine if we should link
-                                    const matchingPool = poolsData.find(
-                                      (pool) =>
-                                        pool.name === item.pool &&
-                                        pool.hash === item.pool_hash
-                                    );
-
-                                    if (matchingPool && item.pool_hash) {
-                                      return (
-                                        <Link
-                                          href={`/jobs/pools/${item.pool}`}
-                                          className="text-blue-600 hover:underline"
-                                        >
-                                          {item.pool}
-                                        </Link>
-                                      );
-                                    }
-                                    // Pool exists but no matching hash found - likely terminated
-                                    return `${item.pool} (terminated)`;
-                                  })()
-                                : '-'}
+                              : renderPoolLink(
+                                  item.pool,
+                                  item.pool_hash,
+                                  poolsData
+                                )}
                           </div>
                         </TableCell>
                         <TableCell>

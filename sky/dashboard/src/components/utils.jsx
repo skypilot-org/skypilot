@@ -9,6 +9,7 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
+import Link from 'next/link';
 
 // Refresh interval in milliseconds
 export const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -623,4 +624,27 @@ export const InfraBadges = ({ replicaInfo }) => {
       })}
     </div>
   );
+};
+
+// Common function for rendering pool links with hash comparison
+export const renderPoolLink = (poolName, poolHash, poolsData) => {
+  if (!poolName) return '-';
+
+  // Check if pool hash matches to determine if we should link
+  const matchingPool = poolsData.find(
+    (pool) => pool.name === poolName && pool.hash === poolHash
+  );
+
+  if (matchingPool && poolHash) {
+    return (
+      <Link
+        href={`/jobs/pools/${poolName}`}
+        className="text-blue-600 hover:underline"
+      >
+        {poolName}
+      </Link>
+    );
+  }
+  // Pool exists but no matching hash found - likely terminated
+  return `${poolName} (terminated)`;
 };
