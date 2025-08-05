@@ -18,20 +18,14 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import aiohttp
 import colorama
 
-from sky import admin_policy
-from sky import backends
 from sky import exceptions
-from sky import models
 from sky import sky_logging
-import sky.catalog
 from sky.client import common as client_common
 from sky.client import sdk
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
-from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common
@@ -44,6 +38,12 @@ if typing.TYPE_CHECKING:
     import io
 
     import sky
+    import sky.catalog
+    from sky import admin_policy
+    from sky import backends
+    from sky import models
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    from sky.skylet import job_lib
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
@@ -297,7 +297,7 @@ async def list_accelerators(
     require_price: bool = True,
     case_sensitive: bool = True,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Dict[str, List[sky.catalog.common.InstanceTypeInfo]]:
+) -> Dict[str, List['sky.catalog.common.InstanceTypeInfo']]:
     """Async version of list_accelerators() that lists the names of all
     accelerators offered by Sky."""
     request_id = await context_utils.to_thread(sdk.list_accelerators, gpus_only,
@@ -339,9 +339,9 @@ async def optimize(
         dag: 'sky.Dag',
         minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
         admin_policy_request_options: Optional[
-            admin_policy.RequestOptions] = None,
+            'admin_policy.RequestOptions'] = None,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> sky.dag.Dag:
+) -> 'sky.dag.Dag':
     """Async version of optimize() that finds the best execution plan for the
       given DAG."""
     request_id = await context_utils.to_thread(sdk.optimize, dag, minimize,
@@ -374,7 +374,7 @@ async def launch(
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -386,7 +386,7 @@ async def launch(
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
-) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+) -> Tuple[Optional[int], Optional['backends.ResourceHandle']]:
     """Async version of launch() that launches a cluster or task."""
     request_id = await context_utils.to_thread(
         sdk.launch, task, cluster_name, retry_until_up,
@@ -407,9 +407,9 @@ async def exec(  # pylint: disable=redefined-builtin
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
-) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+) -> Tuple[Optional[int], Optional['backends.ResourceHandle']]:
     """Async version of exec() that executes a task on an existing cluster."""
     request_id = await context_utils.to_thread(sdk.exec, task, cluster_name,
                                                dryrun, down, backend)
@@ -449,7 +449,7 @@ async def start(
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
-) -> backends.CloudVmRayResourceHandle:
+) -> 'backends.CloudVmRayResourceHandle':
     """Async version of start() that restarts a cluster."""
     request_id = await context_utils.to_thread(sdk.start, cluster_name,
                                                idle_minutes_to_autostop,
@@ -529,7 +529,7 @@ async def job_status(
     cluster_name: str,
     job_ids: Optional[List[int]] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
+) -> Dict[Optional[int], Optional['job_lib.JobStatus']]:
     """Async version of job_status() that gets the status of jobs on a
       cluster."""
     request_id = await context_utils.to_thread(sdk.job_status, cluster_name,
@@ -703,7 +703,7 @@ async def realtime_kubernetes_gpu_availability(
     quantity_filter: Optional[int] = None,
     is_ssh: Optional[bool] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
+) -> List[Tuple[str, List['models.RealtimeGpuAvailability']]]:
     """Async version of realtime_kubernetes_gpu_availability() that gets the
       real-time Kubernetes GPU availability."""
     request_id = await context_utils.to_thread(
@@ -720,7 +720,7 @@ async def realtime_kubernetes_gpu_availability(
 async def kubernetes_node_info(
     context: Optional[str] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> models.KubernetesNodesInfo:
+) -> 'models.KubernetesNodesInfo':
     """Async version of kubernetes_node_info() that gets the resource
     information for all the nodes in the cluster."""
     request_id = await context_utils.to_thread(sdk.kubernetes_node_info,
@@ -735,8 +735,8 @@ async def kubernetes_node_info(
 @annotations.client_api
 async def status_kubernetes(
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Tuple[List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
-           List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
+) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+           List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
            List[Dict[str, Any]], Optional[str]]:
     """Async version of status_kubernetes() that gets all SkyPilot clusters
       and jobs in the Kubernetes cluster."""
