@@ -146,9 +146,6 @@ apiService:
 # Authentication configuration for the API server
 # @schema type: [object, null]
 auth:
-  # Note: we add new configuration entries instead of reusing ingress.oauth2-proxy because:
-  # 1. Make the semantic clearer: oauth2-proxy at the API server is an implemenation detail instead of an user-facing proxy;
-  # 2. The OAuth integration is not supported in old versions, enable it implicitly will break the deployment;
   # OAuth Proxy based authentication for the API server
   # @schema type: [object, null]
   oauth:

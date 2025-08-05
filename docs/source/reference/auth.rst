@@ -293,13 +293,22 @@ OAuth migration guide
     .. code-block:: console
 
         # NAMESPACE and RELEASE_NAME are the same as the ones used in the Helm deployment
-        $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
-          --set ingress.oauth2-proxy.enabled=false \
-          --set auth.oauth.enabled=true \
-          --set auth.oauth.oidc-issuer-url=https://<ISSUER URL> \
-          --set auth.oauth.client-id=<CLIENT ID> \
-          --set auth.oauth.client-secret=<CLIENT SECRET> \
-          --set auth.oauth.email-domain=<EMAIL DOMAIN> # optional
+        $ helm get values $RELEASE_NAME -n $NAMESPACE -o yaml > values.yaml
+
+        # Edit values.yaml, move the values from ingress.oauth2-proxy.* to auth.oauth.*
+        # Preview the changes, you should see the following diff:
+        $ diff values.yaml <(sed 's/^ingress:/auth:/;s/^  oauth2-proxy:/  oauth:/' values.yaml)
+        4,5c4,5
+        < ingress:
+        <   oauth2-proxy:
+        ---
+        > auth:
+        >   oauth:
+        $ sed -i 's/^ingress:/auth:/;s/^  oauth2-proxy:/  oauth:/' values.yaml
+
+        # Upgrade the helm chart with mutated values
+        $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reset-then-reuse-values \
+          -f values.yaml
 
     The migration will not break authenticated clients as long as the OAuth provider config is not changed.
 

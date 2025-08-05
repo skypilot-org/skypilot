@@ -1,6 +1,4 @@
 """Authentication module."""
-
-# TODO(hailong): Remove this function and use request.state.auth_user instead.
 import json
 from typing import Optional
 
@@ -13,6 +11,7 @@ from sky.skylet import constants
 logger = sky_logging.init_logger(__name__)
 
 
+# TODO(hailong): Remove this function and use request.state.auth_user instead.
 async def override_user_info_in_request_body(request: fastapi.Request,
                                              auth_user: Optional[models.User]):
     if auth_user is None:
