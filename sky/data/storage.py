@@ -886,8 +886,7 @@ class Storage(object):
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius',
-                    'cw'
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
