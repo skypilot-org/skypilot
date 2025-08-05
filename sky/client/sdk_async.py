@@ -790,7 +790,8 @@ async def dashboard(starting_page: Optional[str] = None) -> None:
 async def api_info() -> responses.APIHealthResponse:
     """Async version of api_info() that gets the server's status, commit and
       version."""
-    return await context_utils.to_thread(sdk.api_info)
+    return responses.APIHealthResponse(
+        **(await context_utils.to_thread(sdk.api_info)))
 
 
 @usage_lib.entrypoint
