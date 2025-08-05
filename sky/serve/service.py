@@ -234,8 +234,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         if not success:
             cleanup_storage(tmp_task_yaml)
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Service {service_name} already exists '
-                                 'in service.py.')
+                raise ValueError(f'Service {service_name} already exists.')
 
         # Create the service working directory.
         os.makedirs(service_dir, exist_ok=True)

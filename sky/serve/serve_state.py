@@ -16,7 +16,6 @@ from sky.serve import constants
 from sky.utils.db import db_utils
 
 if typing.TYPE_CHECKING:
-
     from sky.serve import replica_managers
     from sky.serve import service_spec
 
@@ -301,7 +300,7 @@ def add_service(name: str, controller_job_id: int, policy: str,
                 (name, controller_job_id, status, policy,
                 requested_resources_str, load_balancing_policy, tls_encrypted,
                 pool, controller_pid)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (name, controller_job_id, status.value, policy,
                  requested_resources_str, load_balancing_policy,
                  int(tls_encrypted), int(pool), controller_pid))
