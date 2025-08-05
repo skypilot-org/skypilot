@@ -232,54 +232,27 @@ export function formatDuration(durationInSeconds) {
 export function formatLogs(str) {
   if (!str) return '';
 
-  // Filter out unwanted lines
-  const lines = str
+  // Remove ANSI escape codes
+  const cleaned = stripAnsiCodes(str);
+
+  // Split into lines and format each one
+  return cleaned
     .split('\n')
-    .filter(
-      (line) =>
+    .filter((line) => {
+      // Filter out empty lines and rich terminal formatting artifacts
+      return line.trim() !== '' && // remove empty
         !line.match(/<rich_.*?\[bold cyan\]/) &&
         !line.match(/<rich_.*>.*<\/rich_.*>/) &&
         !line.match(/├──/) &&
-        !line.match(/└──/)
-    );
-
-  // Remove ANSI escape codes
-  str = stripAnsiCodes(lines.join('\n'));
-
-  // Process each line
-  return str
-    .split('\n')
+        !line.match(/└──/);
+    })
     .map((line) => {
-      // Match the format: "I 04-14 02:07:19 controller.py:59] DAG:"
-      const standardMatch = line.match(
-        /^([IWED])\s+(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+([^:]+:\d+\])(.*)/
-      );
-
-      if (standardMatch) {
-        const [_, level, timestamp, location, message] = standardMatch;
-        const logLevel =
-          {
-            I: 'INFO',
-            W: 'WARNING',
-            E: 'ERROR',
-            D: 'DEBUG',
-          }[level] || '';
-
-        return `<span class="log-line ${logLevel}"><span class="level">${level}</span><span class="timestamp">${timestamp}</span><span class="location">${location}</span><span class="message">${message}</span></span>`;
-      }
-
-      // If it doesn't match the standard format, try to split on parentheses content
-      const parts = line.match(/^(\([^)]+\))(.*)$/);
-      if (parts) {
-        const [_, prefix, rest] = parts;
-        return `<span class="log-line"><span class="log-prefix">${prefix}</span><span class="log-rest">${rest}</span></span>`;
-      }
-
-      // If no patterns match, return the line as is
+      // Wrap each line in log formatting
       return `<span class="log-line"><span class="message">${line}</span></span>`;
     })
     .join('\n');
 }
+
 
 export const logStyles = `
   .logs-container {
@@ -426,7 +399,7 @@ export function LogFilter({ logs, controller = false }) {
       )}
       <div
         className="logs-container"
-        dangerouslySetInnerHTML={{ __html: filteredLogs }}
+        dangerouslySetInnerHTML={{ __html: formatLogs(filteredLogs) }}
       />
     </div>
   );

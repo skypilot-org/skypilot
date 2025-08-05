@@ -12,7 +12,7 @@ import { RotateCwIcon } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
 import { streamClusterJobLogs } from '@/data/connectors/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
-import { LogFilter, formatLogs } from '@/components/utils';
+import { LogFilter, formatLogs, stripAnsiCodes } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { UserDisplay } from '@/components/elements/UserDisplay';
@@ -81,7 +81,7 @@ export function JobDetailPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [logs, setLogs] = useState([]);
+  const [logs, setLogs] = useState('');
   const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -102,28 +102,79 @@ export function JobDetailPage() {
 
   const handleRefreshLogs = () => {
     setIsRefreshingLogs((prev) => !prev);
-    setLogs([]);
+    setLogs('');
   };
 
   useEffect(() => {
     let active = true;
-
+  
     if (!cluster || !job || isPending) {
       setIsLoadingLogs(false);
       return () => {
         active = false;
       };
     }
-
+  
     setIsLoadingLogs(true);
-
+  
     streamClusterJobLogs({
       clusterName: cluster,
       jobId: job,
-      onNewLog: (log) => {
+      onNewLog: (chunk) => {
         if (active) {
-          const strippedLog = formatLogs(log);
-          setLogs((prevLogs) => [...prevLogs, strippedLog]);
+          setLogs((prevLogs) => {
+            // Split the chunk into lines
+            const newLines = chunk.split('\n').filter(line => line.trim());
+            
+            let updatedLogs = prevLogs;
+            
+            for (const line of newLines) {
+              // Clean the line (remove ANSI codes)
+              const cleanLine = stripAnsiCodes(line);
+              
+              // Check if this is a progress bar line
+              const isProgressBar = /\d+%\s*\|/.test(cleanLine);
+              
+              if (isProgressBar) {
+                // Extract process identifier from the new line
+                const processMatch = cleanLine.match(/^\(([^)]+)\)/);
+                
+                if (processMatch && updatedLogs) {
+                  // Look for the last progress bar from the same process in existing logs
+                  const existingLines = updatedLogs.split('\n');
+                  let replaced = false;
+                  
+                  // Search from the end for efficiency
+                  for (let i = existingLines.length - 1; i >= 0; i--) {
+                    const existingLine = existingLines[i];
+                    if (/\d+%\s*\|/.test(existingLine)) {
+                      const existingProcessMatch = existingLine.match(/^\(([^)]+)\)/);
+                      if (existingProcessMatch && existingProcessMatch[1] === processMatch[1]) {
+                        // Found a progress bar from the same process, replace it
+                        existingLines[i] = cleanLine;
+                        updatedLogs = existingLines.join('\n');
+                        replaced = true;
+                        break;
+                      }
+                    }
+                  }
+                  
+                  if (!replaced) {
+                    // No existing progress bar from this process, append
+                    updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
+                  }
+                } else {
+                  // First line or no process match, just append
+                  updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
+                }
+              } else {
+                // Regular log line, just append
+                updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
+              }
+            }
+            
+            return updatedLogs;
+          });
         }
       },
       workspace: clusterData?.workspace,
@@ -139,17 +190,17 @@ export function JobDetailPage() {
           setIsLoadingLogs(false);
         }
       });
-
+  
     return () => {
       active = false;
     };
-  }, [cluster, job, isRefreshingLogs, isPending, clusterData]);
+  }, [cluster, job, isRefreshingLogs, isPending, clusterData]);  
 
   // Handle manual refresh
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     setIsRefreshingLogs((prev) => !prev);
-    setLogs([]);
+    setLogs('');
     try {
       if (refreshData) {
         await refreshData();
@@ -363,7 +414,7 @@ export function JobDetailPage() {
                     </div>
                   ) : (
                     <div className="max-h-96 overflow-y-auto">
-                      <LogFilter logs={logs.join('')} />
+                      <LogFilter logs={logs} />
                     </div>
                   )}
                 </div>
