@@ -841,7 +841,7 @@ def test_managed_jobs_storage(generic_cloud: str):
     # However, we inject this testing only for AWS and GCP since they are the
     # supported object storage providers in SkyPilot.
     if generic_cloud == 'aws':
-        region = 'eu-central-1'
+        region = 'us-east-2'
         region_flag = f'/{region}'
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.S3, bucket_name=output_storage_name)
