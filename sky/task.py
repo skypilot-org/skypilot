@@ -248,6 +248,7 @@ class Task:
         workdir: Optional[Union[str, Dict[str, Any]]] = None,
         num_nodes: Optional[int] = None,
         file_mounts: Optional[Dict[str, str]] = None,
+        storage_mounts: Optional[Dict[str, storage_lib.Storage]] = None,
         volumes: Optional[Dict[str, str]] = None,
         resources: Optional[Union['resources_lib.Resources',
                                   List['resources_lib.Resources'],
@@ -335,6 +336,8 @@ class Task:
         self.name = name
         self.run = run
         self.storage_mounts: Dict[str, storage_lib.Storage] = {}
+        if storage_mounts is not None:
+            self.set_storage_mounts(storage_mounts)
         self.storage_plans: Dict[storage_lib.Storage,
                                  storage_lib.StoreType] = {}
         self.setup = setup
@@ -373,7 +376,7 @@ class Task:
 
         self.time_estimator_func: Optional[Callable[['sky.Resources'],
                                                     int]] = None
-        self.file_mounts: Optional[Dict[str, str]] = file_mounts
+        self.file_mounts: Optional[Dict[str, str]] = None
         if file_mounts is not None:
             self.set_file_mounts(file_mounts)
 
