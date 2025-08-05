@@ -656,11 +656,7 @@ class Task:
             secrets=config.pop('secrets', None),
             volumes=config.pop('volumes', None),
             event_callback=config.pop('event_callback', None),
-            _file_mounts_mapping=config.pop(
-                '_file_mounts_mapping',
-                # BW compatibility: This field used to be named file_mounts_mapping.
-                # TODO(syang): Remove this in 0.11.0.
-                config.pop('file_mounts_mapping', None)),
+            _file_mounts_mapping=config.pop('file_mounts_mapping', None),
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
         )
@@ -797,11 +793,7 @@ class Task:
             pool = service_spec.SkyServiceSpec.from_yaml_config(pool)
             task.set_service(pool)
 
-        volume_mounts = config.pop(
-            '_volume_mounts',
-            # BW compatibility: This field used to be named volume_mounts.
-            # TODO(syang): Remove this in 0.11.0.
-            config.pop('volume_mounts', None))
+        volume_mounts = config.pop('volume_mounts', None)
         if volume_mounts is not None:
             task.volume_mounts = []
             for vol in volume_mounts:
@@ -1676,10 +1668,10 @@ class Task:
                 for mount_path, storage in self.storage_mounts.items()
             })
 
-        add_if_not_none('_file_mounts_mapping', self.file_mounts_mapping)
+        add_if_not_none('file_mounts_mapping', self.file_mounts_mapping)
         add_if_not_none('volumes', self.volumes)
         if self.volume_mounts is not None:
-            config['_volume_mounts'] = [
+            config['volume_mounts'] = [
                 volume_mount.to_yaml_config()
                 for volume_mount in self.volume_mounts
             ]
