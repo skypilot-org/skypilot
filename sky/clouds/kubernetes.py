@@ -818,6 +818,10 @@ class Kubernetes(clouds.Cloud):
             assert len(accelerators) == 1, resources
             # GPUs requested - build instance type.
             acc_type, acc_count = list(accelerators.items())[0]
+            # If acc_type contains spaces, return empty list since Kubernetes
+            # does not support spaces in label values
+            if ' ' in acc_type:
+                return resources_utils.FeasibleResources([], [], None)
 
             # Parse into KubernetesInstanceType
             k8s_instance_type = (kubernetes_utils.KubernetesInstanceType.
