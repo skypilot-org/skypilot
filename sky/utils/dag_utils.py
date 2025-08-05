@@ -61,7 +61,7 @@ def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
                 'Expected a sky.Task or sky.Dag but received argument of type: '
                 f'{type(entrypoint)}')
 
-    run_prelaunch_setup(dag)
+    run_prelaunch_setup(converted_dag)
     return converted_dag
 
 
