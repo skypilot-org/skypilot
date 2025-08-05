@@ -3694,6 +3694,9 @@ def show_gpus(
         print_section_titles = False
         if (is_ssh and query_ssh_realtime_gpu or query_k8s_realtime_gpu):
             context = region
+            # Convert '*' back to None for GPU query to query all contexts
+            if context == '*':
+                context = None
 
             try:
                 # If --cloud kubernetes is not specified, we want to catch
@@ -3745,9 +3748,13 @@ def show_gpus(
             print_section_titles = True
             # TODO(romilb): Show filtered per node GPU availability here as well
             try:
+                context = region
+                # Convert '*' back to None for GPU query to query all contexts
+                if context == '*':
+                    context = None
                 (k8s_realtime_infos, total_table,
                  all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
-                     context=region,
+                     context=context,
                      name_filter=name,
                      quantity_filter=quantity,
                      is_ssh=is_ssh)
