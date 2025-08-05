@@ -39,6 +39,7 @@ from sky.utils import context_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import ux_utils
+from sky.server import responses
 
 if typing.TYPE_CHECKING:
     import io
@@ -786,7 +787,7 @@ async def dashboard(starting_page: Optional[str] = None) -> None:
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_info() -> Dict[str, Any]:
+async def api_info() -> responses.APIHealthResponse:
     """Async version of api_info() that gets the server's status, commit and
       version."""
     return await context_utils.to_thread(sdk.api_info)
