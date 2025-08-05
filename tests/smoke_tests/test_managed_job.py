@@ -944,7 +944,6 @@ def test_managed_jobs_storage(generic_cloud: str):
     # This is useful for jobs consolidation mode, where the job submission is
     # very fast (don't need to launch a controller VM) and the bucket might not
     # be created yet immediately after the job submission.
-    region_validation_cmd_with_retry = region_validation_base_cmd
     region_validation_timeout_for_consolidation = 30
     # Only apply to non-trivial region validation commands.
     if region_validation_base_cmd != 'true':
