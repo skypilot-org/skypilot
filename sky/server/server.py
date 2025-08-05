@@ -25,6 +25,7 @@ import aiofiles
 import fastapi
 from fastapi.middleware import cors
 from passlib.hash import apr_md5_crypt
+import sqlalchemy
 import starlette.middleware.base
 import uvloop
 
@@ -450,10 +451,11 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     """FastAPI lifespan context manager."""
     del app  # unused
     # Initialize databases first, before any background tasks
-    logger.info('Initializing global user state database...')
+    logger.info('Server: Initializing global user state database...')
     global_user_state.initialize_and_get_db()
-    logger.info('Initializing request database...')
+    logger.info('Server: Initializing request database...')
     requests_lib.reset_db_and_logs()
+    logger.info('Server: Database initialization completed')
     
     # Startup: Run background tasks
     for event in daemons.INTERNAL_REQUEST_DAEMONS:
