@@ -247,7 +247,12 @@ class Task:
         secrets: Optional[Dict[str, str]] = None,
         workdir: Optional[Union[str, Dict[str, Any]]] = None,
         num_nodes: Optional[int] = None,
+        file_mounts: Optional[Dict[str, str]] = None,
+        storage_mounts: Optional[Dict[str, storage_lib.Storage]] = None,
         volumes: Optional[Dict[str, str]] = None,
+        resources: Optional[Union['resources_lib.Resources',
+                                  List['resources_lib.Resources'],
+                                  Set['resources_lib.Resources']]] = None,
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
@@ -315,6 +320,16 @@ class Task:
             setup/run command, where ``run`` can either be a str, meaning all
             nodes get the same command, or a lambda, with the semantics
             documented above.
+          file_mounts: An optional dict of ``{remote_path: (local_path|cloud
+            URI)}``, where remote means the VM(s) on which this Task will
+            eventually run on, and local means the node from which the task is
+            launched.
+          storage_mounts: an optional dict of ``{mount_path: sky.Storage
+            object}``, where mount_path is the path inside the remote VM(s)
+            where the Storage object will be mounted on.
+          resources: either a sky.Resources, a set of them, or a list of them.
+            A set or a list of resources asks the optimizer to "pick the
+            best of these resources" to run this task.
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
@@ -377,6 +392,13 @@ class Task:
             volume_mounts)
 
         self._metadata = metadata if metadata is not None else {}
+
+        if resources is not None:
+            self.set_resources(resources)
+        if storage_mounts is not None:
+            self.set_storage_mounts(storage_mounts)
+        if file_mounts is not None:
+            self.set_file_mounts(file_mounts)
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
