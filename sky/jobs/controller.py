@@ -637,10 +637,11 @@ class JobsController:
                     await
                     managed_job_state.get_pool_submit_info_async(self._job_id))
                 assert cluster_name is not None
-            await managed_job_state.set_recovered(self._job_id,
-                                                  task_id,
-                                                  recovered_time=recovered_time,
-                                                  callback_func=callback_func)
+            await managed_job_state.set_recovered_async(
+                self._job_id,
+                task_id,
+                recovered_time=recovered_time,
+                callback_func=callback_func)
 
     async def run(self):
         """Run controller logic and handle exceptions."""

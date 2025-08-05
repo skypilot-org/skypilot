@@ -234,6 +234,7 @@ async def scheduled_launch(job_id: int):
     if (await state.get_job_schedule_state_async(job_id) !=
             state.ManagedJobScheduleState.LAUNCHING):
         # Since we aren't LAUNCHING, we need to wait to be scheduled.
+        logger.info(await state.get_job_schedule_state_async(job_id))
         await state.scheduler_set_alive_waiting_async(job_id)
     yield
     await state.scheduler_set_alive_async(job_id)

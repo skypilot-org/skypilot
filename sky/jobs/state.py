@@ -739,14 +739,14 @@ async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
     if recovering:
         target_status = ManagedJobStatus.RECOVERING.value
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        count = await session.execute(
+        result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
                     spot_table.c.task_id == task_id,
-                    spot_table.c.status == ManagedJobStatus.PENDING.value,
                     spot_table.c.end_at.is_(None),
                 )).values({spot_table.c.status: target_status}))
+        count = result.rowcount
         await session.commit()
         logger.debug(f'back to {target_status}')
         if count != 1:
@@ -835,32 +835,6 @@ def set_recovering(job_id: int, task_id: int, force_transit_to_recovering: bool,
                 f'Failed to set the task to recovering. '
                 f'({count} rows updated)')
     callback_func('RECOVERING')
-
-
-@_init_db
-def set_recovered(job_id: int, task_id: int, recovered_time: float,
-                  callback_func: CallbackType):
-    """Set the task to recovered."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(spot_table).filter(
-            sqlalchemy.and_(
-                spot_table.c.spot_job_id == job_id,
-                spot_table.c.task_id == task_id,
-                spot_table.c.status == ManagedJobStatus.RECOVERING.value,
-                spot_table.c.end_at.is_(None),
-            )).update({
-                spot_table.c.status: ManagedJobStatus.RUNNING.value,
-                spot_table.c.last_recovered_at: recovered_time,
-                spot_table.c.recovery_count: spot_table.c.recovery_count + 1,
-            })
-        session.commit()
-        if count != 1:
-            raise exceptions.ManagedJobStatusError(
-                f'Failed to set the task to recovered. '
-                f'({count} rows updated)')
-    logger.info('==== Recovered. ====')
-    callback_func('RECOVERED')
 
 
 @_init_db
@@ -1594,7 +1568,7 @@ async def scheduler_set_alive_waiting_async(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        updated_count = await session.execute(
+        result = await session.execute(
             sqlalchemy.update(job_info_table).where(
                 sqlalchemy.and_(
                     job_info_table.c.spot_job_id == job_id,
@@ -1605,6 +1579,7 @@ async def scheduler_set_alive_waiting_async(job_id: int) -> None:
                         job_info_table.c.schedule_state:
                             ManagedJobScheduleState.ALIVE_WAITING.value
                     }))
+        updated_count = result.rowcount
         await session.commit()
         assert updated_count == 1, (job_id, updated_count)
 
@@ -2204,7 +2179,7 @@ async def scheduler_set_done_async(job_id: int,
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        updated_count = await session.execute(
+        result = await session.execute(
             sqlalchemy.update(job_info_table).where(
                 sqlalchemy.and_(
                     job_info_table.c.spot_job_id == job_id,
@@ -2214,6 +2189,7 @@ async def scheduler_set_done_async(job_id: int,
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.DONE.value
                 }))
+        updated_count = result.rowcount
         await session.commit()
         if not idempotent:
-            assert updated_count.rowcount == 1, (job_id, updated_count)
+            assert updated_count == 1, (job_id, updated_count)
