@@ -552,7 +552,7 @@ def update_service_status(pool: bool) -> None:
             # still used for controller process management. We set the
             # value_to_replace_existing_entries to -1 to indicate historical
             # services.
-            # TODO(tian): Remove before 0.12.0.
+            # TODO(tian): Remove before 0.13.0.
             controller_job_id = record['controller_job_id']
             assert controller_job_id is not None
             controller_status = job_lib.get_status(controller_job_id)
