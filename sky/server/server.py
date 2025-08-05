@@ -17,7 +17,7 @@ import resource
 import shutil
 import sys
 import threading
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple
+from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
@@ -48,6 +48,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
+from sky.server import responses
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
@@ -73,7 +74,6 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
-from sky.server import responses
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -1532,7 +1532,9 @@ async def api_status(
         return encoded_request_tasks
 
 
-@app.get('/api/health')
+@app.get('/api/health',
+         response_model=responses.APIHealthResponse,
+         response_model_exclude_unset=True)
 async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
@@ -1571,7 +1573,8 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
             # - There is no harm when an malicious client calls /api/health
             #   without authentication since no sensitive information is
             #   returned.
-            return {'status': common.ApiServerStatus.HEALTHY}
+            return responses.APIHealthResponse(
+                status=common.ApiServerStatus.HEALTHY,)
         # TODO(aylei): remove this after min_compatible_api_version >= 14.
         if client_version < 14:
             # For Client with API version < 14, the NEEDS_AUTH status is not
@@ -1590,8 +1593,8 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         version_on_disk=common.get_skypilot_version_on_disk(),
         commit=sky.__commit__,
         user=user if user is not None else None,
-        basic_auth_enabled=os.environ.get(
-            constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
+        basic_auth_enabled=os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
+                                          'false').lower() == 'true',
     )
 
 
