@@ -881,8 +881,7 @@ class Kubernetes(clouds.Cloud):
                     return True, _bright_green_color('enabled.')
             else:
                 assert check_result[1] is not None
-                return False, (_red_color('disabled.') +
-                               _dim_color(f' Reason: {check_result[1]}'))
+                return False, check_result[1]
         except Exception as e:  # pylint: disable=broad-except
             return False, _red_color(str(e))
 
