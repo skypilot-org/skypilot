@@ -213,6 +213,7 @@ def up(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 remote_user_config_path=remote_config_yaml_path,
                 local_user_config=mutated_user_config,
+                is_consolidation_mode=controller_job_id is not None,
             ),
         }
         common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,

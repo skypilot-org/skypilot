@@ -348,6 +348,7 @@ def launch(
                     # afterwards without recreate the controller. Need to
                     # revisit this.
                     local_user_config=mutated_user_config,
+                    is_consolidation_mode=consolidation_mode_job_id is not None,
                 ),
             }
 

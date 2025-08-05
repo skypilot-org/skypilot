@@ -14,6 +14,7 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import models
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
@@ -463,7 +464,8 @@ def download_and_stream_job_log(
 
 def shared_controller_vars_to_fill(
         controller: Controllers, remote_user_config_path: str,
-        local_user_config: Dict[str, Any]) -> Dict[str, str]:
+        local_user_config: Dict[str, Any],
+        is_consolidation_mode: bool) -> Dict[str, str]:
     if not local_user_config:
         local_user_config_path = None
     else:
@@ -498,11 +500,18 @@ def shared_controller_vars_to_fill(
     env_vars: Dict[str, str] = {
         env.env_key: str(int(env.get())) for env in env_options.Options
     }
+    if is_consolidation_mode:
+        user_name = user_hash = 'consolidation-system'
+        global_user_state.add_or_update_user(
+            models.User(id=user_hash, name=user_name))
+    else:
+        user_name = common_utils.get_current_user_name()
+        user_hash = common_utils.get_user_hash()
     env_vars.update({
         # Should not use $USER here, as that env var can be empty when
         # running in a container.
-        constants.USER_ENV_VAR: common_utils.get_current_user_name(),
-        constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
+        constants.USER_ENV_VAR: user_name,
+        constants.USER_ID_ENV_VAR: user_hash,
         # Skip cloud identity check to avoid the overhead.
         env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.env_key: '1',
         # Disable minimize logging to get more details on the controller.

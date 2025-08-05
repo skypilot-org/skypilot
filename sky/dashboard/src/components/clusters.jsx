@@ -627,11 +627,25 @@ export function ClusterTable({
   const sortedData = React.useMemo(() => {
     // Main filter function
     const filterData = (data, filters) => {
-      if (filters.length === 0) {
-        return data;
+      // First, filter out consolidation-system clusters by default
+      // unless there's an explicit user filter that includes consolidation-system
+      let filteredData = data;
+      
+      const userFilters = filters.filter(filter => filter.property === 'User');
+      const hasConsolidationSystemFilter = userFilters.some(filter => 
+        filter.value && filter.value.toLowerCase() === 'consolidation-system'
+      );
+      
+      // Only exclude consolidation-system if there's no explicit user filter for it
+      if (userFilters.length === 0 || !hasConsolidationSystemFilter) {
+        filteredData = data.filter((item) => item.user !== 'consolidation-system');
       }
 
-      return data.filter((item) => {
+      if (filters.length === 0) {
+        return filteredData;
+      }
+
+      return filteredData.filter((item) => {
         let result = null;
 
         for (let i = 0; i < filters.length; i++) {
