@@ -107,6 +107,10 @@ def upgrade():
                                              'last_creation_command',
                                              sa.Text(),
                                              server_default=None)
+        db_utils.add_column_to_table_alembic('cluster_history',
+                                             'workspace',
+                                             sa.Text(),
+                                             server_default=None)
 
         # Add all missing columns to users table
         db_utils.add_column_to_table_alembic('users',
