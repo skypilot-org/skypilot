@@ -313,6 +313,22 @@ def add_service(name: str, controller_job_id: int, policy: str,
 
 
 @init_db
+def update_service_controller_pid(service_name: str,
+                                  controller_pid: int) -> None:
+    """Updates the controller pid of a service.
+
+    This is used to update the controller pid of a service on ha recovery.
+    """
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE services SET
+            controller_pid=(?) WHERE name=(?)""",
+            (controller_pid, service_name))
+
+
+@init_db
 def remove_service(service_name: str) -> None:
     """Removes a service from the database."""
     assert _DB_PATH is not None

@@ -246,6 +246,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         # sync to a tmp file first and then copy it to the final name
         # if there is no name conflict.
         shutil.copy(tmp_task_yaml, service_task_yaml)
+    else:
+        serve_state.update_service_controller_pid(service_name, os.getpid())
 
     controller_process = None
     load_balancer_process = None
