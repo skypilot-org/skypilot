@@ -449,6 +449,12 @@ async def cleanup_upload_ids():
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
     del app  # unused
+    # Initialize databases first, before any background tasks
+    logger.info('Initializing global user state database...')
+    global_user_state.initialize_and_get_db()
+    logger.info('Initializing request database...')
+    requests_lib.reset_db_and_logs()
+    
     # Startup: Run background tasks
     for event in daemons.INTERNAL_REQUEST_DAEMONS:
         if event.should_skip():
@@ -1773,11 +1779,6 @@ if __name__ == '__main__':
     import uvicorn
 
     from sky.server import uvicorn as skyuvicorn
-
-    # Initialize global user state db
-    global_user_state.initialize_and_get_db()
-    # Initialize request db
-    requests_lib.reset_db_and_logs()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')
