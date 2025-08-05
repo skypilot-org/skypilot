@@ -115,13 +115,11 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                     end_streaming_flag = True
                 if (args.stream_logs and start_streaming_flag and
                         not end_streaming_flag):
-                    # writes to run.log
                     print(streaming_prefix + line,
                           end='',
                           file=out_stream,
                           flush=True)
                 if args.log_path != '/dev/null':
-                    # writes to tasks/run.log
                     fout.write(line)
                     fout.flush()
                 line_processor.process_line(line)
