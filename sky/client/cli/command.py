@@ -3463,6 +3463,17 @@ def show_gpus(
                                                                region,
                                                                zone=None)
 
+    # cloud and region could be '*' from _handle_infra_cloud_region_zone_options
+    # which normally indicates to
+    # _make_task_or_dag_from_entrypoint_with_overrides -> _parse_override_params
+    # to disregard the cloud and region from the YAML.
+    # In show_gpus, there is no YAML, so we need to handle the '*' value
+    # directly here. We should use None instead to indicate "any".
+    if cloud == '*':
+        cloud = None
+    if region == '*':
+        region = None
+
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
