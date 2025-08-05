@@ -97,6 +97,8 @@ def stream_response(request_id: Optional[server_common.RequestId],
     Args:
         request_id: The request ID of the request to stream. May be a full
             request ID or a prefix.
+            If None, the latest request submitted to the API server is streamed.
+            Using None request_id is not recommended in multi-user environments.
         response: The HTTP response.
         output_stream: The output stream to write to. If None, print to the
             console.
@@ -1834,6 +1836,8 @@ def stream_and_get(
     Args:
         request_id: The request ID of the request to stream. May be a full
             request ID or a prefix.
+            If None, the latest request submitted to the API server is streamed.
+            Using None request_id is not recommended in multi-user environments.
         log_path: The path to the log file to stream.
         tail: The number of lines to show from the end of the logs.
             If None, show all logs.
