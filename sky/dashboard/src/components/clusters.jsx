@@ -630,15 +630,20 @@ export function ClusterTable({
       // First, filter out consolidation-system clusters by default
       // unless there's an explicit user filter that includes consolidation-system
       let filteredData = data;
-      
-      const userFilters = filters.filter(filter => filter.property === 'User');
-      const hasConsolidationSystemFilter = userFilters.some(filter => 
-        filter.value && filter.value.toLowerCase() === 'consolidation-system'
+
+      const userFilters = filters.filter(
+        (filter) => filter.property === 'User'
       );
-      
+      const hasConsolidationSystemFilter = userFilters.some(
+        (filter) =>
+          filter.value && filter.value.toLowerCase() === 'consolidation-system'
+      );
+
       // Only exclude consolidation-system if there's no explicit user filter for it
       if (userFilters.length === 0 || !hasConsolidationSystemFilter) {
-        filteredData = data.filter((item) => item.user !== 'consolidation-system');
+        filteredData = data.filter(
+          (item) => item.user !== 'consolidation-system'
+        );
       }
 
       if (filters.length === 0) {
