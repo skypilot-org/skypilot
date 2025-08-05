@@ -96,8 +96,12 @@ class ServiceUpdateEvent(SkyletEvent):
     """
     EVENT_INTERVAL_SECONDS = 300
 
+    def __init__(self, pool: bool) -> None:
+        super().__init__()
+        self._pool = pool
+
     def _run(self):
-        serve_utils.update_service_status()
+        serve_utils.update_service_status(self._pool)
 
 
 class UsageHeartbeatReportEvent(SkyletEvent):

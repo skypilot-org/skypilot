@@ -62,7 +62,6 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
-from sky.server import versions
 from sky.server.requests import requests
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -557,17 +556,17 @@ def _parse_override_params(
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
-        if cloud.lower() == 'none':
+        if cloud.lower() == 'none' or cloud == '*':
             override_params['cloud'] = None
         else:
             override_params['cloud'] = registry.CLOUD_REGISTRY.from_str(cloud)
     if region is not None:
-        if region.lower() == 'none':
+        if region.lower() == 'none' or region == '*':
             override_params['region'] = None
         else:
             override_params['region'] = region
     if zone is not None:
-        if zone.lower() == 'none':
+        if zone.lower() == 'none' or zone == '*':
             override_params['zone'] = None
         else:
             override_params['zone'] = zone
@@ -965,9 +964,10 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
 
     if infra is not None:
         infra_info = infra_utils.InfraInfo.from_str(infra)
-        cloud = infra_info.cloud
-        region = infra_info.region
-        zone = infra_info.zone
+        # Convert None to '*' to ensure proper override behavior
+        cloud = infra_info.cloud if infra_info.cloud is not None else '*'
+        region = infra_info.region if infra_info.region is not None else '*'
+        zone = infra_info.zone if infra_info.zone is not None else '*'
     return cloud, region, zone
 
 
@@ -1832,9 +1832,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
-    remote_api_version = versions.get_remote_api_version()
-    if remote_api_version is None or remote_api_version < 12:
-        show_pools = False
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
@@ -1886,7 +1883,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         return serve_lib.status(service_names=None)
 
     def submit_pools() -> Optional[str]:
-        return managed_jobs.pool_status(pool_names=None)
+        try:
+            return managed_jobs.pool_status(pool_names=None)
+        except exceptions.APINotSupportedError as e:
+            logger.debug(f'Pools are not supported in the remote server: {e}')
+            return None
 
     def submit_workspace() -> Optional[str]:
         try:
@@ -2009,7 +2010,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 controller_utils.Controllers.JOBS_CONTROLLER.value.
                 in_progress_hint(False).format(job_info=job_info))
 
-    if show_pools:
+    if show_pools and pool_status_request_id:
         num_pools = None
         if managed_jobs_query_interrupted:
             msg = 'KeyboardInterrupt'
@@ -3502,7 +3503,14 @@ def show_gpus(
                               (cloud_name is None or cloud_is_ssh))
 
     def _list_to_str(lst):
-        return ', '.join([str(e) for e in lst])
+
+        def format_number(n):
+            # If it's a float that's a whole number, display as int
+            if isinstance(n, float) and n.is_integer():
+                return str(int(n))
+            return str(n)
+
+        return ', '.join([format_number(n) for n in lst])
 
     # TODO(zhwu,romilb): We should move most of these kubernetes related
     # queries into the backend, especially behind the server.

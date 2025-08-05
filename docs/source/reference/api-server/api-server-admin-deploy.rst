@@ -9,6 +9,13 @@ The SkyPilot API server is packaged as a Helm chart which deploys a Kubernetes i
 
     This guide is for admins to deploy the API server. If you are a user looking to connect to the API server, refer to  :ref:`sky-api-server-connect`.
 
+.. tip::
+
+    Deploying the API server to a Kubernetes cluster using Helm provides the best reliability and enables additional features such as :ref:`OAuth2 authentication <api-server-auth-proxy>` and :ref:`metrics <api-server-metrics-setup>`. However, there are two alternative options available for special cases:
+
+    * :ref:`Deploying the API server on cloud VMs <sky-api-server-cloud-deploy>` if you do not have a Kubernetes cluster and do not need the additional features.
+    * :ref:`Sharing an API server for multiple users on a single machine <sky-api-server-in-docker>` if you want to share the API server with multiple users on a single machine instead of exposing it to the public internet (e.g. a shared bastion machine).
+
 Prerequisites
 -------------
 
@@ -19,8 +26,6 @@ Prerequisites
 .. tip::
 
     If you do not have a Kubernetes cluster, refer to :ref:`Kubernetes Deployment Guides <kubernetes-deployment>` to set one up.
-
-    You can also deploy the API server on cloud VMs using an existing SkyPilot installation. See :ref:`sky-api-server-cloud-deploy`.
 
 .. _sky-api-server-helm-deploy-command:
 
@@ -1052,4 +1057,5 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
     GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>
+    Example: Deploy SkyPilot API Server in Docker <examples/api-server-in-docker>
     Example: Deploy on GKE with Cloud SQL <examples/example-deploy-gcp-cloud-sql>
