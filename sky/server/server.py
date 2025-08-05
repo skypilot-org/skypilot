@@ -73,6 +73,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
+from sky.server import responses
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -1532,7 +1533,7 @@ async def api_status(
 
 
 @app.get('/api/health')
-async def health(request: fastapi.Request) -> Dict[str, Any]:
+async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
     Returns:
@@ -1579,19 +1580,19 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
                                         detail='Authentication required')
 
     logger.debug(f'Health endpoint: request.state.auth_user = {user}')
-    return {
-        'status': server_status,
+    return responses.APIHealthResponse(
+        status=server_status,
         # Kept for backward compatibility, clients before 0.11.0 will read this
         # field to check compatibility and hint the user to upgrade the CLI.
         # TODO(aylei): remove this field after 0.13.0
-        'api_version': str(server_constants.API_VERSION),
-        'version': sky.__version__,
-        'version_on_disk': common.get_skypilot_version_on_disk(),
-        'commit': sky.__commit__,
-        'user': user.to_dict() if user is not None else None,
-        'basic_auth_enabled': os.environ.get(
+        api_version=str(server_constants.API_VERSION),
+        version=sky.__version__,
+        version_on_disk=common.get_skypilot_version_on_disk(),
+        commit=sky.__commit__,
+        user=user if user is not None else None,
+        basic_auth_enabled=os.environ.get(
             constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
-    }
+    )
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
