@@ -283,6 +283,8 @@ function shortenTimeForJobs(timeString) {
 export function ManagedJobs() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [poolsLoading, setPoolsLoading] = useState(true); // Start as true for initial load
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const jobsRefreshRef = React.useRef(null);
   const poolsRefreshRef = React.useRef(null);
   const [jobsData, setJobsData] = useState([]);
@@ -302,8 +304,12 @@ export function ManagedJobs() {
     pool: [],
   }); // Option values for properties
 
-  const fetchData = async () => {
+  const fetchData = async (isRefreshButton = false) => {
     setLoading(true);
+    // Only set poolsLoading on initial load, not on refresh button clicks
+    if (!isRefreshButton && isInitialLoad) {
+      setPoolsLoading(true);
+    }
     try {
       const [jobsResponse, poolsResponse] = await Promise.all([
         dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
@@ -315,6 +321,10 @@ export function ManagedJobs() {
       console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
+      if (!isRefreshButton && isInitialLoad) {
+        setPoolsLoading(false);
+        setIsInitialLoad(false);
+      }
     }
   };
 
@@ -330,7 +340,7 @@ export function ManagedJobs() {
     dashboardCache.invalidate(getUsers);
 
     // Refresh parent component data (including poolsData for link matching)
-    fetchData();
+    fetchData(true); // Pass true to indicate it's a refresh button click
 
     // Trigger a re-fetch in both tables via their refreshDataRef
     if (jobsRefreshRef.current) {
@@ -421,6 +431,7 @@ export function ManagedJobs() {
         setOptionValues={setOptionValues}
         onRefresh={handleRefresh}
         poolsData={poolsData}
+        poolsLoading={poolsLoading}
       />
 
       {/* Pools table - always visible */}
@@ -443,6 +454,7 @@ export function ManagedJobsTable({
   setOptionValues,
   onRefresh,
   poolsData,
+  poolsLoading,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -1093,29 +1105,39 @@ export function ManagedJobsTable({
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>
                         <TableCell>
-                          {item.pool
-                            ? (() => {
-                                // Check if pool hash matches to determine if we should link
-                                const matchingPool = poolsData.find(
-                                  (pool) =>
-                                    pool.name === item.pool &&
-                                    pool.hash === item.pool_hash
-                                );
+                          <div
+                            className={
+                              poolsLoading
+                                ? 'blur-sm transition-all duration-300'
+                                : ''
+                            }
+                          >
+                            {poolsLoading
+                              ? '-'
+                              : item.pool
+                                ? (() => {
+                                    // Check if pool hash matches to determine if we should link
+                                    const matchingPool = poolsData.find(
+                                      (pool) =>
+                                        pool.name === item.pool &&
+                                        pool.hash === item.pool_hash
+                                    );
 
-                                if (matchingPool && item.pool_hash) {
-                                  return (
-                                    <Link
-                                      href={`/jobs/pools/${item.pool}`}
-                                      className="text-blue-600 hover:underline"
-                                    >
-                                      {item.pool}
-                                    </Link>
-                                  );
-                                }
-                                // Pool exists but no matching hash found - likely terminated
-                                return `${item.pool} (terminated)`;
-                              })()
-                            : '-'}
+                                    if (matchingPool && item.pool_hash) {
+                                      return (
+                                        <Link
+                                          href={`/jobs/pools/${item.pool}`}
+                                          className="text-blue-600 hover:underline"
+                                        >
+                                          {item.pool}
+                                        </Link>
+                                      );
+                                    }
+                                    // Pool exists but no matching hash found - likely terminated
+                                    return `${item.pool} (terminated)`;
+                                  })()
+                                : '-'}
+                          </div>
                         </TableCell>
                         <TableCell>
                           {item.details ? (
