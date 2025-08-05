@@ -310,8 +310,9 @@ def ha_recovery_for_consolidation_mode(pool: bool):
                         'not exist. Skipping recovery.\n')
                 continue
             rc, out, err = runner.run(script, require_outputs=True)
-            f.write(f'Recovery script returned {rc}. '
-                    f'Output: {out}. Error: {err}\n')
+            if rc:
+                f.write(f'Recovery script returned {rc}. '
+                        f'Output: {out}\nError: {err}\n')
             f.write(f'{capnoun} {service_name} completed recovery at '
                     f'{datetime.datetime.now()}\n')
         f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
