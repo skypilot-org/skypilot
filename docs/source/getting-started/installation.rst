@@ -246,6 +246,7 @@ This will produce a summary like:
     Seeweb: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
+    CoreWeave (for object store): enabled
     Kubernetes: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
@@ -692,6 +693,41 @@ Seeweb |community-badge|
 
     [DEFAULT]
     api_key = <your-api-token>
+
+
+CoreWeave
+~~~~~~~~~~~~~~~~~~
+
+`CoreWeave <https://www.coreweave.com/>`__ provides cloud infrastructure with a focus on object storage. SkyPilot supports CoreWeave Object Storage, which is S3-compatible.
+
+To configure CoreWeave Object Storage access, you can use AWS CLI commands:
+
+.. code-block:: shell
+
+  # Configure your CoreWeave credentials
+  aws configure --profile coreweave
+
+In the prompt, enter your CoreWeave Access Key ID and Secret Access Key. Select your preferred region and :code:`json` for the default output format.
+
+.. code-block:: text
+
+  AWS Access Key ID [None]: <your_access_key_id>
+  AWS Secret Access Key [None]: <your_secret_access_key>
+  Default region name [None]: <REGION>
+  Default output format [None]: json
+
+Then set the endpoint URL and S3 addressing style:
+
+.. code-block:: shell
+
+  aws configure set endpoint_url https://cwobject.com --profile coreweave
+  aws configure set s3.addressing_style virtual --profile coreweave
+
+To obtain your CoreWeave Object Storage credentials:
+
+1. Log into your `CoreWeave Cloud console <https://cloud.coreweave.com/>`__.
+2. Navigate to the Object Storage section.
+3. Generate or retrieve your Access Key ID and Secret Access Key.
 
 
 Request quotas for first time users

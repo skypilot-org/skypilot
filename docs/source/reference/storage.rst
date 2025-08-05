@@ -3,7 +3,7 @@
 Cloud Buckets
 ==============
 
-SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, OCI Object Storage or IBM COS.
+SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, OCI Object Storage or IBM COS.
 
 Buckets are made available to each task at a local path on the remote VM, so
 the task can access bucket objects as if they were local files.

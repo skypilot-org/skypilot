@@ -23,6 +23,7 @@ from sky import skypilot_config
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
+from sky.adaptors import coreweave
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
@@ -61,6 +62,7 @@ STORE_ENABLED_CLOUDS: List[str] = [
     str(clouds.IBM()),
     str(clouds.OCI()),
     str(clouds.Nebius()),
+    str(clouds.CoreWeave()),
     cloudflare.NAME,
 ]
 
@@ -126,6 +128,7 @@ class StoreType(enum.Enum):
     IBM = 'IBM'
     OCI = 'OCI'
     NEBIUS = 'NEBIUS'
+    COREWEAVE = 'COREWEAVE'
     VOLUME = 'VOLUME'
 
     @classmethod
@@ -883,7 +886,7 @@ class Storage(object):
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius'
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'coreweave'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -908,7 +911,7 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://. Got: {source}')
+                        f'r2://, cos://, oci://, nebius://, coreweave://. Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self, name: Optional[str]) -> None:
@@ -923,7 +926,7 @@ class Storage(object):
             """
             prefix = name.split('://')[0]
             prefix = prefix.lower()
-            if prefix in ['s3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius']:
+            if prefix in ['s3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'coreweave', 'coreweave']:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
                         'Prefix detected: `name` cannot start with '
@@ -1058,6 +1061,12 @@ class Storage(object):
                         _bucket_sub_path=self._bucket_sub_path)
                 elif s_type == StoreType.NEBIUS:
                     store = NebiusStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
+                elif s_type == StoreType.COREWEAVE:
+                    store = CoreWeaveStore.from_metadata(
                         s_metadata,
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction,
@@ -4590,6 +4599,80 @@ class NebiusStore(S3CompatibleStore):
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.NEBIUS.get_profile_name(self.name))
         rclone_config = data_utils.Rclone.RcloneStores.NEBIUS.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+
+@register_s3_compatible_store
+class CoreWeaveStore(S3CompatibleStore):
+    """CoreWeaveStore inherits from S3CompatibleStore and represents the backend
+    for CoreWeave Object Storage buckets.
+    """
+
+    NAME = "coreweave"
+    DISPLAY_NAME = "CoreWeave Buckets"
+    URL_PATTERNS = ["coreweave://"]
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for CoreWeave Object Storage."""
+        return S3CompatibleConfig(
+            store_type='COREWEAVE',
+            url_prefix='coreweave://',
+            client_factory=lambda region: data_utils.create_coreweave_client(),
+            resource_factory=lambda name: coreweave.resource('s3').Bucket(name),
+            split_path=data_utils.split_coreweave_path,
+            verify_bucket=data_utils.verify_coreweave_bucket,
+            aws_profile=coreweave.COREWEAVE_PROFILE_NAME,
+            cloud_name='CoreWeave',
+            mount_cmd_factory=cls._get_coreweave_mount_cmd,
+        )
+
+    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
+        """Get or create bucket using CoreWeave's S3 API with custom verification."""
+        bucket = self.config.resource_factory(self.name)
+
+        # Use our custom bucket verification instead of head_bucket
+        if data_utils.verify_coreweave_bucket(self.name):
+            self._validate_existing_bucket()
+            return bucket, False
+        
+        # Check if this is a source with URL prefix (existing bucket case)
+        if isinstance(self.source, str) and self.source.startswith(
+                self.config.url_prefix):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    'Attempted to use a non-existent bucket as a source: '
+                    f'{self.source}.')
+
+        # If bucket cannot be found, create it if needed
+        if self.sync_on_reconstruction:
+            bucket = self._create_bucket(self.name)
+            return bucket, True
+        else:
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
+
+    @classmethod
+    def _get_coreweave_mount_cmd(cls, bucket_name: str, mount_path: str,
+                                 bucket_sub_path: Optional[str]) -> str:
+        """Factory method for CoreWeave mount command."""
+        client = data_utils.create_coreweave_client()
+        endpoint_url = client.meta.endpoint_url
+        return mounting_utils.get_coreweave_mount_cmd(coreweave.COREWEAVE_PROFILE_NAME,
+                                                     bucket_name, endpoint_url,
+                                                     mount_path, bucket_sub_path)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        """CoreWeave-specific cached mount implementation using rclone."""
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.COREWEAVE.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.COREWEAVE.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path)

@@ -66,7 +66,7 @@ all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace',
     'primeintellect', 'runpod', 'vast', 'nebius', 'hyperbolic', 'seeweb',
-    'shadeform'
+    'shadeform', 'coreweave',
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -95,7 +95,8 @@ cloud_to_pytest_keyword = {
     'nebius': 'nebius',
     'hyperbolic': 'hyperbolic',
     'shadeform': 'shadeform',
-    'seeweb': 'seeweb'
+    'seeweb': 'seeweb',
+    'coreweave': 'coreweave',
 }
 
 
