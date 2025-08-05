@@ -38,10 +38,10 @@ if typing.TYPE_CHECKING:
     import io
 
     import sky
-    import sky.catalog
     from sky import admin_policy
     from sky import backends
     from sky import models
+    import sky.catalog
     from sky.provision.kubernetes import utils as kubernetes_utils
     from sky.skylet import job_lib
 
@@ -336,11 +336,11 @@ async def list_accelerator_counts(
 @usage_lib.entrypoint
 @annotations.client_api
 async def optimize(
-        dag: 'sky.Dag',
-        minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
-        admin_policy_request_options: Optional[
-            'admin_policy.RequestOptions'] = None,
-        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+    dag: 'sky.Dag',
+    minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
+    admin_policy_request_options: Optional[
+        'admin_policy.RequestOptions'] = None,
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
 ) -> 'sky.dag.Dag':
     """Async version of optimize() that finds the best execution plan for the
       given DAG."""

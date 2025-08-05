@@ -2189,9 +2189,10 @@ async def get_status_async(job_id: int) -> Optional[ManagedJobStatus]:
 async def get_job_schedule_state_async(job_id: int) -> ManagedJobScheduleState:
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        state = await session.execute(
+        result = await session.execute(
             sqlalchemy.select(job_info_table.c.schedule_state).where(
-                job_info_table.c.spot_job_id == job_id)).fetchone()[0]
+                job_info_table.c.spot_job_id == job_id))
+        state = result.fetchone()[0]
         return ManagedJobScheduleState(state)
 
 
