@@ -125,8 +125,15 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 
 
 def executor_initializer(proc_group: str):
+    """Initialize executor worker process with database connections."""
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    
+    # Initialize databases in each worker process
+    # This ensures that database tables are created and connections are established
+    # before any requests are processed in this worker process
+    global_user_state.initialize_and_get_db()
+    api_requests.reset_db_and_logs()
 
 
 class RequestWorker:
