@@ -254,7 +254,7 @@ def get_cloud_config_value_from_dict(
         region_key = 'region_configs'
 
     per_context_config = None
-    if region is not None and region_key is not None:
+    if region is not None and region != '*' and region_key is not None:
         per_context_config = input_config.get_nested(
             keys=(cloud, region_key, region) + keys,
             default_value=None,
