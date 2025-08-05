@@ -470,16 +470,17 @@ def _print_checked_cloud(
         # _format_enabled_cloud. Skip here unless the cloud is disabled.
         if not isinstance(reason, str):
             if not ok:
-                reason_str = "\n"
-                for i, (context, reason_text) in enumerate(reason.items()):
-                    symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(reason) -
-                              1 else ux_utils.INDENT_SYMBOL)
-                    reason_str += f"    {symbol}"
-                    reason_str += f"{context}: {reason_text}"
-                    if i < len(reason) - 1:
-                        reason_str += "\n"
-                reason_str += "\n"
-                reasons_to_capabilities.setdefault(reason_str, []).append(capability)
+                if reason is not None:
+                    reason_str = "\n"
+                    for i, (context, reason_text) in enumerate(reason.items()):
+                        symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(reason) -
+                                1 else ux_utils.INDENT_SYMBOL)
+                        reason_str += f"    {symbol}"
+                        reason_str += f"{context}: {reason_text}"
+                        if i < len(reason) - 1:
+                            reason_str += "\n"
+                    reason_str += "\n"
+                    reasons_to_capabilities.setdefault(reason_str, []).append(capability)
             continue
         if ok:
             if reason is not None:
