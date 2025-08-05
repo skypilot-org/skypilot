@@ -469,18 +469,14 @@ def _print_checked_cloud(
         # `dict` reasons for K8s and SSH will be printed in detail in
         # _format_enabled_cloud. Skip here unless the cloud is disabled.
         if not isinstance(reason, str):
-            if not ok:
+            if not ok and isinstance(cloud_tuple[1],
+                                     (sky_clouds.SSH, sky_clouds.Kubernetes)):
                 if reason is not None:
-                    reason_str = '\n'
-                    for i, (context, reason_text) in enumerate(reason.items()):
-                        symbol = (ux_utils.INDENT_LAST_SYMBOL
-                                  if i == len(reason) -
-                                  1 else ux_utils.INDENT_SYMBOL)
-                        reason_str += f'    {symbol}'
-                        reason_str += f'{context}: {reason_text}'
-                        if i < len(reason) - 1:
-                            reason_str += '\n'
-                    reason_str += '\n'
+                    reason_str = _format_context_details(cloud_tuple[1],
+                                                         show_details=True,
+                                                         ctx2text=reason)
+                    reason_str = '\n'.join(
+                        '    ' + line for line in reason_str.splitlines())
                     reasons_to_capabilities.setdefault(reason_str,
                                                        []).append(capability)
             continue
