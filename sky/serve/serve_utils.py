@@ -523,6 +523,8 @@ def set_service_status_and_active_versions_from_replica(
 
 
 def update_service_status(pool: bool) -> None:
+    noun = 'pool' if pool else 'serve'
+    capnoun = noun.capitalize()
     service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
         record = _get_service_status(service_name,
@@ -534,10 +536,16 @@ def update_service_status(pool: bool) -> None:
         if service_status == serve_state.ServiceStatus.SHUTTING_DOWN:
             # Skip services that is shutting down.
             continue
+
+        logger.info(f'Update {noun} status for {service_name!r} '
+                    f'with status {service_status}')
+
         controller_pid = record['controller_pid']
         if controller_pid is None:
             if service_status == serve_state.ServiceStatus.LAUNCHER_INIT:
                 continue
+            logger.info(f'{capnoun} {service_name!r} controller pid is None. '
+                        f'Unexpected status {service_status}. Set to failure.')
         elif controller_pid < 0:
             # Backwards compatibility: this service was submitted when ray was
             # still used for controller process management. We set the
@@ -550,14 +558,19 @@ def update_service_status(pool: bool) -> None:
             if (controller_status is not None and
                     not controller_status.is_terminal()):
                 continue
+            logger.info(f'Updating {noun} {service_name!r} in old version. '
+                        f'SkyPilot job status: {controller_status}. '
+                        'Set to failure.')
         else:
-            if _controller_process_alive(controller_pid, record['name']):
+            if _controller_process_alive(controller_pid, service_name):
                 # The controller is still running.
                 continue
+            logger.info(f'{capnoun} {service_name!r} controller pid '
+                        f'{controller_pid} is not alive. Set to failure.')
 
         # If controller job is not running, set it as controller failed.
         serve_state.set_service_status_and_active_versions(
-            record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
+            service_name, serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
 def update_service_encoded(service_name: str, version: int, mode: str,
