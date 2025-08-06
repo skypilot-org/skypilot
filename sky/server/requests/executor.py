@@ -128,7 +128,7 @@ def executor_initializer(proc_group: str):
     """Initialize executor worker process with database connections."""
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
-    
+
     # Initialize databases in each worker process
     # This ensures that database tables are created and connections are established
     # before any requests are processed in this worker process

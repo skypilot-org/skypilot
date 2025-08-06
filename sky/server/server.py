@@ -454,7 +454,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     logger.info('Server: Initializing request database...')
     requests_lib.reset_db_and_logs()
     logger.info('Server: Request database initialization completed')
-    
+
     # Startup: Run background tasks
     for event in daemons.INTERNAL_REQUEST_DAEMONS:
         if event.should_skip():

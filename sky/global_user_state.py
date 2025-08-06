@@ -280,6 +280,7 @@ def _init_engine(func):
                     # get an engine to the db
                     _SQLALCHEMY_ENGINE = migration_utils.get_engine('state')
         return func(*args, **kwargs)
+
     return wrapper
 
 
