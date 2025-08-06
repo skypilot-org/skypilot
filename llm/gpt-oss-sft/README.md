@@ -10,7 +10,7 @@ This guide walks through how to finetune both models with LoRA/full finetuning u
 
 ![Cloud Logos](https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png)
 
-## Step 0: Setup Infrastructure
+## Step 0: Setup infrastructure
 
 SkyPilot is a framework for running AI and batch workloads on any infrastructure, offering unified execution, high cost savings, and high GPU availability.
 
@@ -21,15 +21,15 @@ pip install 'skypilot[all]'
 ```
 For more details on how to setup your cloud credentials see [SkyPilot docs](https://docs.skypilot.co).
 
-### Choose Your Infrastructure
+### Choose your infrastructure
 
 ```bash
 sky check
 ```
 
-## Step 1: Run gpt-oss Models
+## Step 1: Run gpt-oss models
 
-### Full Finetuning
+### Full finetuning
 
 **For `gpt-oss-20b` (smaller model):**
 - Requirements: 1 node, 8x H100 GPUs
@@ -43,7 +43,7 @@ sky launch -c gpt-oss-20b-sft gpt-oss-20b-sft.yaml
 sky launch -c gpt-oss-120b-sft gpt-oss-120b-sft.yaml
 ```
 
-### LoRA Finetuning
+### LoRA finetuning
 
 **For `gpt-oss-20b` with LoRA:**
 - Requirements: 1 node, 2x H100 GPU
@@ -57,7 +57,7 @@ sky launch -c gpt-oss-20b-lora gpt-oss-20b-lora.yaml
 sky launch -c gpt-oss-120b-lora gpt-oss-120b-lora.yaml
 ```
 
-## Step 2: Monitor and Get Results
+## Step 2: Monitor and get results
 
 Once your finetuning job is running, you can monitor the progress and retrieve results:
 
@@ -72,7 +72,7 @@ sky logs <cluster-name>
 sky down <cluster-name>
 ```
 
-### Example Training Progress
+### Example training progress
 
 Here's what you can expect to see during training - the loss should decrease and token accuracy should improve over time:
 
@@ -111,6 +111,6 @@ Final Training Summary:
 - Training time: ~5 minutes for 1 epoch on 2x8 H100 nodes
 - Final loss: ~1.13 (indicates good convergence)
 
-## Configuration Files
+## Configuration files
 
 You can find the complete configurations in [the following directory](https://github.com/skypilot-org/skypilot/blob/master/llm/gpt-oss-sft/).
