@@ -1,6 +1,6 @@
 resources:
   infra: nebius/eu-north1
-  accelerators: H100:1
+  accelerators: {H100:1, H200:1}
   disk_size: 512 
   ports: 8000
 
