@@ -1,6 +1,7 @@
+"""test sky.client.sdk"""
+
 import sys
 
-import sky
 from sky.client import sdk
 
 print(sys.path)

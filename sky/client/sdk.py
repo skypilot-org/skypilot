@@ -24,7 +24,6 @@ import colorama
 import filelock
 
 from sky import admin_policy
-from sky import backends
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -66,6 +65,7 @@ if typing.TYPE_CHECKING:
     import requests
 
     import sky
+    from sky import backends
 else:
     # only used in api_login()
     base64 = adaptors_common.LazyImport('base64')
@@ -81,6 +81,8 @@ logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
 _LINE_PROCESSED_KEY = 'line_processed'
+
+T = TypeVar('T')
 
 
 def reload_config() -> None:
@@ -1361,9 +1363,7 @@ def status(
     )
     response = server_common.make_authenticated_request(
         'POST', '/status', json=json.loads(body.model_dump_json()))
-    request_id = server_common.get_request_id(response)
-
-    return request_id
+    return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
@@ -1756,9 +1756,6 @@ def status_kubernetes() -> server_common.RequestId:
     response = server_common.make_authenticated_request('GET',
                                                         '/status_kubernetes')
     return server_common.get_request_id(response)
-
-
-T = TypeVar('T')
 
 
 # === API request APIs ===

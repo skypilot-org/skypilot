@@ -93,8 +93,10 @@ RequestId = str
 
 T = TypeVar('T')
 
+
 class SuperRequestId(str, Generic[T]):
     pass
+
 
 ApiVersion = Optional[str]
 
