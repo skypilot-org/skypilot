@@ -16,6 +16,7 @@ ALLOWED_TERMS = {
     'OpenAI',
     'API',
     'GPU',
+    'GPT-OSS',
     'VM',
     'GUI',
     'AWS',
