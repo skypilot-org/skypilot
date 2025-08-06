@@ -2032,9 +2032,7 @@ class KubernetesInstanceType:
             accelerator_type = match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = int(accelerator_count)
-                # This is to revert the accelerator types with spaces back to
-                # the original format.
-                accelerator_type = str(accelerator_type).replace('_', ' ')
+                accelerator_type = str(accelerator_type)
             else:
                 accelerator_count = None
                 accelerator_type = None
@@ -2047,7 +2045,7 @@ class KubernetesInstanceType:
             accelerator_type = prev_match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = int(accelerator_count)
-                accelerator_type = str(accelerator_type).replace('_', ' ')
+                accelerator_type = str(accelerator_type)
             else:
                 accelerator_count = None
                 accelerator_type = None
@@ -2998,6 +2996,13 @@ def get_kubernetes_node_info(
                 # Get all the pods running on the node
                 if (pod.spec.node_name == node.metadata.name and
                         pod.status.phase in ['Running', 'Pending']):
+                    # Skip pods that should not count against GPU count
+                    if should_exclude_pod_from_gpu_allocation(pod):
+                        logger.debug(
+                            f'Excluding low priority pod '
+                            f'{pod.metadata.name} from GPU allocation '
+                            f'calculations on node {node.metadata.name}')
+                        continue
                     # Iterate over all the containers in the pod and sum the
                     # GPU requests
                     for container in pod.spec.containers:
@@ -3596,3 +3601,24 @@ def delete_k8s_resource_with_retry(delete_func: Callable, resource_type: str,
                 time.sleep(retry_delay)
             else:
                 raise
+
+
+def should_exclude_pod_from_gpu_allocation(pod) -> bool:
+    """Check if a pod should be excluded from GPU count calculations.
+
+    Some cloud providers run low priority test/verification pods that request
+    GPUs but should not count against real GPU availability since they are
+    designed to be evicted when higher priority workloads need resources.
+
+    Args:
+        pod: Kubernetes pod object
+
+    Returns:
+        bool: True if the pod should be excluded from GPU count calculations.
+    """
+    # CoreWeave HPC verification pods - identified by namespace
+    if (hasattr(pod.metadata, 'namespace') and
+            pod.metadata.namespace == 'cw-hpc-verification'):
+        return True
+
+    return False

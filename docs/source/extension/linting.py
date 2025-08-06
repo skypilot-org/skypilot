@@ -7,6 +7,7 @@ from sphinx.util.logging import getLogger
 ALLOWED_TERMS = {
     # Technical terms
     'Kubernetes',
+    'Python',
     'SkyPilot',
     'SkyServe',
     'Gemma',
@@ -76,6 +77,7 @@ MULTI_WORD_TERMS = {
     'Google Workspace',
     'Google Auth Platform',
     'Google Cloud Logging',
+    'AWS Systems Manager',
 }
 
 

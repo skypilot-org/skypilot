@@ -1,5 +1,9 @@
-{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") (eq (index .Values.ingress "oauth2-proxy" "session-store-type" | default "redis") "redis") (not (index .Values.ingress "oauth2-proxy" "redis-url")) -}}
-{{- $redis := index .Values.ingress "oauth2-proxy" "redis" -}}
+{{- if or .Values.auth.oauth.enabled (and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled")) }}
+{{- $oauth2 := .Values.auth.oauth -}}
+{{- if not .Values.auth.oauth.enabled -}}
+{{- $oauth2 = index .Values.ingress "oauth2-proxy" -}}
+{{- end -}}
+{{- if and (eq (index $oauth2 "session-store-type" | default "redis") "redis") (not (index $oauth2 "redis-url")) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,4 +53,5 @@ spec:
     name: redis
   selector:
     app: {{ .Release.Name }}-oauth2-proxy-redis
+{{- end -}}
 {{- end -}}

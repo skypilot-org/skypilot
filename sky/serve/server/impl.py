@@ -102,10 +102,10 @@ def up(
     pool: bool = False,
 ) -> Tuple[str, str]:
     """Spins up a service or a pool."""
-    if pool and not serve_utils.is_consolidation_mode():
+    if pool and not serve_utils.is_consolidation_mode(pool):
         raise ValueError(
             'Pool is only supported in consolidation mode. To fix, set '
-            '`serve.controller.consolidation_mode: true` in SkyPilot config.')
+            '`jobs.controller.consolidation_mode: true` in SkyPilot config.')
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
     assert task.service is not None
@@ -174,7 +174,8 @@ def up(
             prefix=f'controller-task-{service_name}-',
             mode='w',
     ) as controller_file:
-        controller_name = common.SKY_SERVE_CONTROLLER_NAME
+        controller = controller_utils.get_controller_for_pool(pool)
+        controller_name = controller.value.cluster_name
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(service_file.name, task_config)
         remote_tmp_task_yaml_path = (
@@ -187,7 +188,7 @@ def up(
             controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
             task_resources=task.resources)
         controller_job_id = None
-        if serve_utils.is_consolidation_mode():
+        if serve_utils.is_consolidation_mode(pool):
             controller_job_id = 0
 
         vars_to_fill = {
@@ -238,7 +239,7 @@ def up(
         # for the first time; otherwise it is a name conflict.
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
-        if not serve_utils.is_consolidation_mode():
+        if not serve_utils.is_consolidation_mode(pool):
             print(f'{colorama.Fore.YELLOW}Launching controller for '
                   f'{service_name!r}...{colorama.Style.RESET_ALL}')
             with common.with_server_user():
@@ -251,9 +252,9 @@ def up(
                         _disable_controller_check=True,
                     )
         else:
+            controller_type = controller_utils.get_controller_for_pool(pool)
             controller_handle = backend_utils.is_controller_accessible(
-                controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-                stopped_message='')
+                controller=controller_type, stopped_message='')
             backend = backend_utils.get_backend_from_handle(controller_handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
             backend.sync_file_mounts(
@@ -270,10 +271,8 @@ def up(
             ]
             run_script = '\n'.join(env_cmds + [run_script])
             # Dump script for high availability recovery.
-            # if controller_utils.high_availability_specified(
-            #         controller_name):
-            #     managed_job_state.set_ha_recovery_script(
-            #         consolidation_mode_job_id, run_script)
+            if controller_utils.high_availability_specified(controller_name):
+                serve_state.set_ha_recovery_script(service_name, run_script)
             backend.run_on_head(controller_handle, run_script)
 
         style = colorama.Style
@@ -289,7 +288,7 @@ def up(
             # and return the endpoint if the job id matches. Otherwise it will
             # return None.
             code = serve_utils.ServeCodeGen.wait_service_registration(
-                service_name, controller_job_id)
+                service_name, controller_job_id, pool)
             backend = backend_utils.get_backend_from_handle(controller_handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
             assert isinstance(controller_handle,
@@ -304,7 +303,7 @@ def up(
                 returncode, code, f'Failed to wait for {noun} initialization',
                 lb_port_payload)
         except exceptions.CommandError:
-            if serve_utils.is_consolidation_mode():
+            if serve_utils.is_consolidation_mode(pool):
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         f'Failed to wait for {noun} initialization. '
@@ -339,7 +338,7 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            if not serve_utils.is_consolidation_mode():
+            if not serve_utils.is_consolidation_mode(pool):
                 socket_endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     lb_port,
@@ -442,8 +441,9 @@ def update(
                        'effect. To update TLS keyfile and certfile, please '
                        'tear down the service and spin up a new one.')
 
+    controller_type = controller_utils.get_controller_for_pool(pool)
     handle = backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        controller=controller_type,
         stopped_message=
         'Service controller is stopped. There is no service to update. '
         f'To spin up a new service, use {ux_utils.BOLD}'
@@ -572,9 +572,9 @@ def apply(
     """Applies the config to the service or pool."""
     with filelock.FileLock(serve_utils.get_service_filelock_path(service_name)):
         try:
+            controller_type = controller_utils.get_controller_for_pool(pool)
             handle = backend_utils.is_controller_accessible(
-                controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-                stopped_message='')
+                controller=controller_type, stopped_message='')
             backend = backend_utils.get_backend_from_handle(handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
             service_record = _get_service_record(service_name, pool, handle,
@@ -598,8 +598,9 @@ def down(
         service_names = []
     if isinstance(service_names, str):
         service_names = [service_names]
+    controller_type = controller_utils.get_controller_for_pool(pool)
     handle = backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        controller=controller_type,
         stopped_message=f'All {noun}s should have terminated.')
 
     service_names_str = ','.join(service_names)
@@ -624,7 +625,7 @@ def down(
     except exceptions.FetchClusterInfoError as e:
         raise RuntimeError(
             'Failed to fetch controller IP. Please refresh controller status '
-            f'by `sky status -r {common.SKY_SERVE_CONTROLLER_NAME}` '
+            f'by `sky status -r {controller_type.value.cluster_name}` '
             'and try again.') from e
 
     try:
@@ -654,7 +655,7 @@ def status(
             raise RuntimeError(f'Failed to refresh {noun}s status '
                                'due to network error.') from e
 
-    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
+    controller_type = controller_utils.get_controller_for_pool(pool)
     handle = backend_utils.is_controller_accessible(
         controller=controller_type,
         stopped_message=controller_type.value.default_hint_if_non_existent.
@@ -690,7 +691,7 @@ def status(
         if service_record['load_balancer_port'] is not None:
             try:
                 lb_port = service_record['load_balancer_port']
-                if not serve_utils.is_consolidation_mode():
+                if not serve_utils.is_consolidation_mode(pool):
                     endpoint = backend_utils.get_endpoints(
                         cluster=common.SKY_SERVE_CONTROLLER_NAME,
                         port=lb_port).get(lb_port, None)
