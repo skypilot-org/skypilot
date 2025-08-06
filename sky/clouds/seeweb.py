@@ -1,4 +1,9 @@
-"""Seeweb Cloud."""
+"""Seeweb Cloud"""
+"""
+@ Aug 6, 2025: Initial version of the integration.
+- Francesco Massa 
+- Cristofanilli Marco (marco.cATseeweb.it)
+"""
 
 from __future__ import annotations
 
@@ -19,10 +24,12 @@ if typing.TYPE_CHECKING:
     from sky.utils import status_lib
     from sky.utils import volume as volume_lib
 
-# ---------- key file path -----------------
-_SEEWEB_KEY_FILE = '~/.seeweb_cloud/seeweb_keys'
+# ---------- Key file path -----------------
+# Compute → API Token → New Token
 # (content: ini-like)
-#   api_key = <TOKEN>
+# api_key = <TOKEN>
+_SEEWEB_KEY_FILE = '~/.seeweb_cloud/seeweb_keys'
+
 
 
 @registry.CLOUD_REGISTRY.register
