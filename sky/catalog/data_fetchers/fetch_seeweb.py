@@ -19,39 +19,43 @@ import pandas as pd
 DEFAULT_SEEWEB_KEYS_PATH = os.path.expanduser('~/.seeweb_cloud/seeweb_keys')
 
 # Known GPU types to memory mapping (in MiB)
-# This might need to be updated based on actual Seeweb offerings
+# Updated with actual Seeweb offerings from catalog
 GPU_TO_MEMORY = {
-    'RTX4090': 24576,  # 24GB
-    'RTX4080': 16384,  # 16GB  
-    'RTX4070': 12288,  # 12GB
-    'RTX3090': 24576,  # 24GB
-    'RTX3080': 10240,  # 10GB
-    'RTX3070': 8192,  # 8GB
-    'A100': 40960,  # 40GB
+    'RTX-6000-24GB': 24576,  # 24GB
+    'RTX-A6000-48GB': 49152,  # 48GB
+    'A30': 24576,  # 24GB
     'A100-80GB': 81920,  # 80GB
-    'V100': 16384,  # 16GB
-    'T4': 16384,  # 16GB
-    'K80': 12288,  # 12GB
+    'L4-24GB': 24576,  # 24GB
+    'L40s-48GB': 49152,  # 48GB
+    'MI300X': 131072,  # 128GB (8x16GB)
     'GENERAL': None  # No GPU
 }
 
 # Fallback catalog data if API fails
-# These are example plans - actual Seeweb offerings may differ
+# Updated with actual Seeweb offerings from catalog
 FALLBACK_PLANS = [
     # CPU-only instances
     {
         'plan_name': 'eCS1',
         'vcpus': 1,
-        'memory_gb': 2,
-        'price': 0.05,
+        'memory_gb': 1,
+        'price': 0.019,
         'gpu_name': None,
         'gpu_count': 0
     },
     {
         'plan_name': 'eCS2',
         'vcpus': 2,
+        'memory_gb': 2,
+        'price': 0.032,
+        'gpu_name': None,
+        'gpu_count': 0
+    },
+    {
+        'plan_name': 'eCS3',
+        'vcpus': 4,
         'memory_gb': 4,
-        'price': 0.10,
+        'price': 0.048,
         'gpu_name': None,
         'gpu_count': 0
     },
@@ -59,55 +63,213 @@ FALLBACK_PLANS = [
         'plan_name': 'eCS4',
         'vcpus': 4,
         'memory_gb': 8,
-        'price': 0.20,
+        'price': 0.063,
         'gpu_name': None,
         'gpu_count': 0
     },
     {
-        'plan_name': 'eCS8',
+        'plan_name': 'eCS5',
         'vcpus': 8,
         'memory_gb': 16,
-        'price': 0.40,
+        'price': 0.127,
+        'gpu_name': None,
+        'gpu_count': 0
+    },
+    {
+        'plan_name': 'eCS6',
+        'vcpus': 12,
+        'memory_gb': 24,
+        'price': 0.152,
+        'gpu_name': None,
+        'gpu_count': 0
+    },
+    {
+        'plan_name': 'ECS7',
+        'vcpus': 16,
+        'memory_gb': 32,
+        'price': 0.31,
+        'gpu_name': None,
+        'gpu_count': 0
+    },
+    {
+        'plan_name': 'ECS8',
+        'vcpus': 16,
+        'memory_gb': 64,
+        'price': 0.63,
         'gpu_name': None,
         'gpu_count': 0
     },
 
-    # GPU instances - these might need adjustment based on actual Seeweb offerings
+    # High Memory instances
     {
-        'plan_name': 'gCS4-RTX4090',
+        'plan_name': 'eCS1HM',
         'vcpus': 4,
-        'memory_gb': 16,
-        'price': 1.50,
-        'gpu_name': 'RTX4090',
-        'gpu_count': 1
+        'memory_gb': 64,
+        'price': 0.217,
+        'gpu_name': None,
+        'gpu_count': 0
     },
     {
-        'plan_name': 'gCS8-RTX4090',
+        'plan_name': 'eCS2HM',
+        'vcpus': 8,
+        'memory_gb': 128,
+        'price': 0.434,
+        'gpu_name': None,
+        'gpu_count': 0
+    },
+    {
+        'plan_name': 'eCS3HM',
+        'vcpus': 16,
+        'memory_gb': 256,
+        'price': 0.719,
+        'gpu_name': None,
+        'gpu_count': 0
+    },
+    {
+        'plan_name': 'eCS4HM',
+        'vcpus': 32,
+        'memory_gb': 512,
+        'price': 1.338,
+        'gpu_name': None,
+        'gpu_count': 0
+    },
+    {
+        'plan_name': 'eCS5HM',
+        'vcpus': 32,
+        'memory_gb': 960,
+        'price': 2.537,
+        'gpu_name': None,
+        'gpu_count': 0
+    },
+
+    # GPU instances - RTX-6000-24GB
+    {
+        'plan_name': 'ECS1GPU',
         'vcpus': 8,
         'memory_gb': 32,
-        'price': 2.50,
-        'gpu_name': 'RTX4090',
+        'price': 0.29,
+        'gpu_name': 'RTX-6000-24GB',
         'gpu_count': 1
     },
+
+    # GPU instances - A30
     {
-        'plan_name': 'gCS4-A100',
-        'vcpus': 4,
-        'memory_gb': 16,
-        'price': 2.00,
-        'gpu_name': 'A100',
-        'gpu_count': 1
-    },
-    {
-        'plan_name': 'gCS8-A100',
+        'plan_name': 'ECS1GPU11',
         'vcpus': 8,
         'memory_gb': 32,
-        'price': 3.00,
-        'gpu_name': 'A100',
+        'price': 0.29,
+        'gpu_name': 'A30',
         'gpu_count': 1
+    },
+
+    # GPU instances - RTX-A6000-48GB
+    {
+        'plan_name': 'ECS1GPU2',
+        'vcpus': 8,
+        'memory_gb': 32,
+        'price': 0.74,
+        'gpu_name': 'RTX-A6000-48GB',
+        'gpu_count': 1
+    },
+    {
+        'plan_name': 'ECS2GPU2',
+        'vcpus': 16,
+        'memory_gb': 64,
+        'price': 1.48,
+        'gpu_name': 'RTX-A6000-48GB',
+        'gpu_count': 2
+    },
+    {
+        'plan_name': 'ECS3GPU2',
+        'vcpus': 32,
+        'memory_gb': 128,
+        'price': 2.96,
+        'gpu_name': 'RTX-A6000-48GB',
+        'gpu_count': 4
+    },
+
+    # GPU instances - A100-80GB
+    {
+        'plan_name': 'ECS1GPU3',
+        'vcpus': 16,
+        'memory_gb': 120,
+        'price': 1.89,
+        'gpu_name': 'A100-80GB',
+        'gpu_count': 1
+    },
+    {
+        'plan_name': 'ECS2GPU3',
+        'vcpus': 32,
+        'memory_gb': 240,
+        'price': 3.78,
+        'gpu_name': 'A100-80GB',
+        'gpu_count': 2
+    },
+    {
+        'plan_name': 'ECS3GPU3',
+        'vcpus': 64,
+        'memory_gb': 480,
+        'price': 7.56,
+        'gpu_name': 'A100-80GB',
+        'gpu_count': 4
+    },
+
+    # GPU instances - L4-24GB
+    {
+        'plan_name': 'ECS1GPU6',
+        'vcpus': 4,
+        'memory_gb': 32,
+        'price': 0.38,
+        'gpu_name': 'L4-24GB',
+        'gpu_count': 1
+    },
+    {
+        'plan_name': 'ECS2GPU6',
+        'vcpus': 8,
+        'memory_gb': 64,
+        'price': 0.76,
+        'gpu_name': 'L4-24GB',
+        'gpu_count': 2
+    },
+    {
+        'plan_name': 'ECS3GPU6',
+        'vcpus': 16,
+        'memory_gb': 128,
+        'price': 1.52,
+        'gpu_name': 'L4-24GB',
+        'gpu_count': 4
+    },
+
+    # GPU instances - L40s-48GB
+    {
+        'plan_name': 'ECS1GPU7',
+        'vcpus': 8,
+        'memory_gb': 32,
+        'price': 0.85,
+        'gpu_name': 'L40s-48GB',
+        'gpu_count': 1
+    },
+    {
+        'plan_name': 'ECS2GPU7',
+        'vcpus': 16,
+        'memory_gb': 64,
+        'price': 1.7,
+        'gpu_name': 'L40s-48GB',
+        'gpu_count': 2
+    },
+
+    # GPU instances - MI300X (AMD)
+    {
+        'plan_name': 'ECS8GPU9',
+        'vcpus': 255,
+        'memory_gb': 2048,
+        'price': 12.8,
+        'gpu_name': 'MI300X',
+        'gpu_count': 8
     },
 ]
 
-FALLBACK_REGIONS = ['it-mi2', 'de-fra1', 'us-east1']
+FALLBACK_REGIONS = ['it-fr2', 'it-mi2', 'ch-lug1', 'bg-sof1']
 
 
 def get_api_key(api_key_path: Optional[str] = None) -> str:
