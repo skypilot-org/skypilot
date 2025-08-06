@@ -1,11 +1,10 @@
 resources:
-  infra: nebius/eu-north1
   accelerators: {H100:1, H200:1}
   disk_size: 512 
   ports: 8000
 
 envs:
-  MODEL_NAME: openai/gpt-oss-120b
+  MODEL_NAME: openai/gpt-oss-20b
 
 setup: |
   sudo apt-get update
@@ -16,7 +15,7 @@ setup: |
     --extra-index-url https://wheels.vllm.ai/gpt-oss/ \
     --extra-index-url https://download.pytorch.org/whl/nightly/cu128 \
     --index-strategy unsafe-best-match
-  uv pip install hf_xet openai==1.99.0
+  uv pip install hf_xet openai==1.99.1
   hf download $MODEL_NAME
 
 run: |
@@ -33,3 +32,11 @@ service:
     target_qps_per_replica: 5.0
     upscale_delay_seconds: 300
     downscale_delay_seconds: 600
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
