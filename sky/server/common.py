@@ -24,7 +24,6 @@ import uuid
 import cachetools
 import colorama
 import filelock
-from typing_extensions import Concatenate
 from typing_extensions import ParamSpec
 
 from sky import exceptions

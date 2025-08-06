@@ -4696,7 +4696,7 @@ def jobs_cancel(
                       show_default=True)
 
     sdk.stream_and_get(
-        managed_jobs.cancel(job_ids=job_ids,
+        managed_jobs.cancel(job_ids=list(job_ids),
                             name=name,
                             pool=pool,
                             all=all,
@@ -5555,6 +5555,7 @@ def serve_down(
                           show_default=True)
 
     if replica_id_is_defined:
+        assert replica_id is not None
         request_id = serve_lib.terminate_replica(service_names[0], replica_id,
                                                  purge)
     else:

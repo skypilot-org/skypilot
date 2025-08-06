@@ -2422,7 +2422,9 @@ def api_login(endpoint: Optional[str] = None,
     _save_config_updates(endpoint=endpoint)
     dashboard_url = server_common.get_dashboard_url(endpoint)
 
-    server_common.get_api_server_status.cache_clear()
+    # see https://github.com/python/mypy/issues/5107 on why
+    # typing is disabled on this line
+    server_common.get_api_server_status.cache_clear()  # type: ignore
     # After successful authentication, check server health again to get user
     # identity
     server_status, final_api_server_info = server_common.check_server_healthy(
