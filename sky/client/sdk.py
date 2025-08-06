@@ -1874,6 +1874,8 @@ def stream_and_get(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
+        if request_id is None:
+            return None
         return get(request_id)
     return stream_response(request_id, response, output_stream)
 
