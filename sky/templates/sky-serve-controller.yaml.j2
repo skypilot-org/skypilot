@@ -57,6 +57,7 @@ run: |
    -u -m sky.serve.service \
     --service-name {{service_name}} \
     --task-yaml {{remote_task_yaml_path}} \
+    --entrypoint {{entrypoint}} \
     {%- if consolidation_mode_job_id is not none %}
     --job-id {{consolidation_mode_job_id}} \
     {%- else %}
