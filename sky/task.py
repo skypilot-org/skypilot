@@ -406,8 +406,8 @@ class Task:
         self.best_resources: Optional[sky.Resources] = None
 
         # For internal use only.
-        self.file_mounts_mapping: Optional[Dict[str,
-                                                str]] = _file_mounts_mapping
+        self.file_mounts_mapping: Optional[Dict[str, str]] = (
+            _file_mounts_mapping)
         self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
             _volume_mounts)
 
@@ -835,8 +835,8 @@ class Task:
             envs=config.pop('envs', None),
             secrets=config.pop('secrets', None),
             event_callback=config.pop('event_callback', None),
-            _file_mounts_mapping=config.pop('file_mounts_mapping', None),
             volumes=config.pop('volumes', None),
+            _file_mounts_mapping=config.pop('file_mounts_mapping', None),
             _metadata=config.pop('_metadata', None),
             require_prelaunch_setup=True,
             file_mounts_config=config.pop('file_mounts', None),
