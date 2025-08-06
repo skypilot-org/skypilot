@@ -32,11 +32,4 @@ service:
     target_qps_per_replica: 5.0
     upscale_delay_seconds: 300
     downscale_delay_seconds: 600
-  readiness_probe:
-    path: /v1/chat/completions
-    post_data:
-      model: $MODEL_NAME
-      messages:
-        - role: user
-          content: Hello! What is your name?
-      max_tokens: 1
+  readiness_probe: /v1/models
