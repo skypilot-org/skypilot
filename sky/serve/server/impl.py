@@ -786,13 +786,12 @@ def tail_logs(
 
 
 def _get_all_replica_targets(
-    service_name: str, backend: backends.CloudVmRayBackend,
-    handle: backends.CloudVmRayResourceHandle
-) -> Set[serve_utils.ServiceComponentTarget]:
+        service_name: str, backend: backends.CloudVmRayBackend,
+        handle: backends.CloudVmRayResourceHandle,
+        pool: bool) -> Set[serve_utils.ServiceComponentTarget]:
     """Helper function to get targets for all live replicas."""
-    # Pool does not support replica logs.
     code = serve_utils.ServeCodeGen.get_service_status([service_name],
-                                                       pool=False)
+                                                       pool=pool)
     returncode, serve_status_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -833,8 +832,11 @@ def sync_down_logs(
     pool: bool = False,
 ) -> str:
     """Sync down logs of a service or pool."""
-    # Step 0) get the controller handle
     noun = 'pool' if pool else 'service'
+    repnoun = 'worker' if pool else 'replica'
+    caprepnoun = repnoun.capitalize()
+
+    # Step 0) get the controller handle
     with rich_utils.safe_status(
             ux_utils.spinner_message(f'Checking {noun} status...')):
         controller_type = controller_utils.get_controller_for_pool(pool)
@@ -872,9 +874,9 @@ def sync_down_logs(
                 serve_utils.ServiceComponent.LOAD_BALANCER))
     if serve_utils.ServiceComponent.REPLICA in requested_components:
         with rich_utils.safe_status(
-                ux_utils.spinner_message('Getting live replica infos...')):
+                ux_utils.spinner_message(f'Getting live {repnoun} infos...')):
             replica_targets = _get_all_replica_targets(service_name, backend,
-                                                       handle)
+                                                       handle, pool)
         if not replica_ids:
             # Replica target requested but no specific IDs
             # -> Get all replica logs
@@ -888,8 +890,8 @@ def sync_down_logs(
             ]
             for target in requested_replica_targets:
                 if target not in replica_targets:
-                    logger.warning(f'Replica ID {target.replica_id} not found '
-                                   f'for {service_name}. Skipping...')
+                    logger.warning(f'{caprepnoun} ID {target.replica_id} not '
+                                   f'found for {service_name}. Skipping...')
                 else:
                     normalized_targets.add(target)
 
