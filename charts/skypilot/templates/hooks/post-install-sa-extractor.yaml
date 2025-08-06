@@ -1,4 +1,4 @@
-{{- if .Values.apiService.enableServiceAccounts }}
+{{- if include "skypilot.serviceAccountAuthEnabled" . | trim | eq "true" }}
 apiVersion: batch/v1
 kind: Job
 metadata:

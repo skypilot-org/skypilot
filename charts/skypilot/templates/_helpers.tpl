@@ -102,7 +102,7 @@ http://{{ .Release.Name }}-oauth2-proxy:4180
 {{- end -}}
 
 {{- define "skypilot.serviceAccountAuthEnabled" -}}
-{{- if ne .Values.auth.serviceAccount.enabled nil -}}
+{{- if and .Values.auth .Values.auth.serviceAccount (ne .Values.auth.serviceAccount.enabled nil) -}}
 {{- .Values.auth.serviceAccount.enabled -}}
 {{- else -}}
 {{- .Values.apiService.enableServiceAccounts -}}
@@ -127,7 +127,7 @@ false
 
 {{/* Validate the oauth config */}}
 {{- define "skypilot.validateOAuthConfig" -}}
-{{- $authOAuthEnabled := .Values.auth.oauth.enabled -}}
+{{- $authOAuthEnabled := (and .Values.auth .Values.auth.oauth .Values.auth.oauth.enabled) -}}
 {{- $ingressBasicAuthEnabled := include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" -}}
 {{- $ingressOAuthEnabled := include "skypilot.ingressOAuthEnabled" . | trim | eq "true" -}}
 {{- $serviceAccountAuthEnabled := include "skypilot.serviceAccountAuthEnabled" . | trim | eq "true" -}}

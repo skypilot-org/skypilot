@@ -79,7 +79,7 @@ spec:
         - name: SKYPILOT_ENABLE_SERVICE_ACCOUNTS
           value: "true"
         {{- end }}
-        {{- if .Values.auth.disableAnonymousAccess }}
+        {{- if and (include "skypilot.ingressBasicAuthEnabled" . | trim | ne "true") .Values.auth.disableAnonymousAccess }}
         - name: SKYPILOT_DISABLE_ANONYMOUS_ACCESS
           value: "true"
         {{- end }}
@@ -124,7 +124,7 @@ spec:
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"
         {{- end }}
-        {{- if .Values.auth.oauth.enabled }}
+        {{- if and .Values.auth .Values.auth.oauth .Values.auth.oauth.enabled }}
         - name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
           value: "true"
         - name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
