@@ -353,9 +353,11 @@ def validate(
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
     remote_api_version = versions.get_remote_api_version()
-    omit_user_specified_yaml = remote_api_version is None or remote_api_version < 15
+    omit_user_specified_yaml = (remote_api_version is None or
+                                remote_api_version < 15)
     for task in dag.tasks:
         if omit_user_specified_yaml:
+            # pylint: disable=protected-access
             task._user_specified_yaml = None
         task.expand_and_validate_workdir()
         if not workdir_only:
