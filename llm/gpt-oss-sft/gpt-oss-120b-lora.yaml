@@ -1,0 +1,31 @@
+resources:
+  infra: k8s
+  accelerators: H100:8
+  network_tier: best
+  image_id: docker:cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.23.4-ubu22.04-cu12.4
+
+file_mounts:
+  /sft: ./sft
+
+num_nodes: 1
+
+setup: |
+  conda install cuda -c nvidia
+  uv venv ~/training --seed --python 3.10
+  source ~/training/bin/activate
+  uv pip install torch --index-url https://download.pytorch.org/whl/cu128
+  uv pip install "trl>=0.20.0" "peft>=0.17.0" "transformers>=4.55.0"
+  uv pip install deepspeed
+  uv pip install git+https://github.com/huggingface/accelerate.git@c0a3aefea8aa5008a0fbf55b049bd3f0efa9cbf2
+
+  uv pip install nvitop
+
+run: |
+  source ~/training/bin/activate
+
+  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  NP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
+
+  accelerate launch --config_file /sft/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /sft/train.py --enable_lora
+
+  
