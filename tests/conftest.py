@@ -355,6 +355,21 @@ def setup_docker_container(request):
     dockerfile_path = 'tests/smoke_tests/docker/Dockerfile_test'
     default_user = os.environ.get('USER', 'buildkite')
 
+    # Get resource limits from pytest markers
+    cpu_limit = None
+    memory_limit = None
+    if hasattr(request, 'session'):
+        for item in request.session.items:
+            if hasattr(item, 'get_closest_marker'):
+                docker_resources = item.get_closest_marker('docker_resources')
+                if docker_resources:
+                    cpu_limit = docker_resources.kwargs.get('cpu_limit')
+                    memory_limit = docker_resources.kwargs.get('memory_limit')
+                    logger.info(
+                        f'Docker resources: CPU={cpu_limit}, Memory={memory_limit}'
+                    )
+                    break
+
     # Create a lockfile and counter file in a temporary directory that all processes can access
     lock_file = os.path.join(tempfile.gettempdir(), 'sky_docker_setup.lock')
     counter_file = os.path.join(tempfile.gettempdir(), 'sky_docker_workers.txt')
@@ -438,7 +453,9 @@ def setup_docker_container(request):
             target_container_name=docker_utils.get_container_name(),
             host_port=docker_utils.get_host_port(),
             container_port=46580,
-            username=default_user)
+            username=default_user,
+            cpu_limit=cpu_limit,
+            memory_limit=memory_limit)
 
         logger.info(f'Container {docker_utils.get_container_name()} started')
 
