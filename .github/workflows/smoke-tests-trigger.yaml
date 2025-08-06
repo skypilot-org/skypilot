@@ -8,8 +8,8 @@ on:
         required: true
         type: string
   # uncomment this for PR triggers testing
-  # pull_request:
-  #   types: [opened, synchronize, reopened]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 jobs:
   smoke-tests:

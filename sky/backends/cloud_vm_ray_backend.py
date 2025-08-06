@@ -201,6 +201,7 @@ def _get_cluster_config_template(cloud):
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',
         clouds.Nebius: 'nebius-ray.yml.j2',
         clouds.Hyperbolic: 'hyperbolic-ray.yml.j2'
+        clouds.Seeweb: 'seeweb-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 

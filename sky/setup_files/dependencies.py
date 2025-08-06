@@ -182,6 +182,7 @@ extras_require: Dict[str, List[str]] = {
         'nebius>=0.2.47',
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
+    'seeweb': ['ecsapi>=0.1.3'],
     'server': server_dependencies,
 }
 

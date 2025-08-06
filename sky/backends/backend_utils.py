@@ -1042,9 +1042,69 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_fluidstack_authentication(config)
     elif isinstance(cloud, clouds.Hyperbolic):
         config = auth.setup_hyperbolic_authentication(config)
+    elif isinstance(cloud, clouds.Seeweb):
+        config = auth.setup_seeweb_authentication(config)
     else:
         assert False, cloud
     common_utils.dump_yaml(tmp_yaml_path, config)
+
+# ---------------------------------------------------------------------
+# SEEWEB – query cluster status
+# ---------------------------------------------------------------------
+def _query_status_seeweb(
+    cluster: str,
+    ray_config: Dict[str, Any],
+) -> List[status_lib.ClusterStatus]:
+    """Returns the list of statuses (one per node) for the Seeweb cluster.
+
+    • Uses the `notes` field of ECS servers to identify which cluster
+      an instance belongs to (*notes == cluster_name_on_cloud*).
+    • Translates Seeweb statuses → SkyPilot ClusterStatus enum.
+    """
+    try:
+        import configparser
+        from pathlib import Path
+
+        import ecsapi
+
+        # Leggi API key
+        parser = configparser.ConfigParser()
+        parser.read(Path('~/.seeweb_cloud/seeweb_keys').expanduser())
+        api_key = parser['DEFAULT']['api_key'].strip()
+
+        client = ecsapi.Api(token=api_key)
+    except Exception as e:  # pragma: no cover
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Impossibile interrogare Seeweb: {e}. '
+                               'Verifica che SEEWEB_TOKEN sia valido.') from e
+
+    # --- 2. Filtra le istanze del cluster ------------------------------------
+    servers = [
+        s for s in client.servers.list()  # GET /servers
+        if s.get('notes') == cluster
+    ]
+
+    if not servers:
+        # Nessuna istanza con quel tag → cluster terminato
+        return []
+
+    # --- 3. Mappa stato Seeweb → ClusterStatus -------------------------------
+    translate = {
+        'Running': status_lib.ClusterStatus.UP,
+        'Booting': status_lib.ClusterStatus.INIT,
+        'PoweringOn': status_lib.ClusterStatus.INIT,
+        'Off': status_lib.ClusterStatus.STOPPED,
+        'PoweringOff': status_lib.ClusterStatus.STOPPED,
+    }
+
+    return [
+        translate.get(s['status'], status_lib.ClusterStatus.INIT)
+        for s in servers
+    ]
+
+_QUERY_STATUS_FUNCS = {
+    'Seeweb': _query_status_seeweb,
+}
 
 
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:

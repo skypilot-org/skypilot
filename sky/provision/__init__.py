@@ -29,6 +29,7 @@ from sky.provision import scp
 from sky.provision import ssh
 from sky.provision import vast
 from sky.provision import vsphere
+from sky.provision import seeweb
 from sky.utils import command_runner
 from sky.utils import timeline
 
