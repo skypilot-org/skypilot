@@ -1048,6 +1048,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         assert False, cloud
     common_utils.dump_yaml(tmp_yaml_path, config)
 
+
 # ---------------------------------------------------------------------
 # SEEWEB – query cluster status
 # ---------------------------------------------------------------------
@@ -1101,6 +1102,7 @@ def _query_status_seeweb(
         translate.get(s['status'], status_lib.ClusterStatus.INIT)
         for s in servers
     ]
+
 
 _QUERY_STATUS_FUNCS = {
     'Seeweb': _query_status_seeweb,

@@ -90,7 +90,7 @@ class SeewebNodeProvider:
 
         for srv in cluster_nodes:
             specific_status = self.ecs.fetch_server_status(srv.name)
-            
+
             if specific_status == "SHUTOFF":
                 logger.info(f"\nServer {srv.name} is already stopped\n")
                 continue
@@ -98,7 +98,7 @@ class SeewebNodeProvider:
                 # Get specific status to check if server is not already SHUTOFF
                 try:
                     specific_status = self.ecs.fetch_server_status(srv.name)
-                    # Continue with power off only if specific_status is not SHUTOFF 
+                    # Continue with power off only if specific_status is not SHUTOFF
                     # and general status is not STOPPED
                     if specific_status != "SHUTOFF" and srv.status != "STOPPED":
                         self._power_off(srv.name)
@@ -107,7 +107,9 @@ class SeewebNodeProvider:
                     if srv.status != "STOPPED":
                         self._power_off(srv.name)
             else:
-                logger.info(f"\nServer {srv.name} has status '{srv.status}', skipping\n")
+                logger.info(
+                    f"\nServer {srv.name} has status '{srv.status}', skipping\n"
+                )
         # Wait for all servers to be actually stopped with forced refresh
         self._wait_for_stop_with_forced_refresh()
 
@@ -152,7 +154,8 @@ class SeewebNodeProvider:
                 all_shutoff = True
                 for server in cluster_nodes:
                     try:
-                        specific_status = self.ecs.fetch_server_status(server.name)
+                        specific_status = self.ecs.fetch_server_status(
+                            server.name)
                         if specific_status != "SHUTOFF":
                             all_shutoff = False
                     except Exception as e:
@@ -341,7 +344,6 @@ class SeewebNodeProvider:
         raise TimeoutError(f"Servers not stopped within {max_wait} seconds")
 
 
-
 # =============================================================================
 # Standalone functions required by the provisioning interface
 # Following Lambda Cloud pattern
@@ -490,7 +492,7 @@ def _wait_for_all_servers_stable_standalone(cluster_nodes,
             time.sleep(1)
             return True
 
-        time.sleep(_POLL_INTERVAL)
+        time.sleep(1)
 
     return False
 

@@ -42,8 +42,8 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
 from sky.adaptors import runpod
-from sky.adaptors import vast
 from sky.adaptors import seeweb as seeweb_adaptor
+from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
@@ -595,7 +595,6 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return configure_ssh_info(config)
 
 
-
 def setup_seeweb_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     """Registers the public key with Seeweb and notes the remote name."""
     # 1. local key pair
@@ -631,5 +630,3 @@ def setup_seeweb_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['remote_key_name'] = remote_name
 
     return config
-
-

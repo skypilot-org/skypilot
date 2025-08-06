@@ -17,7 +17,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import status_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 # ---------- key file path -----------------
 _SEEWEB_KEY_FILE = '~/.seeweb_cloud/seeweb_keys'
