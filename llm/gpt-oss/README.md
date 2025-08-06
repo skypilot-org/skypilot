@@ -1,12 +1,12 @@
-# Run and Serve OpenAI GPT-OSS Models with SkyPilot and vLLM
+# Run and Serve OpenAI gpt-oss Models with SkyPilot and vLLM
 
-![](https://i.imgur.com/Lxa6g0B.png)
+![](https://i.imgur.com/TkoqCQK.png)
 
-On August 5, 2025, OpenAI released [GPT-OSS](https://openai.com/open-models/), including two state-of-the-art open-weight language models: `gpt-oss-120b` and `gpt-oss-20b`. These models deliver strong real-world performance at low cost and are available under the flexible Apache 2.0 license.
+On August 5, 2025, OpenAI released [gpt-oss](https://openai.com/open-models/), including two state-of-the-art open-weight language models: `gpt-oss-120b` and `gpt-oss-20b`. These models deliver strong real-world performance at low cost and are available under the flexible Apache 2.0 license.
 
 The `gpt-oss-120b` model achieves near-parity with OpenAI o4-mini on core reasoning benchmarks, while the `gpt-oss-20b` model delivers similar results to OpenAI o3-mini.
 
-This guide walks through how to run and host GPT-OSS models on any infrastructure using SkyPilot and vLLM, from local GPU workstations to Kubernetes clusters and public clouds (16+ clouds supported).
+This guide walks through how to run and host gpt-oss models on any infrastructure using SkyPilot and vLLM, from local GPU workstations to Kubernetes clusters and public clouds (16+ clouds supported).
 
 ![Cloud Logos](https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png)
 
@@ -27,7 +27,7 @@ For more details on how to setup your cloud credentials see [SkyPilot docs](http
 sky check
 ```
 
-## Step 1: Run GPT-OSS models
+## Step 1: Run gpt-oss models
 
 ### Basic deployment
 

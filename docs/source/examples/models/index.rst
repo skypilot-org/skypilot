@@ -4,7 +4,7 @@ Models
 .. toctree::
    :maxdepth: 1
 
-   GPT-OSS <gpt-oss>
+   OpenAI gpt-oss <gpt-oss>
    DeepSeek-R1 <deepseek-r1>
    DeepSeek-R1 Distilled <deepseek-r1-distilled>
    DeepSeek-Janus <deepseek-janus>
