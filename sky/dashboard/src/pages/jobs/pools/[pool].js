@@ -535,8 +535,15 @@ export default function PoolDetailPage() {
                               // Check if there's a region part in parentheses
                               const parenIndex = cloudWithRegion.indexOf('(');
                               if (parenIndex === -1) {
-                                // No region part, return as is
-                                return cloudWithRegion;
+                                // No region part, return cloud as link
+                                return (
+                                  <Link
+                                    href="/infra"
+                                    className="text-blue-600 hover:underline"
+                                  >
+                                    {worker.cloud}
+                                  </Link>
+                                );
                               }
 
                               const cloudName = cloudWithRegion
@@ -549,7 +556,17 @@ export default function PoolDetailPage() {
 
                               // Only truncate the region part if it's longer than the truncate length
                               if (regionPart.length <= NAME_TRUNCATE_LENGTH) {
-                                return cloudWithRegion;
+                                return (
+                                  <span>
+                                    <Link
+                                      href="/infra"
+                                      className="text-blue-600 hover:underline"
+                                    >
+                                      {cloudName}
+                                    </Link>
+                                    <span> ({regionPart})</span>
+                                  </span>
+                                );
                               }
 
                               // Truncate only the region part
@@ -561,7 +578,15 @@ export default function PoolDetailPage() {
                                   content={cloudWithRegion}
                                   className="text-sm text-muted-foreground"
                                 >
-                                  <span>{displayText}</span>
+                                  <span>
+                                    <Link
+                                      href="/infra"
+                                      className="text-blue-600 hover:underline"
+                                    >
+                                      {cloudName}
+                                    </Link>
+                                    <span> ({truncatedRegion})</span>
+                                  </span>
                                 </NonCapitalizedTooltip>
                               );
                             } catch (error) {
