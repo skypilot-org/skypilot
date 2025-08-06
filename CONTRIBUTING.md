@@ -284,6 +284,22 @@ def cli_entry_point(newflag: Optional[str] = None):
         logger.warning('The new flag is ignored because the server does not support it yet.')
 ```
 
+We should also be careful when adding new fields that are not directly visible in 
+`sky/server/api/payloads.py`, but is also being sent from the client to the server. This
+is mainly for validating objects from the client.
+As an example, this request body contains a single field, the string representation of a DAG.
+
+```
+class ValidateBody(DagRequestBodyWithRequestOptions):
+    """The request body for the validate endpoint."""
+    dag: str
+```
+
+A DAG consists of Tasks, so when adding new fields to Task, we should also handle backwards
+compatibility in the serialization, otherwise the server may not recognize the new field
+from the client and return an error during validation.
+
+
 #### Refactoring existing APIs
 
 Refactoring existing APIs can be tricky. It is recommended to add an new API instead. Then the compatibility issue can be addressed in the same way as [Adding new APIs](#adding-new-apis), e.g.:
