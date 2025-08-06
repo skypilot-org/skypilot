@@ -1,6 +1,6 @@
 # Run and Serve OpenAI gpt-oss Models with SkyPilot and vLLM
 
-![](https://i.imgur.com/MGkHOTg.png)
+![](https://i.imgur.com/TkoqCQK.png)
 
 On August 5, 2025, OpenAI released [gpt-oss](https://openai.com/open-models/), including two state-of-the-art open-weight language models: `gpt-oss-120b` and `gpt-oss-20b`. These models deliver strong real-world performance at low cost and are available under the flexible Apache 2.0 license.
 
