@@ -261,15 +261,6 @@ class Task:
         _file_mounts_mapping: Optional[Dict[str, str]] = None,
         _volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
         _metadata: Optional[Dict[str, Any]] = None,
-        require_prelaunch_setup: bool = False,
-        # Internal use (setup only).
-        file_mounts_config: Optional[Dict[str, Any]] = None,
-        service_config: Optional[Dict[str, Any]] = None,
-        pool_config: Optional[Dict[str, Any]] = None,
-        input_config: Optional[Dict[str, Any]] = None,
-        output_config: Optional[Dict[str, Any]] = None,
-        resources_config: Optional[Dict[str, Any]] = None,
-        volume_mounts_config: Optional[Dict[str, Any]] = None,
         _user_specified_yaml: Optional[str] = None,
     ):
         """Initializes a Task.
@@ -420,16 +411,16 @@ class Task:
         if file_mounts is not None:
             self.set_file_mounts(file_mounts)
 
-        self._require_prelaunch_setup = require_prelaunch_setup
-
         # For internal use, setup only. Will be cleaned up after setup.
-        self._file_mounts_config = file_mounts_config
-        self._service_config = service_config
-        self._pool_config = pool_config
-        self._input_config = input_config
-        self._output_config = output_config
-        self._resources_config = resources_config
-        self._volume_mounts_config = volume_mounts_config
+        self._require_prelaunch_setup = False
+
+        self._file_mounts_config: Optional[Dict[str, Any]] = None
+        self._service_config: Optional[Dict[str, Any]] = None
+        self._pool_config: Optional[Dict[str, Any]] = None
+        self._input_config: Optional[Dict[str, Any]] = None
+        self._output_config: Optional[Dict[str, Any]] = None
+        self._resources_config: Optional[Dict[str, Any]] = None
+        self._volume_mounts_config: Optional[Dict[str, Any]] = None
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
@@ -582,6 +573,18 @@ class Task:
         self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
 
     def maybe_run_yaml_prelaunch_setup(self):
+        """Resolve all configs passed to Task instance and resolve all
+        environment variables.
+
+        This will setup filemounts, storage, volumes, etc, so subsequent
+        changes to the environment variables via `update_envs` may not be
+        reflected.
+
+        Note that this function HAS to be called before validation if
+        it is required to call this function (ie: Task instance not
+        fully setup yet)
+        """
+
         if not self.require_prelaunch_setup:
             logger.debug(
                 'Not running task prelaunch setup as it is not required')
@@ -714,6 +717,35 @@ class Task:
         self._volume_mounts_config = None
         self._require_prelaunch_setup = False
 
+    def _add_pre_env_parse_configs(
+        self,
+        file_mounts_config: Optional[Dict[str, Any]] = None,
+        service_config: Optional[Dict[str, Any]] = None,
+        pool_config: Optional[Dict[str, Any]] = None,
+        input_config: Optional[Dict[str, Any]] = None,
+        output_config: Optional[Dict[str, Any]] = None,
+        resources_config: Optional[Dict[str, Any]] = None,
+        volume_mounts_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Internal use only. Used in from_yaml_config to
+        populate the Task instance with pre-environment variable
+        filled config information.
+
+        This information is used by maybe_run_yaml_prelaunch_setup
+        to finalize task instantiation"""
+
+        assert not self._require_prelaunch_setup, (
+            'Prelaunch configs already filled')
+        self._require_prelaunch_setup = True
+
+        self._file_mounts_config = file_mounts_config
+        self._service_config = service_config
+        self._pool_config = pool_config
+        self._input_config = input_config
+        self._output_config = output_config
+        self._resources_config = resources_config
+        self._volume_mounts_config = volume_mounts_config
+
     @staticmethod
     def from_yaml_config(
         config: Dict[str, Any],
@@ -838,7 +870,11 @@ class Task:
             volumes=config.pop('volumes', None),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
             _metadata=config.pop('_metadata', None),
-            require_prelaunch_setup=True,
+            _user_specified_yaml=user_specified_yaml,
+        )
+
+        # fill in env-var configs # pylint: disable-next=protected-access
+        task._add_pre_env_parse_configs(
             file_mounts_config=config.pop('file_mounts', None),
             service_config=config.pop('service', None),
             pool_config=config.pop('pool', None),
@@ -846,8 +882,8 @@ class Task:
             output_config=config.pop('outputs', None),
             resources_config=resources_config,
             volume_mounts_config=config.pop('volume_mounts', None),
-            _user_specified_yaml=user_specified_yaml,
         )
+
         assert not config, f'Invalid task args: {config.keys()}'
 
         if complete_setup:
