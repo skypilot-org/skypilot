@@ -5,6 +5,7 @@ import hashlib
 import http
 import os
 from typing import Optional
+import urllib
 
 import aiohttp
 import fastapi
@@ -59,7 +60,8 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     async def forward_to_oauth2_proxy(self, request: fastapi.Request):
         """Forward requests to oauth2-proxy service."""
         logger.debug(f'forwarding to oauth2-proxy: {request.url.path}')
-        target_url = f'{self.proxy_base}/{request.url.path}'
+        path = request.url.path.lstrip('/')
+        target_url = f'{self.proxy_base}/{path}'
         body = await request.body()
         async with aiohttp.ClientSession() as session:
             try:
@@ -74,11 +76,24 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                         allow_redirects=False,
                 ) as response:
                     response_body = await response.read()
-                    return fastapi.responses.Response(
+                    fastapi_response = fastapi.responses.Response(
                         content=response_body,
                         status_code=response.status,
                         headers=dict(response.headers),
                     )
+                    # Forward cookies from OAuth2 proxy response to client
+                    for cookie_name, cookie in response.cookies.items():
+                        fastapi_response.set_cookie(
+                            key=cookie_name,
+                            value=cookie.value,
+                            max_age=cookie.get('max-age'),
+                            expires=cookie.get('expires'),
+                            path=cookie.get('path', '/'),
+                            domain=cookie.get('domain'),
+                            secure=cookie.get('secure', False),
+                            httponly=cookie.get('httponly', False),
+                        )
+                    return fastapi_response
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.error(f'Error forwarding to OAuth2 proxy: {e}')
                 return fastapi.responses.JSONResponse(
@@ -104,7 +119,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                             session: aiohttp.ClientSession):
         forwarded_headers = dict(request.headers)
         auth_url = f'{self.proxy_base}/oauth2/auth'
-        forwarded_headers['X-Forwarded-Uri'] = str(request.url)
+        forwarded_headers['X-Forwarded-Uri'] = str(request.url).rstrip('/')
         logger.debug(f'authenticate request: {request.url.path}')
 
         async with session.request(
@@ -145,8 +160,12 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 # or rejection should be done after all the authentication
                 # methods are performed.
                 # Not authenticated, redirect to sign-in
+                redirect_path = request.url.path
+                if request.url.query:
+                    redirect_path += f'?{request.url.query}'
+                rd = urllib.parse.quote(redirect_path)
                 signin_url = (f'{request.base_url}oauth2/start?'
-                              f'rd={str(request.url)}')
+                              f'rd={rd}')
                 return fastapi.responses.RedirectResponse(url=signin_url)
             else:
                 logger.error('oauth2-proxy returned unexpected status '
