@@ -16,7 +16,7 @@ import logging
 import os
 import subprocess
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
 from urllib import parse as urlparse
 
 import click
@@ -24,6 +24,7 @@ import colorama
 import filelock
 
 from sky import admin_policy
+from sky import backends
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -65,7 +66,6 @@ if typing.TYPE_CHECKING:
     import requests
 
     import sky
-    from sky import backends
 else:
     # only used in api_login()
     base64 = adaptors_common.LazyImport('base64')
@@ -1276,7 +1276,7 @@ def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId[List[Dict[str, Any]]]:
     """Gets cluster statuses.
 
     If cluster_names is given, return those clusters. Otherwise, return all
@@ -1361,7 +1361,9 @@ def status(
     )
     response = server_common.make_authenticated_request(
         'POST', '/status', json=json.loads(body.model_dump_json()))
-    return server_common.get_request_id(response)
+    request_id = server_common.get_request_id(response)
+
+    return request_id
 
 
 @usage_lib.entrypoint
@@ -1756,7 +1758,71 @@ def status_kubernetes() -> server_common.RequestId:
     return server_common.get_request_id(response)
 
 
+T = TypeVar('T')
+
+
 # === API request APIs ===
+@usage_lib.entrypoint
+@annotations.client_api
+def super_get(request_id: server_common.SuperRequestId[T]) -> T:
+    """Waits for and gets the result of a request.
+
+    This function will not check the server health since /api/get is typically
+    not the first API call in an SDK session and checking the server health
+    may cause GET /api/get being sent to a restarted API server.
+
+    Args:
+        request_id: The request ID of the request to get. May be a full request
+            ID or a prefix.
+
+    Returns:
+        The ``Request Returns`` of the specified request. See the documentation
+        of the specific requests above for more details.
+
+    Raises:
+        Exception: It raises the same exceptions as the specific requests,
+            see ``Request Raises`` in the documentation of the specific requests
+            above.
+    """
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/api/get?request_id={request_id}',
+        retry=False,
+        timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
+                 None))
+    request_task = None
+    if response.status_code == 200:
+        request_task = requests_lib.Request.decode(
+            payloads.RequestPayload(**response.json()))
+    elif response.status_code == 500:
+        try:
+            request_task = requests_lib.Request.decode(
+                payloads.RequestPayload(**response.json().get('detail')))
+            logger.debug(f'Got request with error: {request_task.name}')
+        except Exception:  # pylint: disable=broad-except
+            request_task = None
+    if request_task is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Failed to get request {request_id}: '
+                               f'{response.status_code} {response.text}')
+    error = request_task.get_error()
+    if error is not None:
+        error_obj = error['object']
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            stacktrace = getattr(error_obj, 'stacktrace', str(error_obj))
+            logger.error('=== Traceback on SkyPilot API Server ===\n'
+                         f'{stacktrace}')
+        with ux_utils.print_exception_no_traceback():
+            raise error_obj
+    if request_task.status == requests_lib.RequestStatus.CANCELLED:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.RequestCancelled(
+                f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
+                f'({request_task.request_id}) is cancelled by another process.'
+                f'{colorama.Style.RESET_ALL}')
+    return request_task.get_return_value()
+
+
 @usage_lib.entrypoint
 @annotations.client_api
 def get(request_id: server_common.RequestId) -> Any:

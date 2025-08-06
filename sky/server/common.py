@@ -16,8 +16,8 @@ import tempfile
 import threading
 import time
 import typing
-from typing import (Any, Callable, cast, Dict, Literal, Optional, Tuple,
-                    TypeVar, Union)
+from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
+                    Tuple, TypeVar, Union)
 from urllib import parse
 import uuid
 
@@ -90,6 +90,23 @@ _SERVER_INSTALL_VERSION_MISMATCH_WARNING = (
     f'{colorama.Style.RESET_ALL}')
 
 RequestId = str
+
+T = TypeVar('T')
+
+
+class SuperRequestId(Generic[T]):
+
+    def __init__(self, request_id: str, value: T):
+        self.request_id = request_id
+        self.value = value
+
+    def transform(self, value: Any) -> T:
+        return value
+
+    def __str__(self):
+        return self.request_id
+
+
 ApiVersion = Optional[str]
 
 logger = sky_logging.init_logger(__name__)
