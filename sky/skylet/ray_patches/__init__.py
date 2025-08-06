@@ -41,7 +41,7 @@ def _run_patch(target_file,
     # .orig is the original file that is not patched.
     orig_file = os.path.abspath(f'{target_file}-v{version}.orig')
     script = f"""\
-    which patch >/dev/null 2>&1 || sudo yum install -y patch || true
+    command -v patch >/dev/null 2>&1 || sudo $(command -v yum || command -v apt-get) install -y patch || true
     which patch >/dev/null 2>&1 || (echo "`patch` is not found. Failed to setup ray." && exit 1)
     if [ ! -f {orig_file} ]; then
         echo Create backup file {orig_file}
