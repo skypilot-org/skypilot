@@ -93,19 +93,8 @@ RequestId = str
 
 T = TypeVar('T')
 
-
-class SuperRequestId(Generic[T]):
-
-    def __init__(self, request_id: str, value: T):
-        self.request_id = request_id
-        self.value = value
-
-    def transform(self, value: Any) -> T:
-        return value
-
-    def __str__(self):
-        return self.request_id
-
+class SuperRequestId(str, Generic[T]):
+    pass
 
 ApiVersion = Optional[str]
 
