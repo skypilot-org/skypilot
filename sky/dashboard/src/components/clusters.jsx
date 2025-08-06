@@ -641,9 +641,7 @@ export function ClusterTable({
 
       // Only exclude skypilot-system if there's no explicit user filter for it
       if (userFilters.length === 0 || !hasSkyPilotSystemFilter) {
-        filteredData = data.filter(
-          (item) => item.user !== 'skypilot-system'
-        );
+        filteredData = data.filter((item) => item.user !== 'skypilot-system');
       }
 
       if (filters.length === 0) {
