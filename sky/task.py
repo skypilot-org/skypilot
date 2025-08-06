@@ -903,6 +903,11 @@ class Task:
 
         Args:
           yaml_path: file path to a valid task yaml file.
+          complete_setup: when set to True, resolve all environment variables
+            and fully initialize the Task instance. Set to False if there is a
+            need to override env-vars (ie: using `update_envs`). Task instance
+            will finish initializing automatically when it is validated,
+            launched, exec-ed, etc.
 
         Raises:
           ValueError: if the path gets loaded into a str instead of a dict; or
