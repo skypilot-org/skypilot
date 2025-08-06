@@ -120,7 +120,10 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                 <Card className="p-3 bg-gray-50">
                   <div className="flex items-center justify-between">
                     <pre className="text-sm">
-                      <code>code --remote ssh-remote+{cluster}</code>
+                      <code>
+                        code --folder-uri &quot;vscode-remote://ssh-remote+
+                        {cluster}/home/sky&quot;
+                      </code>
                     </pre>
                     <Tooltip content="Copy command">
                       <Button
@@ -128,7 +131,7 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                         size="icon"
                         onClick={() =>
                           navigator.clipboard.writeText(
-                            `code --remote ssh-remote+${cluster}`
+                            `code --folder-uri "vscode-remote://ssh-remote+${cluster}/home/sky"`
                           )
                         }
                         className="h-8 w-8 rounded-full"
