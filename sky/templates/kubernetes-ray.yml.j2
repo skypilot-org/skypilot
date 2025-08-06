@@ -777,6 +777,15 @@ available_node_types:
                 {{ ray_installation_commands }}
 
                 VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                # Wait for `patch` package to be installed before applying ray patches
+                until dpkg -l | grep -q "^ii  patch "; do
+                  sleep 0.1
+                  echo "Waiting for patch package to be installed..."
+                done
+                # Apply Ray patches for progress bar fix
+                ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && { 
+                  VIRTUAL_ENV=~/skypilot-runtime python -c "from sky.skylet.ray_patches import patch; patch()" || exit 1; 
+                }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
 
@@ -1211,8 +1220,7 @@ setup_commands:
     end_epoch=$(date +%s);
     echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
-    # install skypilot from wheel and apply ray patches
-    {{ ray_skypilot_installation_commands }}
+    {{ skypilot_wheel_installation_commands }}
     end_epoch=$(date +%s);
     echo "=== Skypilot wheel installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
