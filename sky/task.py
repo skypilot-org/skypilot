@@ -406,8 +406,8 @@ class Task:
         self.best_resources: Optional[sky.Resources] = None
 
         # For internal use only.
-        self.file_mounts_mapping: Optional[Dict[str, str]] = (
-            _file_mounts_mapping)
+        self.file_mounts_mapping: Optional[Dict[str,
+                                                str]] = _file_mounts_mapping
         self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
             _volume_mounts)
 
