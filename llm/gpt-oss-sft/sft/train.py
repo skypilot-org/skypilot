@@ -1,14 +1,20 @@
 import argparse
-from accelerate import Accelerator, ProfileKwargs
-from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, Mxfp4Config
-from trl import SFTConfig
-from trl import SFTTrainer
-from peft import LoraConfig, get_peft_model
-
 import os
 
+from accelerate import Accelerator
+from accelerate import ProfileKwargs
+from datasets import load_dataset
+from peft import get_peft_model
+from peft import LoraConfig
+from transformers import AutoModelForCausalLM
+from transformers import AutoTokenizer
+from transformers import Mxfp4Config
+from trl import SFTConfig
+from trl import SFTTrainer
+
+
 class ProfilingSFTTrainer(SFTTrainer):
+
     def __init__(self, *args, accelerator_profiler=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.accelerator_profiler = accelerator_profiler
@@ -19,48 +25,53 @@ class ProfilingSFTTrainer(SFTTrainer):
             self.accelerator_profiler.step()
         return result
 
+
 def main():
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Train a model using SFT on Codeforces dataset")
+    parser = argparse.ArgumentParser(
+        description="Train a model using SFT on Codeforces dataset")
     parser.add_argument(
         "--model_id",
         type=str,
         default="openai/gpt-oss-20b",
-        help="The model ID to use for training (default: openai/gpt-oss-120b)"
-    )
-    parser.add_argument(
-        "--enable_lora",
-        action="store_true",
-        default=False,
-        help="Enable LoRA"
-    )
+        help="The model ID to use for training (default: openai/gpt-oss-120b)")
+    parser.add_argument("--enable_lora",
+                        action="store_true",
+                        default=False,
+                        help="Enable LoRA")
     parser.add_argument(
         "--enable_profiling",
         action="store_true",
         default=False,
-        help="Enable accelerate profiling with chrome trace export"
-    )
+        help="Enable accelerate profiling with chrome trace export")
     args = parser.parse_args()
-    
+
     # Setup profiling if enabled
     accelerator_kwargs = {}
     if args.enable_profiling:
+
         def trace_handler(p):
             p.export_chrome_trace(f"/tmp/trace_{p.step_num}.json")
 
-        profile_kwargs = ProfileKwargs(
-            activities=["cpu", "cuda"],
-            schedule_option={"wait": 0, "warmup": 1, "active": 3, "repeat": 0, "skip_first": 1},
-            on_trace_ready=trace_handler
-        )
+        profile_kwargs = ProfileKwargs(activities=["cpu", "cuda"],
+                                       schedule_option={
+                                           "wait": 0,
+                                           "warmup": 1,
+                                           "active": 3,
+                                           "repeat": 0,
+                                           "skip_first": 1
+                                       },
+                                       on_trace_ready=trace_handler)
         accelerator_kwargs['kwargs_handlers'] = [profile_kwargs]
 
     accelerator = Accelerator(**accelerator_kwargs)
     model_id = args.model_id
 
     # Load dataset
-    num_proc = int(os.cpu_count()/2)
-    train_dataset = load_dataset("HuggingFaceH4/Multilingual-Thinking", split="train",  num_proc=num_proc)
+    num_proc = int(os.cpu_count() / 2)
+    train_dataset = load_dataset("HuggingFaceH4/Multilingual-Thinking",
+                                 split="train",
+                                 num_proc=num_proc)
 
     quantization_config = Mxfp4Config(dequantize=True)
 
@@ -101,7 +112,7 @@ def main():
         if args.model_id == 'openai/gpt-oss-20b':
             per_device_train_batch_size = 1
     else:
-        per_device_train_batch_size = 8
+        per_device_train_batch_size = 1
 
     # Train model
     training_args = SFTConfig(
@@ -117,14 +128,14 @@ def main():
         lr_scheduler_kwargs={"min_lr_rate": 0.1},
         dataset_num_proc=num_proc,
     )
-    
+
     # Train model with optional profiling
     trainer_kwargs = {
         'args': training_args,
         'model': model,
         'train_dataset': train_dataset,
     }
-    
+
     if args.enable_profiling:
         with accelerator.profile() as prof:
             trainer_kwargs['accelerator_profiler'] = prof
