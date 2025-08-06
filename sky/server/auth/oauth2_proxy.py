@@ -4,8 +4,8 @@ import asyncio
 import hashlib
 import http
 import os
-import urllib
 from typing import Optional
+import urllib
 
 import aiohttp
 import fastapi
