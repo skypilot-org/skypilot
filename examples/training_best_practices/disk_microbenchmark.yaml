@@ -16,7 +16,9 @@ name: storage-benchmark
 
 envs:
   S3_BUCKET: nebius://henry-test  # S3 bucket for benchmarks
+  S3_BUCKET_MOUNT_CACHED: nebius://henry-test-et  # S3 bucket for benchmarks
   BENCH_PATH_S3: /skystorage-mount/bench
+  BENCH_PATH_S3_CACHED: /skystorage-mount-cached/bench
   BENCH_PATH_NVME: /tmp/nvme-bench/bench
   BENCH_PATH_NEBIUS: /mnt/data/fio
   
@@ -39,6 +41,9 @@ file_mounts:
   /skystorage-mount:
     source: ${S3_BUCKET}
     mode: MOUNT
+  /skystorage-mount-cached:
+    source: ${S3_BUCKET_MOUNT_CACHED}
+    mode: MOUNT_CACHED
 
 volumes:
   # Mount the Nebius shared filesystem to /mnt/data across all nodes
@@ -74,11 +79,15 @@ setup: |
   # Create S3 benchmark directory  
   mkdir -p ${BENCH_PATH_S3}
   
+  # Create S3 cached benchmark directory
+  mkdir -p ${BENCH_PATH_S3_CACHED}
+  
   # Create Nebius benchmark directory
   mkdir -p ${BENCH_PATH_NEBIUS}
   
   echo "✅ Setup complete"
   echo "S3 mount path: ${BENCH_PATH_S3}"
+  echo "S3 cached mount path: ${BENCH_PATH_S3_CACHED}"
   echo "NVMe bench path: ${BENCH_PATH_NVME}"
   echo "Nebius bench path: ${BENCH_PATH_NEBIUS}"
 
@@ -207,11 +216,14 @@ run: |
   }
   
   # Run benchmarks on both storage types
-  echo "=== Starting Triple Storage Benchmark ==="
-  echo "Testing S3 mount, NVMe storage, and Nebius shared filesystem performance"
+  echo "=== Starting Quadruple Storage Benchmark ==="
+  echo "Testing S3 mount, S3 cached mount, NVMe storage, and Nebius shared filesystem performance"
   
   # Benchmark S3 Mount Storage
   run_fio_benchmark "S3 Mount" "${BENCH_PATH_S3}" "s3"
+  
+  # Benchmark S3 Cached Mount Storage
+  run_fio_benchmark "S3 Cached Mount" "${BENCH_PATH_S3_CACHED}" "s3_cached"
   
   # Benchmark NVMe Storage  
   run_fio_benchmark "NVMe" "${BENCH_PATH_NVME}" "nvme"
@@ -226,12 +238,14 @@ run: |
   echo "========================================================================================="
   
   display_results "S3 Mount" "${BENCH_PATH_S3}" "s3"
+  display_results "S3 Cached Mount" "${BENCH_PATH_S3_CACHED}" "s3_cached"
   display_results "NVMe" "${BENCH_PATH_NVME}" "nvme"
   display_results "Nebius" "${BENCH_PATH_NEBIUS}" "nebius"
   
   echo ""
   echo "=== Benchmark Summary ==="
   echo "S3 Mount Path: ${BENCH_PATH_S3}"
+  echo "S3 Cached Mount Path: ${BENCH_PATH_S3_CACHED}"
   echo "NVMe Path: ${BENCH_PATH_NVME}"
   echo "Nebius Path: ${BENCH_PATH_NEBIUS}"
   echo "✅ All benchmarks complete"

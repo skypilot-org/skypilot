@@ -14,7 +14,7 @@ resources:
   network_tier: best
   image_id: docker:cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.23.4-ubu22.04-cu12.4
 
-num_nodes: 2
+num_nodes: 1
 
 # Configure buckets for dataset and checkpoints with both S3 and local NVMe
 file_mounts:
@@ -53,7 +53,6 @@ run: |
   # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py
   # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --dirs /tmp/checkpoint /mnt/data/checkpoint /checkpoints_s3 /checkpoints_s3_mount_cached
   python /e2e/download.py --num_proc -1 --dirs /tmp/checkpoint /mnt/data /checkpoints_s3 /checkpoints_s3_mount_cached
-  # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /tmp/checkpoint /mnt/data/checkpoint /checkpoints_s3 /checkpoints_s3_mount_cached
 
   # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /tmp/checkpoint
   # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /mnt/data/
@@ -69,12 +68,12 @@ run: |
   # accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --enable_profiling --dirs /checkpoints_s3_mount_cached
   # cp /tmp/trace_* /checkpoints_s3_mount_cached/checkpoints
 
-  accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --dirs /tmp/checkpoint
-  cp /tmp/trace_* /tmp/checkpoint/checkpoints
-  accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --dirs /mnt/data/
-  cp /tmp/trace_* /mnt/data/checkpoint/checkpoints
-  accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --dirs /checkpoints_s3
-  cp /tmp/trace_* /checkpoints_s3/checkpoints
+  # accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --dirs /tmp/checkpoint
+  # cp /tmp/trace_* /tmp/checkpoint/checkpoints
+  # accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --dirs /mnt/data/
+  # cp /tmp/trace_* /mnt/data/checkpoint/checkpoints
+  # accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --dirs /checkpoints_s3
+  # cp /tmp/trace_* /checkpoints_s3/checkpoints
   accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --dirs /checkpoints_s3_mount_cached
   cp /tmp/trace_* /checkpoints_s3_mount_cached/checkpoints
 
