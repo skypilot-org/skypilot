@@ -587,8 +587,9 @@ class Task:
 
         if not self.require_prelaunch_setup:
             logger.debug(
-                'Not running task prelaunch setup as it is not required')
+                'Not running task prelaunch setup as it is not required.')
             return
+        logger.debug('Parsing env vars and running task prelaunch setup.')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
