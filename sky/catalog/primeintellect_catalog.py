@@ -8,7 +8,6 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.catalog import common
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
