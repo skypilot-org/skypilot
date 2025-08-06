@@ -17,7 +17,6 @@ ALLOWED_TERMS = {
     'API',
     'GPU',
     'GPT-OSS',
-    'GPT-OSS-SFT',
     'VM',
     'GUI',
     'AWS',
