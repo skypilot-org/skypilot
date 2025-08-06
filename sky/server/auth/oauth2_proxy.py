@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import http
 import os
+import urllib
 from typing import Optional
 
 import aiohttp
@@ -146,8 +147,12 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 # or rejection should be done after all the authentication
                 # methods are performed.
                 # Not authenticated, redirect to sign-in
+                redirect_path = request.url.path
+                if request.url.query:
+                    redirect_path += f'?{request.url.query}'
+                rd = urllib.parse.quote(redirect_path)
                 signin_url = (f'{request.base_url}oauth2/start?'
-                              f'rd={request.url.path.lstrip("/")}')
+                              f'rd={rd}')
                 return fastapi.responses.RedirectResponse(url=signin_url)
             else:
                 logger.error('oauth2-proxy returned unexpected status '
