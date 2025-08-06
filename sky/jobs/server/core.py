@@ -850,3 +850,43 @@ def pool_status(
                                List[str]]] = None,) -> List[Dict[str, Any]]:
     """Query a pool."""
     return impl.status(pool_names, pool=True)
+
+
+ServiceComponentOrStr = Union[str, serve_utils.ServiceComponent]
+
+
+@usage_lib.entrypoint
+def pool_tail_logs(
+    pool_name: str,
+    *,
+    target: ServiceComponentOrStr,
+    worker_id: Optional[int] = None,
+    follow: bool = True,
+    tail: Optional[int] = None,
+) -> None:
+    """Tail logs of a pool."""
+    return impl.tail_logs(pool_name,
+                          target=target,
+                          replica_id=worker_id,
+                          follow=follow,
+                          tail=tail,
+                          pool=True)
+
+
+@usage_lib.entrypoint
+def pool_sync_down_logs(
+    pool_name: str,
+    *,
+    local_dir: str,
+    targets: Union[ServiceComponentOrStr, List[ServiceComponentOrStr],
+                   None] = None,
+    worker_ids: Optional[List[int]] = None,
+    tail: Optional[int] = None,
+) -> str:
+    """Sync down logs of a pool."""
+    return impl.sync_down_logs(pool_name,
+                               local_dir=local_dir,
+                               targets=targets,
+                               replica_ids=worker_ids,
+                               tail=tail,
+                               pool=True)

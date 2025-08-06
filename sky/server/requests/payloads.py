@@ -707,6 +707,25 @@ class JobsPoolStatusBody(RequestBody):
     pool_names: Optional[Union[str, List[str]]]
 
 
+class JobsPoolLogsBody(RequestBody):
+    """The request body for the jobs pool logs endpoint."""
+    pool_name: str
+    target: Union[str, serve.ServiceComponent]
+    worker_id: Optional[int] = None
+    follow: bool = True
+    tail: Optional[int] = None
+
+
+class JobsPoolDownloadLogsBody(RequestBody):
+    """The request body for the jobs pool download logs endpoint."""
+    pool_name: str
+    local_dir: str
+    targets: Optional[Union[str, serve.ServiceComponent,
+                            List[Union[str, serve.ServiceComponent]]]]
+    worker_ids: Optional[List[int]] = None
+    tail: Optional[int] = None
+
+
 class UploadZipFileResponse(pydantic.BaseModel):
     """The response body for the upload zip file endpoint."""
     status: str

@@ -408,3 +408,44 @@ def pool_status(
     pool_names: Optional[Union[str, List[str]]],) -> server_common.RequestId:
     """Query a pool."""
     return impl.status(pool_names, pool=True)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@rest.retry_transient_errors()
+@versions.minimal_api_version(13)
+def pool_tail_logs(pool_name: str,
+                   target: Union[str, 'serve_utils.ServiceComponent'],
+                   worker_id: Optional[int] = None,
+                   follow: bool = True,
+                   output_stream: Optional['io.TextIOBase'] = None,
+                   tail: Optional[int] = None) -> None:
+    """Tails logs of a pool."""
+    return impl.tail_logs(pool_name,
+                          target,
+                          worker_id,
+                          follow,
+                          output_stream,
+                          tail,
+                          pool=True)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@rest.retry_transient_errors()
+@versions.minimal_api_version(13)
+def pool_sync_down_logs(pool_name: str,
+                        local_dir: str,
+                        *,
+                        targets: Optional[Union[
+                            str, 'serve_utils.ServiceComponent', Sequence[Union[
+                                str, 'serve_utils.ServiceComponent']]]] = None,
+                        worker_ids: Optional[List[int]] = None,
+                        tail: Optional[int] = None) -> None:
+    """Sync down logs of a pool."""
+    return impl.sync_down_logs(pool_name,
+                               local_dir,
+                               targets=targets,
+                               replica_ids=worker_ids,
+                               tail=tail,
+                               pool=True)
