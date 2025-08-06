@@ -16,13 +16,15 @@ import tempfile
 import threading
 import time
 import typing
-from typing import Any, Dict, Literal, Optional, Tuple, Union
+from typing import (Any, Callable, cast, Dict, Literal, Optional, Tuple,
+                    TypeVar, Union)
 from urllib import parse
 import uuid
 
 import cachetools
 import colorama
 import filelock
+from typing_extensions import ParamSpec
 
 from sky import exceptions
 from sky import sky_logging
@@ -93,6 +95,9 @@ ApiVersion = Optional[str]
 logger = sky_logging.init_logger(__name__)
 
 hinted_for_server_install_version_mismatch = False
+
+T = TypeVar('T')
+P = ParamSpec('P')
 
 
 class ApiServerStatus(enum.Enum):
@@ -753,14 +758,14 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                                   metrics_port, enable_basic_auth)
 
 
-def check_server_healthy_or_start(func):
+def check_server_healthy_or_start(func: Callable[P, T]) -> Callable[P, T]:
 
     @functools.wraps(func)
     def wrapper(*args, deploy: bool = False, host: str = '127.0.0.1', **kwargs):
         check_server_healthy_or_start_fn(deploy, host)
         return func(*args, **kwargs)
 
-    return wrapper
+    return cast(Callable[P, T], wrapper)
 
 
 def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],

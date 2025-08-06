@@ -66,13 +66,12 @@ def get_num_service_threshold():
 
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
-# NOTE(dev): We assume log paths are either in ~/sky_logs/... or ~/.sky/...
-# and always appear after a space. Be careful when changing UX as this
-# assumption is used to expand some log files while ignoring others.
-_SKYPILOT_LOG_DIRS = r'~/(sky_logs|\.sky)'
-_SKYPILOT_PROVISION_LOG_PATTERN = (
-    fr'.* ({_SKYPILOT_LOG_DIRS}/.*provision\.log)')
-_SKYPILOT_LOG_PATTERN = fr'.* ({_SKYPILOT_LOG_DIRS}/.*\.log)'
+# NOTE(dev): We assume log are print with the hint 'sky api logs -l'. Be careful
+# when changing UX as this assumption is used to expand some log files while
+# ignoring others.
+_SKYPILOT_LOG_HINT = r'.*sky api logs -l'
+_SKYPILOT_PROVISION_LOG_PATTERN = (fr'{_SKYPILOT_LOG_HINT} (.*/provision\.log)')
+_SKYPILOT_LOG_PATTERN = fr'{_SKYPILOT_LOG_HINT} (.*\.log)'
 
 # TODO(tian): Find all existing replica id and print here.
 _FAILED_TO_FIND_REPLICA_MSG = (
@@ -1036,12 +1035,16 @@ def load_service_initialization_result(payload: str) -> int:
     return message_utils.decode_payload(payload)
 
 
-def check_service_status_healthy(service_name: str) -> Optional[str]:
-    service_record = serve_state.get_service_from_name(service_name)
+def _check_service_status_healthy(service_name: str,
+                                  pool: bool) -> Optional[str]:
+    service_record = _get_service_status(service_name,
+                                         pool,
+                                         with_replica_info=False)
+    capnoun = 'Service' if not pool else 'Pool'
     if service_record is None:
-        return f'Service {service_name!r} does not exist.'
+        return f'{capnoun} {service_name!r} does not exist.'
     if service_record['status'] == serve_state.ServiceStatus.CONTROLLER_INIT:
-        return (f'Service {service_name!r} is still initializing its '
+        return (f'{capnoun} {service_name!r} is still initializing its '
                 'controller. Please try again later.')
     return None
 
@@ -1080,7 +1083,10 @@ def _process_line(line: str,
     log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
 
     if provision_log_prompt is not None:
-        nested_log_path = os.path.expanduser(provision_log_prompt.group(1))
+        log_path = provision_log_prompt.group(1)
+        nested_log_path = pathlib.Path(
+            skylet_constants.SKY_LOGS_DIRECTORY).expanduser().joinpath(
+                log_path).resolve()
 
         try:
             with open(nested_log_path, 'r', newline='', encoding='utf-8') as f:
@@ -1172,12 +1178,14 @@ def _capped_follow_logs_with_provision_expanding(
 
 
 def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
-                        tail: Optional[int]) -> str:
-    msg = check_service_status_healthy(service_name)
+                        tail: Optional[int], pool: bool) -> str:
+    msg = _check_service_status_healthy(service_name, pool=pool)
     if msg is not None:
         return msg
+    repnoun = 'worker' if pool else 'replica'
+    caprepnoun = repnoun.capitalize()
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
-          f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
+          f'of {repnoun} {replica_id}.{colorama.Style.RESET_ALL}')
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
     if os.path.exists(log_file_name):
         if tail is not None:
@@ -1194,7 +1202,7 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
     launch_log_file_name = generate_replica_launch_log_file_name(
         service_name, replica_id)
     if not os.path.exists(launch_log_file_name):
-        return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
+        return (f'{colorama.Fore.RED}{caprepnoun} {replica_id} doesn\'t exist.'
                 f'{colorama.Style.RESET_ALL}')
 
     replica_cluster_name = generate_replica_cluster_name(
@@ -1244,6 +1252,10 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
                 print(line, end='', flush=True)
         return ''
 
+    # For pools, we don't stream the job logs as the run section is ignored.
+    if pool:
+        return ''
+
     backend = backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
@@ -1258,13 +1270,13 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
 
     # Notify user here to make sure user won't think the log is finished.
     print(f'{colorama.Fore.YELLOW}Start streaming logs for task job '
-          f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
+          f'of {repnoun} {replica_id}...{colorama.Style.RESET_ALL}')
 
     # Always tail the latest logs, which represent user setup & run.
     if tail is None:
         returncode = backend.tail_logs(handle, job_id=None, follow=follow)
         if returncode != 0:
-            return (f'{colorama.Fore.RED}Failed to stream logs for replica '
+            return (f'{colorama.Fore.RED}Failed to stream logs for {repnoun} '
                     f'{replica_id}.{colorama.Style.RESET_ALL}')
     elif not follow and tail > 0:
         final = backend.tail_logs(handle,
@@ -1291,8 +1303,9 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
 
 
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
-                              follow: bool, tail: Optional[int]) -> str:
-    msg = check_service_status_healthy(service_name)
+                              follow: bool, tail: Optional[int],
+                              pool: bool) -> str:
+    msg = _check_service_status_healthy(service_name, pool)
     if msg is not None:
         return msg
     if stream_controller:
@@ -1301,7 +1314,9 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
         log_file = generate_remote_load_balancer_log_file_name(service_name)
 
     def _service_is_terminal() -> bool:
-        record = serve_state.get_service_from_name(service_name)
+        record = _get_service_status(service_name,
+                                     pool,
+                                     with_replica_info=False)
         if record is None:
             return True
         return record['status'] in serve_state.ServiceStatus.failed_statuses()
@@ -1544,21 +1559,24 @@ class ServeCodeGen:
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,
-                            follow: bool, tail: Optional[int]) -> str:
+                            follow: bool, tail: Optional[int],
+                            pool: bool) -> str:
         code = [
+            f'kwargs={{}} if serve_version < 5 else {{"pool": {pool}}}',
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow}, tail={tail})',
-            'print(msg, flush=True)'
+            f'{service_name!r}, {replica_id!r}, follow={follow}, tail={tail}, '
+            '**kwargs)', 'print(msg, flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
     def stream_serve_process_logs(cls, service_name: str,
                                   stream_controller: bool, follow: bool,
-                                  tail: Optional[int]) -> str:
+                                  tail: Optional[int], pool: bool) -> str:
         code = [
+            f'kwargs={{}} if serve_version < 5 else {{"pool": {pool}}}',
             f'msg = serve_utils.stream_serve_process_logs({service_name!r}, '
-            f'{stream_controller}, follow={follow}, tail={tail})',
+            f'{stream_controller}, follow={follow}, tail={tail}, **kwargs)',
             'print(msg, flush=True)'
         ]
         return cls._build(code)
