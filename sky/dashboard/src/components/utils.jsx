@@ -639,7 +639,7 @@ export const renderPoolLink = (poolName, poolHash, poolsData) => {
     return (
       <Link
         href={`/jobs/pools/${poolName}`}
-        className="text-blue-600 hover:underline"
+        className="text-gray-700 hover:text-blue-600 hover:underline"
       >
         {poolName}
       </Link>
