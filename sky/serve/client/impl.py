@@ -1,7 +1,7 @@
 """Implementation of SDK for SkyServe."""
 import json
 import typing
-from typing import List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import click
 
@@ -112,7 +112,7 @@ def apply(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.TypedRequestId[None]:
     assert pool, 'Command `apply` is only supported for pool.'
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -153,7 +153,7 @@ def down(
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False,
     pool: bool = False,
-) -> server_common.RequestId:
+) -> server_common.TypedRequestId[None]:
     if pool:
         body = payloads.JobsPoolDownBody(
             pool_names=service_names,
@@ -177,7 +177,7 @@ def down(
 def status(
     service_names: Optional[Union[str, List[str]]],
     pool: bool = False,
-) -> server_common.RequestId:
+) -> server_common.TypedRequestId[List[Dict[str, Any]]]:
     if pool:
         body = payloads.JobsPoolStatusBody(pool_names=service_names)
     else:

@@ -92,9 +92,10 @@ _SERVER_INSTALL_VERSION_MISMATCH_WARNING = (
 RequestId = str
 
 T = TypeVar('T')
+P = ParamSpec('P')
 
 
-class SuperRequestId(str, Generic[T]):
+class TypedRequestId(str, Generic[T]):
     pass
 
 
@@ -103,9 +104,6 @@ ApiVersion = Optional[str]
 logger = sky_logging.init_logger(__name__)
 
 hinted_for_server_install_version_mismatch = False
-
-T = TypeVar('T')
-P = ParamSpec('P')
 
 
 class ApiServerStatus(enum.Enum):
@@ -499,7 +497,7 @@ def handle_request_error(response: 'requests.Response') -> None:
                 f'{response.text}')
 
 
-def get_request_id(response: 'requests.Response') -> RequestId:
+def get_request_id(response: 'requests.Response') -> TypedRequestId[T]:
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')
     if request_id is None:
@@ -510,7 +508,7 @@ def get_request_id(response: 'requests.Response') -> RequestId:
                 'Failed to get request ID from SkyPilot API server at '
                 f'{get_server_url()}. Response: {response.status_code} '
                 f'{response.text}')
-    return request_id
+    return TypedRequestId[T](request_id)
 
 
 def _start_api_server(deploy: bool = False,

@@ -46,7 +46,7 @@ def launch(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
-) -> server_common.SuperRequestId[Tuple[Optional[int],
+) -> server_common.TypedRequestId[Tuple[Optional[int],
                                         Optional['backends.ResourceHandle']]]:
     """Launches a managed job.
 
@@ -130,7 +130,7 @@ def queue(
     skip_finished: bool = False,
     all_users: bool = False,
     job_ids: Optional[List[int]] = None
-) -> server_common.SuperRequestId[List[Dict[str, Any]]]:
+) -> server_common.TypedRequestId[List[Dict[str, Any]]]:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
@@ -194,7 +194,7 @@ def cancel(
     all: bool = False,  # pylint: disable=redefined-builtin
     all_users: bool = False,
     pool: Optional[str] = None,
-) -> server_common.SuperRequestId[None]:
+) -> server_common.TypedRequestId[None]:
     """Cancels managed jobs.
 
     Please refer to sky.cli.job_cancel for documentation.
@@ -282,7 +282,8 @@ def tail_logs(name: Optional[str] = None,
         json=json.loads(body.model_dump_json()),
         stream=True,
         timeout=(5, None))
-    request_id = server_common.get_request_id(response)
+    request_id: server_common.TypedRequestId[
+        None] = server_common.get_request_id(response)
     # Log request is idempotent when tail is 0, thus can resume previous
     # streaming point on retry.
     return sdk.stream_response(request_id=request_id,
@@ -384,7 +385,7 @@ def pool_apply(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.SuperRequestId[None]:
+) -> server_common.TypedRequestId[None]:
     """Apply a config to a pool."""
     return impl.apply(task,
                       pool_name,
@@ -400,7 +401,7 @@ def pool_down(
     pool_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False,
-) -> server_common.SuperRequestId[None]:
+) -> server_common.TypedRequestId[None]:
     """Delete a pool."""
     return impl.down(pool_names, all, purge, pool=True)
 
@@ -410,7 +411,7 @@ def pool_down(
 @versions.minimal_api_version(12)
 def pool_status(
     pool_names: Optional[Union[str, List[str]]],
-) -> server_common.SuperRequestId[List[Dict[str, Any]]]:
+) -> server_common.TypedRequestId[List[Dict[str, Any]]]:
     """Query a pool."""
     return impl.status(pool_names, pool=True)
 

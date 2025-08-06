@@ -1,7 +1,7 @@
 """SDK for SkyServe."""
 import json
 import typing
-from typing import List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from sky.serve.client import impl
 from sky.server import common as server_common
@@ -156,8 +156,8 @@ def terminate_replica(service_name: str, replica_id: int,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def status(
-        service_names: Optional[Union[str,
-                                      List[str]]]) -> server_common.RequestId:
+    service_names: Optional[Union[str, List[str]]]
+) -> server_common.TypedRequestId[List[Dict[str, Any]]]:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
