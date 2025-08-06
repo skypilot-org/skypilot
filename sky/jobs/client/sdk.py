@@ -1,7 +1,7 @@
 """SDK functions for managed jobs."""
 import json
 import typing
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import click
 
@@ -26,6 +26,7 @@ if typing.TYPE_CHECKING:
     import webbrowser
 
     import sky
+    from sky import backends
     from sky.serve import serve_utils
 else:
     # only used in dashboard()
@@ -45,7 +46,8 @@ def launch(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId[Tuple[Optional[int],
+                                        Optional['backends.ResourceHandle']]]:
     """Launches a managed job.
 
     Please refer to sky.cli.job_launch for documentation.
@@ -123,10 +125,12 @@ def launch(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def queue(refresh: bool,
-          skip_finished: bool = False,
-          all_users: bool = False,
-          job_ids: Optional[List[int]] = None) -> server_common.RequestId:
+def queue(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    job_ids: Optional[List[int]] = None
+) -> server_common.SuperRequestId[List[Dict[str, Any]]]:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
@@ -190,7 +194,7 @@ def cancel(
     all: bool = False,  # pylint: disable=redefined-builtin
     all_users: bool = False,
     pool: Optional[str] = None,
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId[None]:
     """Cancels managed jobs.
 
     Please refer to sky.cli.job_cancel for documentation.
@@ -380,7 +384,7 @@ def pool_apply(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId[None]:
     """Apply a config to a pool."""
     return impl.apply(task,
                       pool_name,
@@ -396,7 +400,7 @@ def pool_down(
     pool_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False,
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId[None]:
     """Delete a pool."""
     return impl.down(pool_names, all, purge, pool=True)
 
@@ -405,7 +409,8 @@ def pool_down(
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
 def pool_status(
-    pool_names: Optional[Union[str, List[str]]],) -> server_common.RequestId:
+    pool_names: Optional[Union[str, List[str]]],
+) -> server_common.SuperRequestId[List[Dict[str, Any]]]:
     """Query a pool."""
     return impl.status(pool_names, pool=True)
 
