@@ -501,9 +501,7 @@ def shared_controller_vars_to_fill(
         env.env_key: str(int(env.get())) for env in env_options.Options
     }
     if is_consolidation_mode:
-        user_name = user_hash = 'consolidation-system'
-        global_user_state.add_or_update_user(
-            models.User(id=user_hash, name=user_name))
+        user_name = user_hash = constants.SKYPILOT_SYSTEM_USER_ID
     else:
         user_name = common_utils.get_current_user_name()
         user_hash = common_utils.get_user_hash()

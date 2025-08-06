@@ -627,22 +627,22 @@ export function ClusterTable({
   const sortedData = React.useMemo(() => {
     // Main filter function
     const filterData = (data, filters) => {
-      // First, filter out consolidation-system clusters by default
-      // unless there's an explicit user filter that includes consolidation-system
+      // First, filter out skypilot-system clusters by default
+      // unless there's an explicit user filter that includes skypilot-system
       let filteredData = data;
 
       const userFilters = filters.filter(
         (filter) => filter.property === 'User'
       );
-      const hasConsolidationSystemFilter = userFilters.some(
+      const hasSkyPilotSystemFilter = userFilters.some(
         (filter) =>
-          filter.value && filter.value.toLowerCase() === 'consolidation-system'
+          filter.value && filter.value.toLowerCase() === 'skypilot-system'
       );
 
-      // Only exclude consolidation-system if there's no explicit user filter for it
-      if (userFilters.length === 0 || !hasConsolidationSystemFilter) {
+      // Only exclude skypilot-system if there's no explicit user filter for it
+      if (userFilters.length === 0 || !hasSkyPilotSystemFilter) {
         filteredData = data.filter(
-          (item) => item.user !== 'consolidation-system'
+          (item) => item.user !== 'skypilot-system'
         );
       }
 
