@@ -16,7 +16,7 @@ Welcome to SkyPilot!
 
    <p></p>
    <p style="text-align:center">
-   <strong>Simplify and Scale Any AI Infrastructure</strong>
+   <strong>Run AI on Any Infra</strong> — Unified, Faster, Cheaper
    </p>
    <p style="text-align:center">
    <a class="github-button" href="https://github.com/skypilot-org/skypilot" data-show-count="true" data-size="large" aria-label="Star skypilot-org/skypilot on GitHub">Star</a>

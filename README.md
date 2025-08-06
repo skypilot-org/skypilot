@@ -25,7 +25,7 @@
 </p>
 
 <h3 align="center">
-    Simplify and Scale Any AI Infrastructure
+    Run AI on Any Infra — Unified, Faster, Cheaper
 </h3>
 
 <div align="center">
