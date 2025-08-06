@@ -284,7 +284,7 @@ def cli_entry_point(newflag: Optional[str] = None):
         logger.warning('The new flag is ignored because the server does not support it yet.')
 ```
 
-We should also be careful when adding new fields that are not directly visible in 
+We should also be careful when adding new fields that are not directly visible in
 `sky/server/api/payloads.py`, but is also being sent from the client to the server. This
 is mainly for validating objects from the client.
 As an example, this request body contains a single field, the string representation of a DAG.
