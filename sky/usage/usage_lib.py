@@ -495,6 +495,11 @@ def entrypoint_context(name: str, fallback: bool = False):
     additional entrypoint_context with fallback=True can be used to wrap
     the global entrypoint to catch any exceptions that are not caught.
     """
+    # Deterministic database initialization for all CLI commands
+    # This ensures database tables are created before any command execution
+    from sky import global_user_state
+    global_user_state.initialize_and_get_db()
+    
     is_entry = messages.usage.entrypoint is None
     if is_entry and not fallback:
         for message in messages.values():

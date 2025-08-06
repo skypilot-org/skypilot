@@ -940,11 +940,7 @@ class _DocumentedCodeCommand(click.Command):
                       help='Show the commit hash and exit')
 @annotations.client_api
 def cli():
-    # Deterministic database initialization for CLI commands
-    # This ensures all CLI commands have the database properly initialized
-    # before any operations that might require database access
-    from sky import global_user_state
-    global_user_state.initialize_and_get_db()
+    pass
 
 
 def _handle_infra_cloud_region_zone_options(infra: Optional[str],
