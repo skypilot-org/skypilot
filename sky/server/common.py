@@ -93,7 +93,7 @@ T = TypeVar('T')
 P = ParamSpec('P')
 
 
-class TypedRequestId(str, Generic[T]):
+class RequestId(str, Generic[T]):
     pass
 
 
@@ -495,7 +495,7 @@ def handle_request_error(response: 'requests.Response') -> None:
                 f'{response.text}')
 
 
-def get_request_id(response: 'requests.Response') -> TypedRequestId[T]:
+def get_request_id(response: 'requests.Response') -> RequestId[T]:
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')
     if request_id is None:
@@ -506,7 +506,7 @@ def get_request_id(response: 'requests.Response') -> TypedRequestId[T]:
                 'Failed to get request ID from SkyPilot API server at '
                 f'{get_server_url()}. Response: {response.status_code} '
                 f'{response.text}')
-    return TypedRequestId[T](request_id)
+    return RequestId[T](request_id)
 
 
 def _start_api_server(deploy: bool = False,

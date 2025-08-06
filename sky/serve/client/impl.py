@@ -25,7 +25,7 @@ def up(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.TypedRequestId[Tuple[str, str]]:
+) -> server_common.RequestId[Tuple[str, str]]:
     assert not pool, 'Command `up` is not supported for pool.'
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -69,7 +69,7 @@ def update(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.TypedRequestId[None]:
+) -> server_common.RequestId[None]:
     assert not pool, 'Command `update` is not supported for pool.'
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -112,7 +112,7 @@ def apply(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.TypedRequestId[None]:
+) -> server_common.RequestId[None]:
     assert pool, 'Command `apply` is only supported for pool.'
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -153,7 +153,7 @@ def down(
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False,
     pool: bool = False,
-) -> server_common.TypedRequestId[None]:
+) -> server_common.RequestId[None]:
     if pool:
         body = payloads.JobsPoolDownBody(
             pool_names=service_names,
@@ -177,7 +177,7 @@ def down(
 def status(
     service_names: Optional[Union[str, List[str]]],
     pool: bool = False,
-) -> server_common.TypedRequestId[List[Dict[str, Any]]]:
+) -> server_common.RequestId[List[Dict[str, Any]]]:
     if pool:
         body = payloads.JobsPoolStatusBody(pool_names=service_names)
     else:

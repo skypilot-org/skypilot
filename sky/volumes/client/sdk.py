@@ -24,7 +24,7 @@ logger = sky_logging.init_logger(__name__)
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def apply(volume: volume_lib.Volume) -> server_common.TypedRequestId[None]:
+def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
     """Creates or registers a volume.
 
     Args:
@@ -50,7 +50,7 @@ def apply(volume: volume_lib.Volume) -> server_common.TypedRequestId[None]:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ls() -> server_common.TypedRequestId[List[Dict[str, Any]]]:
+def ls() -> server_common.RequestId[List[Dict[str, Any]]]:
     """Lists all volumes.
 
     Returns:
@@ -65,7 +65,7 @@ def ls() -> server_common.TypedRequestId[List[Dict[str, Any]]]:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def delete(names: List[str]) -> server_common.TypedRequestId[None]:
+def delete(names: List[str]) -> server_common.RequestId[None]:
     """Deletes volumes.
 
     Args:

@@ -226,7 +226,7 @@ def _get_glob_matches(candidate_names: List[str],
     return list(set(glob_storages))
 
 
-def _async_call_or_wait(request_id: server_common.TypedRequestId[T],
+def _async_call_or_wait(request_id: server_common.RequestId[T],
                         async_call: bool, request_name: str) -> Any:
     short_request_id = request_id[:8]
     if not async_call:
@@ -1413,7 +1413,7 @@ def exec(
 
 
 def _handle_jobs_queue_request(
-        request_id: server_common.TypedRequestId[List[Dict[str, Any]]],
+        request_id: server_common.RequestId[List[Dict[str, Any]]],
         show_all: bool,
         show_user: bool,
         max_num_jobs_to_show: Optional[int],
@@ -1494,7 +1494,7 @@ def _handle_jobs_queue_request(
 
 
 def _handle_services_request(
-    request_id: server_common.TypedRequestId[List[Dict[str, Any]]],
+    request_id: server_common.RequestId[List[Dict[str, Any]]],
     service_names: Optional[List[str]],
     show_all: bool,
     show_endpoint: bool,
@@ -1882,19 +1882,18 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                                   all_users=all_users)
 
     def submit_services(
-    ) -> Optional[server_common.TypedRequestId[List[Dict[str, Any]]]]:
+    ) -> Optional[server_common.RequestId[List[Dict[str, Any]]]]:
         return serve_lib.status(service_names=None)
 
     def submit_pools(
-    ) -> Optional[server_common.TypedRequestId[List[Dict[str, Any]]]]:
+    ) -> Optional[server_common.RequestId[List[Dict[str, Any]]]]:
         try:
             return managed_jobs.pool_status(pool_names=None)
         except exceptions.APINotSupportedError as e:
             logger.debug(f'Pools are not supported in the remote server: {e}')
             return None
 
-    def submit_workspace(
-    ) -> Optional[server_common.TypedRequestId[Dict[str, Any]]]:
+    def submit_workspace() -> Optional[server_common.RequestId[Dict[str, Any]]]:
         try:
             return sdk.workspaces()
         except RuntimeError:
@@ -1934,13 +1933,13 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             workspace_request_id = workspace_request_future.result()
 
     managed_jobs_queue_request_id = (
-        server_common.TypedRequestId[List[Dict[str, Any]]]('')
+        server_common.RequestId[List[Dict[str, Any]]]('')
         if not managed_jobs_queue_request_id else managed_jobs_queue_request_id)
-    service_status_request_id = (
-        server_common.TypedRequestId[List[Dict[str, Any]]]('')
-        if not service_status_request_id else service_status_request_id)
-    pool_status_request_id = (server_common.TypedRequestId[List[Dict[str,
-                                                                     Any]]]('')
+    service_status_request_id = (server_common.RequestId[List[Dict[str,
+                                                                   Any]]]('')
+                                 if not service_status_request_id else
+                                 service_status_request_id)
+    pool_status_request_id = (server_common.RequestId[List[Dict[str, Any]]]('')
                               if not pool_status_request_id else
                               pool_status_request_id)
 
@@ -6048,7 +6047,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
     if request_id is not None and log_path is not None:
         raise click.BadParameter(
             'Only one of request ID and log path can be provided.')
-    sdk.stream_and_get(server_common.TypedRequestId[None](request_id), log_path,
+    sdk.stream_and_get(server_common.RequestId[None](request_id), log_path,
                        tail)
 
 
