@@ -450,12 +450,10 @@ async def cleanup_upload_ids():
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
     del app  # unused
-    # Initialize databases first, before any background tasks
-    logger.info('Server: Initializing global user state database...')
-    global_user_state.initialize_and_get_db()
+    # Initialize request database for API server functionality
     logger.info('Server: Initializing request database...')
     requests_lib.reset_db_and_logs()
-    logger.info('Server: Database initialization completed')
+    logger.info('Server: Request database initialization completed')
     
     # Startup: Run background tasks
     for event in daemons.INTERNAL_REQUEST_DAEMONS:

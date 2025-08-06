@@ -82,6 +82,7 @@ _set_http_proxy_env_vars()
 # pylint: disable=wrong-import-position
 from sky import backends
 from sky import clouds
+from sky import global_user_state
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
 from sky.admin_policy import UserRequest
@@ -146,6 +147,10 @@ Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
+
+# Initialize global user state database when sky module is imported
+# This ensures database tables are created for programmatic usage
+global_user_state.initialize_and_get_db()
 
 __all__ = [
     '__version__',
