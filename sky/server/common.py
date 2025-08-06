@@ -878,7 +878,8 @@ def request_body_to_params(body: 'pydantic.BaseModel') -> Dict[str, Any]:
 
 def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
-                           using_remote_api_server: bool, user: 'models.User'):
+                           using_remote_api_server: bool, user: 'models.User',
+                           request_id: str) -> None:
     """Reload modules, global variables, and usage message for a new request."""
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
@@ -892,6 +893,7 @@ def reload_for_new_request(client_entrypoint: Optional[str],
         client_command=client_command,
         using_remote_api_server=using_remote_api_server,
         user=user,
+        request_id=request_id,
     )
 
     # Clear cache should be called before reload_logger and usage reset,

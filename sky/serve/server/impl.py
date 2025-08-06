@@ -2,6 +2,7 @@
 import re
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
+import uuid
 
 import colorama
 import filelock
@@ -189,7 +190,9 @@ def up(
             task_resources=task.resources)
         controller_job_id = None
         if serve_utils.is_consolidation_mode(pool):
-            controller_job_id = 0
+            # Using request id hash as job id to avoid name conflict.
+            rid = common_utils.get_current_request_id()
+            controller_job_id = hash(uuid.UUID(rid).int) & 0x7FFFFFFFFFFFFFFF
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
