@@ -31,8 +31,6 @@ class PrimeIntellect(clouds.Cloud):
         clouds.CloudImplementationFeatures.AUTODOWN:
             ('Auto down not supported yet.'),
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot is not supported yet.'),
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
@@ -72,14 +70,17 @@ class PrimeIntellect(clouds.Cloud):
         zone: Optional[str],
     ) -> List[clouds.Region]:
         """Returns the regions that offer the specified resources."""
-        del accelerators, zone  # Unused.
-        if use_spot:
-            return []
+        del accelerators  # Unused.
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'primeintellect')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
+        if zone is not None:
+            for r in regions:
+                assert r.zones is not None, r
+                r.set_zones([z for z in r.zones if z.name == zone])
+            regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
