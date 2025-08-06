@@ -245,7 +245,7 @@ async def stream_and_get(
                     raise RuntimeError(f'Failed to stream logs: {detail}')
             elif response.status != 200:
                 # TODO(syang): handle the case where the requestID is not
-                # provided see https://github.com/skypilot-org/skypilot/issues/6549
+                # provided. https://github.com/skypilot-org/skypilot/issues/6549
                 if request_id is None:
                     return None
                 return await get(request_id)
