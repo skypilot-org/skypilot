@@ -20,6 +20,7 @@ import uuid
 
 import colorama
 import filelock
+import yaml
 
 from sky import backends
 from sky import exceptions
@@ -668,12 +669,18 @@ def _get_service_status(
     if record['pool']:
         latest_yaml_path = generate_task_yaml_file_name(service_name,
                                                         record['version'])
-        original_config = common_utils.read_yaml(latest_yaml_path)
-        original_config.pop('run', None)
-        svc: Dict[str, Any] = original_config.pop('service')
-        if svc is not None:
-            svc.pop('pool', None)
-            original_config['pool'] = svc
+        raw_yaml_config = common_utils.read_yaml(latest_yaml_path)
+        original_config = raw_yaml_config.get('_user_specified_yaml')
+        if original_config is None:
+            # Fall back to old display format.
+            original_config = raw_yaml_config
+            original_config.pop('run', None)
+            svc: Dict[str, Any] = original_config.pop('service')
+            if svc is not None:
+                svc.pop('pool', None)  # Remove pool from service config
+                original_config['pool'] = svc  # Add pool to root config
+        else:
+            original_config = yaml.safe_load(original_config)
         record['pool_yaml'] = common_utils.dump_yaml_str(original_config)
 
     record['target_num_replicas'] = 0
