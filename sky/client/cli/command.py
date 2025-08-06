@@ -5029,11 +5029,18 @@ def _handle_serve_logs(
 
         with rich_utils.client_status(
                 ux_utils.spinner_message(f'Downloading {noun} logs...')):
-            sync_down_logs_func = (managed_jobs.pool_sync_down_logs
-                                   if pool else serve_lib.sync_down_logs)
-            kwargs: Dict[str, Any] = dict(targets=targets_to_sync, tail=tail)
-            kwargs['worker_ids' if pool else 'replica_ids'] = list(replica_ids)
-            sync_down_logs_func(service_name, str(log_dir), **kwargs)
+            if pool:
+                managed_jobs.pool_sync_down_logs(service_name,
+                                                 str(log_dir),
+                                                 targets=targets_to_sync,
+                                                 worker_ids=list(replica_ids),
+                                                 tail=tail)
+            else:
+                serve_lib.sync_down_logs(service_name,
+                                         str(log_dir),
+                                         targets=targets_to_sync,
+                                         replica_ids=list(replica_ids),
+                                         tail=tail)
         style = colorama.Style
         fore = colorama.Fore
         logger.info(f'{fore.CYAN}{capnoun} {service_name} logs: '
@@ -5072,13 +5079,18 @@ def _handle_serve_logs(
     target_replica_id: Optional[int] = replica_ids[0] if replica_ids else None
 
     try:
-        tail_logs_func = (managed_jobs.pool_tail_logs
-                          if pool else serve_lib.tail_logs)
-        tail_logs_func(service_name,
-                       target=target_component,
-                       replica_id=target_replica_id,
-                       follow=follow,
-                       tail=tail)
+        if pool:
+            managed_jobs.pool_tail_logs(service_name,
+                                        target=target_component,
+                                        worker_id=target_replica_id,
+                                        follow=follow,
+                                        tail=tail)
+        else:
+            serve_lib.tail_logs(service_name,
+                                target=target_component,
+                                replica_id=target_replica_id,
+                                follow=follow,
+                                tail=tail)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise

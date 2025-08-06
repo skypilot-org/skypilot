@@ -1,7 +1,7 @@
 """Implementation of SDK for SkyServe."""
 import json
 import typing
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Union
 
 import click
 
@@ -234,8 +234,8 @@ def sync_down_logs(service_name: str,
                    *,
                    targets: Optional[Union[
                        str, 'serve_utils.ServiceComponent',
-                       List[Union[str,
-                                  'serve_utils.ServiceComponent']]]] = None,
+                       Sequence[Union[str,
+                                      'serve_utils.ServiceComponent']]]] = None,
                    replica_ids: Optional[List[int]] = None,
                    tail: Optional[int] = None,
                    pool: bool = False) -> None:

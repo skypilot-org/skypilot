@@ -416,14 +416,14 @@ def pool_status(
 @versions.minimal_api_version(13)
 def pool_tail_logs(pool_name: str,
                    target: Union[str, 'serve_utils.ServiceComponent'],
-                   replica_id: Optional[int] = None,
+                   worker_id: Optional[int] = None,
                    follow: bool = True,
                    output_stream: Optional['io.TextIOBase'] = None,
                    tail: Optional[int] = None) -> None:
     """Tails logs of a pool."""
     return impl.tail_logs(pool_name,
                           target,
-                          replica_id,
+                          worker_id,
                           follow,
                           output_stream,
                           tail,
@@ -438,7 +438,7 @@ def pool_sync_down_logs(pool_name: str,
                         local_dir: str,
                         *,
                         targets: Optional[Union[
-                            str, 'serve_utils.ServiceComponent', List[Union[
+                            str, 'serve_utils.ServiceComponent', Sequence[Union[
                                 str, 'serve_utils.ServiceComponent']]]] = None,
                         worker_ids: Optional[List[int]] = None,
                         tail: Optional[int] = None) -> None:

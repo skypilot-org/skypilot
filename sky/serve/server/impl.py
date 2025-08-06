@@ -1,8 +1,8 @@
 """Implementation of the SkyServe core APIs."""
 import pathlib
 import re
-import signal
 import shlex
+import signal
 import tempfile
 import threading
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
