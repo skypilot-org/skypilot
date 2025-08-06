@@ -1,8 +1,10 @@
-"""Seeweb Cloud"""
-"""
+"""Seeweb Cloud
+
+History:
 @ Aug 6, 2025: Initial version of the integration.
 - Francesco Massa 
-- Cristofanilli Marco (marco.cATseeweb.it)
+- Marco Cristofanilli (marco.cATseeweb.it)
+
 """
 
 from __future__ import annotations
