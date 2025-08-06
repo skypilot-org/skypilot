@@ -35,7 +35,7 @@ import sys
 import traceback
 import typing
 from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
-                    Union)
+                    TypeVar, Union)
 
 import click
 import colorama
@@ -115,6 +115,8 @@ _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
+
+T = TypeVar('T')
 
 
 def _get_cluster_records_and_set_ssh_config(
@@ -224,8 +226,8 @@ def _get_glob_matches(candidate_names: List[str],
     return list(set(glob_storages))
 
 
-def _async_call_or_wait(request_id: str, async_call: bool,
-                        request_name: str) -> Any:
+def _async_call_or_wait(request_id: server_common.TypedRequestId[T],
+                        async_call: bool, request_name: str) -> Any:
     short_request_id = request_id[:8]
     if not async_call:
         try:
@@ -1411,7 +1413,7 @@ def exec(
 
 
 def _handle_jobs_queue_request(
-        request_id: str,
+        request_id: server_common.TypedRequestId[List[Dict[str, Any]]],
         show_all: bool,
         show_user: bool,
         max_num_jobs_to_show: Optional[int],
@@ -1492,7 +1494,7 @@ def _handle_jobs_queue_request(
 
 
 def _handle_services_request(
-    request_id: str,
+    request_id: server_common.TypedRequestId[List[Dict[str, Any]]],
     service_names: Optional[List[str]],
     show_all: bool,
     show_endpoint: bool,
@@ -1879,17 +1881,20 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                                   skip_finished=True,
                                   all_users=all_users)
 
-    def submit_services() -> Optional[str]:
+    def submit_services(
+    ) -> Optional[server_common.TypedRequestId[List[Dict[str, Any]]]]:
         return serve_lib.status(service_names=None)
 
-    def submit_pools() -> Optional[str]:
+    def submit_pools(
+    ) -> Optional[server_common.TypedRequestId[List[Dict[str, Any]]]]:
         try:
             return managed_jobs.pool_status(pool_names=None)
         except exceptions.APINotSupportedError as e:
             logger.debug(f'Pools are not supported in the remote server: {e}')
             return None
 
-    def submit_workspace() -> Optional[str]:
+    def submit_workspace(
+    ) -> Optional[server_common.TypedRequestId[Dict[str, Any]]]:
         try:
             return sdk.workspaces()
         except RuntimeError:
@@ -1928,11 +1933,15 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         if not (ip or show_endpoints):
             workspace_request_id = workspace_request_future.result()
 
-    managed_jobs_queue_request_id = ('' if not managed_jobs_queue_request_id
-                                     else managed_jobs_queue_request_id)
-    service_status_request_id = ('' if not service_status_request_id else
-                                 service_status_request_id)
-    pool_status_request_id = ('' if not pool_status_request_id else
+    managed_jobs_queue_request_id = (
+        server_common.TypedRequestId[List[Dict[str, Any]]]('')
+        if not managed_jobs_queue_request_id else managed_jobs_queue_request_id)
+    service_status_request_id = (
+        server_common.TypedRequestId[List[Dict[str, Any]]]('')
+        if not service_status_request_id else service_status_request_id)
+    pool_status_request_id = (server_common.TypedRequestId[List[Dict[str,
+                                                                     Any]]]('')
+                              if not pool_status_request_id else
                               pool_status_request_id)
 
     # Phase 3: Get cluster records and handle special cases
@@ -1957,7 +1966,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     if workspace_request_id is not None:
         all_workspaces = sdk.get(workspace_request_id)
     else:
-        all_workspaces = [constants.SKYPILOT_DEFAULT_WORKSPACE]
+        all_workspaces = {constants.SKYPILOT_DEFAULT_WORKSPACE: {}}
     active_workspace = skypilot_config.get_active_workspace()
     show_workspace = len(all_workspaces) > 1
     _show_enabled_infra(active_workspace, show_workspace)

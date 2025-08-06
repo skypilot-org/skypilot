@@ -94,7 +94,7 @@ def reload_config() -> None:
     skypilot_config.safe_reload_config()
 
 
-def stream_response(request_id: Optional[server_common.RequestId],
+def stream_response(request_id: Optional[server_common.TypedRequestId[T]],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
                     resumable: bool = False) -> Any:
@@ -1790,68 +1790,7 @@ def status_kubernetes() -> server_common.TypedRequestId[Tuple[
 # === API request APIs ===
 @usage_lib.entrypoint
 @annotations.client_api
-def super_get(request_id: server_common.TypedRequestId[T]) -> T:
-    """Waits for and gets the result of a request.
-
-    This function will not check the server health since /api/get is typically
-    not the first API call in an SDK session and checking the server health
-    may cause GET /api/get being sent to a restarted API server.
-
-    Args:
-        request_id: The request ID of the request to get. May be a full request
-            ID or a prefix.
-
-    Returns:
-        The ``Request Returns`` of the specified request. See the documentation
-        of the specific requests above for more details.
-
-    Raises:
-        Exception: It raises the same exceptions as the specific requests,
-            see ``Request Raises`` in the documentation of the specific requests
-            above.
-    """
-    response = server_common.make_authenticated_request(
-        'GET',
-        f'/api/get?request_id={request_id}',
-        retry=False,
-        timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
-                 None))
-    request_task = None
-    if response.status_code == 200:
-        request_task = requests_lib.Request.decode(
-            payloads.RequestPayload(**response.json()))
-    elif response.status_code == 500:
-        try:
-            request_task = requests_lib.Request.decode(
-                payloads.RequestPayload(**response.json().get('detail')))
-            logger.debug(f'Got request with error: {request_task.name}')
-        except Exception:  # pylint: disable=broad-except
-            request_task = None
-    if request_task is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Failed to get request {request_id}: '
-                               f'{response.status_code} {response.text}')
-    error = request_task.get_error()
-    if error is not None:
-        error_obj = error['object']
-        if env_options.Options.SHOW_DEBUG_INFO.get():
-            stacktrace = getattr(error_obj, 'stacktrace', str(error_obj))
-            logger.error('=== Traceback on SkyPilot API Server ===\n'
-                         f'{stacktrace}')
-        with ux_utils.print_exception_no_traceback():
-            raise error_obj
-    if request_task.status == requests_lib.RequestStatus.CANCELLED:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.RequestCancelled(
-                f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
-                f'({request_task.request_id}) is cancelled by another process.'
-                f'{colorama.Style.RESET_ALL}')
-    return request_task.get_return_value()
-
-
-@usage_lib.entrypoint
-@annotations.client_api
-def get(request_id: server_common.RequestId) -> Any:
+def get(request_id: server_common.TypedRequestId[T]) -> T:
     """Waits for and gets the result of a request.
 
     This function will not check the server health since /api/get is typically
@@ -1914,7 +1853,7 @@ def get(request_id: server_common.RequestId) -> Any:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def stream_and_get(
-    request_id: Optional[server_common.RequestId] = None,
+    request_id: Optional[server_common.TypedRequestId[T]] = None,
     log_path: Optional[str] = None,
     tail: Optional[int] = None,
     follow: bool = True,

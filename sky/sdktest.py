@@ -14,7 +14,7 @@ print(request_id)
 
 # request_id_prefix = request_id[:10]
 # print(request_id_prefix)
-clusters = sdk.super_get(request_id)
+clusters = sdk.get(request_id)
 print(type(clusters))
 print(clusters)
 cluster = clusters[0]

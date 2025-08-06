@@ -88,11 +88,11 @@ def launch(
         if _need_confirmation:
             job_identity = 'a managed job'
             if pool is None:
-                request_id = sdk.optimize(dag)
-                sdk.stream_and_get(request_id)
+                optimize_request_id = sdk.optimize(dag)
+                sdk.stream_and_get(optimize_request_id)
             else:
-                request_id = pool_status(pool)
-                pool_statuses = sdk.get(request_id)
+                pool_status_request_id = pool_status(pool)
+                pool_statuses = sdk.get(pool_status_request_id)
                 if not pool_statuses:
                     raise click.UsageError(f'Pool {pool!r} not found.')
                 resources = pool_statuses[0]['requested_resources_str']
