@@ -77,7 +77,7 @@ sky down <cluster-name>
 Here's what you can expect to see during training - the loss should decrease and token accuracy should improve over time:
 
 ```
-Training Progress for gpt-oss-20b:
+Training Progress for gpt-oss-20b on Nebius:
   6%|▋         | 1/16 [01:18<19:31, 78.12s/it]
 {'loss': 2.2344, 'grad_norm': 17.139, 'learning_rate': 0.0, 'num_tokens': 51486.0, 'mean_token_accuracy': 0.5436, 'epoch': 0.06}
 
@@ -100,16 +100,6 @@ Final Training Summary:
 {'train_runtime': 298.36s, 'train_samples_per_second': 3.352, 'train_steps_per_second': 0.054, 'train_loss': 2.086, 'epoch': 1.0}
 ✓ Job finished (status: SUCCEEDED).
 ```
-
-**Key Metrics to Monitor:**
-- **Loss**: Should decrease from ~2.23 to ~1.13 (indicating learning progress)
-- **Token Accuracy**: Should improve from ~54% to ~71% 
-- **Gradient Norm**: Should stabilize as training progresses
-- **Learning Rate**: Follows cosine schedule, decreasing over time
-
-**Expected Performance:**
-- Training time: ~5 minutes for 1 epoch on 2x8 H100 nodes
-- Final loss: ~1.13 (indicates good convergence)
 
 ## Configuration files
 
