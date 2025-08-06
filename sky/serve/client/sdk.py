@@ -3,7 +3,6 @@ import json
 import typing
 from typing import List, Optional, Union
 
-from sky.client import common as client_common
 from sky.serve.client import impl
 from sky.server import common as server_common
 from sky.server import rest
@@ -290,27 +289,13 @@ def tail_logs(service_name: str,
         sky.exceptions.ClusterNotUpError: the sky serve controller is not up.
         ValueError: arguments not valid, or failed to tail the logs.
     """
-    # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
-
-    body = payloads.ServeLogsBody(
-        service_name=service_name,
-        target=target,
-        replica_id=replica_id,
-        follow=follow,
-        tail=tail,
-    )
-    response = server_common.make_authenticated_request(
-        'POST',
-        '/serve/logs',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        stream=True)
-    request_id = server_common.get_request_id(response)
-    return sdk.stream_response(request_id=request_id,
-                               response=response,
-                               output_stream=output_stream,
-                               resumable=True)
+    return impl.tail_logs(service_name,
+                          target,
+                          replica_id,
+                          follow,
+                          output_stream,
+                          tail,
+                          pool=False)
 
 
 @usage_lib.entrypoint
@@ -352,25 +337,9 @@ def sync_down_logs(service_name: str,
         sky.exceptions.ClusterNotUpError: If the controller is not up.
         ValueError: Arguments not valid.
     """
-    # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
-
-    body = payloads.ServeDownloadLogsBody(
-        service_name=service_name,
-        # No need to set here, since the server will override it
-        # to a directory on the API server.
-        local_dir=local_dir,
-        targets=targets,
-        replica_ids=replica_ids,
-        tail=tail,
-    )
-    response = server_common.make_authenticated_request(
-        'POST',
-        '/serve/sync-down-logs',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None))
-    remote_dir = sdk.stream_and_get(server_common.get_request_id(response))
-
-    # Download from API server paths to the client's local_dir
-    client_common.download_logs_from_api_server([remote_dir], remote_dir,
-                                                local_dir)
+    return impl.sync_down_logs(service_name,
+                               local_dir,
+                               targets=targets,
+                               replica_ids=replica_ids,
+                               tail=tail,
+                               pool=False)
