@@ -67,6 +67,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 forwarded_headers = dict(request.headers)
                 logger.info(f'forwarded_headers: {forwarded_headers}')
                 logger.info(f'params: {request.query_params}')
+                logger.info(f'url: {request.url}')
                 async with session.request(
                         method=request.method,
                         url=target_url,
