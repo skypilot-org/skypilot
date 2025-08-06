@@ -1,5 +1,6 @@
 """Implementation of the SkyServe core APIs."""
 import re
+import shlex
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -201,6 +202,7 @@ def up(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'consolidation_mode_job_id': controller_job_id,
+            'entrypoint': shlex.quote(common_utils.get_current_command()),
             **tls_template_vars,
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,

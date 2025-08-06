@@ -64,6 +64,9 @@ export default function PoolDetailPage() {
   const [isPoolYamlExpanded, setIsPoolYamlExpanded] = useState(false);
   const [isPoolYamlCopied, setIsPoolYamlCopied] = useState(false);
 
+  // Entrypoint state
+  const [isEntrypointCopied, setIsEntrypointCopied] = useState(false);
+
   const fetchPoolData = React.useCallback(
     async (isRefresh = false) => {
       if (!poolName) return;
@@ -159,6 +162,18 @@ export default function PoolDetailPage() {
       }
     } catch (err) {
       console.error('Failed to copy Pool YAML to clipboard:', err);
+    }
+  };
+
+  const copyEntrypointToClipboard = async () => {
+    try {
+      if (poolData && poolData.entrypoint) {
+        await navigator.clipboard.writeText(poolData.entrypoint);
+        setIsEntrypointCopied(true);
+        setTimeout(() => setIsEntrypointCopied(false), 2000); // Reset after 2 seconds
+      }
+    } catch (err) {
+      console.error('Failed to copy entrypoint to clipboard:', err);
     }
   };
 
@@ -388,6 +403,42 @@ export default function PoolDetailPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* Entrypoint section - spans full width */}
+                {poolData.entrypoint && (
+                  <div className="pt-4 mt-4">
+                    <div className="flex items-center">
+                      <div className="text-gray-600 font-medium text-base">
+                        Entrypoint
+                      </div>
+                      <Tooltip
+                        content={
+                          isEntrypointCopied ? 'Copied!' : 'Copy command'
+                        }
+                        className="text-muted-foreground"
+                      >
+                        <button
+                          onClick={copyEntrypointToClipboard}
+                          className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                        >
+                          {isEntrypointCopied ? (
+                            <Check className="w-4 h-4 text-green-600" />
+                          ) : (
+                            <Copy className="w-4 h-4" />
+                          )}
+                        </button>
+                      </Tooltip>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
+                        <code className="text-sm text-gray-800 font-mono break-all">
+                          {poolData.entrypoint}
+                        </code>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Pool YAML Section */}
                 {poolData.pool_yaml && poolData.pool_yaml.trim() && (

@@ -640,9 +640,7 @@ export const renderPoolLink = (poolName, poolHash, poolsData) => {
     return (
       <div className="flex items-center space-x-2">
         <NonCapitalizedTooltip content="This pool is running" placement="top">
-          <div className="w-6 h-6 rounded-full flex items-center justify-center">
-            <div className="w-2 h-2 bg-green-700 rounded-full"></div>
-          </div>
+          <div className="w-2 h-2 bg-green-700 rounded-full"></div>
         </NonCapitalizedTooltip>
         <Link
           href={`/jobs/pools/${poolName}`}
@@ -658,9 +656,7 @@ export const renderPoolLink = (poolName, poolHash, poolsData) => {
   return (
     <div className="flex items-center space-x-2">
       <NonCapitalizedTooltip content="This pool is down" placement="top">
-        <div className="w-6 h-6 rounded-full flex items-center justify-center">
-          <div className="w-2 h-2 bg-gray-800"></div>
-        </div>
+        <div className="w-2 h-2 bg-gray-800"></div>
       </NonCapitalizedTooltip>
       <span>
         {poolName} ({shortHash})

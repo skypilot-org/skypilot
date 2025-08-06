@@ -87,6 +87,9 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     # the same.
     db_utils.add_column_to_table(cursor, conn, 'services', 'hash',
                                  'TEXT DEFAULT NULL')
+    # Entrypoint to launch the service.
+    db_utils.add_column_to_table(cursor, conn, 'services', 'entrypoint',
+                                 'TEXT DEFAULT NULL')
     conn.commit()
 
 
@@ -289,7 +292,7 @@ _SERVICE_STATUS_TO_COLOR = {
 def add_service(name: str, controller_job_id: int, policy: str,
                 requested_resources_str: str, load_balancing_policy: str,
                 status: ServiceStatus, tls_encrypted: bool, pool: bool,
-                controller_pid: int) -> bool:
+                controller_pid: int, entrypoint: str) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -304,12 +307,12 @@ def add_service(name: str, controller_job_id: int, policy: str,
                 INSERT INTO services
                 (name, controller_job_id, status, policy,
                 requested_resources_str, load_balancing_policy, tls_encrypted,
-                pool, controller_pid, hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                pool, controller_pid, hash, entrypoint)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (name, controller_job_id, status.value, policy,
                  requested_resources_str, load_balancing_policy,
                  int(tls_encrypted), int(pool), controller_pid, str(
-                     uuid.uuid4())))
+                     uuid.uuid4()), entrypoint))
 
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -403,7 +406,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
      _, active_versions, load_balancing_policy, tls_encrypted, pool,
-     controller_pid, svc_hash) = row[:18]
+     controller_pid, svc_hash, entrypoint) = row[:19]
     record = {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -425,6 +428,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'pool': bool(pool),
         'controller_pid': controller_pid,
         'hash': svc_hash,
+        'entrypoint': entrypoint,
     }
     latest_spec = get_spec(name, current_version)
     if latest_spec is not None:
