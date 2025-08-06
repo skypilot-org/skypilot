@@ -180,6 +180,8 @@ export function Users() {
   const [createSuccess, setCreateSuccess] = useState(null);
   const [createError, setCreateError] = useState(null);
   const [basicAuthEnabled, setBasicAuthEnabled] = useState(undefined);
+  const [serviceAccountTokenEnabled, setServiceAccountTokenEnabled] =
+    useState(false);
   const [activeMainTab, setActiveMainTab] = useState('users');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showRotateDialog, setShowRotateDialog] = useState(false);
@@ -193,13 +195,17 @@ export function Users() {
   useEffect(() => {
     if (router.isReady) {
       const tab = router.query.tab;
-      if (tab === 'service-accounts') {
+      if (tab === 'service-accounts' && serviceAccountTokenEnabled) {
         setActiveMainTab('service-accounts');
       } else {
         setActiveMainTab('users');
+        // If trying to access service-accounts but it's disabled, redirect to users
+        if (tab === 'service-accounts' && !serviceAccountTokenEnabled) {
+          router.push('/users', undefined, { shallow: true });
+        }
       }
     }
-  }, [router.isReady, router.query.tab]);
+  }, [router.isReady, router.query.tab, serviceAccountTokenEnabled, router]);
 
   useEffect(() => {
     async function fetchHealth() {
@@ -208,11 +214,14 @@ export function Users() {
         if (resp.ok) {
           const data = await resp.json();
           setBasicAuthEnabled(!!data.basic_auth_enabled);
+          setServiceAccountTokenEnabled(!!data.service_account_token_enabled);
         } else {
           setBasicAuthEnabled(false);
+          setServiceAccountTokenEnabled(false);
         }
       } catch {
         setBasicAuthEnabled(false);
+        setServiceAccountTokenEnabled(false);
       }
     }
     fetchHealth();
@@ -481,21 +490,23 @@ export function Users() {
           >
             Users
           </button>
-          <button
-            className={`leading-none pb-2 px-2 border-b-2 ${
-              activeMainTab === 'service-accounts'
-                ? 'text-sky-blue border-sky-500'
-                : 'text-gray-500 hover:text-gray-700 border-transparent'
-            }`}
-            onClick={() => {
-              setActiveMainTab('service-accounts');
-              router.push('/users?tab=service-accounts', undefined, {
-                shallow: true,
-              });
-            }}
-          >
-            Service Accounts
-          </button>
+          {serviceAccountTokenEnabled && (
+            <button
+              className={`leading-none pb-2 px-2 border-b-2 ${
+                activeMainTab === 'service-accounts'
+                  ? 'text-sky-blue border-sky-500'
+                  : 'text-gray-500 hover:text-gray-700 border-transparent'
+              }`}
+              onClick={() => {
+                setActiveMainTab('service-accounts');
+                router.push('/users?tab=service-accounts', undefined, {
+                  shallow: true,
+                });
+              }}
+            >
+              Service Accounts
+            </button>
+          )}
         </div>
 
         <div className="flex items-center">
@@ -603,8 +614,9 @@ export function Users() {
           )}
         </div>
 
-        {/* Create Service Account Button for Service Accounts Tab - only show for admin */}
+        {/* Create Service Account Button for Service Accounts Tab - only show for admin and when enabled */}
         {activeMainTab === 'service-accounts' &&
+          serviceAccountTokenEnabled &&
           userRoleCache?.role === 'admin' && (
             <button
               onClick={() => {
@@ -652,7 +664,7 @@ export function Users() {
           searchQuery={userSearchQuery}
           setSearchQuery={setUserSearchQuery}
         />
-      ) : (
+      ) : activeMainTab === 'service-accounts' && serviceAccountTokenEnabled ? (
         <ServiceAccountTokensView
           checkPermissionAndAct={checkPermissionAndAct}
           userRoleCache={userRoleCache}
@@ -669,6 +681,15 @@ export function Users() {
           searchQuery={serviceAccountSearchQuery}
           setSearchQuery={setServiceAccountSearchQuery}
         />
+      ) : (
+        <div className="text-center py-12">
+          <p className="text-lg font-semibold text-gray-500">
+            Service Accounts are not enabled.
+          </p>
+          <p className="text-sm text-gray-400 mt-1">
+            Contact your administrator to enable service account tokens.
+          </p>
+        </div>
       )}
 
       {/* Create User Dialog */}

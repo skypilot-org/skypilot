@@ -35,9 +35,6 @@
                         "null"
                     ]
                 },
-                "disableAnonymousAccess": {
-                    "type": "boolean"
-                },
                 "enableServiceAccounts": {
                     "type": "boolean"
                 },
@@ -135,6 +132,9 @@
                 "null"
             ],
             "properties": {
+                "disableAnonymousAccess": {
+                    "type": "boolean"
+                },
                 "oauth": {
                     "type": [
                         "object",

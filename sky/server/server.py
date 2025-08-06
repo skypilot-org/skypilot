@@ -270,8 +270,6 @@ class AnonymousAccessMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                           'false').lower() == 'false':
             return await call_next(request)
 
-        # TODO(hailong): Need to remove the /api/health when the new API for
-        # health check is ready.
         # Allow anonymous access for dashboard and root path (redirect to
         # dashboard).
         if (request.url.path.startswith('/api/health') or
@@ -1613,6 +1611,9 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         'user': user.to_dict() if user is not None else None,
         'basic_auth_enabled': os.environ.get(
             constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
+        'service_account_token_enabled': os.environ.get(
+            constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS, 'false').lower() ==
+                                         'true',
     }
 
 

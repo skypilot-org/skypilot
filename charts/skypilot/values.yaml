@@ -28,9 +28,6 @@ apiService:
   # Deprecated: use `auth.serviceAccount.enabled` instead.
   # @schema type: [boolean]
   enableServiceAccounts: true
-  # Disable anonymous access to the API server
-  # If disabled, the API server will not allow anonymous access to the API.
-  disableAnonymousAccess: true
   # Initial basic auth credentials for the API server
   # The user in the credentials will be used to create a new admin user in the API server,
   # and the password can be updated by the user in the Dashboard.
@@ -202,6 +199,9 @@ auth:
     # For backward compatibility, this can be used with OAuth2 Proxy on ingress at the same time.
     # @schema type: [boolean, null]
     enabled: null
+  # Disable anonymous access to the API server
+  # If disabled, the API server will not allow anonymous access to the API.
+  disableAnonymousAccess: true
 
 storage:
   # Enable/disable persistent storage
