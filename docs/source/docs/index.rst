@@ -43,14 +43,14 @@ SkyPilot is an open-source system for running AI and batch workloads on any infr
 
 SkyPilot **is easy to use for AI users**:
 
-- Quickly spin up compute on your own infra
+- Quickly spin up jobs on your own infra
 - Environment and job as code --- simple and portable
-- Easy job management: queue, run, and auto-recover many jobs
+- Easy management: queue, run, and auto-recover many jobs
 
 SkyPilot **makes Kubernetes easy for AI teams**:
 
 - Slurm-like ease of use, cloud-native robustness
-- Reimagined interactive dev on K8s: SSH, sync code, or connect IDE
+- Local dev experience on K8s: SSH into pods, sync code, or connect IDE
 - Turbocharge your clusters: gang scheduling, multi-cluster, and scaling
 
 SkyPilot **unifies multiple clusters, clouds, and hardware**:
