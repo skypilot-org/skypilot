@@ -89,8 +89,6 @@ _SERVER_INSTALL_VERSION_MISMATCH_WARNING = (
     'restarting the API server.'
     f'{colorama.Style.RESET_ALL}')
 
-RequestId = str
-
 T = TypeVar('T')
 P = ParamSpec('P')
 

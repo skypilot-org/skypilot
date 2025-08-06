@@ -1915,8 +1915,9 @@ def stream_and_get(
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_cancel(request_ids: Optional[Union[
-    server_common.RequestId, List[server_common.RequestId]]] = None,
+def api_cancel(request_ids: Optional[
+    Union[server_common.TypedRequestId[T],
+          List[server_common.TypedRequestId[T]], str, List[str]]] = None,
                all_users: bool = False,
                silent: bool = False) -> server_common.TypedRequestId[List[str]]:
     """Aborts a request or all requests.
@@ -1981,7 +1982,8 @@ def _local_api_server_running(kill: bool = False) -> bool:
 @usage_lib.entrypoint
 @annotations.client_api
 def api_status(
-    request_ids: Optional[List[server_common.RequestId]] = None,
+    request_ids: Optional[List[Union[server_common.TypedRequestId[T],
+                                     str]]] = None,
     # pylint: disable=redefined-builtin
     all_status: bool = False
 ) -> List[payloads.RequestPayload]:
