@@ -76,11 +76,11 @@ spec:
               key: auth
         {{- end }}
         {{- if include "skypilot.serviceAccountAuthEnabled" . | trim | eq "true" }}
-        - name: ENABLE_SERVICE_ACCOUNTS
+        - name: SKYPILOT_ENABLE_SERVICE_ACCOUNTS
           value: "true"
         {{- end }}
-        {{- if .Values.apiService.disableAnonymousAccess }}
-        - name: DISABLE_ANONYMOUS_ACCESS
+        {{- if .Values.auth.disableAnonymousAccess }}
+        - name: SKYPILOT_DISABLE_ANONYMOUS_ACCESS
           value: "true"
         {{- end }}
         {{- if .Values.gcpCredentials.enabled }}

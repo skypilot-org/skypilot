@@ -130,9 +130,14 @@ false
 {{- $authOAuthEnabled := .Values.auth.oauth.enabled -}}
 {{- $ingressBasicAuthEnabled := include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" -}}
 {{- $ingressOAuthEnabled := include "skypilot.ingressOAuthEnabled" . | trim | eq "true" -}}
+{{- $serviceAccountAuthEnabled := include "skypilot.serviceAccountAuthEnabled" . | trim | eq "true" -}}
 
 {{- if and $authOAuthEnabled $ingressBasicAuthEnabled -}}
   {{- fail "Error\nauth.oauth.enabled cannot be used together with ingress basic authentication (ingress.authSecret or ingress.authCredentials). These authentication methods are mutually exclusive. Please:\n1. Disable auth.oauth.enabled, OR\n2. Remove ingress.authSecret and ingress.authCredentials\nThen try again." -}}
+{{- end -}}
+
+{{- if and $serviceAccountAuthEnabled $ingressBasicAuthEnabled -}}
+  {{- fail "Error\nauth with service account token (auth.serviceAccount.enabled or apiService.enableServiceAccounts) cannot be used together with ingress basic authentication (ingress.authSecret or ingress.authCredentials). These authentication methods are mutually exclusive. Please:\n1. Disable auth.serviceAccount.enabled or apiService.enableServiceAccounts, OR\n2. Remove ingress.authSecret and ingress.authCredentials\nThen try again." -}}
 {{- end -}}
 
 {{- if and $authOAuthEnabled $ingressOAuthEnabled -}}

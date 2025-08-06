@@ -163,7 +163,7 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: ENABLE_SERVICE_ACCOUNTS
+            name: SKYPILOT_ENABLE_SERVICE_ACCOUNTS
             value: "true"
 
   - it: should disable service accounts when auth.serviceAccount.enabled is explicitly false
@@ -173,7 +173,7 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: ENABLE_SERVICE_ACCOUNTS
+            name: SKYPILOT_ENABLE_SERVICE_ACCOUNTS
 
   - it: should respect auth.serviceAccount.enabled over apiService.enableServiceAccounts
     set:
@@ -183,7 +183,7 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: ENABLE_SERVICE_ACCOUNTS
+            name: SKYPILOT_ENABLE_SERVICE_ACCOUNTS
 
   - it: should fallback to apiService.enableServiceAccounts when auth.serviceAccount.enabled is null
     set:
@@ -193,7 +193,7 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: ENABLE_SERVICE_ACCOUNTS
+            name: SKYPILOT_ENABLE_SERVICE_ACCOUNTS
 
   - it: should mount r2 credentials correctly when r2Credentials is enabled
     set:
