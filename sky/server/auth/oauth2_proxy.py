@@ -81,6 +81,9 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                         status_code=response.status,
                         headers=dict(response.headers),
                     )
+                    logger.info('response.headers', response.headers)
+                    logger.info('response.cookies: ', response.cookies)
+                    
                     # Forward cookies from OAuth2 proxy response to client
                     for cookie_name, cookie in response.cookies.items():
                         fastapi_response.set_cookie(
@@ -91,8 +94,6 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                             path=cookie.get('path', '/'),
                             domain=cookie.get('domain'),
                             secure=cookie.get('secure', False),
-                            httponly=cookie.get('httponly', False),
-                            samesite=cookie.get('samesite', 'lax'),
                         )
                     return fastapi_response
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
