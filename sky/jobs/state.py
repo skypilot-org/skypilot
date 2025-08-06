@@ -565,10 +565,7 @@ def set_starting(job_id: int, task_id: int, run_timestamp: str,
             raise exceptions.ManagedJobStatusError(
                 'Failed to set the task to starting. '
                 f'({count} rows updated)')
-    # SUBMITTED is no longer used, but we keep it for backward compatibility.
-    # TODO(cooperc): remove this in v0.12.0
-    callback_func('SUBMITTED')
-    callback_func('STARTING')
+    callback_func(ManagedJobStatus.STARTING.value)
 
 
 @_init_db
@@ -707,7 +704,7 @@ def set_recovering(job_id: int, task_id: int, force_transit_to_recovering: bool,
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to recovering. '
                 f'({count} rows updated)')
-    callback_func('RECOVERING')
+    callback_func(ManagedJobStatus.RECOVERING.value)
 
 
 @_init_db
@@ -757,7 +754,7 @@ def set_succeeded(job_id: int, task_id: int, end_time: float,
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to succeeded. '
                 f'({count} rows updated)')
-    callback_func('SUCCEEDED')
+    callback_func(ManagedJobStatus.SUCCEEDED.value)
     logger.info('Job succeeded.')
 
 
@@ -821,7 +818,7 @@ def set_failed(
         session.commit()
         updated = count > 0
     if callback_func and updated:
-        callback_func('FAILED')
+        callback_func(failure_type.value)
     logger.info(failure_reason)
 
 
@@ -843,7 +840,7 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
         updated = count > 0
     if updated:
         logger.info('Cancelling the job...')
-        callback_func('CANCELLING')
+        callback_func(ManagedJobStatus.CANCELLING.value)
     else:
         logger.info('Cancellation skipped, job is already terminal')
 
@@ -868,7 +865,7 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
         updated = count > 0
     if updated:
         logger.info('Job cancelled.')
-        callback_func('CANCELLED')
+        callback_func(ManagedJobStatus.CANCELLED.value)
     else:
         logger.info('Cancellation skipped, job is not CANCELLING')
 
