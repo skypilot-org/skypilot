@@ -9,13 +9,17 @@ import sky
 from sky import admin_policy as admin_policy
 from sky import backends as backends
 from sky import exceptions as exceptions
+from sky import models as models
 from sky import sky_logging as sky_logging
 from sky import skypilot_config as skypilot_config
+import sky.catalog
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server import rest as rest
 from sky.server.requests import payloads as payloads
 from sky.skylet import autostop_lib as autostop_lib
 from sky.skylet import constants as constants
+from sky.skylet import job_lib as job_lib
 from sky.usage import usage_lib as usage_lib
 from sky.utils import admin_policy_utils as admin_policy_utils
 from sky.utils import annotations as annotations
@@ -47,35 +51,41 @@ def stream_response(request_id: Optional[server_common.RequestId],
     ...
 
 
-def check(infra_list: Optional[Tuple[str, ...]],
-          verbose: bool,
-          workspace: Optional[str] = ...) -> server_common.RequestId:
+def check(
+    infra_list: Optional[Tuple[str, ...]],
+    verbose: bool,
+    workspace: Optional[str] = ...
+) -> server_common.SuperRequestId[Dict[str, List[str]]]:
     ...
 
 
-def enabled_clouds(workspace: Optional[str] = ...,
-                   expand: bool = ...) -> server_common.RequestId:
+def enabled_clouds(
+        workspace: Optional[str] = ...,
+        expand: bool = ...) -> server_common.SuperRequestId[List[str]]:
     ...
 
 
-def list_accelerators(gpus_only: bool = ...,
-                      name_filter: Optional[str] = ...,
-                      region_filter: Optional[str] = ...,
-                      quantity_filter: Optional[int] = ...,
-                      clouds: Optional[Union[List[str], str]] = ...,
-                      all_regions: bool = ...,
-                      require_price: bool = ...,
-                      case_sensitive: bool = ...) -> server_common.RequestId:
+def list_accelerators(
+    gpus_only: bool = ...,
+    name_filter: Optional[str] = ...,
+    region_filter: Optional[str] = ...,
+    quantity_filter: Optional[int] = ...,
+    clouds: Optional[Union[List[str], str]] = ...,
+    all_regions: bool = ...,
+    require_price: bool = ...,
+    case_sensitive: bool = ...
+) -> server_common.SuperRequestId[Dict[
+        str, List[sky.catalog.common.InstanceTypeInfo]]]:
     ...
 
 
 def list_accelerator_counts(
-        gpus_only: bool = ...,
-        name_filter: Optional[str] = ...,
-        region_filter: Optional[str] = ...,
-        quantity_filter: Optional[int] = ...,
-        clouds: Optional[Union[List[str],
-                               str]] = ...) -> server_common.RequestId:
+    gpus_only: bool = ...,
+    name_filter: Optional[str] = ...,
+    region_filter: Optional[str] = ...,
+    quantity_filter: Optional[int] = ...,
+    clouds: Optional[Union[List[str], str]] = ...
+) -> server_common.SuperRequestId[Dict[str, List[int]]]:
     ...
 
 
@@ -83,11 +93,11 @@ def optimize(
     dag: sky.Dag,
     minimize: common.OptimizeTarget = ...,
     admin_policy_request_options: Optional[admin_policy.RequestOptions] = ...
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId[sky.Dag]:
     ...
 
 
-def workspaces() -> server_common.RequestId:
+def workspaces() -> server_common.SuperRequestId[Dict[str, Any]]:
     ...
 
 
@@ -103,31 +113,36 @@ def dashboard(starting_page: Optional[str] = ...) -> None:
     ...
 
 
-def launch(task: Union['sky.Task', 'sky.Dag'],
-           cluster_name: Optional[str] = ...,
-           retry_until_up: bool = ...,
-           idle_minutes_to_autostop: Optional[int] = ...,
-           wait_for: Optional[autostop_lib.AutostopWaitFor] = ...,
-           dryrun: bool = ...,
-           down: bool = ...,
-           backend: Optional['backends.Backend'] = ...,
-           optimize_target: common.OptimizeTarget = ...,
-           no_setup: bool = ...,
-           clone_disk_from: Optional[str] = ...,
-           fast: bool = ...,
-           _need_confirmation: bool = ...,
-           _is_launched_by_jobs_controller: bool = ...,
-           _is_launched_by_sky_serve_controller: bool = ...,
-           _disable_controller_check: bool = ...) -> server_common.RequestId:
+def launch(
+    task: Union['sky.Task', 'sky.Dag'],
+    cluster_name: Optional[str] = ...,
+    retry_until_up: bool = ...,
+    idle_minutes_to_autostop: Optional[int] = ...,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = ...,
+    dryrun: bool = ...,
+    down: bool = ...,
+    backend: Optional['backends.Backend'] = ...,
+    optimize_target: common.OptimizeTarget = ...,
+    no_setup: bool = ...,
+    clone_disk_from: Optional[str] = ...,
+    fast: bool = ...,
+    _need_confirmation: bool = ...,
+    _is_launched_by_jobs_controller: bool = ...,
+    _is_launched_by_sky_serve_controller: bool = ...,
+    _disable_controller_check: bool = ...
+) -> server_common.SuperRequestId[Tuple[Optional[int],
+                                        Optional[backends.ResourceHandle]]]:
     ...
 
 
 def exec(
-        task: Union['sky.Task', 'sky.Dag'],
-        cluster_name: Optional[str] = ...,
-        dryrun: bool = ...,
-        down: bool = ...,
-        backend: Optional['backends.Backend'] = ...) -> server_common.RequestId:
+    task: Union['sky.Task', 'sky.Dag'],
+    cluster_name: Optional[str] = ...,
+    dryrun: bool = ...,
+    down: bool = ...,
+    backend: Optional['backends.Backend'] = ...
+) -> server_common.SuperRequestId[Tuple[Optional[int],
+                                        Optional[backends.ResourceHandle]]]:
     ...
 
 
@@ -144,47 +159,55 @@ def download_logs(cluster_name: str,
     ...
 
 
-def start(cluster_name: str,
-          idle_minutes_to_autostop: Optional[int] = ...,
-          wait_for: Optional[autostop_lib.AutostopWaitFor] = ...,
-          retry_until_up: bool = ...,
-          down: bool = ...,
-          force: bool = ...) -> server_common.RequestId:
+def start(
+    cluster_name: str,
+    idle_minutes_to_autostop: Optional[int] = ...,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = ...,
+    retry_until_up: bool = ...,
+    down: bool = ...,
+    force: bool = ...
+) -> server_common.SuperRequestId[backends.CloudVmRayResourceHandle]:
     ...
 
 
-def down(cluster_name: str, purge: bool = ...) -> server_common.RequestId:
+def down(cluster_name: str,
+         purge: bool = ...) -> server_common.SuperRequestId[None]:
     ...
 
 
-def stop(cluster_name: str, purge: bool = ...) -> server_common.RequestId:
+def stop(cluster_name: str,
+         purge: bool = ...) -> server_common.SuperRequestId[None]:
     ...
 
 
 def autostop(cluster_name: str,
              idle_minutes: int,
              wait_for: Optional[autostop_lib.AutostopWaitFor] = ...,
-             down: bool = ...) -> server_common.RequestId:
+             down: bool = ...) -> server_common.SuperRequestId[None]:
     ...
 
 
 def queue(cluster_name: str,
           skip_finished: bool = ...,
-          all_users: bool = ...) -> server_common.RequestId:
+          all_users: bool = ...) -> server_common.SuperRequestId[List[dict]]:
     ...
 
 
-def job_status(cluster_name: str,
-               job_ids: Optional[List[int]] = ...) -> server_common.RequestId:
+def job_status(
+    cluster_name: str,
+    job_ids: Optional[List[int]] = ...
+) -> server_common.SuperRequestId[Dict[Optional[int],
+                                       Optional[job_lib.JobStatus]]]:
     ...
 
 
 def cancel(
-        cluster_name: str,
-        all: bool = ...,
-        all_users: bool = ...,
-        job_ids: Optional[List[int]] = ...,
-        _try_cancel_if_cluster_is_init: bool = ...) -> server_common.RequestId:
+    cluster_name: str,
+    all: bool = ...,
+    all_users: bool = ...,
+    job_ids: Optional[List[int]] = ...,
+    _try_cancel_if_cluster_is_init: bool = ...
+) -> server_common.SuperRequestId[None]:
     ...
 
 
@@ -200,60 +223,71 @@ def super_get(request_id: server_common.SuperRequestId[T]) -> T:
     ...
 
 
-def endpoints(cluster: str,
-              port: Optional[Union[int, str]] = ...) -> server_common.RequestId:
+def endpoints(
+    cluster: str,
+    port: Optional[Union[int, str]] = ...
+) -> server_common.SuperRequestId[Dict[int, str]]:
     ...
 
 
-def cost_report(days: Optional[int] = ...) -> server_common.RequestId:
+def cost_report(
+    days: Optional[int] = ...
+) -> server_common.SuperRequestId[List[Dict[str, Any]]]:
     ...
 
 
-def storage_ls() -> server_common.RequestId:
+def storage_ls() -> server_common.SuperRequestId[List[Dict[str, Any]]]:
     ...
 
 
-def storage_delete(name: str) -> server_common.RequestId:
+def storage_delete(name: str) -> server_common.SuperRequestId[None]:
     ...
 
 
-def local_up(gpus: bool,
-             ips: Optional[List[str]],
-             ssh_user: Optional[str],
-             ssh_key: Optional[str],
-             cleanup: bool,
-             context_name: Optional[str] = ...,
-             password: Optional[str] = ...) -> server_common.RequestId:
+def local_up(
+        gpus: bool,
+        ips: Optional[List[str]],
+        ssh_user: Optional[str],
+        ssh_key: Optional[str],
+        cleanup: bool,
+        context_name: Optional[str] = ...,
+        password: Optional[str] = ...) -> server_common.SuperRequestId[None]:
     ...
 
 
-def local_down() -> server_common.RequestId:
+def local_down() -> server_common.SuperRequestId[None]:
     ...
 
 
 def ssh_up(infra: Optional[str] = ...,
-           file: Optional[str] = ...) -> server_common.RequestId:
+           file: Optional[str] = ...) -> server_common.SuperRequestId[None]:
     ...
 
 
-def ssh_down(infra: Optional[str] = ...) -> server_common.RequestId:
+def ssh_down(infra: Optional[str] = ...) -> server_common.SuperRequestId[None]:
     ...
 
 
 def realtime_kubernetes_gpu_availability(
-        context: Optional[str] = ...,
-        name_filter: Optional[str] = ...,
-        quantity_filter: Optional[int] = ...,
-        is_ssh: Optional[bool] = ...) -> server_common.RequestId:
+    context: Optional[str] = ...,
+    name_filter: Optional[str] = ...,
+    quantity_filter: Optional[int] = ...,
+    is_ssh: Optional[bool] = ...
+) -> server_common.SuperRequestId[List[Tuple[
+        str, List[models.RealtimeGpuAvailability]]]]:
     ...
 
 
 def kubernetes_node_info(
-        context: Optional[str] = ...) -> server_common.RequestId:
+    context: Optional[str] = ...
+) -> server_common.SuperRequestId[models.KubernetesNodesInfo]:
     ...
 
 
-def status_kubernetes() -> server_common.RequestId:
+def status_kubernetes() -> server_common.SuperRequestId[Tuple[
+    List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
+    List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload], List[Dict[
+        str, Any]], Optional[str]]]:
     ...
 
 
@@ -272,7 +306,7 @@ def stream_and_get(request_id: Optional[server_common.RequestId] = ...,
 def api_cancel(request_ids: Optional[Union[
     server_common.RequestId, List[server_common.RequestId]]] = ...,
                all_users: bool = ...,
-               silent: bool = ...) -> server_common.RequestId:
+               silent: bool = ...) -> server_common.SuperRequestId[List[str]]:
     ...
 
 

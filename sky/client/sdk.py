@@ -66,6 +66,10 @@ if typing.TYPE_CHECKING:
 
     import sky
     from sky import backends
+    from sky import models
+    import sky.catalog
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    from sky.skylet import job_lib
 else:
     # only used in api_login()
     base64 = adaptors_common.LazyImport('base64')
@@ -131,9 +135,11 @@ def stream_response(request_id: Optional[server_common.RequestId],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def check(infra_list: Optional[Tuple[str, ...]],
-          verbose: bool,
-          workspace: Optional[str] = None) -> server_common.RequestId:
+def check(
+    infra_list: Optional[Tuple[str, ...]],
+    verbose: bool,
+    workspace: Optional[str] = None
+) -> server_common.SuperRequestId[Dict[str, List[str]]]:
     """Checks the credentials to enable clouds.
 
     Args:
@@ -175,8 +181,9 @@ def check(infra_list: Optional[Tuple[str, ...]],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def enabled_clouds(workspace: Optional[str] = None,
-                   expand: bool = False) -> server_common.RequestId:
+def enabled_clouds(
+        workspace: Optional[str] = None,
+        expand: bool = False) -> server_common.SuperRequestId[List[str]]:
     """Gets the enabled clouds.
 
     Args:
@@ -200,14 +207,17 @@ def enabled_clouds(workspace: Optional[str] = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def list_accelerators(gpus_only: bool = True,
-                      name_filter: Optional[str] = None,
-                      region_filter: Optional[str] = None,
-                      quantity_filter: Optional[int] = None,
-                      clouds: Optional[Union[List[str], str]] = None,
-                      all_regions: bool = False,
-                      require_price: bool = True,
-                      case_sensitive: bool = True) -> server_common.RequestId:
+def list_accelerators(
+    gpus_only: bool = True,
+    name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    clouds: Optional[Union[List[str], str]] = None,
+    all_regions: bool = False,
+    require_price: bool = True,
+    case_sensitive: bool = True
+) -> server_common.SuperRequestId[Dict[
+        str, List['sky.catalog.common.InstanceTypeInfo']]]:
     """Lists the names of all accelerators offered by Sky.
 
     This will include all accelerators offered by Sky, including those
@@ -250,12 +260,12 @@ def list_accelerators(gpus_only: bool = True,
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def list_accelerator_counts(
-        gpus_only: bool = True,
-        name_filter: Optional[str] = None,
-        region_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None,
-        clouds: Optional[Union[List[str],
-                               str]] = None) -> server_common.RequestId:
+    gpus_only: bool = True,
+    name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    clouds: Optional[Union[List[str], str]] = None
+) -> server_common.SuperRequestId[Dict[str, List[int]]]:
     """Lists all accelerators offered by Sky and available counts.
 
     Args:
@@ -294,7 +304,7 @@ def optimize(
     dag: 'sky.Dag',
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
     admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId['sky.Dag']:
     """Finds the best execution plan for the given DAG.
 
     Args:
@@ -325,7 +335,7 @@ def optimize(
     return server_common.get_request_id(response)
 
 
-def workspaces() -> server_common.RequestId:
+def workspaces() -> server_common.SuperRequestId[Dict[str, Any]]:
     """Gets the workspaces."""
     response = server_common.make_authenticated_request('GET', '/workspaces')
     return server_common.get_request_id(response)
@@ -404,7 +414,8 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId[Tuple[Optional[int],
+                                        Optional['backends.ResourceHandle']]]:
     """Launches a cluster or task.
 
     The task's setup and run commands are executed under the task's workdir
@@ -586,7 +597,8 @@ def _launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId[Tuple[Optional[int],
+                                        Optional['backends.ResourceHandle']]]:
     """Auxiliary function for launch(), refer to launch() for details."""
 
     validate(dag, admin_policy_request_options=request_options)
@@ -685,7 +697,8 @@ def exec(  # pylint: disable=redefined-builtin
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     backend: Optional['backends.Backend'] = None,
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId[Tuple[Optional[int],
+                                        Optional['backends.ResourceHandle']]]:
     """Executes a task on an existing cluster.
 
     This function performs two actions:
@@ -869,7 +882,7 @@ def start(
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId['backends.CloudVmRayResourceHandle']:
     """Restart a cluster.
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -951,7 +964,8 @@ def start(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def down(cluster_name: str, purge: bool = False) -> server_common.RequestId:
+def down(cluster_name: str,
+         purge: bool = False) -> server_common.SuperRequestId[None]:
     """Tears down a cluster.
 
     Tearing down a cluster will delete all associated resources (all billing
@@ -993,7 +1007,8 @@ def down(cluster_name: str, purge: bool = False) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
+def stop(cluster_name: str,
+         purge: bool = False) -> server_common.SuperRequestId[None]:
     """Stops a cluster.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
@@ -1039,11 +1054,11 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def autostop(
-        cluster_name: str,
-        idle_minutes: int,
-        wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
-        down: bool = False,  # pylint: disable=redefined-outer-name
-) -> server_common.RequestId:
+    cluster_name: str,
+    idle_minutes: int,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+) -> server_common.SuperRequestId[None]:
     """Schedules an autostop/autodown for a cluster.
 
     Autostop/autodown will automatically stop or teardown a cluster when it
@@ -1123,7 +1138,7 @@ def autostop(
 @annotations.client_api
 def queue(cluster_name: str,
           skip_finished: bool = False,
-          all_users: bool = False) -> server_common.RequestId:
+          all_users: bool = False) -> server_common.SuperRequestId[List[dict]]:
     """Gets the job queue of a cluster.
 
     Args:
@@ -1180,8 +1195,11 @@ def queue(cluster_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def job_status(cluster_name: str,
-               job_ids: Optional[List[int]] = None) -> server_common.RequestId:
+def job_status(
+    cluster_name: str,
+    job_ids: Optional[List[int]] = None
+) -> server_common.SuperRequestId[Dict[Optional[int],
+                                       Optional['job_lib.JobStatus']]]:
     """Gets the status of jobs on a cluster.
 
     Args:
@@ -1228,7 +1246,7 @@ def cancel(
     job_ids: Optional[List[int]] = None,
     # pylint: disable=invalid-name
     _try_cancel_if_cluster_is_init: bool = False
-) -> server_common.RequestId:
+) -> server_common.SuperRequestId[None]:
     """Cancels jobs on a cluster.
 
     Args:
@@ -1370,8 +1388,9 @@ def status(
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def endpoints(
-        cluster: str,
-        port: Optional[Union[int, str]] = None) -> server_common.RequestId:
+    cluster: str,
+    port: Optional[Union[int, str]] = None
+) -> server_common.SuperRequestId[Dict[int, str]]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -1403,7 +1422,9 @@ def endpoints(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def cost_report(days: Optional[int] = None) -> server_common.RequestId:  # pylint: disable=redefined-builtin
+def cost_report(
+    days: Optional[int] = None
+) -> server_common.SuperRequestId[List[Dict[str, Any]]]:  # pylint: disable=redefined-builtin
     """Gets all cluster cost reports, including those that have been downed.
 
     The estimated cost column indicates price for the cluster based on the type
@@ -1448,7 +1469,7 @@ def cost_report(days: Optional[int] = None) -> server_common.RequestId:  # pylin
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def storage_ls() -> server_common.RequestId:
+def storage_ls() -> server_common.SuperRequestId[List[Dict[str, Any]]]:
     """Gets the storages.
 
     Returns:
@@ -1476,7 +1497,7 @@ def storage_ls() -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def storage_delete(name: str) -> server_common.RequestId:
+def storage_delete(name: str) -> server_common.SuperRequestId[None]:
     """Deletes a storage.
 
     Args:
@@ -1503,13 +1524,14 @@ def storage_delete(name: str) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_up(gpus: bool,
-             ips: Optional[List[str]],
-             ssh_user: Optional[str],
-             ssh_key: Optional[str],
-             cleanup: bool,
-             context_name: Optional[str] = None,
-             password: Optional[str] = None) -> server_common.RequestId:
+def local_up(
+        gpus: bool,
+        ips: Optional[List[str]],
+        ssh_user: Optional[str],
+        ssh_key: Optional[str],
+        cleanup: bool,
+        context_name: Optional[str] = None,
+        password: Optional[str] = None) -> server_common.SuperRequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -1538,7 +1560,7 @@ def local_up(gpus: bool,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_down() -> server_common.RequestId:
+def local_down() -> server_common.SuperRequestId[None]:
     """Tears down the Kubernetes cluster started by local_up."""
     # We do not allow local up when the API server is running remotely since it
     # will modify the kubeconfig.
@@ -1613,7 +1635,7 @@ def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def ssh_up(infra: Optional[str] = None,
-           file: Optional[str] = None) -> server_common.RequestId:
+           file: Optional[str] = None) -> server_common.SuperRequestId[None]:
     """Deploys the SSH Node Pools defined in ~/.sky/ssh_targets.yaml.
 
     Args:
@@ -1646,7 +1668,7 @@ def ssh_up(infra: Optional[str] = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
+def ssh_down(infra: Optional[str] = None) -> server_common.SuperRequestId[None]:
     """Tears down a Kubernetes cluster on SSH targets.
 
     Args:
@@ -1675,10 +1697,12 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def realtime_kubernetes_gpu_availability(
-        context: Optional[str] = None,
-        name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None,
-        is_ssh: Optional[bool] = None) -> server_common.RequestId:
+    context: Optional[str] = None,
+    name_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    is_ssh: Optional[bool] = None
+) -> server_common.SuperRequestId[List[Tuple[
+        str, List['models.RealtimeGpuAvailability']]]]:
     """Gets the real-time Kubernetes GPU availability.
 
     Returns:
@@ -1701,7 +1725,8 @@ def realtime_kubernetes_gpu_availability(
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def kubernetes_node_info(
-        context: Optional[str] = None) -> server_common.RequestId:
+    context: Optional[str] = None
+) -> server_common.SuperRequestId['models.KubernetesNodesInfo']:
     """Gets the resource information for all the nodes in the cluster.
 
     Currently only GPU resources are supported. The function returns the total
@@ -1732,7 +1757,10 @@ def kubernetes_node_info(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def status_kubernetes() -> server_common.RequestId:
+def status_kubernetes() -> server_common.SuperRequestId[Tuple[
+    List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+    List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'], List[Dict[
+        str, Any]], Optional[str]]]:
     """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.
@@ -1950,7 +1978,7 @@ def stream_and_get(
 def api_cancel(request_ids: Optional[Union[
     server_common.RequestId, List[server_common.RequestId]]] = None,
                all_users: bool = False,
-               silent: bool = False) -> server_common.RequestId:
+               silent: bool = False) -> server_common.SuperRequestId[List[str]]:
     """Aborts a request or all requests.
 
     Args:
