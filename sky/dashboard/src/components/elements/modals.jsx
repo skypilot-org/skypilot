@@ -122,7 +122,7 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                     <pre className="text-sm">
                       <code>
                         code --folder-uri &quot;vscode-remote://ssh-remote+
-                        {cluster}/home/sky&quot;
+                        {cluster}/home&quot;
                       </code>
                     </pre>
                     <Tooltip content="Copy command">
@@ -131,7 +131,7 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                         size="icon"
                         onClick={() =>
                           navigator.clipboard.writeText(
-                            `code --folder-uri "vscode-remote://ssh-remote+${cluster}/home/sky"`
+                            `code --folder-uri "vscode-remote://ssh-remote+${cluster}/home"`
                           )
                         }
                         className="h-8 w-8 rounded-full"
