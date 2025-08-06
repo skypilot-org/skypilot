@@ -147,7 +147,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 # methods are performed.
                 # Not authenticated, redirect to sign-in
                 signin_url = (f'{request.base_url}oauth2/start?'
-                              f'rd={str(request.url.path.lstrip('/'))}')
+                              f'rd={request.url.path.lstrip("/")}')
                 return fastapi.responses.RedirectResponse(url=signin_url)
             else:
                 logger.error('oauth2-proxy returned unexpected status '
