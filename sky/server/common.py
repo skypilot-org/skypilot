@@ -522,7 +522,7 @@ def _initialize_jwt_secret():
     # Check if file exists and is not empty
     token_path = os.path.expanduser(constants.SKYPILOT_SYSTEM_SA_TOKEN_PATH)
     if os.path.exists(token_path) and os.path.getsize(token_path) > 0:
-        logger.info(
+        logger.debug(
             f'Initial token already exists at {token_path}, skipping generation'
         )
         return
@@ -531,8 +531,8 @@ def _initialize_jwt_secret():
     tokens = global_user_state.get_service_account_tokens_by_sa_user_id(
         constants.SKYPILOT_SYSTEM_SA_ID)
     if len(tokens) > 0:
-        logger.info(f'Initial token has been generated for '
-                    f'{constants.SKYPILOT_SYSTEM_SA_ID}, skipping generation')
+        logger.debug(f'Initial token has been generated for '
+                     f'{constants.SKYPILOT_SYSTEM_SA_ID}, skipping generation')
         return
 
     logger.info(f'Creating initial token for {constants.SKYPILOT_SYSTEM_SA_ID}')
