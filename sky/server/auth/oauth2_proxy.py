@@ -58,9 +58,10 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def forward_to_oauth2_proxy(self, request: fastapi.Request):
         """Forward requests to oauth2-proxy service."""
-        logger.debug(f'forwarding to oauth2-proxy: {request.url.path}')
+        logger.info(f'forwarding to oauth2-proxy: {request.url.path}')
         target_url = f'{self.proxy_base}/{request.url.path}'
         body = await request.body()
+        logger.info(f'target_url: {target_url}')
         async with aiohttp.ClientSession() as session:
             try:
                 forwarded_headers = dict(request.headers)
@@ -74,6 +75,9 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                         allow_redirects=False,
                 ) as response:
                     response_body = await response.read()
+                    logger.info(f'response_body: {response_body}')
+                    logger.info(f'response.status: {response.status}')
+                    logger.info(f'response.headers: {response.headers}')
                     return fastapi.responses.Response(
                         content=response_body,
                         status_code=response.status,
