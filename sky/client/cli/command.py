@@ -6083,10 +6083,6 @@ def ssh():
 
 
 @ssh.command('up', cls=_DocumentedCodeCommand)
-@click.option(
-    '--infra',
-    help='Name of the cluster to set up in ~/.sky/ssh_node_pools.yaml. '
-    'If not specified, all clusters in the file will be set up.')
 @click.option('--async',
               'async_call',
               is_flag=True,
@@ -6096,39 +6092,45 @@ def ssh():
               '-f',
               required=False,
               help='The file containing the SSH targets.')
-def ssh_up(infra: Optional[str], async_call: bool, file: Optional[str]):
+def ssh_up(async_call: bool, file: Optional[str]):
     """Set up a cluster using SSH targets from a file. If not specified,
     ~/.sky/ssh_node_pools.yaml will be used.
 
     This command sets up a Kubernetes cluster on the machines specified in the
     config file and configures SkyPilot to use it.
+
+    It is required that a single yaml file only contains one configuration.
     """
-    request_id = sdk.ssh_up(infra=infra, file=file)
+    request_id = sdk.ssh_up(file=file)
     if async_call:
-        print(f'Request submitted with ID: {request_id}')
+        click.echo(f'Request submitted with ID: {request_id}')
     else:
         sdk.stream_and_get(request_id)
 
 
 @ssh.command('down', cls=_DocumentedCodeCommand)
-@click.option(
-    '--infra',
-    help='Name of the cluster to clean up in ~/.sky/ssh_node_pools.yaml. '
-    'If not specified, all clusters in the file will be cleaned up.')
+@click.option('--infra',
+              help='Name of the cluster to clean up. If not specified, all '
+              'clusters launched will be cleaned up.')
 @click.option('--async',
               'async_call',
               is_flag=True,
               hidden=True,
               help='Run the command asynchronously.')
-def ssh_down(infra, async_call):
+@click.option('--force',
+              'force',
+              is_flag=True,
+              help='Remove cluster config from the database, regardless '
+              'of command success.')
+def ssh_down(infra: Optional[str], async_call: bool, force: bool):
     """Clean up a cluster set up with 'sky ssh up'.
 
-    This command removes the Kubernetes installation from the machines specified
-    in ~/.sky/ssh_node_pools.yaml.
+    This command removes the Kubernetes (k3s) installation from the
+    machines that were specified by target files.
     """
-    request_id = sdk.ssh_down(infra=infra)
+    request_id = sdk.ssh_down(infra=infra, force=force)
     if async_call:
-        print(f'Request submitted with ID: {request_id}')
+        click.echo(f'Request submitted with ID: {request_id}')
     else:
         sdk.stream_and_get(request_id)
 
