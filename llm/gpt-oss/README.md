@@ -10,7 +10,7 @@ This guide walks through how to run and host GPT-OSS models on any infrastructur
 
 ![Cloud Logos](https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png)
 
-## Step 0: Setup Infrastructure
+## Step 0: Setup infrastructure
 
 SkyPilot is a framework for running AI and batch workloads on any infrastructure, offering unified execution, high cost savings, and high GPU availability.
 
@@ -21,15 +21,15 @@ pip install 'skypilot[all]'
 ```
 For more details on how to setup your cloud credentials see [SkyPilot docs](https://docs.skypilot.co).
 
-### Choose Your Infrastructure
+### Choose your infrastructure
 
 ```bash
 sky check
 ```
 
-## Step 1: Run GPT-OSS Models
+## Step 1: Run GPT-OSS models
 
-### Basic Deployment
+### Basic deployment
 
 **For `gpt-oss-20b` (smaller model):**
 ```bash
@@ -43,9 +43,9 @@ sky launch -c gpt-oss-120b gpt-oss-vllm.sky.yaml \
   --env MODEL_NAME=openai/gpt-oss-120b
 ```
 
-## Step 2: Get Results
+## Step 2: Get results
 
-### Query Your Deployment
+### Query your deployment
 
 Get the endpoint:
 ```bash
@@ -117,7 +117,7 @@ Get service endpoint:
 ENDPOINT=$(sky serve status --endpoint gpt-oss-service)
 ```
 
-### Custom Configuration
+### Custom configuration
 
 The YAML configuration supports various customizations:
 
@@ -126,7 +126,7 @@ The YAML configuration supports various customizations:
 - **Memory optimization**: MXFP4 quantization reduces memory requirements
 - **Tool use**: Built-in support for function calling and web browsing
 
-### Integration with Other Tools
+### Integration with other tools
 
 The deployed endpoint is OpenAI-compatible, so it works with:
 - [**LangChain**](https://www.langchain.com/): For building complex AI applications
@@ -134,7 +134,7 @@ The deployed endpoint is OpenAI-compatible, so it works with:
 - [**llm CLI tool**](https://github.com/simonw/llm): For command-line interactions
 - **Any OpenAI-compatible client**: Drop-in replacement
 
-## Configuration File
+## Configuration file
 
 You can find the complete configuration in [`gpt-oss-vllm.sky.yaml`](https://github.com/skypilot-org/skypilot/blob/master/llm/gpt-oss/gpt-oss-vllm.sky.yaml).
 
