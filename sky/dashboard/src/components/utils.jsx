@@ -655,7 +655,7 @@ export const renderPoolLink = (poolName, poolHash, poolsData) => {
   const shortHash = poolHash ? poolHash.substring(0, 4) : '';
   return (
     <div className="flex items-center space-x-2">
-      <NonCapitalizedTooltip content="This pool is down" placement="top">
+      <NonCapitalizedTooltip content="This pool is terminated" placement="top">
         <div className="w-2 h-2 bg-gray-800"></div>
       </NonCapitalizedTooltip>
       <span>
