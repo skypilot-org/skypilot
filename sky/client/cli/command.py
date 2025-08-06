@@ -4696,7 +4696,7 @@ def jobs_cancel(
                       show_default=True)
 
     sdk.stream_and_get(
-        managed_jobs.cancel(job_ids=list(job_ids),
+        managed_jobs.cancel(job_ids=job_ids,
                             name=name,
                             pool=pool,
                             all=all,
