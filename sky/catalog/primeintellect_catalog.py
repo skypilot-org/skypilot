@@ -23,9 +23,6 @@ def instance_type_exists(instance_type: str) -> bool:
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    if zone is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Prime Intellect does not support zones.')
     return common.validate_region_zone_impl('primeintellect', _df, region, zone)
 
 
@@ -34,9 +31,6 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    if zone is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Prime Intellect does not support zones.')
     return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
                                        zone)
 
@@ -70,9 +64,6 @@ def get_instance_type_for_accelerator(
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
     """Returns a list of instance types that have the given accelerator."""
-    if zone is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Prime Intellect does not support zones.')
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
