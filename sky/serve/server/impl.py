@@ -6,6 +6,7 @@ import signal
 import tempfile
 import threading
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import uuid
 
 import colorama
 import filelock
@@ -194,7 +195,12 @@ def up(
             task_resources=task.resources)
         controller_job_id = None
         if serve_utils.is_consolidation_mode(pool):
-            controller_job_id = 0
+            # We need a unique integer per sky.serve.up call to avoid name
+            # conflict. Originally in non-consolidation mode, this is the ray
+            # job id; now we use the request id hash instead. Here we also
+            # make sure it is a 63-bit integer to avoid overflow on sqlalchemy.
+            rid = common_utils.get_current_request_id()
+            controller_job_id = hash(uuid.UUID(rid).int) & 0x7FFFFFFFFFFFFFFF
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
