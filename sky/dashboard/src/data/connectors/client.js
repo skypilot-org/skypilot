@@ -46,7 +46,6 @@ export const apiClient = {
     // Handle 401 unauthorized - token expired, redirect to login
     if (response.status === 401) {
       AuthManager.logout();
-      window.location.href = '/dashboard/login';
       return;
     }
 
@@ -63,7 +62,6 @@ export const apiClient = {
     // Check 401 status for the second request
     if (fetchedData.status === 401) {
       AuthManager.logout();
-      window.location.href = '/dashboard/login';
       return;
     }
 
@@ -87,7 +85,6 @@ export const apiClient = {
     // Handle 401 unauthorized - token expired, redirect to login
     if (response.status === 401) {
       AuthManager.logout();
-      window.location.href = '/dashboard/login';
       return response;
     }
 
@@ -119,7 +116,6 @@ export const apiClient = {
     const response = await fetch(fullUrl, { headers });
     if (response.status === 401) {
       AuthManager.logout();
-      window.location.href = '/dashboard/login';
       return response;
     }
     return response;
