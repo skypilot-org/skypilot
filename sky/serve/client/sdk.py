@@ -1,7 +1,7 @@
 """SDK for SkyServe."""
 import json
 import typing
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Union
 
 from sky.client import common as client_common
 from sky.serve.client import impl
@@ -320,8 +320,8 @@ def sync_down_logs(service_name: str,
                    *,
                    targets: Optional[Union[
                        str, 'serve_utils.ServiceComponent',
-                       List[Union[str,
-                                  'serve_utils.ServiceComponent']]]] = None,
+                       Sequence[Union[str,
+                                      'serve_utils.ServiceComponent']]]] = None,
                    replica_ids: Optional[List[int]] = None,
                    tail: Optional[int] = None) -> None:
     """Sync down logs from the service components to a local directory.
