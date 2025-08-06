@@ -98,16 +98,18 @@ const WorkspaceConfigDescription = ({
     // Check if cloud is enabled - handle both exact matches and expanded cloud names
     // (e.g., 'kubernetes' should match both 'kubernetes' and 'kubernetes/context-name')
     const cloudLower = cloudName?.toLowerCase();
-    const isActuallyEnabled = enabledCloudsSet.has(cloudLower) ||
-      Array.from(enabledCloudsSet).some(enabledCloud =>
-        enabledCloud.startsWith(cloudLower + '/'));
+    const isActuallyEnabled =
+      enabledCloudsSet.has(cloudLower) ||
+      Array.from(enabledCloudsSet).some((enabledCloud) =>
+        enabledCloud.startsWith(cloudLower + '/')
+      );
 
     // For Kubernetes, get the specific contexts that are enabled
     const getEnabledKubernetesContexts = () => {
       if (cloud.toLowerCase() === 'kubernetes') {
-        return Array.from(enabledCloudsSet).filter(enabledCloud =>
-          enabledCloud.startsWith(cloudLower + '/')
-        ).map(k8sCloud => k8sCloud.split('/')[1]); // Extract context name
+        return Array.from(enabledCloudsSet)
+          .filter((enabledCloud) => enabledCloud.startsWith(cloudLower + '/'))
+          .map((k8sCloud) => k8sCloud.split('/')[1]); // Extract context name
       }
       return [];
     };
@@ -158,7 +160,8 @@ const WorkspaceConfigDescription = ({
 
         enabledDescriptions.push(
           <span key={`${cloud}-default-enabled`} className="block">
-            {cloudName}{defaultDetail} is enabled (using default settings).
+            {cloudName}
+            {defaultDetail} is enabled (using default settings).
           </span>
         );
       } else {
