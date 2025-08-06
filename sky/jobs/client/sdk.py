@@ -1,7 +1,7 @@
 """SDK functions for managed jobs."""
 import json
 import typing
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Sequence, Union
 
 import click
 
@@ -186,7 +186,7 @@ def queue(refresh: bool,
 @server_common.check_server_healthy_or_start
 def cancel(
     name: Optional[str] = None,
-    job_ids: Optional[List[int]] = None,
+    job_ids: Optional[Sequence[int]] = None,
     all: bool = False,  # pylint: disable=redefined-builtin
     all_users: bool = False,
     pool: Optional[str] = None,

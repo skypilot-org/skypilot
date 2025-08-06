@@ -5742,6 +5742,7 @@ def serve_down(
                           show_default=True)
 
     if replica_id_is_defined:
+        assert replica_id is not None
         request_id = serve_lib.terminate_replica(service_names[0], replica_id,
                                                  purge)
     else:

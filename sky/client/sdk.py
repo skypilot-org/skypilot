@@ -1874,6 +1874,10 @@ def stream_and_get(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
+        # TODO(syang): handle the case where the requestID is not provided
+        # see https://github.com/skypilot-org/skypilot/issues/6549
+        if request_id is None:
+            return None
         return get(request_id)
     return stream_response(request_id, response, output_stream)
 
@@ -2420,7 +2424,9 @@ def api_login(endpoint: Optional[str] = None,
     _save_config_updates(endpoint=endpoint)
     dashboard_url = server_common.get_dashboard_url(endpoint)
 
-    server_common.get_api_server_status.cache_clear()
+    # see https://github.com/python/mypy/issues/5107 on why
+    # typing is disabled on this line
+    server_common.get_api_server_status.cache_clear()  # type: ignore
     # After successful authentication, check server health again to get user
     # identity
     server_status, final_api_server_info = server_common.check_server_healthy(
