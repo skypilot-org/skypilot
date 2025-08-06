@@ -136,7 +136,7 @@ The deployed endpoint is OpenAI-compatible, so it works with:
 
 ## Configuration File
 
-You can find the complete configuration in [`gpt-oss-vllm.sky.yaml`](./gpt-oss-vllm.sky.yaml):
+You can find the complete configuration in [`gpt-oss-vllm.sky.yaml`](https://github.com/skypilot-org/skypilot/blob/master/llm/gpt-oss/gpt-oss-vllm.sky.yaml).
 
 ## Cleanup
 
