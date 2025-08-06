@@ -14,7 +14,6 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
-from sky import models
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
