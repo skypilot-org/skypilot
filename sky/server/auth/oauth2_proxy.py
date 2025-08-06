@@ -76,11 +76,25 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                         allow_redirects=False,
                 ) as response:
                     response_body = await response.read()
-                    return fastapi.responses.Response(
+                    fastapi_response = fastapi.responses.Response(
                         content=response_body,
                         status_code=response.status,
                         headers=dict(response.headers),
                     )
+                    # Forward cookies from OAuth2 proxy response to client
+                    for cookie_name, cookie in response.cookies.items():
+                        fastapi_response.set_cookie(
+                            key=cookie_name,
+                            value=cookie.value,
+                            max_age=cookie.get('max-age'),
+                            expires=cookie.get('expires'),
+                            path=cookie.get('path', '/'),
+                            domain=cookie.get('domain'),
+                            secure=cookie.get('secure', False),
+                            httponly=cookie.get('httponly', False),
+                            samesite=cookie.get('samesite', 'lax'),
+                        )
+                    return fastapi_response
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.error(f'Error forwarding to OAuth2 proxy: {e}')
                 return fastapi.responses.JSONResponse(
