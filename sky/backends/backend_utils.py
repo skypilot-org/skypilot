@@ -2788,6 +2788,13 @@ def get_clusters(
     records = global_user_state.get_clusters()
     current_user = common_utils.get_current_user()
 
+    # Filter out clusters created by the controller.
+    if not env_options.Options.SHOW_DEBUG_INFO.get():
+        records = [
+            record for record in records
+            if not record.get('is_launched_by_controller', False)
+        ]
+
     # Filter by user if requested
     if not all_users:
         records = [

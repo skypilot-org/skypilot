@@ -1,0 +1,34 @@
+"""Columns for whether the cluster is launched by the controller.
+
+Revision ID: 002
+Revises: 001
+Create Date: 2025-08-06
+
+"""
+# pylint: disable=invalid-name
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+from sky.utils.db import db_utils
+
+# revision identifiers, used by Alembic.
+revision: str = '002'
+down_revision: Union[str, Sequence[str], None] = '001'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade():
+    """Add columns for whether the cluster is launched by the controller."""
+    with op.get_context().autocommit_block():
+        db_utils.add_column_to_table_alembic('clusters',
+                                             'is_launched_by_controller',
+                                             sa.Integer(),
+                                             server_default='0')
+
+
+def downgrade():
+    """Remove columns for whether the cluster is launched by the controller."""
+    pass
