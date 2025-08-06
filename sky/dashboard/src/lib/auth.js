@@ -2,6 +2,8 @@
 // It is used to store and retrieve the token from the local storage.
 // It is also used to logout the token.
 
+import { BASE_PATH } from '@/data/connectors/constants';
+
 class AuthManager {
   static TOKEN_KEY = 'skypilot_token';
 
@@ -51,7 +53,7 @@ class AuthManager {
   static logout() {
     this.removeToken();
     if (typeof window !== 'undefined') {
-      window.location.href = '/login';
+      window.location.href = `${BASE_PATH}/login`;
     }
   }
 }
