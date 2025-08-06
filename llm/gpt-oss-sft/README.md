@@ -1,4 +1,4 @@
-# Run and Serve OpenAI gpt-oss Models with SkyPilot and vLLM
+# Finetuning OpenAI gpt-oss Models with SkyPilot
 
 ![](https://i.imgur.com/TkoqCQK.png)
 
@@ -48,7 +48,7 @@ sky launch -c gpt-oss-120b-sft gpt-oss-120b-sft.yaml
 **For `gpt-oss-20b` with LoRA:**
 - Requirements: 1 node, 2x H100 GPU
 ```bash
-sky launch -c gpt-oss-20b-lora gpt-oss-20b-lora.yaml
+sky launch -c zgpt-oss-20b-lora gpt-oss-20b-lora.yaml
 ```
 
 **For `gpt-oss-120b` with LoRA:**
@@ -77,7 +77,7 @@ sky down <cluster-name>
 Here's what you can expect to see during training - the loss should decrease and token accuracy should improve over time:
 
 ```
-Training Progress for gpt-oss-120b:
+Training Progress for gpt-oss-20b:
   6%|▋         | 1/16 [01:18<19:31, 78.12s/it]
 {'loss': 2.2344, 'grad_norm': 17.139, 'learning_rate': 0.0, 'num_tokens': 51486.0, 'mean_token_accuracy': 0.5436, 'epoch': 0.06}
 
