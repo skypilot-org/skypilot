@@ -965,8 +965,10 @@ def wait_service_registration(service_name: str, job_id: int,
     """
     start_time = time.time()
     setup_completed = False
+    noun = 'pool' if pool else 'service'
     while True:
-        # TODO(tian): PID-based tracking.
+        # Only do this check for non-consolidation mode as consolidation mode
+        # has no setup process.
         if not is_consolidation_mode(pool):
             job_status = job_lib.get_status(job_id)
             if job_status is None or job_status < job_lib.JobStatus.RUNNING:
@@ -977,7 +979,7 @@ def wait_service_registration(service_name: str, job_id: int,
                     with ux_utils.print_exception_no_traceback():
                         raise RuntimeError(
                             f'Failed to start the controller process for '
-                            f'the service {service_name!r} within '
+                            f'the {noun} {service_name!r} within '
                             f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS}'
                             f' seconds.')
                 # No need to check the service status as the controller process
@@ -985,22 +987,26 @@ def wait_service_registration(service_name: str, job_id: int,
                 time.sleep(1)
                 continue
 
-            if not setup_completed:
-                setup_completed = True
-                # Reset the start time to wait for the service to be registered.
-                start_time = time.time()
+        if not setup_completed:
+            setup_completed = True
+            # Reset the start time to wait for the service to be registered.
+            start_time = time.time()
 
-        record = serve_state.get_service_from_name(service_name)
+        record = _get_service_status(service_name,
+                                     pool=pool,
+                                     with_replica_info=False)
         if record is not None:
-            # TODO(tian): PID-based tracking.
-            if (not is_consolidation_mode(pool) and
-                    job_id != record['controller_job_id']):
+            if job_id != record['controller_job_id']:
+                if pool:
+                    command_to_run = 'sky jobs pool apply --pool'
+                else:
+                    command_to_run = 'sky serve update'
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'The service {service_name!r} is already running. '
-                        'Please specify a different name for your service. '
-                        'To update an existing service, run: sky serve update '
-                        f'{service_name} <new-service-yaml>')
+                        f'The {noun} {service_name!r} is already running. '
+                        f'Please specify a different name for your {noun}. '
+                        f'To update an existing {noun}, run: {command_to_run}'
+                        f' {service_name} <new-{noun}-yaml>')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
                 return message_utils.encode_payload(lb_port)

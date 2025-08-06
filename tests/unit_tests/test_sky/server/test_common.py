@@ -180,6 +180,7 @@ allowed_clouds:
         client_command='test_cmd',
         using_remote_api_server=False,
         user=mock.Mock(id='test_user'),
+        request_id='dummy-request-id',
     )
     assert skypilot_config.get_nested(keys=('allowed_clouds',),
                                       default_value=None) == ['aws']
@@ -192,6 +193,7 @@ allowed_clouds:
         client_command='test_cmd',
         using_remote_api_server=False,
         user=mock.Mock(id='test_user'),
+        request_id='dummy-request-id',
     )
     assert skypilot_config.get_nested(keys=('allowed_clouds',),
                                       default_value=None) == ['gcp']
