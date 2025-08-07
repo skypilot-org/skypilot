@@ -52,6 +52,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.kubernetes import ssh_utils
+from sky.schemas.api import responses
 
 if typing.TYPE_CHECKING:
     import base64
@@ -2059,7 +2060,7 @@ def api_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def api_info() -> Dict[str, Any]:
+def api_info() -> responses.APIHealthResponse:
     """Gets the server's status, commit and version.
 
     Returns:
@@ -2084,7 +2085,7 @@ def api_info() -> Dict[str, Any]:
     """
     response = server_common.make_authenticated_request('GET', '/api/health')
     response.raise_for_status()
-    return response.json()
+    return responses.APIHealthResponse(**response.json())
 
 
 @usage_lib.entrypoint
