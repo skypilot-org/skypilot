@@ -29,7 +29,7 @@ if typing.TYPE_CHECKING:
     from sky.serve import service_spec
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
-_DB_INIT_LOCK = threading.Lock()
+_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
@@ -126,7 +126,7 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
 
-    with _DB_INIT_LOCK:
+    with _SQLALCHEMY_ENGINE_LOCK:
         if _SQLALCHEMY_ENGINE is not None:
             return _SQLALCHEMY_ENGINE
         # get an engine to the db
