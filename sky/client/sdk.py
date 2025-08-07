@@ -282,7 +282,7 @@ def list_accelerator_counts(
     region_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None,
     clouds: Optional[Union[List[str], str]] = None
-) -> server_common.RequestId[Dict[str, List[int]]]:
+) -> server_common.RequestId[Dict[str, List[float]]]:
     """Lists all accelerators offered by Sky and available counts.
 
     Args:
