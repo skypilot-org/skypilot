@@ -14,11 +14,14 @@ if typing.TYPE_CHECKING:
     from sky.utils import volume as volume_lib
 
 
+COREWEAVE_CREDENTIALS_PATH = '~/.aws/credentials'
+COREWEAVE_CONFIG_PATH = '~/.aws/config'
+
 def coreweave_profile_in_aws_cred_and_config() -> bool:
     """Checks if CoreWeave Object Storage profile is set in aws credentials
     and profile."""
 
-    credentials_path = os.path.expanduser('~/.aws/credentials')
+    credentials_path = os.path.expanduser(COREWEAVE_CREDENTIALS_PATH)
     coreweave_profile_exists_in_credentials = False
     if os.path.isfile(credentials_path):
         with open(credentials_path, 'r', encoding='utf-8') as file:
@@ -26,7 +29,7 @@ def coreweave_profile_in_aws_cred_and_config() -> bool:
                 if f'[{coreweave.COREWEAVE_PROFILE_NAME}]' in line:
                     coreweave_profile_exists_in_credentials = True
 
-    config_path = os.path.expanduser('~/.aws/config')
+    config_path = os.path.expanduser(COREWEAVE_CONFIG_PATH)
     coreweave_profile_exists_in_config = False
     if os.path.isfile(config_path):
         with open(config_path, 'r', encoding='utf-8') as file:
@@ -81,7 +84,7 @@ class CoreWeave(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        # CoreWeave primarily for storage, return empty list for compute regions
+        # CoreWeave doesn't support compute instances, only storage
         return []
 
     @classmethod
@@ -89,6 +92,7 @@ class CoreWeave(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
+        # CoreWeave doesn't support compute instances
         return None, None
 
     @classmethod
@@ -101,7 +105,7 @@ class CoreWeave(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[None]:
-        # Return empty iterator as CoreWeave is primarily for storage
+        # CoreWeave doesn't support compute instances
         return iter([])
 
     def instance_type_to_hourly_cost(self,
@@ -109,6 +113,7 @@ class CoreWeave(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
+        # CoreWeave doesn't support compute instances
         return 0.0
 
     def accelerators_to_hourly_cost(self,
@@ -116,9 +121,11 @@ class CoreWeave(clouds.Cloud):
                                     use_spot: bool,
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
+        # CoreWeave doesn't support compute instances
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
+        # CoreWeave doesn't charge for egress (storage-only)
         return 0.0
 
     def __repr__(self):
@@ -135,6 +142,7 @@ class CoreWeave(clouds.Cloud):
                                       resources_utils.DiskTier] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
+        # CoreWeave doesn't support compute instances
         return None
 
     @classmethod
@@ -142,10 +150,12 @@ class CoreWeave(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
+        # CoreWeave doesn't support compute instances
         return None
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
+        # CoreWeave doesn't support compute instances
         return None
 
     def make_deploy_resources_variables(
@@ -158,11 +168,13 @@ class CoreWeave(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
+        # CoreWeave doesn't support compute instances
         return {}
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> resources_utils.FeasibleResources:
+        # CoreWeave doesn't support compute instances - return empty feasible resources
         return resources_utils.FeasibleResources([], [], None)
 
     @classmethod
@@ -172,14 +184,30 @@ class CoreWeave(clouds.Cloud):
         # Check if CoreWeave storage credentials are available
         return coreweave_profile_in_aws_cred_and_config(), None
 
+    @classmethod
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
+        # CoreWeave is storage-only and doesn't support compute instances
+        return False, f'{cls._REPR} is a storage-only cloud and does not support compute instances.'
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the credential file mounts for CoreWeave."""
         file_mounts = {}
-        # Add CoreWeave credential files if they exist
+
+        # Also add AWS config if CoreWeave profile exists in both files
+        if coreweave_profile_in_aws_cred_and_config():
+            credentials_path = COREWEAVE_CREDENTIALS_PATH
+            if os.path.exists(os.path.expanduser(credentials_path)):
+                file_mounts[credentials_path] = credentials_path
+
+            config_path = COREWEAVE_CONFIG_PATH
+            if os.path.exists(os.path.expanduser(config_path)):
+                file_mounts[config_path] = config_path
+
         for path in coreweave.get_credential_file_paths():
-            expanded_path = os.path.expanduser(path)
-            if os.path.exists(expanded_path):
+            if os.path.exists(os.path.expanduser(path)):
                 file_mounts[path] = path
+
         return file_mounts
 
     @classmethod

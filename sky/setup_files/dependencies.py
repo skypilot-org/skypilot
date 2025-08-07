@@ -153,6 +153,7 @@ extras_require: Dict[str, List[str]] = {
     'docker': ['docker'] + local_ray,
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
+    'coreweave': aws_dependencies,  # CoreWeave uses S3-compatible storage with AWS SDK
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
