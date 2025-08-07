@@ -374,3 +374,51 @@ tests:
           path: spec.template.spec.containers[0].image
           value: "redis:7-alpine"
         documentIndex: 0
+
+  - it: should configure oauth2-proxy with redis-secret
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.redis-secret: "redis-credentials"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--redis-connection-url=$(REDIS_URL)"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_URL
+            valueFrom:
+              secretKeyRef:
+                name: "redis-credentials"
+                key: "redis-url"
+
+
+  - it: should not create redis when redis-secret is configured
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.redis-secret: "redis-credentials"
+    template: templates/oauth2-proxy-redis.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+
+  - it: should fail when both redis-url and redis-secret are set
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.redis-url: "redis://external-redis:6379/1"
+      auth.oauth.redis-secret: "redis-credentials"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: "redis-url and redis-secret are mutually exclusive when OAuth2 proxy is enabled"
