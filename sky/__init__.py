@@ -146,6 +146,7 @@ Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
+Shadeform = clouds.Shadeform
 
 __all__ = [
     '__version__',
@@ -166,6 +167,7 @@ __all__ = [
     'Fluidstack',
     'Nebius',
     'Hyperbolic',
+    'Shadeform',
     'Optimizer',
     'OptimizeTarget',
     'backends',

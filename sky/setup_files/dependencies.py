@@ -183,6 +183,7 @@ extras_require: Dict[str, List[str]] = {
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'server': server_dependencies,
+    'shadeform': [],  # No dependencies needed for shadeform
 }
 
 # Nebius needs python3.10. If python 3.9 [all] will not install nebius

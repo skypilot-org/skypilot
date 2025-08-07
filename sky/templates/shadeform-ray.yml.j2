@@ -1,0 +1,126 @@
+# Configuration for Shadeform cluster provisioning
+cluster_name: {{cluster_name_on_cloud}}
+
+# The minimum number of workers nodes to launch in addition to the head node.
+# This number should be >= 0.
+min_workers: {{num_nodes - 1}}
+max_workers: {{num_nodes - 1}}
+
+# The autoscaler will scale up the cluster faster with higher upscaling speed.
+# E.g., if the task requires adding more nodes then autoscaler will gradually
+# scale up the cluster in chunks of upscaling_speed*currently_running_nodes.
+# This number should be > 0.
+upscaling_speed: 1.0
+
+idle_timeout_minutes: 60
+
+# Cloud-specific configuration
+provider:
+    type: external
+    module: sky.provision.shadeform
+
+# How Ray will authenticate with newly launched nodes.
+auth:
+    ssh_user: {{ssh_user}}
+{% if ssh_private_key is not none %}
+    ssh_private_key: {{ssh_private_key}}
+{% endif %}
+
+# Provider-specific config for the head node, e.g. instance type.
+head_node_type: ray.head.default
+
+# Provider-specific config for worker nodes, e.g. instance type.
+worker_node_type: ray.worker.default
+
+available_node_types:
+    ray.head.default:
+        resources: {}
+        node_config:
+            # Shadeform-specific configuration
+            instance_type: {{instance_type}}
+            region: {{region}}
+            cloud: {{cloud}}
+            shade_cloud: true  # Use Shade Cloud for simplicity
+            # Instance name will be set by the provisioner
+            name: "{{cluster_name_on_cloud}}-head"
+            # Default to Ubuntu 22.04 with CUDA
+            os: "ubuntu22.04_cuda12.2_shade_os"
+
+    ray.worker.default:
+        resources: {}
+        node_config:
+            # Shadeform-specific configuration
+            instance_type: {{instance_type}}
+            region: {{region}}
+            cloud: {{cloud}}
+            shade_cloud: true  # Use Shade Cloud for simplicity
+            # Instance name will be set by the provisioner
+            name: "{{cluster_name_on_cloud}}-worker"
+            # Default to Ubuntu 22.04 with CUDA
+            os: "ubuntu22.04_cuda12.2_shade_os"
+
+# List of shell commands to run to set up nodes.
+# NOTE: these run before any setup_commands in a sky task.
+setup_commands:
+    # Install SkyPilot dependencies
+    - pip3 install packaging
+    - pip3 install --upgrade awscli
+    # Create local directories that should exist
+    - mkdir -p ~/sky_workdir
+    - mkdir -p ~/.sky
+    # Mount credentials if they exist
+{% for src, dst in credentials_mounts.items() %}
+    - mkdir -p {{(dst | dirname)}}
+    # Only mount if source exists
+    - '[ -f {{src}} ] && cp {{src}} {{dst}} || true'
+{% endfor %}
+
+# Custom commands that will be run on the head node after common setup.
+head_setup_commands:
+    # Install Ray if not already installed
+    - which ray >/dev/null 2>&1 || pip3 install -U ray[default]==2.9.3
+    # Start Ray head node
+    - ray stop || true
+    - ulimit -c unlimited && ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --disable-usage-stats
+
+# Custom commands that will be run on worker nodes after common setup.
+worker_setup_commands:
+    # Install Ray if not already installed
+    - which ray >/dev/null 2>&1 || pip3 install -U ray[default]==2.9.3
+
+# Command to start ray on the head node. You don't need to change this.
+# Note webui-host is set to 0.0.0.0 so that SkyPilot can port-forward the
+# Ray dashboard to the user's local machine.
+head_start_ray_commands:
+    - ray stop || true
+    - ulimit -c unlimited && ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --disable-usage-stats --dashboard-host 0.0.0.0
+
+# Command to start ray on worker nodes. You don't need to change this.
+worker_start_ray_commands:
+    - ray stop || true
+    - ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --disable-usage-stats
+
+# Files and directories to copy/mount from the local machine.
+file_mounts: {
+{% for src, dst in file_mounts.items() %}
+  "{{dst}}": "{{src}}",
+{% endfor %}
+{% if credentials_mounts is defined %}
+{% for src, dst in credentials_mounts.items() %}
+  "{{dst}}": "{{src}}",
+{% endfor %}
+{% endif %}
+}
+
+rsync_exclude: []
+
+initialization_commands: []
+
+# Idle timeout. This is the maximum time in seconds that a worker node
+# can be idle before it gets removed from the cluster.
+max_workers_idle_timeout: 300
+
+# SkyPilot metadata
+cluster_synced_files: []
+
+docker: {}
