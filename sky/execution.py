@@ -455,7 +455,7 @@ def _execute_dag(
             if cluster_name is not None:
                 global_user_state.add_cluster_event(
                     cluster_name, 
-                    status_lib.ClusterStatus.INIT, 
+                    status_lib.ClusterStatus.UP, 
                     "Syncing file mounts"
                 )
             backend.sync_file_mounts(handle, task.file_mounts,
@@ -472,7 +472,7 @@ def _execute_dag(
                 if cluster_name is not None:
                     global_user_state.add_cluster_event(
                         cluster_name, 
-                        status_lib.ClusterStatus.INIT, 
+                        status_lib.ClusterStatus.UP, 
                         "Running setup commands to install dependencies"
                     )
                 backend.setup(handle, task, detach_setup=detach_setup)

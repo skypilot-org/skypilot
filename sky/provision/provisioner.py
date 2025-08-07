@@ -66,7 +66,12 @@ def _bulk_provision(
     config = provision.bootstrap_instances(provider_name, region_name,
                                            cluster_name.name_on_cloud,
                                            bootstrap_config)
-
+    # Add cluster event for instance status check
+    global_user_state.add_cluster_event(
+        str(cluster_name), 
+        status_lib.ClusterStatus.INIT, 
+        "Starting instances."
+    )
     provision_record = provision.run_instances(provider_name,
                                                region_name,
                                                cluster_name.name_on_cloud,
@@ -173,6 +178,13 @@ def bulk_provision(
             terminate_str = ('Terminating' if terminate else 'Stopping')
             logger.debug(f'{terminate_str} the failed cluster.')
             retry_cnt = 1
+
+            # Add cluster event for teardown start
+            global_user_state.add_cluster_event(
+                cluster_name, 
+                status_lib.ClusterStatus.INIT, 
+                "Cluster failed to provision. Tearing down cluster."
+            )
             while True:
                 try:
                     teardown_cluster(
