@@ -1,7 +1,10 @@
-"""Tests for Hyperbolic cloud provider."""
+#!/usr/bin/env python3
+"""Tests for Hyperbolic cloud provider (minimal, up-to-date with utils.py)."""
 import os
 from pathlib import Path
 import tempfile
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import pytest
 
@@ -86,3 +89,34 @@ def test_hyperbolic_check_credentials_present(monkeypatch, tmp_path):
     valid, msg = cloud._check_credentials()
     assert valid
     assert msg is None
+
+
+# Tests for simplified endpoint functionality (all GPUs use same endpoints)
+def test_api_endpoints():
+    """Test that all GPUs use the same API endpoints."""
+    from sky.provision.hyperbolic.utils import API_ENDPOINTS
+
+    # All GPUs should use the same API endpoints
+    assert API_ENDPOINTS['create'] == '/v2/marketplace/virtual-machine-rentals'
+    assert API_ENDPOINTS['list'] == '/v2/marketplace/virtual-machine-rentals'
+    assert API_ENDPOINTS[
+        'terminate'] == '/v2/marketplace/virtual-machine-rentals/terminate'
+
+
+def test_status_mapping():
+    """Test that status mapping works for API endpoints."""
+    from sky.provision.hyperbolic.utils import HyperbolicInstanceStatus
+
+    # Test API endpoint statuses
+    assert HyperbolicInstanceStatus.from_raw_status(
+        "Running").value == "running"
+    assert HyperbolicInstanceStatus.from_raw_status(
+        "Pending").value == "pending"
+    assert HyperbolicInstanceStatus.from_raw_status("Failed").value == "failed"
+    assert HyperbolicInstanceStatus.from_raw_status("online").value == "online"
+    assert HyperbolicInstanceStatus.from_raw_status(
+        "creating").value == "creating"
+
+    # Test unknown status
+    assert HyperbolicInstanceStatus.from_raw_status(
+        "unknown_status").value == "unknown"
