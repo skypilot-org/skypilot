@@ -353,6 +353,7 @@ def validate(
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
     remote_api_version = versions.get_remote_api_version()
+    # TODO(kevin): remove this in v0.13.0
     omit_user_specified_yaml = (remote_api_version is None or
                                 remote_api_version < 15)
     for task in dag.tasks:
