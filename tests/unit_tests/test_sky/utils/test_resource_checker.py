@@ -69,16 +69,16 @@ class TestResourceChecker:
             'user_hash': 'user456',
             'workspace': 'default',
             'status': 'SUBMITTED'
-         }, {
+        }, {
             'job_id': 'job-004',
             'workspace': 'default',
             'status': 'RUNNING'
-         }, {
+        }, {
             'job_id': 'job-005',
             'user_hash': None,
             'workspace': 'default',
             'status': 'RUNNING'
-         }, {
+        }, {
             'job_id': 'job-006',
             'user_hash': '',
             'workspace': 'default',
@@ -628,10 +628,12 @@ class TestResourceChecker:
 
         # Should return only resources belonging to specified users
         expected_clusters = [
-            c for c in sample_clusters if 'user_hash' in c and c['user_hash'] in user_ids
+            c for c in sample_clusters
+            if 'user_hash' in c and c['user_hash'] in user_ids
         ]
         expected_jobs = [
-            j for j in sample_managed_jobs if 'user_hash' in j and j['user_hash'] in user_ids
+            j for j in sample_managed_jobs
+            if 'user_hash' in j and j['user_hash'] in user_ids
         ]
 
         assert len(clusters) == len(expected_clusters)
