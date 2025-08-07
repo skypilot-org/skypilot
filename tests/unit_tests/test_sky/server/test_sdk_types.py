@@ -15,13 +15,12 @@ from sky.serve.client import sdk as serve_sdk
 from sky.serve.server import core as serve_core
 from sky.ssh_node_pools import server as ssh_node_pools_server
 from sky.volumes.client import sdk as volume_sdk
-from sky.volumes.server import server as volume_server
 from sky.volumes.server import core as volume_core
+from sky.volumes.server import server as volume_server
 from sky.workspaces import core as workspaces_core
 
 
-def _check_return_type(sdk_function: Callable,
-                       internal_function: Callable) -> bool:
+def _check_return_type(sdk_function: Callable, internal_function: Callable):
     """Check that SDK function RequestId[T] matches internal function return type T."""
     sdk_return_type = sdk_function.__annotations__["return"]
     internal_return_type = internal_function.__annotations__["return"]
@@ -35,17 +34,13 @@ def _check_return_type(sdk_function: Callable,
         f"Internal {internal_function.__name__} returns {internal_return_type}")
 
     if internal_return_type is None:
-        assert isinstance(internal_return_type, sdk_inner_type), (
+        assert sdk_inner_type == type(None), (
             f"SDK function {sdk_function.__name__} does not return the same type as the internal function {internal_function.__name__}"
         )
-        return True
-
-
-    assert sdk_inner_type == internal_return_type, (
-        f"SDK function {sdk_function.__name__} does not return the same type as the internal function {internal_function.__name__}"
-    )
-
-    return True
+    else:
+        assert sdk_inner_type == internal_return_type, (
+            f"SDK function {sdk_function.__name__} does not return the same type as the internal function {internal_function.__name__}"
+        )
 
 
 # tests for sky.client.sdk
@@ -94,7 +89,6 @@ def test_workspaces_return_type():
 # def test_exec_return_type():
 #     """Test that sdk.exec and execution.exec return types match."""
 #     _check_return_type(sdk.exec, execution.exec)
-
 
 # TODO: fix this test
 # def test_start_return_type():
@@ -174,7 +168,6 @@ def test_local_down_return_type():
 #     _check_return_type(sdk.realtime_kubernetes_gpu_availability,
 #                        core.realtime_kubernetes_gpu_availability)
 
-
 # TODO: fix this test
 # def test_kubernetes_node_info_return_type():
 #     """Test that sdk.kubernetes_node_info and core.kubernetes_node_info return types match."""
@@ -184,16 +177,13 @@ def test_local_down_return_type():
 
 def test_ssh_up_down_return_type():
     """Test that sdk.ssh_up / sky.ssh_down and core.ssh_up return types match."""
-    _check_return_type(sdk.ssh_up,
-                       core.ssh_up)
+    _check_return_type(sdk.ssh_up, core.ssh_up)
     # ssh_down is a wrapper around ssh_up with cleanup=True
-    _check_return_type(sdk.ssh_down,
-                       core.ssh_up)
+    _check_return_type(sdk.ssh_down, core.ssh_up)
 
 
 # tests for sky.jobs.client.sdk
 # Tests ordered by function declaration order in sky/jobs/client/sdk.py
-
 
 # TODO: fix this test
 # def test_launch_return_type():
