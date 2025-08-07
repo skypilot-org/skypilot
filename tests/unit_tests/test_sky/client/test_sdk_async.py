@@ -270,8 +270,8 @@ async def test_api_info(mock_to_thread, mock_sdk_functions):
         'basic_auth_enabled': False,
         'user': None,
     }
-    mock_sdk_functions['api_info'].return_value = return_value
     expected_result = responses.APIHealthResponse(**return_value)
+    mock_sdk_functions['api_info'].return_value = expected_result
 
     result = await sdk_async.api_info()
     assert result == expected_result
