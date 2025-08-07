@@ -1,7 +1,7 @@
 """SDK for SkyServe."""
 import json
 import typing
-from typing import List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from sky.serve.client import impl
 from sky.server import common as server_common
@@ -26,7 +26,7 @@ def up(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[Tuple[str, str]]:
     """Spins up a service.
 
     Please refer to the sky.cli.serve_up for the document.
@@ -61,7 +61,7 @@ def update(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     """Updates an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -94,7 +94,7 @@ def down(
     service_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     """Tears down a service.
 
     Please refer to the sky.cli.serve_down for the docs.
@@ -122,7 +122,7 @@ def down(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def terminate_replica(service_name: str, replica_id: int,
-                      purge: bool) -> server_common.RequestId:
+                      purge: bool) -> server_common.RequestId[None]:
     """Tears down a specific replica for the given service.
 
     Args:
@@ -156,8 +156,8 @@ def terminate_replica(service_name: str, replica_id: int,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def status(
-        service_names: Optional[Union[str,
-                                      List[str]]]) -> server_common.RequestId:
+    service_names: Optional[Union[str, List[str]]]
+) -> server_common.RequestId[List[Dict[str, Any]]]:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
