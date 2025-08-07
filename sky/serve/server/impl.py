@@ -198,9 +198,9 @@ def up(
             # We need a unique integer per sky.serve.up call to avoid name
             # conflict. Originally in non-consolidation mode, this is the ray
             # job id; now we use the request id hash instead. Here we also
-            # make sure it is a 63-bit integer to avoid overflow on sqlalchemy.
+            # make sure it is a 32-bit integer to avoid overflow on sqlalchemy.
             rid = common_utils.get_current_request_id()
-            controller_job_id = hash(uuid.UUID(rid).int) & 0x7FFFFFFFFFFFFFFF
+            controller_job_id = hash(uuid.UUID(rid).int) & 0x7FFFFFFF
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,

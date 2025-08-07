@@ -90,8 +90,8 @@ version_specs_table = sqlalchemy.Table(
     sqlalchemy.Column('spec', sqlalchemy.LargeBinary),
 )
 
-ha_recovery_script_table = sqlalchemy.Table(
-    'ha_recovery_script',
+serve_ha_recovery_script_table = sqlalchemy.Table(
+    'serve_ha_recovery_script',
     Base.metadata,
     sqlalchemy.Column('service_name', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('script', sqlalchemy.Text),
@@ -572,7 +572,8 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
             version_specs_table.c.service_name,
             sqlalchemy.func.max(
                 version_specs_table.c.version).label('max_version')
-        ).where(version_specs_table.c.service_name == service_name).alias('v')
+        ).where(version_specs_table.c.service_name == service_name).group_by(
+            version_specs_table.c.service_name).alias('v')
 
         query = sqlalchemy.select(
             subquery.c.max_version, services_table).select_from(
@@ -871,8 +872,8 @@ def get_ha_recovery_script(service_name: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         result = session.execute(
-            sqlalchemy.select(ha_recovery_script_table.c.script).where(
-                ha_recovery_script_table.c.service_name ==
+            sqlalchemy.select(serve_ha_recovery_script_table.c.script).where(
+                serve_ha_recovery_script_table.c.service_name ==
                 service_name)).fetchone()
     return result[0] if result else None
 
@@ -891,7 +892,7 @@ def set_ha_recovery_script(service_name: str, script: str) -> None:
         else:
             raise ValueError('Unsupported database dialect')
 
-        insert_stmt = insert_func(ha_recovery_script_table).values(
+        insert_stmt = insert_func(serve_ha_recovery_script_table).values(
             service_name=service_name, script=script)
 
         insert_stmt = insert_stmt.on_conflict_do_update(
@@ -908,6 +909,6 @@ def remove_ha_recovery_script(service_name: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.execute(
-            sqlalchemy.delete(ha_recovery_script_table).where(
-                ha_recovery_script_table.c.service_name == service_name))
+            sqlalchemy.delete(serve_ha_recovery_script_table).where(
+                serve_ha_recovery_script_table.c.service_name == service_name))
         session.commit()
