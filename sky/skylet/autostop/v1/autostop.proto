@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package sky.skylet.autostop.v1;
+
+service AutostopService {
+  // Set autostop configuration for the cluster.
+  rpc SetAutostop(SetAutostopRequest) returns (SetAutostopResponse);
+  // Check if the cluster is currently autostopping.
+  rpc IsAutostopping(IsAutostoppingRequest) returns (IsAutostoppingResponse);
+}
+
+enum AutostopWaitFor {
+  AUTOSTOP_WAIT_FOR_UNSPECIFIED = 0;
+  AUTOSTOP_WAIT_FOR_JOBS_AND_SSH = 1;
+  AUTOSTOP_WAIT_FOR_JOBS = 2;
+  AUTOSTOP_WAIT_FOR_NONE = 3;
+}
+
+message SetAutostopRequest {
+  int32 idle_minutes = 1;
+  string backend = 2;
+  AutostopWaitFor wait_for = 3;
+  bool down = 4;
+}
+
+message SetAutostopResponse {}
+
+message IsAutostoppingRequest {}
+
+message IsAutostoppingResponse {
+  bool is_autostopping = 1;
+}

@@ -1,5 +1,6 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import copy
+import dataclasses
 import enum
 import inspect
 import json
@@ -17,9 +18,11 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
-                    Union)
+                    TypeVar, Union)
 
 import colorama
+import grpc
+import psutil
 import yaml
 
 import sky
@@ -53,6 +56,8 @@ from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
+from sky.skylet.autostop.v1 import autostop_pb2
+from sky.skylet.autostop.v1 import autostop_pb2_grpc
 from sky.usage import usage_lib
 from sky.utils import accelerator_registry
 from sky.utils import annotations
@@ -79,6 +84,7 @@ if typing.TYPE_CHECKING:
     from sky import dag
 
 Path = str
+T = TypeVar('T')
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = constants.SKY_REMOTE_WORKDIR
@@ -2193,6 +2199,12 @@ class RetryingVmProvisioner(object):
         return config_dict
 
 
+@dataclasses.dataclass
+class SSHTunnelInfo:
+    port: int
+    pid: int
+
+
 class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """A pickle-able handle to a cluster created by CloudVmRayBackend.
 
@@ -2215,7 +2227,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 10
+    _VERSION = 11
 
     def __init__(
             self,
@@ -2248,6 +2260,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
+        self.skylet_ssh_tunnel: Optional[SSHTunnelInfo] = None
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2587,6 +2600,69 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                                     cluster_config_file)
         self.docker_user = docker_user
 
+    def get_grpc_channel(self) -> grpc.Channel:
+        if self.skylet_ssh_tunnel is None:
+            self.open_and_update_skylet_tunnel()
+        assert self.skylet_ssh_tunnel is not None
+        return grpc.insecure_channel(f'localhost:{self.skylet_ssh_tunnel.port}')
+
+    def _cleanup_ssh_tunnel(self, tunnel_info: SSHTunnelInfo) -> None:
+        """Clean up an SSH tunnel by terminating the process."""
+        try:
+            proc = psutil.Process(tunnel_info.pid)
+            if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+                logger.debug(
+                    f'Terminating SSH tunnel process {tunnel_info.pid}')
+                proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except psutil.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=1)
+        except psutil.NoSuchProcess:
+            pass
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to cleanup SSH tunnel process {tunnel_info.pid}: {e}')
+
+    def open_and_update_skylet_tunnel(self) -> None:
+        """Opens an SSH tunnel to the Skylet on the head node,
+        updates the cluster handle, and persists it to the database."""
+        local_port = common_utils.find_free_port(10000)
+        logger.info(
+            f'Opening SSH tunnel to {self.head_ip} on port {local_port}')
+
+        runners = self.get_command_runners()
+        head_runner = runners[0]
+        if isinstance(head_runner, command_runner.SSHCommandRunner):
+            # Disabling ControlMaster makes things easier to reason about
+            # with respect to resource management/ownership,
+            # as killing the process will close the tunnel too.
+            head_runner.disable_control_master = True
+
+        cmd = head_runner.port_forward_command([(local_port,
+                                                 constants.SKYLET_GRPC_PORT)])
+        ssh_tunnel_proc = subprocess.Popen(cmd)
+        tunnel_info = SSHTunnelInfo(port=local_port, pid=ssh_tunnel_proc.pid)
+        try:
+            grpc.channel_ready_future(
+                grpc.insecure_channel(f'localhost:{tunnel_info.port}')).result(
+                    timeout=constants.SKYLET_GRPC_TIMEOUT_SECONDS)
+            # Clean up existing tunnel before setting up the new one.
+            if self.skylet_ssh_tunnel is not None:
+                self._cleanup_ssh_tunnel(self.skylet_ssh_tunnel)
+            self.skylet_ssh_tunnel = tunnel_info
+            global_user_state.update_cluster_handle(self.cluster_name, self)
+        except grpc.FutureTimeoutError:
+            self._cleanup_ssh_tunnel(tunnel_info)
+            logger.warning(
+                f'Skylet gRPC channel for cluster {self.cluster_name} not '
+                f'ready after {constants.SKYLET_GRPC_TIMEOUT_SECONDS}s')
+            raise
+        except Exception:
+            self._cleanup_ssh_tunnel(tunnel_info)
+            raise
+
     @property
     def cluster_yaml(self) -> Optional[str]:
         if self._cluster_yaml is None:
@@ -2684,6 +2760,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     os.path.expanduser(state['_cluster_yaml'])):
                 state['_cluster_yaml'] = None
 
+        if version < 11:
+            # Version 11 adds SSH tunnel info for gRPC connections
+            state['skylet_ssh_tunnel'] = None
+
         self.__dict__.update(state)
 
         # Because the update_cluster_ips and update_ssh_ports
@@ -2721,6 +2801,27 @@ class LocalResourcesHandle(CloudVmRayResourceHandle):
         """Returns a list of local command runners."""
         del force_cached, avoid_ssh_control  # Unused.
         return [command_runner.LocalProcessCommandRunner()]
+
+
+class SkyletClient:
+    """The client to interact with a remote cluster through Skylet."""
+
+    def __init__(self, channel: grpc.Channel):
+        self._autostop_stub = autostop_pb2_grpc.AutostopServiceStub(channel)
+
+    def set_autostop(
+        self,
+        request: autostop_pb2.SetAutostopRequest,
+        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> autostop_pb2.SetAutostopResponse:
+        return self._autostop_stub.SetAutostop(request, timeout=timeout)
+
+    def is_autostopping(
+        self,
+        request: autostop_pb2.IsAutostoppingRequest,
+        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> autostop_pb2.IsAutostoppingResponse:
+        return self._autostop_stub.IsAutostopping(request, timeout=timeout)
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
@@ -4653,6 +4754,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      wait_for: Optional[autostop_lib.AutostopWaitFor],
                      down: bool = False,
                      stream_logs: bool = True) -> None:
+        del stream_logs
         # The core.autostop() function should have already checked that the
         # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
@@ -4697,17 +4799,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
-            code = autostop_lib.AutostopCodeGen.set_autostop(
-                idle_minutes_to_autostop, self.NAME, wait_for, down)
-            returncode, _, stderr = self.run_on_head(handle,
-                                                     code,
-                                                     require_outputs=True,
-                                                     stream_logs=stream_logs)
-            subprocess_utils.handle_returncode(returncode,
-                                               code,
-                                               'Failed to set autostop',
-                                               stderr=stderr,
-                                               stream_logs=stream_logs)
+            request = autostop_pb2.SetAutostopRequest(
+                idle_minutes=idle_minutes_to_autostop,
+                backend=self.NAME,
+                wait_for=wait_for.to_protobuf()
+                if wait_for else autostop_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
+                down=down,
+            )
+            self._invoke_skylet_with_tunnel_recovery(
+                handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                set_autostop(request))
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
 
@@ -4728,22 +4829,59 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             that the cluster is still autostopping when False is returned,
             due to errors like transient network issues.
         """
+        del stream_logs
         if handle.head_ip is None:
             # The head node of the cluster is not UP or in an abnormal state.
             # We cannot check if the cluster is autostopping.
             return False
-        code = autostop_lib.AutostopCodeGen.is_autostopping()
-        returncode, stdout, stderr = self.run_on_head(handle,
-                                                      code,
-                                                      require_outputs=True,
-                                                      stream_logs=stream_logs)
+        request = autostop_pb2.IsAutostoppingRequest()
+        response = self._invoke_skylet_with_tunnel_recovery(
+            handle, lambda: SkyletClient(handle.get_grpc_channel()).
+            is_autostopping(request, timeout=10))
+        return response.is_autostopping
 
-        if returncode == 0:
-            return message_utils.decode_payload(stdout)
-        logger.debug('Failed to check if cluster is autostopping with '
-                     f'{returncode}: {stdout+stderr}\n'
-                     f'Command: {code}')
-        return False
+    def _invoke_skylet_with_tunnel_recovery(self,
+                                            handle: CloudVmRayResourceHandle,
+                                            func: Callable[..., T]) -> T:
+        """Generic helper for making Skylet gRPC requests.
+
+        This method handles the common pattern of:
+        1. Try the gRPC request
+        2. If SSH tunnel is closed, recreate it and retry
+        """
+        max_attempts = 3
+        backoff = common_utils.Backoff(initial_backoff=0.5)
+        last_exception: Optional[Exception] = None
+
+        for _ in range(max_attempts):
+            try:
+                return func()
+            except grpc.RpcError as e:
+                last_exception = e
+                if e.code() == grpc.StatusCode.INTERNAL:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.SkyletInternalError(e.details())
+                elif e.code() == grpc.StatusCode.UNAVAILABLE:
+                    recreate_tunnel = True
+                    try:
+                        if handle.skylet_ssh_tunnel is not None:
+                            proc = psutil.Process(handle.skylet_ssh_tunnel.pid)
+                            if proc.is_running(
+                            ) and proc.status() != psutil.STATUS_ZOMBIE:
+                                recreate_tunnel = False
+                    except psutil.NoSuchProcess:
+                        pass
+
+                    if recreate_tunnel:
+                        handle.open_and_update_skylet_tunnel()
+
+                    time.sleep(backoff.current_backoff())
+                else:
+                    raise e
+
+        raise RuntimeError(
+            f'Failed to invoke Skylet after {max_attempts} attempts'
+        ) from last_exception
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.

@@ -88,6 +88,20 @@ local_ray = [
     'ray[default] >= 2.2.0, != 2.6.0',
 ]
 
+dev_dependencies = [
+    # Required for generating protobuf files during development.
+    # What matters is the version of protoc that grpcio-tools comes with,
+    # so we don't need to explicitly constrain the version of this package.
+    'grpcio-tools',
+    # We arrived at 5.29.5 through the following:
+    # 1. pip install -e ".[all,remote]"
+    # 2. pip show protobuf
+    #    We will see that the resolved protobuf version is 5.29.5.
+    # TODO(kevin): Have this value be maintained through CI,
+    # to make sure it's always up to date.
+    'protobuf==5.29.5',
+]
+
 remote = [
     # Adopted from ray's setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L251-L252
@@ -96,9 +110,12 @@ remote = [
     # Tracking issue: https://github.com/ray-project/ray/issues/30984
     'grpcio >= 1.32.0, != 1.48.0; python_version < \'3.10\'',
     'grpcio >= 1.42.0, != 1.48.0; python_version >= \'3.10\'',
-    # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
-    'protobuf >= 3.15.3, != 3.19.5',
+    # >= 5.29.5 because the runtime version can't be older than the version
+    # used to generate the code.
+    # < 7.0.0 because code generated for a major version V will be supported by
+    # protobuf runtimes of version V and V+1.
+    # https://protobuf.dev/support/cross-version-runtime-guarantee
+    'protobuf >= 5.29.5, < 7.0.0',
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
@@ -192,3 +209,6 @@ if sys.version_info < (3, 10):
         [v for k, v in extras_require.items() if k != 'nebius'], [])
 else:
     extras_require['all'] = sum(extras_require.values(), [])
+
+# Separate from 'all'
+extras_require['dev'] = dev_dependencies

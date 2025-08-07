@@ -51,6 +51,7 @@ repos:
             - types-cachetools
             - types-pyvmomi
             - types-paramiko
+            - types-protobuf
 
 -   repo: https://github.com/google/yapf
     rev: v0.32.0  # Match the version from requirements
@@ -73,4 +74,4 @@ repos:
             - --rcfile=.pylintrc  # Use your custom pylint configuration
             - --load-plugins=pylint_quotes  # Load the pylint-quotes plugin
         files: ^sky/  # Only include files from the 'sky/' directory
-        exclude: ^sky/skylet/providers/ibm/
+        exclude: (^sky/skylet/providers/ibm/|.*_pb2.*\.py$|.*_pb2.*\.pyi$)

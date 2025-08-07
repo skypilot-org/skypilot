@@ -96,6 +96,8 @@ SKYLET_VERSION = '16'
 # user can be notified to update their SkyPilot version on the remote cluster.
 SKYLET_LIB_VERSION = 4
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
+SKYLET_GRPC_PORT = 46590
+SKYLET_GRPC_TIMEOUT_SECONDS = 10
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
