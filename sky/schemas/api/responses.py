@@ -10,7 +10,7 @@ from sky.server import common
 
 class DictLikeModel(pydantic.BaseModel):
     """A pydantic model that acts like a dict.
-    
+
     Supports the following syntax:
     class SampleResponse(DictLikePayload):
         field: str
@@ -32,7 +32,7 @@ class DictLikeModel(pydantic.BaseModel):
     # signature.
     model_config = pydantic.ConfigDict(extra='ignore')
 
-        # backward compatibility with dict
+    # backward compatibility with dict
     def __getitem__(self, key):
         try:
             return getattr(self, key)

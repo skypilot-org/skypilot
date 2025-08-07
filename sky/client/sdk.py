@@ -30,6 +30,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server import versions
@@ -52,7 +53,6 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.kubernetes import ssh_utils
-from sky.schemas.api import responses
 
 if typing.TYPE_CHECKING:
     import base64
