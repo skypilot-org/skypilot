@@ -114,7 +114,7 @@ sky down <cluster-name>
 
 Here's what you can expect to see during training - the loss should decrease and token accuracy should improve over time:
 
-#### gpt-oss-20b Training Progress
+#### gpt-oss-20b training progress
 
 ```
 Training Progress for gpt-oss-20b on Nebius:
@@ -145,7 +145,7 @@ Memory and GPU utilization using [nvitop](https://github.com/XuehaiPan/nvitop)
 
 ![nvitop](https://i.imgur.com/pGqj9RD.png)
 
-#### gpt-oss-120b Training Progress
+#### gpt-oss-120b training progress
 
 ```
 Training Progress for gpt-oss-120b on 4 nodes:
