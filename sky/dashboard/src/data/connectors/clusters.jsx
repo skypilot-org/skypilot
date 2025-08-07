@@ -70,6 +70,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         cluster: cluster.name,
         user: cluster.user_name,
         user_hash: cluster.user_hash,
+        cluster_hash: cluster.cluster_hash,
         cloud: cluster.cloud,
         region: cluster.region,
         infra: region_or_zone
@@ -135,6 +136,7 @@ export async function getClusterHistory() {
         cluster: cluster.name,
         user: user_name,
         user_hash: cluster.user_hash,
+        cluster_hash: cluster.cluster_hash,
         cloud: cloud,
         region: '',
         infra: cloud,

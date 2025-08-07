@@ -84,6 +84,7 @@ Below is the available helm value keys and the default value of each key:
       :ref:`email-domain <helm-values-auth-oauth-email-domain>`: "*"
       :ref:`session-store-type <helm-values-auth-oauth-session-store-type>`: "redis"
       :ref:`redis-url <helm-values-auth-oauth-redis-url>`: null
+      :ref:`redis-secret <helm-values-auth-oauth-redis-secret>`: null
       :ref:`cookie-refresh <helm-values-auth-oauth-cookie-refresh>`: null
       :ref:`cookie-expire <helm-values-auth-oauth-cookie-expire>`: null
     :ref:`serviceAccount <helm-values-auth-serviceAccount>`:
@@ -842,6 +843,24 @@ Default: ``null``
   auth:
     oauth:
       redis-url: "redis://redis-host:6379/0"
+
+
+.. _helm-values-auth-oauth-redis-secret:
+
+``auth.oauth.redis-secret``
+''''''''''''''''''''''''''''
+
+Alternative way to specify Redis connection URL using a Kubernetes secret. The secret must contain a key named ``redis_url`` with the Redis connection URL in the format ``redis://host[:port][/db-number]``.
+
+This field is mutually exclusive with :ref:`redis-url <helm-values-auth-oauth-redis-url>`.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      redis-secret: "my-redis-credentials"
 
 .. _helm-values-auth-oauth-cookie-refresh:
 
