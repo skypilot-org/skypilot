@@ -1370,6 +1370,12 @@ class RetryingVmProvisioner(object):
         # the instance type in the target region. If not, fail early
         # instead of trying to provision and failing later.
         try:
+            # Add cluster event for quota check
+            global_user_state.add_cluster_event(
+                cluster_name, 
+                status_lib.ClusterStatus.INIT, 
+                "Checking if user has quota for requested resources."
+            )
             need_provision = to_provision.cloud.check_quota_available(
                 to_provision)
 
@@ -2979,6 +2985,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with timeline.Event('backend.provision.wheel_build'):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
+                
+                # Add cluster event for wheel building completion
+                global_user_state.add_cluster_event(
+                    cluster_name, 
+                    status_lib.ClusterStatus.INIT, 
+                    "Building SkyPilot wheel package for deployment"
+                )
+
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
