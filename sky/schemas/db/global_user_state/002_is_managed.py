@@ -1,4 +1,4 @@
-"""Columns for whether the cluster is launched by the controller.
+"""Columns for whether the cluster is managed.
 
 Revision ID: 002
 Revises: 001
@@ -21,14 +21,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add columns for whether the cluster is launched by the controller."""
+    """Add columns for whether the cluster is managed."""
     with op.get_context().autocommit_block():
         db_utils.add_column_to_table_alembic('clusters',
-                                             'is_launched_by_controller',
+                                             'is_managed',
                                              sa.Integer(),
                                              server_default='0')
 
 
 def downgrade():
-    """Remove columns for whether the cluster is launched by the controller."""
+    """Remove columns for whether the cluster is managed."""
     pass

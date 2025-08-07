@@ -353,14 +353,13 @@ def _execute_dag(
         task = _maybe_clone_disk_from_cluster(clone_disk_from, cluster_name,
                                               task)
 
-    is_launched_by_controller = (_is_launched_by_jobs_controller or
-                                 _is_launched_by_sky_serve_controller)
+    is_managed = (_is_launched_by_jobs_controller or
+                  _is_launched_by_sky_serve_controller)
 
     if not cluster_exists:
         # If spot is launched on serve or jobs controller, we don't need to
         # print out the hint.
-        if (Stage.PROVISION in stages and task.use_spot and
-                not is_launched_by_controller):
+        if (Stage.PROVISION in stages and task.use_spot and not is_managed):
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
             reset = colorama.Style.RESET_ALL
@@ -400,7 +399,7 @@ def _execute_dag(
         # after K8S pod recovers from a crash.
         # See `kubernetes-ray.yml.j2` for more details.
         dump_final_script=is_controller_high_availability_supported,
-        is_launched_by_controller=is_launched_by_controller)
+        is_managed=is_managed)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket

@@ -2791,8 +2791,7 @@ def get_clusters(
     # Filter out clusters created by the controller.
     if not env_options.Options.SHOW_DEBUG_INFO.get():
         records = [
-            record for record in records
-            if not record.get('is_launched_by_controller', False)
+            record for record in records if not record.get('is_managed', False)
         ]
 
     # Filter by user if requested

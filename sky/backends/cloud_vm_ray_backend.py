@@ -1175,7 +1175,7 @@ class RetryingVmProvisioner(object):
                  wheel_hash: str,
                  blocked_resources: Optional[Iterable[
                      resources_lib.Resources]] = None,
-                 is_launched_by_controller: Optional[bool] = None):
+                 is_managed: Optional[bool] = None):
         self._blocked_resources: Set[resources_lib.Resources] = set()
         if blocked_resources:
             # blocked_resources is not None and not empty.
@@ -1187,7 +1187,7 @@ class RetryingVmProvisioner(object):
         self._requested_features = requested_features
         self._local_wheel_path = local_wheel_path
         self._wheel_hash = wheel_hash
-        self._is_launched_by_controller = is_launched_by_controller
+        self._is_managed = is_managed
 
     def _yield_zones(
             self, to_provision: resources_lib.Resources, num_nodes: int,
@@ -1521,7 +1521,7 @@ class RetryingVmProvisioner(object):
                 cluster_handle=handle,
                 requested_resources=requested_resources,
                 ready=False,
-                is_launched_by_controller=self._is_launched_by_controller,
+                is_managed=self._is_managed,
             )
 
             global_user_state.set_owner_identity_for_cluster(
@@ -2769,8 +2769,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
         self._dump_final_script = kwargs.pop('dump_final_script', False)
-        self._is_launched_by_controller = kwargs.pop(
-            'is_launched_by_controller', False)
+        self._is_managed = kwargs.pop('is_managed', False)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
@@ -2967,8 +2966,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         local_wheel_path,
                         wheel_hash,
                         blocked_resources=task.blocked_resources,
-                        is_launched_by_controller=self.
-                        _is_launched_by_controller)
+                        is_managed=self._is_managed)
                     log_path = os.path.join(self.log_dir, 'provision.log')
                     rich_utils.force_update_status(
                         ux_utils.spinner_message('Launching', log_path))
