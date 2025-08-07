@@ -8,6 +8,8 @@ The `gpt-oss-120b` model achieves near-parity with OpenAI o4-mini on core reason
 
 This guide walks through how to finetune both models with LoRA/full finetuning using [🤗 Accelerate](https://github.com/huggingface/accelerate).
 
+If you're looking to run inference on `gpt-oss` models, check out [the inference example](../models/gpt-oss.md)
+
 ![Cloud Logos](https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png)
 
 ## Step 0: Setup infrastructure
