@@ -413,7 +413,7 @@ def pool_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
-@versions.minimal_api_version(13)
+@versions.minimal_api_version(16)
 def pool_tail_logs(pool_name: str,
                    target: Union[str, 'serve_utils.ServiceComponent'],
                    worker_id: Optional[int] = None,
@@ -433,7 +433,7 @@ def pool_tail_logs(pool_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
-@versions.minimal_api_version(13)
+@versions.minimal_api_version(16)
 def pool_sync_down_logs(pool_name: str,
                         local_dir: str,
                         *,
