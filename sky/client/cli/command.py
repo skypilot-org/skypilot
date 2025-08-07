@@ -3070,6 +3070,21 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
             # controller being STOPPED or being firstly launched, i.e., there is
             # no in-prgress services.
             services = []
+        except exceptions.InconsistentConsolidationModeError:
+            # If this error is raised, it means the user switched to the
+            # consolidation mode but the previous controller cluster is still
+            # running. We should allow the user to tear down the controller
+            # cluster in this case.
+            with skypilot_config.override_skypilot_config(
+                {'serve': {
+                    'controller': {
+                        'consolidation_mode': False
+                    }
+                }}):
+                # Check again with the consolidation mode disabled. This is to
+                # make sure there is no in-progress services.
+                request_id = serve_lib.status(service_names=None)
+                services = sdk.stream_and_get(request_id)
 
     if services:
         service_names = [service['name'] for service in services]
