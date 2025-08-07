@@ -2656,15 +2656,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 self._cleanup_ssh_tunnel(self.skylet_ssh_tunnel)
             self.skylet_ssh_tunnel = tunnel_info
             global_user_state.update_cluster_handle(self.cluster_name, self)
-        except grpc.FutureTimeoutError:
+        except grpc.FutureTimeoutError as e:
             self._cleanup_ssh_tunnel(tunnel_info)
             logger.warning(
                 f'Skylet gRPC channel for cluster {self.cluster_name} not '
                 f'ready after {constants.SKYLET_GRPC_TIMEOUT_SECONDS}s')
-            raise
-        except Exception:
+            raise e
+        except Exception as e:
             self._cleanup_ssh_tunnel(tunnel_info)
-            raise
+            raise e
 
     @property
     def cluster_yaml(self) -> Optional[str]:
@@ -4783,7 +4783,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      wait_for: Optional[autostop_lib.AutostopWaitFor],
                      down: bool = False,
                      stream_logs: bool = True) -> None:
-        del stream_logs
         # The core.autostop() function should have already checked that the
         # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
@@ -4835,9 +4834,29 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if wait_for else autostop_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
                 down=down,
             )
-            self._invoke_skylet_with_retries(
-                handle, lambda: SkyletClient(handle.get_grpc_channel()).
-                set_autostop(request))
+            try:
+                self._invoke_skylet_with_retries(
+                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                    set_autostop(request))
+            except Exception as e:  # pylint: disable=broad-except
+                # Fallback to legacy execution if gRPC fails.
+                # This can happen if the remote cluster is running an old
+                # version of skylet.
+                logger.info(
+                    'set_autostop failed for cluster %s; '
+                    'falling back to legacy remote execution. Error: %s',
+                    handle.cluster_name,
+                    e,
+                    exc_info=True)
+                code = autostop_lib.AutostopCodeGen.set_autostop(
+                    idle_minutes_to_autostop, self.NAME, wait_for, down)
+                returncode, _, stderr = self.run_on_head(
+                    handle, code, require_outputs=True, stream_logs=stream_logs)
+                subprocess_utils.handle_returncode(returncode,
+                                                   code,
+                                                   'Failed to set autostop',
+                                                   stderr=stderr,
+                                                   stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
 
