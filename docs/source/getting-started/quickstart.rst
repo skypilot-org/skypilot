@@ -84,7 +84,7 @@ Create a directory from anywhere on your machine:
       #      Its contents are synced to ~/sky_workdir/ on the cluster.
       #      Both `setup` and `run` is invoked under the workdir (i.e., can use its files).
       task = sky.Task(setup='echo "Running setup."',
-                      run='\n'.join(commands),
+                      run=commands,
                       workdir='.',
                       resources=resource)
 
