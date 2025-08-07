@@ -178,6 +178,22 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
 )
 
+# Table for cluster status change events.
+# starting_status: Status of the cluster at the start of the event.
+# ending_status: Status of the cluster at the end of the event.
+# reason: Reason for the transition.
+# transitioned_at: Timestamp of the transition.
+cluster_event_table = sqlalchemy.Table(
+    'cluster_events',
+    Base.metadata,
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('name', sqlalchemy.Text),
+    sqlalchemy.Column('starting_status', sqlalchemy.Text),
+    sqlalchemy.Column('ending_status', sqlalchemy.Text),
+    sqlalchemy.Column('reason', sqlalchemy.Text),
+    sqlalchemy.Column('transitioned_at', sqlalchemy.Integer),
+)
+
 ssh_key_table = sqlalchemy.Table(
     'ssh_key',
     Base.metadata,
