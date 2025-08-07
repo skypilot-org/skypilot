@@ -4694,7 +4694,7 @@ class CoreWeaveStore(S3CompatibleStore):
         
         # Add retry mechanism to ensure bucket is accessible after creation
         # THIS IS SPECIFIC TO COREWEAVE since the bucket isn't immediately created...
-        max_retries = 12  # 12 * 5 seconds = 60 seconds total
+        max_retries = 60
         retry_count = 0
         
         while retry_count < max_retries:
