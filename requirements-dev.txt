@@ -53,3 +53,16 @@ psycopg2-binary==2.9.10
 # For helm okta test
 selenium==4.33.0
 webdriver-manager==4.0.2
+
+# gRPC / Protobuf code generation
+# We arrived at 1.63.0 through the following:
+# 1. pip install -e ".[all]"
+# 2. pip show protobuf -> 5.29.5, so 5.x is safe by default
+# 3. We mostly care about the major version, 5 in this case.
+# 4. 1.63.0 is the oldest version of grpcio that supports protobuf >= 5.x.y.
+# TODO(kevin): Have this value be maintained through CI,
+# to make sure it's always up to date.
+grpcio-tools==1.63.0
+grpcio==1.63.0
+# The oldest version of protobuf that grpcio 1.63.0 supports.
+protobuf==5.26.1

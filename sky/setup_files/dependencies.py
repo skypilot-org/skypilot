@@ -88,23 +88,6 @@ local_ray = [
     'ray[default] >= 2.2.0, != 2.6.0',
 ]
 
-dev_dependencies = [
-    # Required for generating protobuf files during development.
-    # We arrived at 1.63.0 through the following:
-    # 1. pip install -e ".[all]"
-    # 2. pip show protobuf
-    #    We will see that the resolved protobuf version is 5.29.5,
-    #    so we know that 5.x is safe to use as our default.
-    # 3. We mostly care about the major version, 5 in this case.
-    # 4. 1.63.0 is the oldest version of grpcio that supports protobuf 5.x.y.
-    # TODO(kevin): Have this value be maintained through CI,
-    # to make sure it's always up to date.
-    'grpcio-tools==1.63.0',
-    'grpcio==1.63.0',
-    # The oldest version of protobuf that grpcio 1.63.0 supports.
-    'protobuf==5.26.1',
-]
-
 remote = [
     # The grpc version at runtime has to be newer than the version
     # used to generate the code.
@@ -208,6 +191,3 @@ if sys.version_info < (3, 10):
         [v for k, v in extras_require.items() if k != 'nebius'], [])
 else:
     extras_require['all'] = sum(extras_require.values(), [])
-
-# Intentionally separated from 'all'
-extras_require['dev'] = dev_dependencies
