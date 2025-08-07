@@ -42,13 +42,13 @@ from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
-from sky.schemas.api import responses
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
@@ -1574,7 +1574,14 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
             #   without authentication since no sensitive information is
             #   returned.
             return responses.APIHealthResponse(
-                status=common.ApiServerStatus.HEALTHY,)
+                status=common.ApiServerStatus.HEALTHY,
+                api_version='',
+                version='',
+                version_on_disk='',
+                commit='',
+                basic_auth_enabled=False,
+                user=None,
+            )
         # TODO(aylei): remove this after min_compatible_api_version >= 14.
         if client_version < 14:
             # For Client with API version < 14, the NEEDS_AUTH status is not
@@ -1592,9 +1599,9 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         version=sky.__version__,
         version_on_disk=common.get_skypilot_version_on_disk(),
         commit=sky.__commit__,
-        user=user if user is not None else None,
         basic_auth_enabled=os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
                                           'false').lower() == 'true',
+        user=user if user is not None else None,
     )
 
 
