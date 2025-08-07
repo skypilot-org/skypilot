@@ -389,8 +389,7 @@ class JobsController:
                         self._logger.info(
                             f'Task {task_id} was being cancelled, '
                             're-raising cancellation')
-                        raise exceptions.ManagedJobUserCancelledError(
-                            'Recovering cancel signal.')
+                        raise asyncio.CancelledError()
                 if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
                     force_transit_to_recovering = True
                 # This resume logic should only be triggered once.
@@ -430,11 +429,19 @@ class JobsController:
                         f'Traceback: {traceback.format_exc()}')
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
-                self._logger.info(f'Task {task_id} succeeded!'
+                self._logger.info(f'Task {task_id} succeeded! '
                                   'Getting end time and cleaning up')
-                success_end_time = await managed_job_utils.to_thread(
-                    managed_job_utils.try_to_get_job_end_time, self._backend,
-                    cluster_name, job_id_on_pool_cluster)
+                try:
+                    success_end_time = await managed_job_utils.to_thread(
+                        managed_job_utils.try_to_get_job_end_time, self._backend,
+                        cluster_name, job_id_on_pool_cluster)
+                except Exception as e: # pylint: disable=broad-except
+                    self._logger.warning(
+                        f'Failed to get job end time: '
+                        f'{common_utils.format_exception(e)}',
+                        exc_info=True)
+                    success_end_time = 0
+
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
                 await managed_job_state.set_succeeded_async(
@@ -765,19 +772,27 @@ class Controller:
 
         def task_cleanup(task: 'sky.Task', job_id: int):
             assert task.name is not None, task
-            if pool is None:
-                cluster_name = (
-                    managed_job_utils.generate_managed_job_cluster_name(
-                        task.name, job_id))
-                managed_job_utils.terminate_cluster(cluster_name)
-            else:
-                cluster_name, job_id_on_pool_cluster = (
-                    managed_job_state.get_pool_submit_info(job_id))
-                if cluster_name is not None:
-                    if job_id_on_pool_cluster is not None:
-                        core.cancel(cluster_name=cluster_name,
-                                    job_ids=[job_id_on_pool_cluster],
-                                    _try_cancel_if_cluster_is_init=True)
+            error = None
+            
+            try:
+                if pool is None:
+                    cluster_name = (
+                        managed_job_utils.generate_managed_job_cluster_name(
+                            task.name, job_id))
+                    managed_job_utils.terminate_cluster(cluster_name)
+                else:
+                    cluster_name, job_id_on_pool_cluster = (
+                        managed_job_state.get_pool_submit_info(job_id))
+                    if cluster_name is not None:
+                        if job_id_on_pool_cluster is not None:
+                            core.cancel(cluster_name=cluster_name,
+                                        job_ids=[job_id_on_pool_cluster],
+                                        _try_cancel_if_cluster_is_init=True)
+            except Exception as e:  # pylint: disable=broad-except
+                error = e
+                job_logger.warning(
+                    f'Failed to terminate cluster {cluster_name}: {e}')
+                # we continue to try cleaning up whatever else we can.
             # Clean up Storages with persistent=False.
             # TODO(zhwu): this assumes the specific backend.
             backend = cloud_vm_ray_backend.CloudVmRayBackend()
@@ -787,7 +802,13 @@ class Controller:
             # storage object itself.
             for storage in task.storage_mounts.values():
                 storage.construct()
-            backend.teardown_ephemeral_storage(task)
+            try:
+                backend.teardown_ephemeral_storage(task)
+            except Exception as e:  # pylint: disable=broad-except
+                error = e
+                job_logger.warning(
+                    f'Failed to teardown ephemeral storage: {e}')
+                # we continue to try cleaning up whatever else we can.
 
             # Clean up any files mounted from the local disk, such as two-hop
             # file mounts.
@@ -807,10 +828,22 @@ class Controller:
                     job_logger.warning(
                         f'Failed to clean up file mount {file_mount}: {e}')
 
+            if error is not None:
+                raise error
+
         dag, _ = _get_dag_and_name(dag_yaml)
+        error = None
         for task in dag.tasks:
             # most things in this function are blocking
-            await managed_job_utils.to_thread(task_cleanup, task, job_id)
+            try:
+                await managed_job_utils.to_thread(task_cleanup, task, job_id)
+            except Exception as e:  # pylint: disable=broad-except
+                error = e
+
+        if error is not None:
+            # we only raise the last error that occurred, but its fine to lose
+            # some data here.
+            raise error
 
     async def run_job_loop(self,
                            job_id: int,
@@ -896,12 +929,21 @@ class Controller:
             # Restore original os.environ to avoid affecting other jobs
             os.environ = original_environ
 
-            await self._cleanup(job_id,
+            try:
+                await self._cleanup(job_id,
                                 dag_yaml=dag_yaml,
                                 job_logger=job_logger,
                                 pool=pool)
-            job_logger.info(
-                f'Cluster of managed job {job_id} has been cleaned up.')
+                job_logger.info(
+                    f'Cluster of managed job {job_id} has been cleaned up.')
+            except Exception as e:  # pylint: disable=broad-except
+                await managed_job_state.set_failed_async(
+                    job_id,
+                    task_id=None,
+                    failure_type=managed_job_state.ManagedJobStatus.
+                    FAILED_CONTROLLER,
+                    failure_reason=e,
+                    override_terminal=True)
 
             if cancelling:
                 # Since it's set with cancelling
