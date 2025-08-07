@@ -4,10 +4,11 @@ Autostop and Autodown
 ============================
 
 The **autostop** (or **autodown**) feature automatically stops (or tears down) a
-cluster after it becomes idle. By default, idleness means there are no
-in‑progress (pending/running) jobs in the cluster’s job queue and no active SSH
-sessions; both running jobs and SSH sessions reset the idleness timer (see
-"Setting idleness behavior" below).
+cluster after it becomes idle. Idleness is defined as no
+in‑progress (pending/running) jobs in the cluster and no active SSH
+sessions; both running jobs and SSH sessions reset the idleness timer. You can
+override this behavior via the wait mode (see
+:ref:`Setting idleness behavior <auto-stop-setting-idleness-behavior>`).
 
 With autostop, users can simply submit jobs and leave their laptops, while
 ensuring no unnecessary spending occurs. After jobs have finished, the
@@ -102,6 +103,8 @@ To view the status of the cluster, use ``sky dashboard`` or ``sky status``:
    mycluster2   AWS (us-east-1) 2x(cpus=8, m4.2xlarge, ...)   UP       10 min(down)   1 min ago
 
 Clusters that are autostopped/autodowned are automatically removed from the status table.
+
+.. _auto-stop-setting-idleness-behavior:
 
 Setting idleness behavior
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -277,9 +277,17 @@ Format:
 - ``<num>``: Stop after this many idle minutes
 - ``<num><unit>``: Stop after this much time
 - Object with configuration:
+
   - ``idle_minutes``: Number of idle minutes before stopping
   - ``down``: If true, tear down the cluster instead of stopping it
-  - ``wait_for``: What resets the idleness timer. One of ``jobs_and_ssh`` (default), ``jobs``, or ``none``. See :ref:`auto-stop` for details.
+  - ``wait_for``: Determines the condition for resetting the idleness timer.
+    Options:
+
+    - ``jobs_and_ssh`` (default): Wait for all jobs to complete AND all SSH
+      sessions to disconnect.
+    - ``jobs``: Wait for all jobs to complete.
+    - ``none``: Stop immediately after idle time expires, regardless of running
+      jobs or SSH connections.
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -325,7 +333,7 @@ OR
   resources:
     autostop:
       idle_minutes: 10
-      wait_for: jobs_and_ssh  # Control what resets idleness timer
+      wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
 
 
 .. _yaml-spec-resources-accelerators:
