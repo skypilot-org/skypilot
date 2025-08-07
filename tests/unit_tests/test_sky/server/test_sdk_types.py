@@ -10,7 +10,11 @@ from sky.client import sdk
 from sky.jobs.client import sdk as jobs_sdk
 from sky.jobs.server import core as jobs_core
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.serve.client import sdk as serve_sdk
+from sky.serve.server import core as serve_core
 from sky.ssh_node_pools import server as ssh_node_pools_server
+from sky.volumes.client import sdk as volume_sdk
+from sky.volumes.server import server as volume_server
 from sky.workspaces import core as workspaces_core
 
 
@@ -217,3 +221,47 @@ def test_pool_status_return_type():
 # tests for sky.serve.client.sdk
 # Tests ordered by function declaration order in sky/serve/client/sdk.py
 
+
+def test_up_return_type():
+    """Test that serve_sdk.up and core.up return types match."""
+    _check_return_type(serve_sdk.up, serve_core.up)
+
+
+def test_update_return_type():
+    """Test that serve_sdk.update and core.update return types match."""
+    _check_return_type(serve_sdk.update, serve_core.update)
+
+
+def test_down_return_type():
+    """Test that serve_sdk.down and core.down return types match."""
+    _check_return_type(serve_sdk.down, serve_core.down)
+
+
+def test_terminate_replica_return_type():
+    """Test that serve_sdk.terminate_replica and core.terminate_replica return types match."""
+    _check_return_type(serve_sdk.terminate_replica,
+                       serve_core.terminate_replica)
+
+
+def test_status_return_type():
+    """Test that serve_sdk.status and core.status return types match."""
+    _check_return_type(serve_sdk.status, serve_core.status)
+
+
+# tests for sky.volumes.client.sdk
+# Tests ordered by function declaration order in sky/volumes/client/sdk.py
+
+
+def test_apply_return_type():
+    """Test that volume_sdk.apply and core.apply return types match."""
+    _check_return_type(volume_sdk.apply, volume_server.volume_apply)
+
+
+def test_ls_return_type():
+    """Test that volume_sdk.ls and core.ls return types match."""
+    _check_return_type(volume_sdk.ls, volume_server.volume_list)
+
+
+def test_delete_return_type():
+    """Test that volume_sdk.delete and core.delete return types match."""
+    _check_return_type(volume_sdk.delete, volume_server.volume_delete)
