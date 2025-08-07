@@ -72,7 +72,7 @@ sky logs <cluster-name>
 sky down <cluster-name>
 ```
 
-### Example training progress
+### Example full finetuning progress
 
 Here's what you can expect to see during training - the loss should decrease and token accuracy should improve over time:
 
