@@ -81,8 +81,8 @@ Create a directory from anywhere on your machine:
       #   setup: Typical use: pip install -r requirements.txt
       #   run: Typical use: make use of resources, such as running training.
       #   workdir: Working directory (optional) containing the project codebase.
-      #      Its contents are synced to ~/sky_workdir/ on the cluster.
-      #      Both `setup` and `run` is invoked under the workdir (i.e., can use its files).
+      #     Its contents are synced to ~/sky_workdir/ on the cluster.
+      #     Both `setup` and `run` is invoked under the workdir (i.e., can use its files).
       task = sky.Task(setup='echo "Running setup."',
                       run=commands,
                       workdir='.',
