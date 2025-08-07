@@ -158,6 +158,7 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('last_creation_command',
                       sqlalchemy.Text,
                       server_default=None),
+    sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
 )
 
 # Table for cluster status change events.
@@ -492,6 +493,8 @@ def add_or_update_cluster(cluster_name: str,
 
     user_hash = common_utils.get_current_user().id
     active_workspace = skypilot_config.get_active_workspace()
+    history_workspace = active_workspace
+    history_hash = user_hash
 
     conditional_values = {}
     if is_launch:
@@ -576,6 +579,10 @@ def add_or_update_cluster(cluster_name: str,
         # Modify cluster history table
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
+        if cluster_row and cluster_row.workspace:
+            history_workspace = cluster_row.workspace
+        if cluster_row and cluster_row.user_hash:
+            history_hash = cluster_row.user_hash
         creation_info = {}
         if conditional_values.get('last_creation_yaml') is not None:
             creation_info = {
@@ -593,6 +600,7 @@ def add_or_update_cluster(cluster_name: str,
             launched_resources=pickle.dumps(launched_resources),
             usage_intervals=pickle.dumps(usage_intervals),
             user_hash=user_hash,
+            workspace=history_workspace,
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -606,7 +614,8 @@ def add_or_update_cluster(cluster_name: str,
                     pickle.dumps(launched_resources),
                 cluster_history_table.c.usage_intervals:
                     pickle.dumps(usage_intervals),
-                cluster_history_table.c.user_hash: user_hash,
+                cluster_history_table.c.user_hash: history_hash,
+                cluster_history_table.c.workspace: history_workspace,
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -1090,6 +1099,7 @@ def get_clusters_from_history(
             cluster_history_table.c.user_hash,
             cluster_history_table.c.last_creation_yaml,
             cluster_history_table.c.last_creation_command,
+            cluster_history_table.c.workspace.label('history_workspace'),
             cluster_table.c.status, cluster_table.c.workspace,
             cluster_table.c.status_updated_at).select_from(
                 cluster_history_table.join(cluster_table,
@@ -1160,6 +1170,8 @@ def get_clusters_from_history(
         # Get user name from user hash
         user = get_user(user_hash)
         user_name = user.name if user is not None else None
+        workspace = (row.history_workspace
+                     if row.history_workspace else row.workspace)
 
         record = {
             'name': row.name,
@@ -1172,7 +1184,7 @@ def get_clusters_from_history(
             'status': status,
             'user_hash': user_hash,
             'user_name': user_name,
-            'workspace': row.workspace,
+            'workspace': workspace,
             'last_creation_yaml': row.last_creation_yaml,
             'last_creation_command': row.last_creation_command,
         }
