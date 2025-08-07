@@ -156,4 +156,4 @@ Memory and GPU utilization using [nvitop](https://github.com/XuehaiPan/nvitop)
 
 ## Configuration files
 
-You can find the complete configurations in [the following directory](https://github.com/skypilot-org/skypilot/blob/master/llm/gpt-oss-sft/).
+You can find the complete configurations in [the following directory](https://github.com/skypilot-org/skypilot/blob/master/llm/gpt-oss-finetuning/).
