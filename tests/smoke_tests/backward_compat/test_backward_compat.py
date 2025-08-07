@@ -223,7 +223,8 @@ class TestBackwardCompatibility:
             need_launch_cmd = f'{self.ACTIVATE_CURRENT} && sky launch --infra {generic_cloud} -y -c {cluster_name}'
         commands = [
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
-            f'sky launch --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
+            # Use --cloud since old version may not have --infra
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky autostop -i 10 -y {cluster_name}',
             f'{self.ACTIVATE_BASE} && sky exec -d --infra {generic_cloud} --num-nodes 2 {cluster_name} sleep 120',
             # Must restart API server after switch the code base to ensure the client and server run in same version.
