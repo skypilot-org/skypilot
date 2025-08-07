@@ -8,7 +8,7 @@ from sky import models
 from sky.server import common
 
 
-class DictLikeModel(pydantic.BaseModel):
+class ResponseBaseModel(pydantic.BaseModel):
     """A pydantic model that acts like a dict.
 
     Supports the following syntax:
@@ -23,6 +23,9 @@ class DictLikeModel(pydantic.BaseModel):
 
     This model exists for backwards compatibility with the
     old SDK that used to return a dict.
+
+    The backward compatibility may be removed
+    in the future.
     """
     # Ignore extra fields in the request body, which is useful for backward
     # compatibility. The difference with `allow` is that `ignore` will not
@@ -55,7 +58,7 @@ class DictLikeModel(pydantic.BaseModel):
         return self.model_dump().items()
 
 
-class APIHealthResponse(DictLikeModel):
+class APIHealthResponse(ResponseBaseModel):
     """Response for the API health endpoint."""
     status: common.ApiServerStatus
     api_version: str = ''
