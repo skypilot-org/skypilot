@@ -12,11 +12,13 @@ Welcome to SkyPilot!
   :alt: SkyPilot
   :class: no-scaled-link, only-light
 
+.. <strong>Run AI on Any Infra</strong> — Unified, Faster, Cheaper
+
 .. raw:: html
 
    <p></p>
    <p style="text-align:center">
-   <strong>Run AI on Any Infra</strong> — Unified, Faster, Cheaper
+   <strong>Simplify & Scale Your AI Infrastructure</strong>
    </p>
    <p style="text-align:center">
    <a class="github-button" href="https://github.com/skypilot-org/skypilot" data-show-count="true" data-size="large" aria-label="Star skypilot-org/skypilot on GitHub">Star</a>
@@ -38,7 +40,12 @@ Welcome to SkyPilot!
 
 
 
-SkyPilot is an open-source system for running AI and batch workloads on any infra.
+.. SkyPilot is an open-source system for running AI and batch workloads on any infra.
+
+SkyPilot is an open-source system for running AI and batch workloads on any AI
+infrastructure. It offers a simplified interface to access your AI
+infrastructure (K8s, VMs on 16+ clouds, on-prem), cost optimizations, and infra scaling.
+
 
 
 SkyPilot **is easy to use for AI users**:
