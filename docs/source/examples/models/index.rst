@@ -5,7 +5,7 @@ Models
    :maxdepth: 1
 
    OpenAI gpt-oss <gpt-oss>
-   OpenAI gpt-oss Finetuning <gpt-oss-sft>
+   OpenAI gpt-oss Finetuning <gpt-oss-finetuning>
    DeepSeek-R1 <deepseek-r1>
    DeepSeek-R1 Distilled <deepseek-r1-distilled>
    DeepSeek-Janus <deepseek-janus>
