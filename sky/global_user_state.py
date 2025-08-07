@@ -160,6 +160,22 @@ cluster_history_table = sqlalchemy.Table(
                       server_default=None),
 )
 
+# Table for cluster status change events.
+# starting_status: Status of the cluster at the start of the event.
+# ending_status: Status of the cluster at the end of the event.
+# reason: Reason for the transition.
+# transitioned_at: Timestamp of the transition.
+cluster_event_table = sqlalchemy.Table(
+    'cluster_events',
+    Base.metadata,
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('name', sqlalchemy.Text),
+    sqlalchemy.Column('starting_status', sqlalchemy.Text),
+    sqlalchemy.Column('ending_status', sqlalchemy.Text),
+    sqlalchemy.Column('reason', sqlalchemy.Text),
+    sqlalchemy.Column('transitioned_at', sqlalchemy.Integer),
+)
+
 ssh_key_table = sqlalchemy.Table(
     'ssh_key',
     Base.metadata,
@@ -597,6 +613,36 @@ def add_or_update_cluster(cluster_name: str,
 
         session.commit()
 
+@_init_db
+def add_cluster_event(cluster_name: str,
+                      new_status: status_lib.ClusterStatus,
+                      reason: str):
+    assert _SQLALCHEMY_ENGINE is not None
+    cluster_hash = _get_hash_for_existing_cluster(cluster_name) or str(
+        uuid.uuid4())
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            session.rollback()
+            raise ValueError('Unsupported database dialect')
+
+        cluster_row = session.query(cluster_table).filter_by(name=cluster_name)
+        last_status = cluster_row.first().status if cluster_row else None
+
+        session.execute(insert_func(cluster_event_table).values(
+            cluster_hash=cluster_hash,
+            name=cluster_name,
+            starting_status=last_status,
+            ending_status=new_status.value,
+            reason=reason,
+            transitioned_at=int(time.time()),
+        ))
+        session.commit()
 
 def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
     """Returns the user hash or the current user hash, if user_hash is None.
