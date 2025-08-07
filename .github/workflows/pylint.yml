@@ -37,4 +37,4 @@ jobs:
     - name: Analysing the code with pylint
       run: |
         source ~/test-env/bin/activate
-        pylint --load-plugins pylint_quotes sky
+        pylint --load-plugins pylint_quotes --ignore-patterns '.*_pb2.*\.py$|.*_pb2.*\.pyi$' sky

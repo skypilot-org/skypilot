@@ -90,32 +90,31 @@ local_ray = [
 
 dev_dependencies = [
     # Required for generating protobuf files during development.
-    # What matters is the version of protoc that grpcio-tools comes with,
-    # so we don't need to explicitly constrain the version of this package.
-    'grpcio-tools',
-    # We arrived at 5.29.5 through the following:
-    # 1. pip install -e ".[all,remote]"
+    # We arrived at 1.63.0 through the following:
+    # 1. pip install -e ".[all]"
     # 2. pip show protobuf
-    #    We will see that the resolved protobuf version is 5.29.5.
+    #    We will see that the resolved protobuf version is 5.29.5,
+    #    so we know that 5.x is safe to use as our default.
+    # 3. We mostly care about the major version, 5 in this case.
+    # 4. 1.63.0 is the oldest version of grpcio that supports protobuf 5.x.y.
     # TODO(kevin): Have this value be maintained through CI,
     # to make sure it's always up to date.
-    'protobuf==5.29.5',
+    'grpcio-tools==1.63.0',
+    'grpcio==1.63.0',
+    # The oldest version of protobuf that grpcio 1.63.0 supports.
+    'protobuf==5.26.1',
 ]
 
 remote = [
-    # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L251-L252
-    # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard
-    # fails to start when ray start is called (#2054).
-    # Tracking issue: https://github.com/ray-project/ray/issues/30984
-    'grpcio >= 1.32.0, != 1.48.0; python_version < \'3.10\'',
-    'grpcio >= 1.42.0, != 1.48.0; python_version >= \'3.10\'',
-    # >= 5.29.5 because the runtime version can't be older than the version
+    # The grpc version at runtime has to be newer than the version
+    # used to generate the code.
+    'grpcio>=1.63.0',
+    # >= 5.26.1 because the runtime version can't be older than the version
     # used to generate the code.
     # < 7.0.0 because code generated for a major version V will be supported by
     # protobuf runtimes of version V and V+1.
     # https://protobuf.dev/support/cross-version-runtime-guarantee
-    'protobuf >= 5.29.5, < 7.0.0',
+    'protobuf >= 5.26.1, < 7.0.0',
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
