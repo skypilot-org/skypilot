@@ -128,10 +128,8 @@ def _compare_workspace_configs(current_config: Dict[str, Any],
         new_config) if private_new else []
 
     # Convert to sets for easier comparison
-    old_users_set = set(allowed_users_old) if allowed_users_old != ['*'
-                                                                   ] else set()
-    new_users_set = set(allowed_users_new) if allowed_users_new != ['*'
-                                                                   ] else set()
+    old_users_set = set(allowed_users_old)
+    new_users_set = set(allowed_users_new)
 
     allowed_users_changed = old_users_set != new_users_set
     removed_users = list(old_users_set - new_users_set)
@@ -170,7 +168,7 @@ def _validate_workspace_config_changes(workspace_name: str,
                                        new_config: Dict[str, Any]) -> None:
     """Validate workspace configuration changes based on active resources.
 
-    This function implements the logic described in the comments:
+    This function implements the logic:
     - If only allowed_users or private changed:
       - If private changed from true to false: allow it
       - If private changed from false to true: check that all active resources
@@ -189,7 +187,6 @@ def _validate_workspace_config_changes(workspace_name: str,
         resources.
     """
     config_comparison = _compare_workspace_configs(current_config, new_config)
-    logger.info(f'daniel echo: Config comparison: {config_comparison}')
 
     if config_comparison['only_user_access_changes']:
         # Only user access settings changed
@@ -214,9 +211,6 @@ def _validate_workspace_config_changes(workspace_name: str,
                     resource_checker.check_users_workspaces_active_resources(
                         config_comparison['allowed_users_new'],
                         [workspace_name]))
-                logger.info(f'daniel echo: Error summary: {error_summary}')
-                logger.info(
-                    f'daniel echo: Missed users names: {missed_users_names}')
                 if error_summary:
                     error_msg=f'Cannot change workspace {workspace_name!r}' \
                     f' to private '
@@ -292,7 +286,6 @@ def update_workspace(workspace_name: str, config: Dict[str,
                                                     default_value={})
     current_config = current_workspaces.get(workspace_name, {})
 
-    # Only validate changes if the workspace already exists
     if current_config:
         # Validate the configuration changes based on active resources
         _validate_workspace_config_changes(workspace_name, current_config,
