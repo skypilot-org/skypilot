@@ -33,7 +33,7 @@ def main():
     parser.add_argument(
         "--model_id",
         type=str,
-        default="openai/gpt-oss-20b",
+        default="openai/gpt-oss-120b",
         help="The model ID to use for training (default: openai/gpt-oss-120b)")
     parser.add_argument("--enable_lora",
                         action="store_true",
@@ -44,6 +44,16 @@ def main():
         action="store_true",
         default=False,
         help="Enable accelerate profiling with chrome trace export")
+    parser.add_argument(
+        "--gradient_accumulation_steps",
+        type=int,
+        default=1,
+        help="Number of gradient accumulation steps (default: 1)")
+    parser.add_argument(
+        "--per_device_train_batch_size",
+        type=int,
+        default=1,
+        help="Training batch size per device (default: 1)")
     args = parser.parse_args()
 
     # Setup profiling if enabled
@@ -55,11 +65,11 @@ def main():
 
         profile_kwargs = ProfileKwargs(activities=["cpu", "cuda"],
                                        schedule_option={
-                                           "wait": 0,
+                                           "wait": 1,
                                            "warmup": 1,
-                                           "active": 3,
+                                           "active": 1,
                                            "repeat": 0,
-                                           "skip_first": 1
+                                           "skip_first": 1,
                                        },
                                        on_trace_ready=trace_handler)
         accelerator_kwargs['kwargs_handlers'] = [profile_kwargs]
@@ -75,6 +85,12 @@ def main():
 
     quantization_config = Mxfp4Config(dequantize=True)
 
+    device_map_args = {}
+    if args.enable_lora:
+        device_map_args = {
+            'device_map': 'auto'
+        }
+
     # Load model
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
@@ -82,7 +98,10 @@ def main():
         torch_dtype="auto",
         use_cache=False,
         quantization_config=quantization_config,
+        **device_map_args,
     )
+
+    print(f'Loaded model: {args.model_id}')
 
     if args.enable_lora:
         num_layers = 0
@@ -105,23 +124,14 @@ def main():
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 
-    per_device_train_batch_size = 1
-    if not args.enable_lora:
-        if args.model_id == 'openai/gpt-oss-120b':
-            per_device_train_batch_size = 4
-        if args.model_id == 'openai/gpt-oss-20b':
-            per_device_train_batch_size = 1
-    else:
-        per_device_train_batch_size = 1
-
     # Train model
     training_args = SFTConfig(
         output_dir=f"{model_id}-checkpoint",
         learning_rate=2e-4,
         num_train_epochs=1,
         logging_steps=1,
-        per_device_train_batch_size=per_device_train_batch_size,
-        gradient_accumulation_steps=1,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
         max_length=1024,
         warmup_ratio=0.03,
         lr_scheduler_type="cosine_with_min_lr",

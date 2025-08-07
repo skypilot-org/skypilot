@@ -1,11 +1,12 @@
 resources:
-  accelerators: H100:8
+  accelerators: H200:8
   network_tier: best
+  image_id: docker:cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.23.4-ubu22.04-cu12.4
 
 file_mounts:
   /sft: ./sft
 
-num_nodes: 2
+num_nodes: 4
 
 setup: |
   conda install cuda -c nvidia
@@ -24,6 +25,5 @@ run: |
   MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
   NP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
 
-  accelerate launch --config_file /sft/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /sft/train.py
+  accelerate launch --config_file /sft/fsdp2_120b.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /sft/train.py --model_id openai/gpt-oss-120b --gradient_accumulation_steps 1 --per_device_train_batch_size 1
 
-  
