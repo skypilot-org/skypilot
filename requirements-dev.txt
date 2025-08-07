@@ -27,6 +27,7 @@ types-cachetools
 types-pyvmomi
 types-aiofiles
 types-paramiko
+types-protobuf
 
 # testing
 pytest
