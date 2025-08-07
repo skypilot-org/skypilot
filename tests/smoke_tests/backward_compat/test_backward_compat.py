@@ -226,7 +226,7 @@ class TestBackwardCompatibility:
             # Use --cloud since old version may not have --infra
             f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky autostop -i 10 -y {cluster_name}',
-            f'{self.ACTIVATE_BASE} && sky exec -d --infra {generic_cloud} --num-nodes 2 {cluster_name} sleep 120',
+            f'{self.ACTIVATE_BASE} && sky exec -d --cloud {generic_cloud} --num-nodes 2 {cluster_name} sleep 120',
             # Must restart API server after switch the code base to ensure the client and server run in same version.
             # Test coverage for client and server run in differnet verions should be done in test_client_server_compatibility.
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && result="$(sky status {cluster_name})"; echo "$result"; echo "$result" | grep UP',
