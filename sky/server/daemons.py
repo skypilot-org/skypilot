@@ -121,7 +121,7 @@ def managed_job_status_refresh_event():
     # After recovery, we start the event loop.
     from sky.skylet import events
     refresh_event = events.ManagedJobEvent()
-    scheduling_event = events.ManagedJobSchedulingEvent()
+    scheduling_event = events.ManagedJobEvent()
     logger.info('=== Running managed job event ===')
     refresh_event.run()
     scheduling_event.run()

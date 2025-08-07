@@ -87,7 +87,8 @@ class JobsController:
         dag_yaml: str,
         job_logger: logging.Logger,
         starting: Set[int],
-        job_tasks_lock: asyncio.Lock,
+        starting_lock: asyncio.Lock,
+        starting_signal: asyncio.Condition,
         pool: Optional[str] = None,
     ) -> None:
         """Initialize a JobsController.
@@ -102,7 +103,8 @@ class JobsController:
         """
 
         self.starting = starting
-        self.job_tasks_lock = job_tasks_lock
+        self.starting_lock = starting_lock
+        self.starting_signal = starting_signal
 
         self._logger = job_logger
         self._logger.info(f'Initializing JobsController for job_id={job_id}, '
@@ -284,7 +286,8 @@ class JobsController:
             task.name, self._job_id) if self._pool is None else None
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._job_id, task_id,
-            self._logger, self._pool)
+            self._logger, self._pool, self.starting, self.starting_lock,
+            self.starting_signal)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -344,9 +347,15 @@ class JobsController:
         monitoring_start_time = time.time()
         status_check_count = 0
 
-        async with self.job_tasks_lock:
+        async with self.starting_lock:
             try:
                 self.starting.remove(self._job_id)
+                # its fine if we notify again, better to wake someone up
+                # and have them go to sleep again, then have some stuck
+                # sleeping.
+                # ps. this shouldn't actually happen because if its been
+                # removed from the set then we would get a key error.
+                self.starting_signal.notify()
             except KeyError:
                 # should not happen except maybe in a weird case, but either
                 # we doesn't matter, since its no longer in the set
@@ -439,7 +448,8 @@ class JobsController:
                 try:
                     logger.info(f'Downloading logs on cluster {cluster_name} '
                                 f'and job id {job_id_on_pool_cluster}.')
-                    clusters = backend_utils.get_clusters(
+                    clusters = await managed_job_utils.to_thread(
+                        backend_utils.get_clusters,
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
                         all_users=True)
@@ -522,9 +532,6 @@ class JobsController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    # TODO(luca): this is a hack to avoid blocking the asyncio
-                    # event loop. We should make _download_log_and_stream async
-                    # however that will require a lot of changes to the code.
                     await managed_job_utils.to_thread(
                         self._download_log_and_stream, task_id, handle,
                         job_id_on_pool_cluster)
@@ -743,7 +750,7 @@ class Controller:
 
         # Lock for synchronizing access to global state dictionary
         self._job_tasks_lock = asyncio.Lock()
-        self._background_tasks_lock = asyncio.Lock()
+        self._starting_signal = asyncio.Condition(lock=self._job_tasks_lock)
 
     async def _cleanup(self,
                        job_id: int,
@@ -862,7 +869,7 @@ class Controller:
 
             controller = JobsController(job_id, dag_yaml, job_logger,
                                         self.starting, self._job_tasks_lock,
-                                        pool)
+                                        self._starting_signal, pool)
 
             async with self._job_tasks_lock:
                 if job_id in self.job_tasks:
@@ -938,6 +945,10 @@ class Controller:
                     # just in case we were cancelled or some other error
                     # occurred during launch
                     self.starting.remove(job_id)
+                    # its fine if we notify again, better to wake someone up
+                    # and have them go to sleep again, then have some stuck
+                    # sleeping.
+                    self._starting_signal.notify()
                 except KeyError:
                     pass
 
@@ -1083,10 +1094,6 @@ class Controller:
                     callback_func=managed_job_utils.event_callback_func(
                         job_id=job_id, task_id=None, task=None))
                 continue
-
-            # here we need to sync, because we are modifying it
-            async with self._job_tasks_lock:
-                self.starting.add(job_id)
 
             await self.start_job(job_id, dag_yaml_path, env_file_path, pool)
 

@@ -9,7 +9,7 @@ import asyncio
 import logging
 import traceback
 import typing
-from typing import Optional
+from typing import Optional, Set
 
 import sky
 from sky import backends
@@ -17,7 +17,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
-from sky.client import sdk_async
+from sky.client import sdk
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
@@ -50,10 +50,20 @@ class StrategyExecutor:
 
     RETRY_INIT_GAP_SECONDS = 60
 
-    def __init__(self, cluster_name: Optional[str], backend: 'backends.Backend',
-                 task: 'task_lib.Task', max_restarts_on_errors: int,
-                 job_id: int, task_id: int, job_logger: logging.Logger,
-                 pool: Optional[str]) -> None:
+    def __init__(
+        self,
+        cluster_name: Optional[str],
+        backend: 'backends.Backend',
+        task: 'task_lib.Task',
+        max_restarts_on_errors: int,
+        job_id: int,
+        task_id: int,
+        job_logger: logging.Logger,
+        pool: Optional[str],
+        starting: Set[int],
+        starting_lock: asyncio.Lock,
+        starting_signal: asyncio.Condition,
+    ) -> None:
         """Initialize the strategy executor.
 
         Args:
@@ -64,6 +74,9 @@ class StrategyExecutor:
             job_id: The ID of the job.
             task_id: The ID of the task.
             job_logger: Logger instance for this specific job.
+            starting: Set of job IDs that are currently starting.
+            starting_lock: Lock to synchronize starting jobs.
+            starting_signal: Condition to signal when a job can start.
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
@@ -82,12 +95,24 @@ class StrategyExecutor:
         self.restart_cnt_on_failure = 0
         self._logger = job_logger
         self.job_id_on_pool_cluster: Optional[int] = None
+        self.starting = starting
+        self.starting_lock = starting_lock
+        self.starting_signal = starting_signal
 
     @classmethod
-    def make(cls, cluster_name: Optional[str], backend: 'backends.Backend',
-             task: 'task_lib.Task', job_id: int, task_id: int,
-             job_logger: logging.Logger,
-             pool: Optional[str]) -> 'StrategyExecutor':
+    def make(
+        cls,
+        cluster_name: Optional[str],
+        backend: 'backends.Backend',
+        task: 'task_lib.Task',
+        job_id: int,
+        task_id: int,
+        job_logger: logging.Logger,
+        pool: Optional[str],
+        starting: Set[int],
+        starting_lock: asyncio.Lock,
+        starting_signal: asyncio.Condition,
+    ) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
         resource_list = list(task.resources)
@@ -119,7 +144,8 @@ class StrategyExecutor:
         assert job_recovery_strategy is not None, job_recovery_name
         return job_recovery_strategy(cluster_name, backend, task,
                                      max_restarts_on_errors, job_id, task_id,
-                                     job_logger, pool)
+                                     job_logger, pool, starting, starting_lock,
+                                     starting_signal)
 
     async def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -180,10 +206,15 @@ class StrategyExecutor:
                 kwargs = dict(all=True)
             else:
                 kwargs = dict(job_ids=[self.job_id_on_pool_cluster])
-            await sdk_async.cancel(
+            request_id = await managed_job_utils.to_thread(
+                sdk.cancel,
                 cluster_name=self.cluster_name,
                 **kwargs,
                 _try_cancel_if_cluster_is_init=True,
+            )
+            await managed_job_utils.to_thread(
+                sdk.get,
+                request_id,
             )
         except Exception as e:  # pylint: disable=broad-except
             logger.info('Failed to cancel the job on the cluster. The cluster '
@@ -321,7 +352,13 @@ class StrategyExecutor:
         while True:
             retry_cnt += 1
             try:
-                async with scheduler.scheduled_launch(self.job_id):
+                async with scheduler.scheduled_launch(
+                        self.job_id,
+                        self.starting,
+                        self.starting_lock,
+                        self.starting_signal,
+                        self._logger,
+                ):
                     # The job state may have been PENDING during backoff -
                     # update to STARTING or RECOVERING.
                     # On the first attempt (when retry_cnt is 1), we should
@@ -336,28 +373,27 @@ class StrategyExecutor:
 
                             log_file = _get_logger_file(self._logger)
                             try:
-                                if log_file is None:
-                                    raise OSError('Log file is None')
-                                with open(log_file, 'a', encoding='utf-8') as f:
-                                    await sdk_async.launch(
-                                        self.dag,
-                                        cluster_name=self.cluster_name,
-                                        idle_minutes_to_autostop=
-                                        _AUTODOWN_MINUTES,
-                                        down=True,
-                                        _is_launched_by_jobs_controller=True,
-                                        stream_logs=sdk_async.StreamConfig(
-                                            output_stream=f,))  # mypy: ignore
-                            except OSError as e:
-                                self._logger.error(
-                                    f'Failed to stream logs: {e}')
-                                await sdk_async.launch(
+                                request_id = await managed_job_utils.to_thread(
+                                    sdk.launch,
                                     self.dag,
                                     cluster_name=self.cluster_name,
                                     idle_minutes_to_autostop=_AUTODOWN_MINUTES,
                                     down=True,
                                     _is_launched_by_jobs_controller=True,
-                                    stream_logs=None)
+                                )
+                                if log_file is None:
+                                    raise OSError('Log file is None')
+                                with open(log_file, 'a', encoding='utf-8') as f:
+                                    await managed_job_utils.to_thread(
+                                        sdk.stream_and_get,
+                                        request_id,
+                                        output_stream=f,
+                                    )
+                            except OSError as e:
+                                self._logger.error(
+                                    f'Failed to stream logs: {e}')
+                                await managed_job_utils.to_thread(
+                                    sdk.get, request_id)
                             self._logger.info('Managed job cluster launched.')
                         else:
                             self.cluster_name = await (
@@ -367,9 +403,14 @@ class StrategyExecutor:
                             if self.cluster_name is None:
                                 raise exceptions.NoClusterLaunchedError(
                                     'No cluster name found in the pool.')
-                            # TODO(luca) this is blocking
-                            job_id_on_pool_cluster, _ = await sdk_async.exec(
-                                self.dag, cluster_name=self.cluster_name)
+                            request_id = await managed_job_utils.to_thread(
+                                sdk.exec,
+                                self.dag,
+                                cluster_name=self.cluster_name,
+                            )
+                            job_id_on_pool_cluster, _ = (
+                                await managed_job_utils.to_thread(
+                                    sdk.get, request_id))
                             assert job_id_on_pool_cluster is not None, (
                                 self.cluster_name, self.job_id)
                             self.job_id_on_pool_cluster = job_id_on_pool_cluster
@@ -505,12 +546,23 @@ class FailoverStrategyExecutor(StrategyExecutor):
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
 
-    def __init__(self, cluster_name: Optional[str], backend: 'backends.Backend',
-                 task: 'task_lib.Task', max_restarts_on_errors: int,
-                 job_id: int, task_id: int, job_logger: logging.Logger,
-                 pool: Optional[str]) -> None:
+    def __init__(
+        self,
+        cluster_name: Optional[str],
+        backend: 'backends.Backend',
+        task: 'task_lib.Task',
+        max_restarts_on_errors: int,
+        job_id: int,
+        task_id: int,
+        job_logger: logging.Logger,
+        pool: Optional[str],
+        starting: Set[int],
+        starting_lock: asyncio.Lock,
+        starting_signal: asyncio.Condition,
+    ) -> None:
         super().__init__(cluster_name, backend, task, max_restarts_on_errors,
-                         job_id, task_id, job_logger, pool)
+                         job_id, task_id, job_logger, pool, starting,
+                         starting_lock, starting_signal)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is

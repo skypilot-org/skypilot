@@ -1409,8 +1409,8 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
 @_init_db
 def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
                           original_user_yaml_path: str, env_file_path: str,
-                          user_hash: str, priority: int,
-                          pool: Optional[str]) -> bool:
+                          user_hash: str, priority: int, pool: Optional[str],
+                          controller_pid: Optional[int]):
     """Do not call without holding the scheduler lock.
 
     Returns: Whether this is a recovery run or not.
@@ -1424,8 +1424,7 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
         updated_count = session.query(job_info_table).filter(
             sqlalchemy.and_(
                 job_info_table.c.spot_job_id == job_id,
-                job_info_table.c.schedule_state ==
-                ManagedJobScheduleState.INACTIVE.value,
+                job_info_table.c.controller_pid == controller_pid,
             )
         ).update({
             job_info_table.c.schedule_state:
@@ -1438,9 +1437,7 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
             job_info_table.c.pool: pool,
         })
         session.commit()
-        # For a recovery run, the job may already be in the WAITING state.
         assert updated_count <= 1, (job_id, updated_count)
-        return updated_count == 0
 
 
 @_init_db
@@ -1737,8 +1734,6 @@ async def get_waiting_job(pid: int) -> Optional[Dict[str, Any]]:
         controller_pid = waiting_job_row[4]
         pool = waiting_job_row[5]
 
-        new_pid = controller_pid if controller_pid is not None else pid
-
         # Update the job state to LAUNCHING
         update_result = await session.execute(
             sqlalchemy.update(job_info_table).where(
@@ -1748,7 +1743,7 @@ async def get_waiting_job(pid: int) -> Optional[Dict[str, Any]]:
                 )).values({
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.LAUNCHING.value,
-                    job_info_table.c.controller_pid: new_pid,
+                    job_info_table.c.controller_pid: pid,
                 }))
 
         if update_result.rowcount != 1:

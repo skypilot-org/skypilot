@@ -64,7 +64,7 @@ logger = sky_logging.init_logger(__name__)
 
 # Controller checks its job's status every this many seconds.
 # This is a tradeoff between the latency and the resource usage.
-JOB_STATUS_CHECK_GAP_SECONDS = 60
+JOB_STATUS_CHECK_GAP_SECONDS = 15
 
 # Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
@@ -195,6 +195,7 @@ def ha_recovery_for_consolidation_mode():
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
     runner = command_runner.LocalProcessCommandRunner()
+    scheduler.maybe_start_controllers()
     with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH, 'w',
               encoding='utf-8') as f:
         start = time.time()
@@ -209,7 +210,7 @@ def ha_recovery_for_consolidation_mode():
             # just keep running.
             if controller_pid is not None:
                 try:
-                    if _controller_process_alive(controller_pid, job_id):
+                    if controller_process_alive(controller_pid, job_id):
                         f.write(f'Controller pid {controller_pid} for '
                                 f'job {job_id} is still running. '
                                 'Skipping recovery.\n')
@@ -287,17 +288,16 @@ async def get_job_status(
     return None
 
 
-def _controller_process_alive(pid: int, job_id: int) -> bool:
+def controller_process_alive(pid: int, job_id: int) -> bool:
     """Check if the controller process is alive."""
     try:
-        new = False
         if pid < 0:
             # new job controller process will always be negative
-            new = True
             pid = -pid
         process = psutil.Process(pid)
         cmd_str = ' '.join(process.cmdline())
-        return process.is_running() and (f'--job-id {job_id}' in cmd_str or new)
+        return process.is_running() and ((f'--job-id {job_id}' in cmd_str) or
+                                         ('controller' in cmd_str))
     except psutil.NoSuchProcess:
         return False
 
@@ -471,7 +471,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             failure_reason = f'No controller pid set for {schedule_state.value}'
         else:
             logger.debug(f'Checking controller pid {pid}')
-            if _controller_process_alive(pid, job_id):
+            if controller_process_alive(pid, job_id):
                 # The controller is still running, so this job is fine.
                 continue
 

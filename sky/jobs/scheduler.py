@@ -41,11 +41,12 @@ Nomenclature:
 """
 
 from argparse import ArgumentParser
+import asyncio
 import contextlib
 import os
 import sys
 import typing
-from typing import Optional
+from typing import Optional, Set
 
 import filelock
 
@@ -53,12 +54,15 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
+from sky.jobs import utils as managed_job_utils
 from sky.server import config as server_config
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
+    import logging
+
     import psutil
 else:
     psutil = adaptors_common.LazyImport('psutil')
@@ -81,13 +85,13 @@ JOB_CONTROLLER_ENV_PATH = os.path.expanduser('~/.sky/job_controller_env')
 JOB_MEMORY_MB = 400
 # Number of ongoing launches launches allowed per worker. Can probably be
 # increased a bit to around 16 but keeping it lower to just to be safe
-LAUNCHES_PER_WORKER = 32
+LAUNCHES_PER_WORKER = 8
 # this can probably be increased to around 300-400 but keeping it lower to just
 # to be safe
 JOBS_PER_WORKER = 200
 
 # keep 1GB reserved after the controllers
-MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 1024
+MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
 
 # Maximum values for above constants. There will start to be lagging issues
 # at these numbers already.
@@ -195,19 +199,30 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
 
     This should be called after a job is created in the `spot` table as
     PENDING. It will tell the scheduler to try and start the job controller, if
-    there are resources available. It may block to acquire the lock, so it
-    should not be on the critical path for `sky jobs launch -d`.
+    there are resources available.
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
+    controller_pid = state.get_job_controller_pid(job_id)
+    if controller_pid is not None:
+        if managed_job_utils.controller_process_alive(controller_pid, job_id):
+            maybe_start_controllers()
+            return
     state.scheduler_set_waiting(job_id, dag_yaml_path,
                                 original_user_yaml_path, env_file_path,
-                                common_utils.get_user_hash(), priority, pool)
+                                common_utils.get_user_hash(), priority, pool,
+                                controller_pid)
     maybe_start_controllers()
 
 
 @contextlib.asynccontextmanager
-async def scheduled_launch(job_id: int):
+async def scheduled_launch(
+    job_id: int,
+    starting: Set[int],
+    starting_lock: asyncio.Lock,
+    starting_signal: asyncio.Condition,
+    job_logger: 'logging.Logger',
+):
     """Launch as part of an ongoing job.
 
     A newly started job will already be LAUNCHING, and this will immediately
@@ -229,15 +244,35 @@ async def scheduled_launch(job_id: int):
     that.
     """
 
+    assert starting_lock == starting_signal._lock, (  # type: ignore #pylint: disable=protected-access
+        'starting_lock and starting_signal must use the same lock')
+
+    while True:
+        async with starting_lock:
+            starting_count = len(starting)
+            if starting_count < LAUNCHES_PER_WORKER:
+                break
+            job_logger.info('Too many jobs starting, waiting for a slot')
+            await starting_signal.wait()
+
+    job_logger.info(f'Starting job {job_id}')
+    starting.add(job_id)
+
     # If we're already in LAUNCHING schedule_state, we don't need to wait.
     # This may be the case for the first launch of a job.
     if (await state.get_job_schedule_state_async(job_id) !=
             state.ManagedJobScheduleState.LAUNCHING):
         # Since we aren't LAUNCHING, we need to wait to be scheduled.
-        logger.info(await state.get_job_schedule_state_async(job_id))
+        job_logger.info(await state.get_job_schedule_state_async(job_id))
         await state.scheduler_set_alive_waiting_async(job_id)
+
     yield
+
     await state.scheduler_set_alive_async(job_id)
+
+    async with starting_lock:
+        starting.remove(job_id)
+        starting_signal.notify()
 
 
 def job_done(job_id: int, idempotent: bool = False) -> None:
