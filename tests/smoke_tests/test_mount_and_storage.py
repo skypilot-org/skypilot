@@ -1355,11 +1355,7 @@ class TestStorageWithCredentials:
         bucket_uri = f's3://{tmp_bucket_name}'
         subprocess.check_call(['aws', 's3', 'mb', bucket_uri])
         yield tmp_bucket_name, bucket_uri
-        try:
-            subprocess.check_call(['aws', 's3', 'rb', bucket_uri, '--force'])
-        except subprocess.CalledProcessError:
-            # Bucket might have already been deleted by the test
-            pass
+        subprocess.check_call(['aws', 's3', 'rb', bucket_uri, '--force'])
 
     @pytest.fixture
     def tmp_gsutil_bucket(self, tmp_bucket_name):
