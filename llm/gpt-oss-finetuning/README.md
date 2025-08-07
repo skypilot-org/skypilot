@@ -136,7 +136,7 @@ Final Training Summary:
 
 Memory and GPU utilization using [nvitop](https://github.com/XuehaiPan/nvitop)
 
-![nvitop](images/20b_training_memory.png)
+![nvitop](https://i.imgur.com/pGqj9RD.png)
 
 #### gpt-oss-120b Training Progress
 
@@ -152,7 +152,7 @@ Training Progress for gpt-oss-120b on 4 nodes:
 
 Memory and GPU utilization using [nvitop](https://github.com/XuehaiPan/nvitop)
 
-![nvitop](images/120b_training_memory.png)
+![nvitop](https://i.imgur.com/YrqgpXJ.png)
 
 ## Configuration files
 
