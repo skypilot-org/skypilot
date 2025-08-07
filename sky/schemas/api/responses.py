@@ -49,9 +49,9 @@ class DictLikeModel(pydantic.BaseModel):
 class APIHealthResponse(DictLikeModel):
     """Response for the API health endpoint."""
     status: common.ApiServerStatus
-    api_version: str
-    version: str
-    version_on_disk: str
-    commit: str
-    basic_auth_enabled: bool
+    api_version: str = ''
+    version: str = ''
+    version_on_disk: str = ''
+    commit: str = ''
+    basic_auth_enabled: bool = False
     user: Optional[models.User] = None

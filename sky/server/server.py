@@ -1574,14 +1574,7 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
             #   without authentication since no sensitive information is
             #   returned.
             return responses.APIHealthResponse(
-                status=common.ApiServerStatus.HEALTHY,
-                api_version='',
-                version='',
-                version_on_disk='',
-                commit='',
-                basic_auth_enabled=False,
-                user=None,
-            )
+                status=common.ApiServerStatus.HEALTHY,)
         # TODO(aylei): remove this after min_compatible_api_version >= 14.
         if client_version < 14:
             # For Client with API version < 14, the NEEDS_AUTH status is not
