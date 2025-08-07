@@ -48,7 +48,7 @@ sky launch -c gpt-oss-120b-sft gpt-oss-120b-sft.yaml
 **For `gpt-oss-20b` with LoRA:**
 - Requirements: 1 node, 2x H100 GPU
 ```bash
-sky launch -c zgpt-oss-20b-lora gpt-oss-20b-lora.yaml
+sky launch -c gpt-oss-20b-lora gpt-oss-20b-lora.yaml
 ```
 
 **For `gpt-oss-120b` with LoRA:**
