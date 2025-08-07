@@ -212,7 +212,12 @@ def init_db(func):
     return wrapper
 
 
-_UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
+_UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
+    # sqlite
+    'UNIQUE constraint failed: services.name',
+    # postgres
+    'duplicate key value violates unique constraint "services_pkey"',
+]
 
 
 # === Statuses ===
@@ -415,8 +420,9 @@ def add_service(name: str, controller_job_id: int, policy: str,
             session.commit()
 
     except sqlalchemy_exc.IntegrityError as e:
-        if _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG in str(e):
-            return False
+        for msg in _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS:
+            if msg in str(e):
+                return False
         raise RuntimeError('Unexpected database error') from e
     return True
 
