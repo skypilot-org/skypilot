@@ -37,7 +37,14 @@ def upgrade() -> None:
                                              sa.Integer(),
                                              server_default=None)
 
-    pass
+        # remove mistakenly added columns
+        db_utils.drop_column_from_table_alembic('clusters', 'launched_nodes')
+        db_utils.drop_column_from_table_alembic('clusters', 'disk_tier')
+        db_utils.drop_column_from_table_alembic('clusters',
+                                                'config_hash_locked')
+        db_utils.drop_column_from_table_alembic('clusters', 'handle_locked')
+        db_utils.drop_column_from_table_alembic('clusters', 'num_failures')
+        db_utils.drop_column_from_table_alembic('clusters', 'configs')
 
 
 def downgrade() -> None:
