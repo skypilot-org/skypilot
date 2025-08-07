@@ -830,7 +830,7 @@ def get_latest_version(service_name: str) -> Optional[int]:
                 version_specs_table.c.version)).where(
                     version_specs_table.c.service_name ==
                     service_name)).fetchone()
-    return result[0] if result and result[0] is not None else None
+    return result[0] if result and else None
 
 
 @init_db
