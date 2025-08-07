@@ -49,11 +49,10 @@ def main():
         type=int,
         default=1,
         help="Number of gradient accumulation steps (default: 1)")
-    parser.add_argument(
-        "--per_device_train_batch_size",
-        type=int,
-        default=1,
-        help="Training batch size per device (default: 1)")
+    parser.add_argument("--per_device_train_batch_size",
+                        type=int,
+                        default=1,
+                        help="Training batch size per device (default: 1)")
     args = parser.parse_args()
 
     # Setup profiling if enabled
@@ -87,9 +86,7 @@ def main():
 
     device_map_args = {}
     if args.enable_lora:
-        device_map_args = {
-            'device_map': 'auto'
-        }
+        device_map_args = {'device_map': 'auto'}
 
     # Load model
     model = AutoModelForCausalLM.from_pretrained(
