@@ -187,7 +187,7 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
                     skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
                 # For server mode, we could get connection string from config
                 # but for now we'll use the default path approach
-                pass
+                conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
             if conn_string:
                 engine = sqlalchemy.create_engine(conn_string,
                                                   poolclass=sqlalchemy.NullPool)
