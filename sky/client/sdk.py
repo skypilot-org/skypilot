@@ -94,10 +94,26 @@ def reload_config() -> None:
     skypilot_config.safe_reload_config()
 
 
+@typing.overload
+def stream_response(request_id: None,
+                    response: 'requests.Response',
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False) -> None:
+    ...
+
+
+@typing.overload
+def stream_response(request_id: server_common.RequestId[T],
+                    response: 'requests.Response',
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False) -> T:
+    ...
+
+
 def stream_response(request_id: Optional[server_common.RequestId[T]],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
-                    resumable: bool = False) -> Any:
+                    resumable: bool = False) -> Optional[T]:
     """Streams the response to the console.
 
     Args:
@@ -127,6 +143,8 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
                     retry_context.line_processed = line_count
         if request_id is not None:
             return get(request_id)
+        else:
+            return None
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
@@ -819,7 +837,7 @@ def tail_logs(cluster_name: str,
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
-    request_id: server_common.RequestId[None] = server_common.get_request_id(
+    request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
     # Log request is idempotent when tail is 0, thus can resume previous
     # streaming point on retry.

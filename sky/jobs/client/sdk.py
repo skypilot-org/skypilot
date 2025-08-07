@@ -282,7 +282,7 @@ def tail_logs(name: Optional[str] = None,
         json=json.loads(body.model_dump_json()),
         stream=True,
         timeout=(5, None))
-    request_id: server_common.RequestId[None] = server_common.get_request_id(
+    request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
     # Log request is idempotent when tail is 0, thus can resume previous
     # streaming point on retry.
