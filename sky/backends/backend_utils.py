@@ -2760,6 +2760,9 @@ def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _include_is_managed: bool = False,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
 
@@ -2780,6 +2783,8 @@ def get_clusters(
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
+        _include_is_managed: Whether to force include clusters created by the
+            controller.
 
     Returns:
         A list of cluster records. If the cluster does not exist or has been
@@ -2789,7 +2794,8 @@ def get_clusters(
     current_user = common_utils.get_current_user()
 
     # Filter out clusters created by the controller.
-    if not env_options.Options.SHOW_DEBUG_INFO.get():
+    if (not env_options.Options.SHOW_DEBUG_INFO.get() and
+            not _include_is_managed):
         records = [
             record for record in records if not record.get('is_managed', False)
         ]
@@ -3227,7 +3233,8 @@ def get_endpoints(cluster: str,
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
     cluster_records = get_clusters(refresh=common.StatusRefreshMode.NONE,
-                                   cluster_names=[cluster])
+                                   cluster_names=[cluster],
+                                   _include_is_managed=True)
     if not cluster_records:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
