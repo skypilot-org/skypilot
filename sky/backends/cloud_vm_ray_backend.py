@@ -1365,6 +1365,12 @@ class RetryingVmProvisioner(object):
         # the instance type in the target region. If not, fail early
         # instead of trying to provision and failing later.
         try:
+            # Add cluster event for quota check
+            global_user_state.add_cluster_event(
+                cluster_name, 
+                status_lib.ClusterStatus.INIT, 
+                "Checking if user has quota for requested resources."
+            )
             need_provision = to_provision.cloud.check_quota_available(
                 to_provision)
 
@@ -2916,6 +2922,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
         backend_utils.check_owner_identity(cluster_name)
+        
+        # Add cluster event for provisioning start
+        global_user_state.add_cluster_event(
+            cluster_name, 
+            status_lib.ClusterStatus.INIT, 
+            "Starting cluster provisioning process"
+        )
+        
         lock_id = backend_utils.cluster_status_lock_id(cluster_name)
         with timeline.DistributedLockEvent(lock_id):
             # Try to launch the exiting cluster first. If no existing cluster,
@@ -2937,6 +2951,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with timeline.Event('backend.provision.wheel_build'):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
+                
+                # Add cluster event for wheel building completion
+                global_user_state.add_cluster_event(
+                    cluster_name, 
+                    status_lib.ClusterStatus.INIT, 
+                    "Building SkyPilot wheel package for deployment"
+                )
+
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
@@ -2965,12 +2987,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     log_path = os.path.join(self.log_dir, 'provision.log')
                     rich_utils.force_update_status(
                         ux_utils.spinner_message('Launching', log_path))
+                    
+                    # Add cluster event for actual provisioning start
+                    global_user_state.add_cluster_event(
+                        cluster_name, 
+                        status_lib.ClusterStatus.INIT, 
+                        f"Launching instances on {to_provision_config.resources.cloud.display_name()} in {to_provision_config.resources.region}"
+                    )
+                    
                     config_dict = retry_provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs,
                         skip_unnecessary_provisioning)
                     break
                 except exceptions.ResourcesUnavailableError as e:
                     log_path = retry_provisioner.log_dir + '/provision.log'
+                    
+                    # Add cluster event for provisioning failure
+                    global_user_state.add_cluster_event(
+                        cluster_name, 
+                        status_lib.ClusterStatus.INIT, 
+                        f"Provisioning failed: {str(e)[:100]}..."
+                    )
+                    
                     error_message = (
                         f'{colorama.Fore.RED}Failed to provision all '
                         f'possible launchable resources.'
@@ -2987,6 +3025,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         hint_message = (f'\n{retry_message} '
                                         f'{ux_utils.log_path_hint(log_path)}'
                                         f'{colorama.Style.RESET_ALL}')
+                        
+                        # Add cluster event for retry
+                        global_user_state.add_cluster_event(
+                            cluster_name, 
+                            status_lib.ClusterStatus.INIT, 
+                            f"Retrying provisioning after {gap_seconds:.0f}s"
+                        )
+                        
                         raise exceptions.ExecutionRetryableError(
                             error_message,
                             hint=hint_message,
@@ -3038,6 +3084,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 #    and other necessary files to the VM.
                 # 3. Run setup commands to install dependencies.
                 # 4. Starting ray cluster and skylet.
+                
+                # Add cluster event for runtime setup start
+                global_user_state.add_cluster_event(
+                    handle.cluster_name, 
+                    status_lib.ClusterStatus.INIT, 
+                    "Setting up SkyPilot runtime on cluster"
+                )
+                
                 cluster_info = provisioner.post_provision_runtime_setup(
                     repr(handle.launched_resources.cloud),
                     resources_utils.ClusterName(handle.cluster_name,
@@ -3223,6 +3277,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 config_hash=config_hash,
                 task_config=user_specified_task_config,
             )
+            
+            # Add cluster event for successful provisioning
+            global_user_state.add_cluster_event(
+                handle.cluster_name, 
+                status_lib.ClusterStatus.UP, 
+                f"Cluster successfully provisioned with {handle.launched_nodes} nodes on {handle.launched_resources.cloud.display_name()}"
+            )
+            
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
             # We still add the cluster to ssh config file on API server, this

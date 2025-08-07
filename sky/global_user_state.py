@@ -172,8 +172,8 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('name', sqlalchemy.Text),
     sqlalchemy.Column('starting_status', sqlalchemy.Text),
     sqlalchemy.Column('ending_status', sqlalchemy.Text),
-    sqlalchemy.Column('reason', sqlalchemy.Text),
-    sqlalchemy.Column('transitioned_at', sqlalchemy.Integer),
+    sqlalchemy.Column('reason', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -632,7 +632,7 @@ def add_cluster_event(cluster_name: str,
             raise ValueError('Unsupported database dialect')
 
         cluster_row = session.query(cluster_table).filter_by(name=cluster_name)
-        last_status = cluster_row.first().status if cluster_row else None
+        last_status = cluster_row.first().status if cluster_row and cluster_row.first() is not None else None
 
         session.execute(insert_func(cluster_event_table).values(
             cluster_hash=cluster_hash,
