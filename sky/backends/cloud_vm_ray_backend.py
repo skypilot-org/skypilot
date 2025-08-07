@@ -174,6 +174,9 @@ _MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
 _RESOURCES_UNAVAILABLE_LOG = (
     'Reasons for provision failures (for details, please check the log above):')
 
+# Number of seconds to wait locking the cluster before communicating with user.
+_CLUSTER_LOCK_TIMEOUT = 5.0
+
 
 def _is_command_length_over_limit(command: str) -> bool:
     """Check if the length of the command exceeds the limit.
@@ -3018,10 +3021,36 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # exceptions.ClusterOwnerIdentityMismatchError
         backend_utils.check_owner_identity(cluster_name)
         lock_id = backend_utils.cluster_status_lock_id(cluster_name)
-        with timeline.DistributedLockEvent(lock_id):
-            # Try to launch the exiting cluster first. If no existing cluster,
-            # this function will create a to_provision_config with required
-            # resources.
+        communicated_with_user = False
+
+        while True:
+            try:
+                return self._locked_provision(lock_id, task, to_provision,
+                                              dryrun, stream_logs, cluster_name,
+                                              retry_until_up,
+                                              skip_unnecessary_provisioning)
+            except locks.LockTimeout:
+                if not communicated_with_user:
+                    logger.info(f'{colorama.Fore.YELLOW}'
+                                f'Launching delayed, check concurrent tasks: '
+                                f'sky api status')
+                    communicated_with_user = True
+
+    def _locked_provision(
+        self,
+        lock_id: str,
+        task: task_lib.Task,
+        to_provision: Optional[resources_lib.Resources],
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: str,
+        retry_until_up: bool = False,
+        skip_unnecessary_provisioning: bool = False,
+    ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
+        with timeline.DistributedLockEvent(lock_id, _CLUSTER_LOCK_TIMEOUT):
+            # Try to launch the exiting cluster first. If no existing
+            # cluster, this function will create a to_provision_config
+            # with required resources.
             to_provision_config = self._check_existing_cluster(
                 task, to_provision, cluster_name, dryrun)
             assert to_provision_config.resources is not None, (

@@ -27,11 +27,12 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
-class SuppressSuccessGetAccessLogsFilter(logging.Filter):
+class AutoscalerInfoFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        return not ('GET' in message and '200' in message)
+        return not ('GET' in message and '200' in message and
+                    '/autoscaler/info' in message)
 
 
 class SkyServeController:
@@ -61,6 +62,7 @@ class SkyServeController:
         uvicorn_access_logger = logging.getLogger('uvicorn.access')
         for handler in uvicorn_access_logger.handlers:
             handler.setFormatter(sky_logging.FORMATTER)
+            handler.addFilter(AutoscalerInfoFilter())
         yield
 
     def _run_autoscaler(self):

@@ -24,6 +24,7 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
+from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
 from sky.skylet import constants as skylet_constants
@@ -108,6 +109,11 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
     # Create local directory for the managed job.
     pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
     job_ids = []
+    pool_hash = None
+    if pool is not None:
+        pool_hash = serve_state.get_service_hash(pool)
+        # Already checked in the sdk.
+        assert pool_hash is not None, f'Pool {pool} not found'
     for _ in range(num_jobs if num_jobs is not None else 1):
         # TODO(tian): We should have a separate name for each job when
         # submitting multiple jobs. Current blocker is that we are sharing
@@ -121,7 +127,8 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
                 workspace=skypilot_config.get_active_workspace(
                     force_user_workspace=True),
                 entrypoint=common_utils.get_current_command(),
-                pool=pool))
+                pool=pool,
+                pool_hash=pool_hash))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
@@ -843,3 +850,43 @@ def pool_status(
                                List[str]]] = None,) -> List[Dict[str, Any]]:
     """Query a pool."""
     return impl.status(pool_names, pool=True)
+
+
+ServiceComponentOrStr = Union[str, serve_utils.ServiceComponent]
+
+
+@usage_lib.entrypoint
+def pool_tail_logs(
+    pool_name: str,
+    *,
+    target: ServiceComponentOrStr,
+    worker_id: Optional[int] = None,
+    follow: bool = True,
+    tail: Optional[int] = None,
+) -> None:
+    """Tail logs of a pool."""
+    return impl.tail_logs(pool_name,
+                          target=target,
+                          replica_id=worker_id,
+                          follow=follow,
+                          tail=tail,
+                          pool=True)
+
+
+@usage_lib.entrypoint
+def pool_sync_down_logs(
+    pool_name: str,
+    *,
+    local_dir: str,
+    targets: Union[ServiceComponentOrStr, List[ServiceComponentOrStr],
+                   None] = None,
+    worker_ids: Optional[List[int]] = None,
+    tail: Optional[int] = None,
+) -> str:
+    """Sync down logs of a pool."""
+    return impl.sync_down_logs(pool_name,
+                               local_dir=local_dir,
+                               targets=targets,
+                               replica_ids=worker_ids,
+                               tail=tail,
+                               pool=True)

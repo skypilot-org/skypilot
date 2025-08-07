@@ -12,6 +12,9 @@
 {{- if and (not (index $oauth2 "client-details-from-secret")) (eq (index $oauth2 "client-secret") "") -}}
 {{- fail "ingress.oauth2-proxy.client-secret is required when OAuth2 proxy is enabled and client-details-from-secret is not set" -}}
 {{- end -}}
+{{- if and (index $oauth2 "redis-url") (index $oauth2 "redis-secret") -}}
+{{- fail "redis-url and redis-secret are mutually exclusive when OAuth2 proxy is enabled" -}}
+{{- end -}}
 
 {{- /* Determine the secret key format when using client-details-from-secret */ -}}
 {{- $clientIdKey := "client-id" -}}
@@ -81,6 +84,8 @@ spec:
         {{- if eq (index $oauth2 "session-store-type" | default "redis") "redis" }}
         {{- if (index $oauth2 "redis-url") }}
         - --redis-connection-url={{ index $oauth2 "redis-url" }}
+        {{- else if (index $oauth2 "redis-secret") }}
+        - --redis-connection-url=$(REDIS_URL)
         {{- else }}
         - --redis-connection-url=redis://$(SERVICE_NAME)-oauth2-proxy-redis:6379/0
         {{- end }}
@@ -106,6 +111,13 @@ spec:
           {{- end }}
         - name: SERVICE_NAME
           value: {{ .Release.Name }}
+        {{- if (index $oauth2 "redis-secret") }}
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ index $oauth2 "redis-secret" }}
+              key: redis_url
+        {{- end }}
         - name: OAUTH2_PROXY_COOKIE_SECRET
           {{- /* Look up existing deployment to get the current cookie secret if available */}}
           {{- $deploymentName := printf "%s-oauth2-proxy" .Release.Name }}

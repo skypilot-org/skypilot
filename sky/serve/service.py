@@ -176,7 +176,7 @@ def _cleanup_task_run_script(job_id: int) -> None:
             logger.warning(f'Task run script {this_task_run_script} not found')
 
 
-def _start(service_name: str, tmp_task_yaml: str, job_id: int):
+def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
     """Starts the service.
     This including the controller and load balancer.
     """
@@ -228,7 +228,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             status=serve_state.ServiceStatus.CONTROLLER_INIT,
             tls_encrypted=service_spec.tls_credential is not None,
             pool=service_spec.pool,
-            controller_pid=os.getpid())
+            controller_pid=os.getpid(),
+            entrypoint=entrypoint)
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:
@@ -365,8 +366,12 @@ if __name__ == '__main__':
                         required=True,
                         type=int,
                         help='Job id for the service job.')
+    parser.add_argument('--entrypoint',
+                        type=str,
+                        help='Entrypoint to launch the service',
+                        required=True)
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    _start(args.service_name, args.task_yaml, args.job_id)
+    _start(args.service_name, args.task_yaml, args.job_id, args.entrypoint)
