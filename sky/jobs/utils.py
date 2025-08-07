@@ -141,7 +141,7 @@ def _validate_consolidation_mode_config(
         if global_user_state.get_cluster_from_name(controller_cn) is not None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InconsistentConsolidationModeError(
-                    f'{colorama.Fore.RED}Consolidation mode is '
+                    f'{colorama.Fore.RED}Consolidation mode for jobs is '
                     f'enabled, but the controller cluster '
                     f'{controller_cn} is still running. Please '
                     'terminate the controller cluster first.'
