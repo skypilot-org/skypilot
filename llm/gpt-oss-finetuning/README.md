@@ -71,7 +71,14 @@ run: |
   MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
   NP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
 
-  accelerate launch --config_file /sft/fsdp2_120b.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /sft/train.py --model_id openai/gpt-oss-120b
+  accelerate launch \
+    --config_file /sft/fsdp2_120b.yaml \
+    --num_machines $SKYPILOT_NUM_NODES \
+    --num_processes $NP \
+    --machine_rank $SKYPILOT_NODE_RANK \
+    --main_process_ip $MASTER_ADDR \
+    --main_process_port 29500 \
+    /sft/train.py --model_id openai/gpt-oss-120b
 ```
 
 ### LoRA finetuning
@@ -152,7 +159,7 @@ Training Progress for gpt-oss-120b on 4 nodes:
 
 Memory and GPU utilization using [nvitop](https://github.com/XuehaiPan/nvitop)
 
-![nvitop](https://i.imgur.com/B9qKBr7.png)
+![nvitop](https://i.imgur.com/dAov9ud.png)
 
 ## Configuration files
 
