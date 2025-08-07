@@ -3,8 +3,6 @@ import collections
 import enum
 import functools
 import json
-import os
-import pathlib
 import pickle
 import threading
 import typing
@@ -20,9 +18,9 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
 
 from sky.serve import constants
-from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
 from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row
@@ -118,87 +116,28 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Create tables if they don't exist
-    Base.metadata.create_all(bind=engine)
-
-    # Backward compatibility: add columns that not exist in older databases
-    with orm.Session(engine) as session:
-        db_utils.add_column_to_table_sqlalchemy(session, 'services',
-                                                'requested_resources_str',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'services',
-            'current_version',
-            sqlalchemy.Integer(),
-            default_statement=f'DEFAULT {constants.INITIAL_VERSION}')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'services',
-            'active_versions',
-            sqlalchemy.Text(),
-            default_statement=f'DEFAULT {json.dumps([])!r}')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'services',
-            'load_balancing_policy',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'services',
-                                                'tls_encrypted',
-                                                sqlalchemy.Integer(),
-                                                default_statement='DEFAULT 0')
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'services',
-                                                'pool',
-                                                sqlalchemy.Integer(),
-                                                default_statement='DEFAULT 0')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'services',
-            'controller_pid',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT NULL',
-            value_to_replace_existing_entries=-1)
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'services',
-            'hash',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'services',
-            'entrypoint',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-        session.commit()
+    migration_utils.safe_alembic_upgrade(engine, migration_utils.SERVE_DB_NAME,
+                                         migration_utils.SERVE_VERSION)
 
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
+
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
+
     with _DB_INIT_LOCK:
-        if _SQLALCHEMY_ENGINE is None:
-            conn_string = None
-            if os.environ.get(
-                    skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-                conn_string = os.environ.get(
-                    skylet_constants.ENV_VAR_DB_CONNECTION_URI)
-            if conn_string:
-                engine = sqlalchemy.create_engine(conn_string,
-                                                  poolclass=sqlalchemy.NullPool)
-            else:
-                db_path = pathlib.Path(
-                    constants.SKYSERVE_METADATA_DIR) / 'services.db'
-                db_path = db_path.expanduser().absolute()
-                db_path.parents[0].mkdir(parents=True, exist_ok=True)
-                engine = sqlalchemy.create_engine('sqlite:///' + str(db_path))
-            create_table(engine)
-            _SQLALCHEMY_ENGINE = engine
-    return _SQLALCHEMY_ENGINE
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+        # get an engine to the db
+        engine = migration_utils.get_engine('serve/services')
+
+        # run migrations if needed
+        create_table(engine)
+
+        # return engine
+        _SQLALCHEMY_ENGINE = engine
+        return _SQLALCHEMY_ENGINE
 
 
 def init_db(func):
