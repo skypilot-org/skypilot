@@ -177,6 +177,11 @@ auth:
     # If set, this external Redis instance will be used
     # @schema type: [string, null]
     redis-url: null
+    # Secret containing Redis connection URL (redis_url: 'redis://host[:port][/db-number]').
+    # This is used to set redis url from an existing secret and is mutually exclusive with the redis-url field.
+    # Refer to redis-url for more details.
+    # @schema type: [string, null]
+    redis-secret: null
     # Cookie timing settings (in seconds)
     # @schema type: [string, number, null]
     cookie-refresh: null  # refresh tokens after this duration (Access token lifespan minus 1 min)
