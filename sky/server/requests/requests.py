@@ -665,4 +665,4 @@ async def requests_gc_daemon():
             logger.error(f'Error running requests GC daemon: {e}')
         # Run the daemon at most once every hour to avoid too frequent
         # cleanup.
-        await asyncio.sleep(max(retention_seconds, 3600))
+        await asyncio.sleep(max(retention_seconds, 120))
