@@ -1182,3 +1182,21 @@ class LocalProcessCommandRunner(CommandRunner):
                     log_path=log_path,
                     stream_logs=stream_logs,
                     max_retry=max_retry)
+
+class SlurmCommandRunner(CommandRunner):
+    """Runner for Slurm commands."""
+
+    def __init__(self, node):
+        """Initialize SlurmCommandRunner.
+
+        Example Usage:
+            runner = SlurmCommandRunner()
+            runner.run('ls -l')
+            runner.rsync(source, target, up=True)
+
+        Args:
+            node:
+        """
+        del kwargs
+        super().__init__(node)
+        # TODO(jwj): Define and parse a node
