@@ -2974,6 +2974,8 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
+    # TODO(tian): We also need to check pools after we allow running pools on
+    # jobs controller.
     with rich_utils.client_status(
             '[bold cyan]Checking for in-progress managed jobs[/]'):
         try:
