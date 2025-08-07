@@ -26,6 +26,10 @@ SPOT_JOBS_DB_NAME = 'spot_jobs_db'
 SPOT_JOBS_VERSION = '003'
 SPOT_JOBS_LOCK_PATH = '~/.sky/locks/.spot_jobs_db.lock'
 
+SERVE_DB_NAME = 'serve_db'
+SERVE_VERSION = '001'
+SERVE_LOCK_PATH = '~/.sky/locks/.serve_db.lock'
+
 
 def get_engine(db_name: str):
     conn_string = None
