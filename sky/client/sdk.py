@@ -880,8 +880,9 @@ def download_logs(cluster_name: str,
     )
     response = server_common.make_authenticated_request(
         'POST', '/download_logs', json=json.loads(body.model_dump_json()))
-    job_id_remote_path_dict = stream_and_get(
-        server_common.get_request_id(response))
+    request_id: server_common.RequestId[Dict[
+        str, str]] = server_common.get_request_id(response)
+    job_id_remote_path_dict = stream_and_get(request_id)
     remote2local_path_dict = client_common.download_logs_from_api_server(
         job_id_remote_path_dict.values())
     return {
@@ -1865,6 +1866,24 @@ def get(request_id: server_common.RequestId[T]) -> T:
     return request_task.get_return_value()
 
 
+@typing.overload
+def stream_and_get(request_id: server_common.RequestId[T],
+                   log_path: Optional[str] = None,
+                   tail: Optional[int] = None,
+                   follow: bool = True,
+                   output_stream: Optional['io.TextIOBase'] = None) -> T:
+    ...
+
+
+@typing.overload
+def stream_and_get(request_id: None = None,
+                   log_path: Optional[str] = None,
+                   tail: Optional[int] = None,
+                   follow: bool = True,
+                   output_stream: Optional['io.TextIOBase'] = None) -> None:
+    ...
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -1874,7 +1893,7 @@ def stream_and_get(
     tail: Optional[int] = None,
     follow: bool = True,
     output_stream: Optional['io.TextIOBase'] = None,
-) -> Any:
+) -> Optional[T]:
     """Streams the logs of a request or a log file and gets the final result.
 
     This will block until the request is finished. The request id can be a

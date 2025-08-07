@@ -331,12 +331,13 @@ def download_logs(
         '/jobs/download_logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
-    job_id_remote_path_dict = sdk.stream_and_get(
-        server_common.get_request_id(response))
+    request_id: server_common.RequestId[Dict[
+        str, str]] = server_common.get_request_id(response)
+    job_id_remote_path_dict = sdk.stream_and_get(request_id)
     remote2local_path_dict = client_common.download_logs_from_api_server(
         job_id_remote_path_dict.values())
     return {
-        job_id: remote2local_path_dict[remote_path]
+        int(job_id): remote2local_path_dict[remote_path]
         for job_id, remote_path in job_id_remote_path_dict.items()
     }
 

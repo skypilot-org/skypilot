@@ -266,7 +266,9 @@ def sync_down_logs(service_name: str,
         '/jobs/pool_sync-down-logs' if pool else '/serve/sync-down-logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
-    remote_dir = sdk.stream_and_get(server_common.get_request_id(response))
+    request_id: server_common.RequestId[str] = server_common.get_request_id(
+        response)
+    remote_dir = sdk.stream_and_get(request_id)
 
     # Download from API server paths to the client's local_dir
     client_common.download_logs_from_api_server([remote_dir], remote_dir,
