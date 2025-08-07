@@ -220,18 +220,18 @@ class TestBackwardCompatibility:
         need_launch = request.config.getoption("--need-launch")
         need_launch_cmd = 'echo "skipping launch"'
         if need_launch:
-            need_launch_cmd = f'{self.ACTIVATE_CURRENT} && sky launch --cloud {generic_cloud} -y -c {cluster_name}'
+            need_launch_cmd = f'{self.ACTIVATE_CURRENT} && sky launch --infra {generic_cloud} -y -c {cluster_name}'
         commands = [
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
-            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
-            f'{self.ACTIVATE_BASE} && sky autostop -i 10 -y {cluster_name}',
-            f'{self.ACTIVATE_BASE} && sky exec -d --cloud {generic_cloud} --num-nodes 2 {cluster_name} sleep 120',
+            f'{self.ACTIVATE_CURRENT} && sky launch --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
+            f'{self.ACTIVATE_CURRENT} && sky autostop -i 10 -y {cluster_name}',
+            f'{self.ACTIVATE_CURRENT} && sky exec -d --infra {generic_cloud} --num-nodes 2 {cluster_name} sleep 120',
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && result="$(sky status {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             f'{self.ACTIVATE_CURRENT} && result="$(sky status -r {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             need_launch_cmd,
-            f'{self.ACTIVATE_CURRENT} && sky exec -d --cloud {generic_cloud} {cluster_name} sleep 50',
+            f'{self.ACTIVATE_CURRENT} && sky exec -d --infra {generic_cloud} {cluster_name} sleep 50',
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue -u {cluster_name})"; echo "$result"; echo "$result" | grep RUNNING | wc -l | grep 2',
-            f'{self.ACTIVATE_CURRENT} && s=$(sky launch --cloud {generic_cloud} -d -c {cluster_name} examples/minimal.yaml) && '
+            f'{self.ACTIVATE_CURRENT} && s=$(sky launch --infra {generic_cloud} -d -c {cluster_name} examples/minimal.yaml) && '
             'echo "$s" | sed -r "s/\\x1B\\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 4"',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2 --status | grep -E "RUNNING|SUCCEEDED"',
             f"""
