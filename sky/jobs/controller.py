@@ -719,6 +719,13 @@ class JobsController:
             await self._update_failed_task_state(
                 task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
                 msg)
+        finally:
+            callback_func = managed_job_utils.event_callback_func(
+                job_id=self._job_id,
+                task_id=task_id,
+                task=self._dag.tasks[task_id])
+            await managed_job_state.set_cancelling_async(
+                job_id=self._job_id, callback_func=callback_func)
 
     async def _update_failed_task_state(
             self, task_id: int,
