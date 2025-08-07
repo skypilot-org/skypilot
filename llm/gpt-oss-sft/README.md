@@ -8,7 +8,7 @@ The `gpt-oss-120b` model achieves near-parity with OpenAI o4-mini on core reason
 
 This guide walks through how to finetune both models with LoRA/full finetuning using [🤗 Accelerate](https://github.com/huggingface/accelerate).
 
-![Cloud Logos](https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png)
+![Cloud Logos](https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png)
 
 ## Step 0: Setup infrastructure
 
@@ -41,6 +41,37 @@ sky launch -c gpt-oss-20b-sft gpt-oss-20b-sft.yaml
 - Requirements: 4 nodes, 8x H200 GPUs each
 ```bash
 sky launch -c gpt-oss-120b-sft gpt-oss-120b-sft.yaml
+```
+
+```yaml
+# gpt-oss-120b-sft.yaml
+resources:
+  accelerators: H200:8
+  network_tier: best
+
+file_mounts:
+  /sft: ./sft
+
+num_nodes: 4
+
+setup: |
+  conda install cuda -c nvidia
+  uv venv ~/training --seed --python 3.10
+  source ~/training/bin/activate
+  uv pip install torch --index-url https://download.pytorch.org/whl/cu128
+  uv pip install "trl>=0.20.0" "peft>=0.17.0" "transformers>=4.55.0"
+  uv pip install deepspeed
+  uv pip install git+https://github.com/huggingface/accelerate.git@c0a3aefea8aa5008a0fbf55b049bd3f0efa9cbf2
+
+  uv pip install nvitop
+
+run: |
+  source ~/training/bin/activate
+
+  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  NP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
+
+  accelerate launch --config_file /sft/fsdp2_120b.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /sft/train.py --model_id openai/gpt-oss-120b
 ```
 
 ### LoRA finetuning
