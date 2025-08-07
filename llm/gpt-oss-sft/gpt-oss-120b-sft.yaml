@@ -1,7 +1,6 @@
 resources:
   accelerators: H200:8
   network_tier: best
-  image_id: docker:cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.23.4-ubu22.04-cu12.4
 
 file_mounts:
   /sft: ./sft

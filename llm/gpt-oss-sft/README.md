@@ -38,7 +38,7 @@ sky launch -c gpt-oss-20b-sft gpt-oss-20b-sft.yaml
 ```
 
 **For `gpt-oss-120b` (larger model):**
-- Requirements: 2 nodes, 8x H100 GPUs each
+- Requirements: 4 nodes, 8x H200 GPUs each
 ```bash
 sky launch -c gpt-oss-120b-sft gpt-oss-120b-sft.yaml
 ```
