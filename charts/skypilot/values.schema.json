@@ -173,6 +173,12 @@
                                 "null"
                             ]
                         },
+                        "redis-secret": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
                         "redis-url": {
                             "type": [
                                 "string",

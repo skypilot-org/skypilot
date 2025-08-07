@@ -53,7 +53,7 @@ def test_hyperbolic_resource_feasibility():
     """Test resource feasibility for Hyperbolic."""
     cloud = hyperbolic.Hyperbolic()
     resources = Resources(cloud=cloud,
-                          instance_type='1x-H100-28-271',
+                          instance_type='1x-H100-112-1083',
                           accelerators={'H100': 1})
     feasible = cloud._get_feasible_launchable_resources(resources)
     assert hasattr(feasible, 'resources_list')
