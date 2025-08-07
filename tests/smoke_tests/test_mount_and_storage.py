@@ -593,7 +593,7 @@ def test_nebius_storage_mounts(generic_cloud: str):
 @pytest.mark.coreweave
 def test_coreweave_storage_mounts(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
+    storage_name = f'sky-test-{int(time.time())}-coreweave'
     template_str = pathlib.Path(
         'tests/test_yamls/test_coreweave_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
@@ -1419,14 +1419,29 @@ class TestStorageWithCredentials:
         subprocess.check_call(
             f'aws s3 mb {bucket_uri} --profile={coreweave.COREWEAVE_PROFILE_NAME}',
             shell=True)
+        # Coreweave yields the bucket after being created immediately, but any action will fail...
+        # Wait for bucket to be available using ls
+        import time
+        max_retries = 30
+        retry_delay = 2
+        for attempt in range(max_retries):
+            try:
+                subprocess.check_call(
+                    f'aws s3 ls {bucket_uri} --profile={coreweave.COREWEAVE_PROFILE_NAME}',
+                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                break
+            except subprocess.CalledProcessError:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+                    # If we can't list after max retries, still try to delete
+                    break
+        
         yield tmp_bucket_name, f'cw://{tmp_bucket_name}'
-        try:
-            subprocess.check_call(
-                f'aws s3 rb {bucket_uri} --force --profile={coreweave.COREWEAVE_PROFILE_NAME}',
-                shell=True)
-        except subprocess.CalledProcessError:
-            # Bucket might have already been deleted by the test
-            pass
+        subprocess.check_call(
+            f'aws s3 rb {bucket_uri} --force --profile={coreweave.COREWEAVE_PROFILE_NAME}',
+            shell=True)
+
 
     @pytest.fixture
     def tmp_ibm_cos_bucket(self, tmp_bucket_name):
