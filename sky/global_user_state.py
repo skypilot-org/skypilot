@@ -1136,9 +1136,9 @@ def get_clusters_from_history(
 def get_cluster_names_start_with(starts_with: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(cluster_table).filter(
+        rows = session.query(cluster_table.c.name).filter(
             cluster_table.c.name.like(f'{starts_with}%')).all()
-    return [row.name for row in rows]
+    return [row[0] for row in rows]
 
 
 @_init_db
