@@ -4806,7 +4806,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if wait_for else autostop_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
                 down=down,
             )
-            self._invoke_skylet_with_tunnel_recovery(
+            self._invoke_skylet_with_retries(
                 handle, lambda: SkyletClient(handle.get_grpc_channel()).
                 set_autostop(request))
             global_user_state.set_cluster_autostop_value(
@@ -4835,14 +4835,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # We cannot check if the cluster is autostopping.
             return False
         request = autostop_pb2.IsAutostoppingRequest()
-        response = self._invoke_skylet_with_tunnel_recovery(
+        response = self._invoke_skylet_with_retries(
             handle, lambda: SkyletClient(handle.get_grpc_channel()).
-            is_autostopping(request, timeout=10))
+            is_autostopping(request))
         return response.is_autostopping
 
-    def _invoke_skylet_with_tunnel_recovery(self,
-                                            handle: CloudVmRayResourceHandle,
-                                            func: Callable[..., T]) -> T:
+    def _invoke_skylet_with_retries(self, handle: CloudVmRayResourceHandle,
+                                    func: Callable[..., T]) -> T:
         """Generic helper for making Skylet gRPC requests.
 
         This method handles the common pattern of:
