@@ -241,8 +241,8 @@ class Task:
         self,
         name: Optional[str] = None,
         *,
-        setup: Optional[str] = None,
-        run: Optional[CommandOrCommandGen] = None,
+        setup: Optional[Union[str, List[str]]] = None,
+        run: Optional[Union[CommandOrCommandGen, List[str]]] = None,
         envs: Optional[Dict[str, str]] = None,
         secrets: Optional[Dict[str, str]] = None,
         workdir: Optional[Union[str, Dict[str, Any]]] = None,
@@ -293,15 +293,15 @@ class Task:
 
         Args:
           name: A string name for the Task for display purposes.
-          setup: A setup command, which will be run before executing the run
+          setup: A setup command(s), which will be run before executing the run
             commands ``run``, and executed under ``workdir``.
           run: The actual command for the task. If not None, either a shell
-            command (str) or a command generator (callable).  If latter, it
-            must take a node rank and a list of node addresses as input and
-            return a shell command (str) (valid to return None for some nodes,
-            in which case no commands are run on them).  Run commands will be
-            run under ``workdir``. Note the command generator should be a
-            self-contained lambda.
+            command(s) (str, list(str)) or a command generator (callable). If
+            latter, it must take a node rank and a list of node addresses as
+            input and return a shell command (str) (valid to return None for
+            some nodes, in which case no commands are run on them). Run
+            commands will be run under ``workdir``. Note the command generator
+            should be a self-contained lambda.
           envs: A dictionary of environment variables to set before running the
             setup and run commands.
           secrets: A dictionary of secret environment variables to set before
@@ -347,14 +347,21 @@ class Task:
             YAML config.
         """
         self.name = name
-        self.run = run
         self.storage_mounts: Dict[str, storage_lib.Storage] = {}
         self.storage_plans: Dict[storage_lib.Storage,
                                  storage_lib.StoreType] = {}
-        self.setup = setup
         self._envs = envs or {}
         self._secrets = secrets or {}
         self._volumes = volumes or {}
+
+        # concatenate commands if given as list
+        def _concat(commands):
+            if isinstance(commands, list):
+                return '\n'.join(commands)
+            return commands
+
+        self.run = _concat(run)
+        self.setup = _concat(setup)
 
         # Validate Docker login configuration early if both envs and secrets
         # contain Docker variables
