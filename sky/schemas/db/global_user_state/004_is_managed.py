@@ -1,8 +1,8 @@
 """Columns for whether the cluster is managed.
 
-Revision ID: 002
-Revises: 001
-Create Date: 2025-08-06
+Revision ID: 004
+Revises: 003
+Create Date: 2025-08-07
 
 """
 # pylint: disable=invalid-name
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 from sky.utils.db import db_utils
 
-# revision identifiers, used by Alembic.
+# revision identifiers, used by Alembic.π
 revision: str = '004'
 down_revision: Union[str, Sequence[str], None] = '003'
 branch_labels: Union[str, Sequence[str], None] = None
