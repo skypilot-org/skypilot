@@ -279,6 +279,7 @@ Format:
 - Object with configuration:
   - ``idle_minutes``: Number of idle minutes before stopping
   - ``down``: If true, tear down the cluster instead of stopping it
+  - ``wait_for``: What resets the idleness timer. One of ``jobs_and_ssh`` (default), ``jobs``, or ``none``. See :ref:`auto-stop` for details.
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -316,6 +317,15 @@ OR
     autostop:
       idle_minutes: 10
       down: true  # Use autodown instead of autostop
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop:
+      idle_minutes: 10
+      wait_for: jobs_and_ssh  # Control what resets idleness timer
 
 
 .. _yaml-spec-resources-accelerators:
@@ -526,7 +536,7 @@ Units supported (case-insensitive):
 
   resources:
     disk_size: 256
-  
+
 OR
 
 .. code-block:: yaml

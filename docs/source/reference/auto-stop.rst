@@ -4,7 +4,10 @@ Autostop and Autodown
 ============================
 
 The **autostop** (or **autodown**) feature automatically stops (or tears down) a
-cluster after it becomes idle.
+cluster after it becomes idle. By default, idleness means there are no
+in‑progress (pending/running) jobs in the cluster’s job queue and no active SSH
+sessions; both running jobs and SSH sessions reset the idleness timer (see
+"Setting idleness behavior" below).
 
 With autostop, users can simply submit jobs and leave their laptops, while
 ensuring no unnecessary spending occurs. After jobs have finished, the
