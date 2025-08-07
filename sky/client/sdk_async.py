@@ -28,7 +28,7 @@ from sky.client import common as client_common
 from sky.client import sdk
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
-from sky.server import responses
+from sky.schemas.api import responses
 from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib

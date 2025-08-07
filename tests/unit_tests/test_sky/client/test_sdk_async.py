@@ -6,7 +6,7 @@ import pytest
 
 from sky import exceptions
 from sky.client import sdk_async
-from sky.server import responses
+from sky.schemas.api import responses
 from sky.utils import common as common_utils
 
 
