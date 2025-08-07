@@ -100,19 +100,6 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('last_creation_command',
                       sqlalchemy.Text,
                       server_default=None),
-    sqlalchemy.Column('config_hash_locked',
-                      sqlalchemy.Boolean,
-                      server_default='FALSE'),
-    sqlalchemy.Column('handle_locked',
-                      sqlalchemy.Boolean,
-                      server_default='FALSE'),
-    sqlalchemy.Column('num_failures',
-                      sqlalchemy.Integer,
-                      server_default='0'),
-    sqlalchemy.Column('configs',
-                      sqlalchemy.Text,
-                      server_default='[]'),
-    sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
 )
 
 storage_table = sqlalchemy.Table(

@@ -34,13 +34,13 @@ def upgrade():
                                              sa.Integer(),
                                              server_default='-1')
         db_utils.add_column_to_table_alembic('clusters',
-                                             'metadata',
-                                             sa.Text(),
-                                             server_default='{}')
-        db_utils.add_column_to_table_alembic('clusters',
                                              'to_down',
                                              sa.Integer(),
                                              server_default='0')
+        db_utils.add_column_to_table_alembic('clusters',
+                                             'metadata',
+                                             sa.Text(),
+                                             server_default='{}')
         db_utils.add_column_to_table_alembic('clusters',
                                              'owner',
                                              sa.Text(),
@@ -49,11 +49,10 @@ def upgrade():
                                              'cluster_hash',
                                              sa.Text(),
                                              server_default=None)
-        db_utils.add_column_to_table_alembic(
-            'clusters',
-            'storage_mounts_metadata',
-            sa.LargeBinary(),
-            server_default=None)
+        db_utils.add_column_to_table_alembic('clusters',
+                                             'storage_mounts_metadata',
+                                             sa.LargeBinary(),
+                                             server_default=None)
         db_utils.add_column_to_table_alembic(
             'clusters',
             'cluster_ever_up',
@@ -67,19 +66,10 @@ def upgrade():
             # clusters were never really UP, setting it to 1 means they won't be
             # auto-deleted during any failover.
             value_to_replace_existing_entries=1)
-        db_utils.add_column_to_table_alembic(
-            'clusters',
-            'status_updated_at',
-            sa.Integer(),
-            server_default=None)
-        # db_utils.add_column_to_table_alembic('clusters',
-        #                                      'launched_nodes',
-        #                                      sa.Integer(),
-        #                                      server_default='0')
-        # db_utils.add_column_to_table_alembic('clusters',
-        #                                      'disk_tier',
-        #                                      sa.Text(),
-        #                                      server_default=None)
+        db_utils.add_column_to_table_alembic('clusters',
+                                             'status_updated_at',
+                                             sa.Integer(),
+                                             server_default=None)
         db_utils.add_column_to_table_alembic('clusters',
                                              'config_hash',
                                              sa.Text(),
@@ -100,22 +90,6 @@ def upgrade():
                                              'last_creation_command',
                                              sa.Text(),
                                              server_default=None)
-        db_utils.add_column_to_table_alembic('clusters',
-                                             'config_hash_locked',
-                                             sa.Boolean(),
-                                             server_default='FALSE')
-        db_utils.add_column_to_table_alembic('clusters',
-                                             'handle_locked',
-                                             sa.Boolean(),
-                                             server_default='FALSE')
-        db_utils.add_column_to_table_alembic('clusters',
-                                             'num_failures',
-                                             sa.Integer(),
-                                             server_default='0')
-        db_utils.add_column_to_table_alembic('clusters',
-                                             'configs',
-                                             sa.Text(),
-                                             server_default='[]')
 
         # Add all missing columns to cluster_history table
         db_utils.add_column_to_table_alembic('cluster_history',
