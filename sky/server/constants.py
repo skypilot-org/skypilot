@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 11
+API_VERSION = 14
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -33,7 +33,7 @@ VERSION_HEADER = 'X-SkyPilot-Version'
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
 # The memory (GB) that SkyPilot tries to not use to prevent OOM.
-MIN_AVAIL_MEM_GB = 2
+MIN_AVAIL_MEM_GB = 4
 # Default encoder/decoder handler name.
 DEFAULT_HANDLER_NAME = 'default'
 # The path to the API request database.

@@ -72,62 +72,10 @@ jobs:
             echo "previous_minor_release_branch=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Get current sky api version
-        id: get_current_sky_api_version
-        run: |
-          echo "Reading current API version from the current checkout..."
-          # Extract current API version from the current checked-out state
-          CURRENT_SKY_API_VERSION=$(grep "^API_VERSION = " sky/server/constants.py | sed "s/API_VERSION = '\\(.*\\)'/\\1/")
-          echo "Current API version (from checkout): ${CURRENT_SKY_API_VERSION}"
-          echo "current_sky_api_version=${CURRENT_SKY_API_VERSION}" >> $GITHUB_OUTPUT
-
-      - name: Get latest release sky api version from PyPI
-        id: get_latest_release_sky_api_version
-        run: |
-          LATEST_PYPI_VERSION="${{ steps.find_previous_release_branch.outputs.latest_pypi_version }}"
-          # Create and activate uv virtual environment
-          echo "Creating uv virtual environment..."
-          uv venv --seed ~/pypi-check-env
-          echo "Activating virtual environment..."
-          source ~/pypi-check-env/bin/activate
-
-          echo "Installing skypilot==${LATEST_PYPI_VERSION} from PyPI using uv..."
-          uv pip install --prerelease=allow "azure-cli>=2.65.0"
-          uv pip install 'omegaconf>=2.4.0dev3' skypilot==${LATEST_PYPI_VERSION}
-
-          echo "Extracting API version from installed PyPI package..."
-          # Store current directory and change to a temporary one to avoid importing local sky package
-          ORIGINAL_DIR=$(pwd)
-          TEMP_DIR=$(mktemp -d)
-          cd "${TEMP_DIR}"
-          echo "Changed directory to ${TEMP_DIR} to ensure correct package import."
-
-          # Python command now runs within the activated venv and outside the project directory
-          LATEST_PYPI_SKY_API_VERSION=$(python -c "import sky.server.constants; print(sky.server.constants.API_VERSION)")
-
-          # Change back to original directory and clean up temp dir
-          cd "${ORIGINAL_DIR}"
-          rm -rf "${TEMP_DIR}"
-          echo "Restored original directory: ${ORIGINAL_DIR}"
-
-          # Deactivate environment
-          deactivate
-
-          if [[ -z "${LATEST_PYPI_SKY_API_VERSION}" ]]; then
-            echo "Error: Could not fetch API_VERSION from the installed PyPI package. Python command likely failed."
-            exit 1
-          fi
-
-          echo "Latest release PyPI API version: ${LATEST_PYPI_SKY_API_VERSION}"
-          echo "latest_pypi_sky_api_version=${LATEST_PYPI_SKY_API_VERSION}" >> $GITHUB_OUTPUT
-
       # Determine release version based on trigger type
       - name: Determine release version
         id: determine_version
         run: |
-          CURRENT_SKY_API_VERSION="${{ steps.get_current_sky_api_version.outputs.current_sky_api_version }}"
-          LATEST_PYPI_SKY_API_VERSION="${{ steps.get_latest_release_sky_api_version.outputs.latest_pypi_sky_api_version }}"
-
           if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_version }}" ]; then
             # Manual trigger with input version provided
             RELEASE_VERSION="${{ github.event.inputs.release_version }}"
@@ -139,15 +87,9 @@ jobs:
             MAJOR=$(echo $LATEST_VERSION | cut -d. -f1)
             MINOR=$(echo $LATEST_VERSION | cut -d. -f2)
             PATCH=$(echo $LATEST_VERSION | cut -d. -f3)
-            if [ "${CURRENT_SKY_API_VERSION}" -le "${LATEST_PYPI_SKY_API_VERSION}" ]; then
-              # Increment patch version
-              NEW_PATCH=$((PATCH + 1))
-              RELEASE_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-            else
-              # Increment minor version
-              NEW_MINOR=$((MINOR + 1))
-              RELEASE_VERSION="${MAJOR}.${NEW_MINOR}.0"
-            fi
+            # Always increment patch version
+            NEW_PATCH=$((PATCH + 1))
+            RELEASE_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
             echo "Incrementing from ${LATEST_VERSION} to ${RELEASE_VERSION}"
           fi
           echo "release_version=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
@@ -168,63 +110,17 @@ jobs:
           PYPI_MINOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f2)
           PYPI_PATCH=$(echo $LATEST_PYPI_VERSION | cut -d. -f3)
 
-          # Calculate expected next versions
+          # Calculate expected next patch version
           NEXT_PATCH_VERSION="${PYPI_MAJOR}.${PYPI_MINOR}.$((PYPI_PATCH + 1))"
-          NEXT_MINOR_VERSION="${PYPI_MAJOR}.$((PYPI_MINOR + 1)).0"
 
           echo "Expected next patch version: ${NEXT_PATCH_VERSION}"
-          echo "Expected next minor version: ${NEXT_MINOR_VERSION}"
 
-          # Check if the determined release version is one of the expected next versions
-          if [ "${RELEASE_VERSION}" = "${NEXT_PATCH_VERSION}" ] || [ "${RELEASE_VERSION}" = "${NEXT_MINOR_VERSION}" ]; then
-            echo "Success: Version check passed. Determined version ${RELEASE_VERSION} is a valid next version."
+          # Check if the determined release version is the expected next patch version
+          if [ "${RELEASE_VERSION}" = "${NEXT_PATCH_VERSION}" ]; then
+            echo "Success: Version check passed. Determined version ${RELEASE_VERSION} is the expected next patch version."
           else
-            echo "Error: Determined release version ${RELEASE_VERSION} must be either the next patch version (${NEXT_PATCH_VERSION}) or the next minor version (${NEXT_MINOR_VERSION}) compared to the latest PyPI version ${LATEST_PYPI_VERSION}."
+            echo "Error: Determined release version ${RELEASE_VERSION} must be the next patch version (${NEXT_PATCH_VERSION}) compared to the latest PyPI version ${LATEST_PYPI_VERSION}."
             exit 1
-          fi
-
-      - name: Verify API Version Compatibility
-        id: verify_api_version
-        if: ${{ !github.event.inputs.skip_version_checks }}
-        run: |
-          RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
-          LATEST_PYPI_VERSION="${{ steps.find_previous_release_branch.outputs.latest_pypi_version }}"
-          CURRENT_SKY_API_VERSION="${{ steps.get_current_sky_api_version.outputs.current_sky_api_version }}"
-          LATEST_PYPI_SKY_API_VERSION="${{ steps.get_latest_release_sky_api_version.outputs.latest_pypi_sky_api_version }}"
-
-          # Assert current API version >= PyPI API version
-          if [[ "${CURRENT_SKY_API_VERSION}" -lt "${LATEST_PYPI_SKY_API_VERSION}" ]]; then
-            echo "Error: Current API version (${CURRENT_SKY_API_VERSION}) is less than the latest PyPI API version (${LATEST_PYPI_SKY_API_VERSION})."
-            exit 1
-          fi
-          echo "Assertion passed: Current API version (${CURRENT_SKY_API_VERSION}) >= PyPI API version (${LATEST_PYPI_SKY_API_VERSION})."
-
-          # If API version changed, ensure it's not just a patch release
-          if [[ "${CURRENT_SKY_API_VERSION}" -gt "${LATEST_PYPI_SKY_API_VERSION}" ]]; then
-            echo "API version has increased from ${LATEST_PYPI_SKY_API_VERSION} to ${CURRENT_SKY_API_VERSION}."
-
-            # Parse versions
-            RELEASE_MAJOR=$(echo $RELEASE_VERSION | cut -d. -f1)
-            RELEASE_MINOR=$(echo $RELEASE_VERSION | cut -d. -f2)
-
-            PYPI_MAJOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f1)
-            PYPI_MINOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f2)
-
-            IS_MINOR_OR_MAJOR_UPGRADE=false
-            if [[ "${RELEASE_MAJOR}" -gt "${PYPI_MAJOR}" ]]; then
-              IS_MINOR_OR_MAJOR_UPGRADE=true
-            elif [[ "${RELEASE_MAJOR}" -eq "${PYPI_MAJOR}" && "${RELEASE_MINOR}" -gt "${PYPI_MINOR}" ]]; then
-              IS_MINOR_OR_MAJOR_UPGRADE=true
-            fi
-
-            if [[ "${IS_MINOR_OR_MAJOR_UPGRADE}" == "false" ]]; then
-              echo "Error: API version changed (${LATEST_PYPI_SKY_API_VERSION} -> ${CURRENT_SKY_API_VERSION}), but the release (${RELEASE_VERSION}) is only a patch upgrade from the latest PyPI version (${LATEST_PYPI_VERSION}). API version changes require a minor or major version bump."
-              exit 1
-            else
-              echo "API version change is accompanied by a minor or major version bump (${LATEST_PYPI_VERSION} -> ${RELEASE_VERSION}). Proceeding."
-            fi
-          else
-            echo "API version has not changed (${LATEST_PYPI_SKY_API_VERSION}). Proceeding."
           fi
 
       - name: Create release branch

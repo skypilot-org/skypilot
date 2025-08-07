@@ -40,7 +40,9 @@ from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -925,7 +927,10 @@ def write_cluster_config(
             cluster_config_overrides=cluster_config_overrides,
             cloud=cloud,
             context=region.name)
-        kubernetes_utils.combine_metadata_fields(tmp_yaml_path, region.name)
+        kubernetes_utils.combine_metadata_fields(
+            tmp_yaml_path,
+            cluster_config_overrides=cluster_config_overrides,
+            context=region.name)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
@@ -2267,7 +2272,11 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                     success = True
                     reset_local_autostop = True
                     try:
-                        backend.set_autostop(handle, -1, stream_logs=False)
+                        backend.set_autostop(
+                            handle,
+                            -1,
+                            autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                            stream_logs=False)
                     except exceptions.CommandError as e:
                         success = False
                         if e.returncode == 255:
@@ -2655,7 +2664,9 @@ def is_controller_accessible(
           failed to be connected.
     """
     if (managed_job_utils.is_consolidation_mode() and
-            controller == controller_utils.Controllers.JOBS_CONTROLLER):
+            controller == controller_utils.Controllers.JOBS_CONTROLLER
+       ) or (serve_utils.is_consolidation_mode() and
+             controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER):
         cn = 'local-controller-consolidation'
         return backends.LocalResourcesHandle(
             cluster_name=cn,

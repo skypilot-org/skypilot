@@ -41,12 +41,14 @@ from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import aiohttp
     import pydantic
     import requests
 
     from sky import dag as dag_lib
     from sky import models
 else:
+    aiohttp = adaptors_common.LazyImport('aiohttp')
     pydantic = adaptors_common.LazyImport('pydantic')
     requests = adaptors_common.LazyImport('requests')
 
@@ -175,24 +177,14 @@ def get_cookies_from_response(
     return cookies
 
 
-def make_authenticated_request(method: str,
-                               path: str,
-                               server_url: Optional[str] = None,
-                               retry: bool = True,
-                               **kwargs) -> 'requests.Response':
-    """Make an authenticated HTTP request to the API server.
-
-    Automatically handles service account token authentication or cookie-based
-    authentication based on what's available.
-
-    Args:
-        method: HTTP method (GET, POST, etc.)
-        path: API path (e.g., '/api/v1/status')
-        server_url: Server URL, defaults to configured server
-        **kwargs: Additional arguments to pass to requests
+def _prepare_authenticated_request_params(
+        path: str,
+        server_url: Optional[str] = None,
+        **kwargs) -> Tuple[str, Dict[str, Any]]:
+    """Prepare common parameters for authenticated requests (sync or async).
 
     Returns:
-        requests.Response object
+        Tuple of (url, updated_kwargs)
     """
     if server_url is None:
         server_url = get_server_url()
@@ -214,12 +206,110 @@ def make_authenticated_request(method: str,
     if not headers.get('Authorization') and 'cookies' not in kwargs:
         kwargs['cookies'] = get_api_cookie_jar()
 
+    return url, kwargs
+
+
+def _convert_requests_cookies_to_aiohttp(
+        cookie_jar: requests.cookies.RequestsCookieJar) -> Dict[str, str]:
+    """Convert requests cookie jar to aiohttp-compatible dict format."""
+    cookies = {}
+    for cookie in cookie_jar:
+        cookies[cookie.name] = cookie.value
+    return cookies  # type: ignore
+
+
+def make_authenticated_request(method: str,
+                               path: str,
+                               server_url: Optional[str] = None,
+                               retry: bool = True,
+                               **kwargs) -> 'requests.Response':
+    """Make an authenticated HTTP request to the API server.
+
+    Automatically handles service account token authentication or cookie-based
+    authentication based on what's available.
+
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        path: API path (e.g., '/api/v1/status')
+        server_url: Server URL, defaults to configured server
+        retry: Whether to retry on transient errors
+        **kwargs: Additional arguments to pass to requests
+
+    Returns:
+        requests.Response object
+    """
+    url, kwargs = _prepare_authenticated_request_params(path, server_url,
+                                                        **kwargs)
+
     # Make the request
     if retry:
         return rest.request(method, url, **kwargs)
     else:
         assert method == 'GET', 'Only GET requests can be done without retry'
         return rest.request_without_retry(method, url, **kwargs)
+
+
+async def make_authenticated_request_async(
+        session: 'aiohttp.ClientSession',
+        method: str,
+        path: str,
+        server_url: Optional[str] = None,
+        retry: bool = True,
+        **kwargs) -> 'aiohttp.ClientResponse':
+    """Make an authenticated async HTTP request to the API server using aiohttp.
+
+    Automatically handles service account token authentication or cookie-based
+    authentication based on what's available.
+
+    Example usage:
+        async with aiohttp.ClientSession() as session:
+            response = await make_authenticated_request_async(
+                session, 'GET', '/api/v1/status')
+            data = await response.json()
+
+    Args:
+        session: aiohttp ClientSession to use for the request
+        method: HTTP method (GET, POST, etc.)
+        path: API path (e.g., '/api/v1/status')
+        server_url: Server URL, defaults to configured server
+        retry: Whether to retry on transient errors
+        **kwargs: Additional arguments to pass to aiohttp
+
+    Returns:
+        aiohttp.ClientResponse object
+
+    Raises:
+        aiohttp.ClientError: For HTTP-related errors
+        exceptions.ServerTemporarilyUnavailableError: When server returns 503
+        exceptions.RequestInterruptedError: When request is interrupted
+    """
+    url, kwargs = _prepare_authenticated_request_params(path, server_url,
+                                                        **kwargs)
+
+    # Convert cookies to aiohttp format if needed
+    if 'cookies' in kwargs and isinstance(kwargs['cookies'],
+                                          requests.cookies.RequestsCookieJar):
+        kwargs['cookies'] = _convert_requests_cookies_to_aiohttp(
+            kwargs['cookies'])
+
+    # Convert params to strings for aiohttp compatibility
+    if 'params' in kwargs and kwargs['params'] is not None:
+        normalized_params = {}
+        for key, value in kwargs['params'].items():
+            if isinstance(value, bool):
+                normalized_params[key] = str(value).lower()
+            elif value is not None:
+                normalized_params[key] = str(value)
+            # Skip None values
+        kwargs['params'] = normalized_params
+
+    # Make the request
+    if retry:
+        return await rest.request_async(session, method, url, **kwargs)
+    else:
+        assert method == 'GET', 'Only GET requests can be done without retry'
+        return await rest.request_without_retry_async(session, method, url,
+                                                      **kwargs)
 
 
 @annotations.lru_cache(scope='global')

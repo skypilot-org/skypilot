@@ -33,6 +33,7 @@ from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -87,7 +88,9 @@ class JobsController:
         dag_yaml: str,
         job_logger: logging.Logger,
         starting: Set[int],
-        job_tasks_lock: asyncio.Lock,
+        starting_lock: asyncio.Lock,
+        starting_signal: asyncio.Condition,
+        pool: Optional[str] = None,
     ) -> None:
         """Initialize a JobsController.
 
@@ -101,7 +104,8 @@ class JobsController:
         """
 
         self.starting = starting
-        self.job_tasks_lock = job_tasks_lock
+        self.starting_lock = starting_lock
+        self.starting_signal = starting_signal
 
         self._logger = job_logger
         self._logger.info(f'Initializing JobsController for job_id={job_id}, '
@@ -113,6 +117,7 @@ class JobsController:
         self._logger.info(f'Loaded DAG: {self._dag}')
 
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        self._pool = pool
 
         # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
@@ -147,8 +152,10 @@ class JobsController:
             task.update_envs(task_envs)
 
     def _download_log_and_stream(
-        self, task_id: Optional[int],
-        handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']
+        self,
+        task_id: Optional[int],
+        handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+        job_id_on_pool_cluster: Optional[int],
     ) -> None:
         """Downloads and streams the logs of the current job with given task ID.
 
@@ -162,11 +169,14 @@ class JobsController:
             return
 
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                            'managed_jobs')
-
-        log_file = controller_utils.download_and_stream_latest_job_log(
-            self._backend, handle, managed_job_logs_dir)
-
+                                            'managed_jobs',
+                                            f'job-id-{self._job_id}')
+        log_file = controller_utils.download_and_stream_job_log(
+            self._backend,
+            handle,
+            managed_job_logs_dir,
+            job_ids=[str(job_id_on_pool_cluster)]
+            if job_id_on_pool_cluster is not None else None)
         if log_file is not None:
             # Set the path of the log file for the current task, so it can
             # be accessed even after the job is finished
@@ -178,6 +188,13 @@ class JobsController:
                 f'task {task_id}')
 
         self._logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+
+    async def _cleanup_cluster(self, cluster_name: Optional[str]) -> None:
+        if cluster_name is None:
+            return
+        if self._pool is None:
+            await managed_job_utils.to_thread(
+                managed_job_utils.terminate_cluster, cluster_name)
 
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
@@ -263,13 +280,15 @@ class JobsController:
         usage_lib.messages.usage.update_task_id(task_id)
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
         assert task.name is not None, task
+        # Set the cluster name to None if the job is submitted
+        # to a pool. This will be updated when we later calls the `launch`
+        # or `recover` function from the strategy executor.
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, self._job_id)
-
+            task.name, self._job_id) if self._pool is None else None
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._job_id, task_id,
-            self._logger)
-
+            self._logger, self._pool, self.starting, self.starting_lock,
+            self.starting_signal)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -305,12 +324,19 @@ class JobsController:
             # Run the launch in a separate thread to avoid blocking the event
             # loop. The scheduler functions used internally already have their
             # own file locks.
-            remote_job_submitted_at = await context_utils.to_thread(
-                self._strategy_executor.launch)
+            remote_job_submitted_at = await self._strategy_executor.launch()
 
             launch_time = time.time() - launch_start
             self._logger.info(f'Cluster launch completed in {launch_time:.2f}s')
             assert remote_job_submitted_at is not None, remote_job_submitted_at
+        if self._pool is None:
+            job_id_on_pool_cluster = None
+        else:
+            # Update the cluster name when using cluster pool.
+            cluster_name, job_id_on_pool_cluster = (
+                await
+                managed_job_state.get_pool_submit_info_async(self._job_id))
+        assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
         if not is_resume:
             await managed_job_state.set_started_async(
@@ -322,9 +348,15 @@ class JobsController:
         monitoring_start_time = time.time()
         status_check_count = 0
 
-        async with self.job_tasks_lock:
+        async with self.starting_lock:
             try:
                 self.starting.remove(self._job_id)
+                # its fine if we notify again, better to wake someone up
+                # and have them go to sleep again, then have some stuck
+                # sleeping.
+                # ps. this shouldn't actually happen because if its been
+                # removed from the set then we would get a key error.
+                self.starting_signal.notify()
             except KeyError:
                 # should not happen except maybe in a weird case, but either
                 # we doesn't matter, since its no longer in the set
@@ -386,9 +418,12 @@ class JobsController:
             job_status = None
             if not force_transit_to_recovering:
                 try:
-                    job_status = await context_utils.to_thread(
-                        managed_job_utils.get_job_status, self._backend,
-                        cluster_name, self._logger)
+                    job_status = await managed_job_utils.get_job_status(
+                        self._backend,
+                        cluster_name,
+                        job_id=job_id_on_pool_cluster,
+                        job_logger=self._logger,
+                    )
                 except exceptions.FetchClusterInfoError as fetch_e:
                     self._logger.info(
                         'Failed to fetch the job status. Start recovery.\n'
@@ -400,7 +435,7 @@ class JobsController:
                                   'Getting end time and cleaning up')
                 success_end_time = await context_utils.to_thread(
                     managed_job_utils.try_to_get_job_end_time, self._backend,
-                    cluster_name)
+                    cluster_name, job_id_on_pool_cluster)
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
                 await managed_job_state.set_succeeded_async(
@@ -412,7 +447,10 @@ class JobsController:
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
                 try:
-                    clusters = backend_utils.get_clusters(
+                    logger.info(f'Downloading logs on cluster {cluster_name} '
+                                f'and job id {job_id_on_pool_cluster}.')
+                    clusters = await managed_job_utils.to_thread(
+                        backend_utils.get_clusters,
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
                         all_users=True)
@@ -420,8 +458,9 @@ class JobsController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        await context_utils.to_thread(
-                            self._download_log_and_stream, task_id, handle)
+                        await managed_job_utils.to_thread(
+                            self._download_log_and_stream, task_id, handle,
+                            job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     self._logger.warning(
@@ -430,8 +469,7 @@ class JobsController:
                         exc_info=True)
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
-                await context_utils.to_thread(
-                    managed_job_utils.terminate_cluster, cluster_name)
+                await self._cleanup_cluster(cluster_name)
 
                 task_total_time = time.time() - task_start_time
                 monitoring_time = time.time() - monitoring_start_time
@@ -489,17 +527,15 @@ class JobsController:
                         f'Task {task_id} failed with status: {job_status}')
                     end_time = await context_utils.to_thread(
                         managed_job_utils.try_to_get_job_end_time,
-                        self._backend, cluster_name)
+                        self._backend, cluster_name, job_id_on_pool_cluster)
                     self._logger.info(
                         f'The user job failed ({job_status}). Please check the '
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    # TODO(luca): this is a hack to avoid blocking the asyncio
-                    # event loop. We should make _download_log_and_stream async
-                    # however that will require a lot of changes to the code.
-                    await context_utils.to_thread(self._download_log_and_stream,
-                                                  task_id, handle)
+                    await managed_job_utils.to_thread(
+                        self._download_log_and_stream, task_id, handle,
+                        job_id_on_pool_cluster)
 
                     failure_reason = (
                         'To see the details, run: '
@@ -590,8 +626,7 @@ class JobsController:
                     self._logger.info(
                         'Cleaning up the preempted or failed cluster'
                         '...')
-                    await context_utils.to_thread(
-                        managed_job_utils.terminate_cluster, cluster_name)
+                    await self._cleanup_cluster(cluster_name)
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
@@ -603,17 +638,17 @@ class JobsController:
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func)
 
-            recovery_start = time.time()
-            await context_utils.to_thread(self._strategy_executor.recover)
-            recovery_time = time.time() - recovery_start
+            recovered_time = await self._strategy_executor.recover()
 
-            self._logger.info(
-                f'Recovery completed for task {task_id} in {recovery_time:.2f}s'
-            )
+            if self._pool is not None:
+                cluster_name, job_id_on_pool_cluster = (
+                    await
+                    managed_job_state.get_pool_submit_info_async(self._job_id))
+                assert cluster_name is not None
             await managed_job_state.set_recovered_async(
                 self._job_id,
                 task_id,
-                recovered_time=recovery_time,
+                recovered_time=recovered_time,
                 callback_func=callback_func)
 
     async def run(self):
@@ -716,10 +751,13 @@ class Controller:
 
         # Lock for synchronizing access to global state dictionary
         self._job_tasks_lock = asyncio.Lock()
-        self._background_tasks_lock = asyncio.Lock()
+        self._starting_signal = asyncio.Condition(lock=self._job_tasks_lock)
 
-    async def _cleanup(self, job_id: int, dag_yaml: str,
-                       job_logger: logging.Logger):
+    async def _cleanup(self,
+                       job_id: int,
+                       dag_yaml: str,
+                       job_logger: logging.Logger,
+                       pool: Optional[str] = None):
         """Clean up the cluster(s) and storages.
 
         (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
@@ -730,16 +768,26 @@ class Controller:
             should be left when reaching here, as we currently only support
             chain DAGs, and only one task is executed at a time.
         """
-
         # Cleanup the HA recovery script first as it is possible that some error
         # was raised when we construct the task object (e.g.,
         # sky.exceptions.ResourcesUnavailableError).
+        await managed_job_state.remove_ha_recovery_script_async(job_id)
+
         def task_cleanup(task: 'sky.Task', job_id: int):
             assert task.name is not None, task
-            cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-                task.name, job_id)
-            managed_job_utils.terminate_cluster(cluster_name)
-
+            if pool is None:
+                cluster_name = (
+                    managed_job_utils.generate_managed_job_cluster_name(
+                        task.name, job_id))
+                managed_job_utils.terminate_cluster(cluster_name)
+            else:
+                cluster_name, job_id_on_pool_cluster = (
+                    managed_job_state.get_pool_submit_info(job_id))
+                if cluster_name is not None:
+                    if job_id_on_pool_cluster is not None:
+                        core.cancel(cluster_name=cluster_name,
+                                    job_ids=[job_id_on_pool_cluster],
+                                    _try_cancel_if_cluster_is_init=True)
             # Clean up Storages with persistent=False.
             # TODO(zhwu): this assumes the specific backend.
             backend = cloud_vm_ray_backend.CloudVmRayBackend()
@@ -753,14 +801,13 @@ class Controller:
 
             # Clean up any files mounted from the local disk, such as two-hop
             # file mounts.
-            consolidation_mode = managed_job_utils.is_consolidation_mode()
             for file_mount in (task.file_mounts or {}).values():
                 try:
                     # For consolidation mode, there is no two-hop file mounts
                     # and the file path here represents the real user data.
                     # We skip the cleanup for consolidation mode.
                     if (not data_utils.is_cloud_store_url(file_mount) and
-                            not consolidation_mode):
+                            not managed_job_utils.is_consolidation_mode()):
                         path = os.path.expanduser(file_mount)
                         if os.path.isdir(path):
                             shutil.rmtree(path)
@@ -770,7 +817,6 @@ class Controller:
                     job_logger.warning(
                         f'Failed to clean up file mount {file_mount}: {e}')
 
-        await managed_job_state.remove_ha_recovery_script_async(job_id)
         dag, _ = _get_dag_and_name(dag_yaml)
         for task in dag.tasks:
             # most things in this function are blocking
@@ -780,7 +826,8 @@ class Controller:
                            job_id: int,
                            dag_yaml: str,
                            job_logger: logging.Logger,
-                           env_file_path: Optional[str] = None):
+                           env_file_path: Optional[str] = None,
+                           pool: Optional[str] = None):
         """Background task that runs the job loop."""
         # Initialize context for this job to provide environment isolation
         context.initialize()
@@ -822,7 +869,8 @@ class Controller:
             job_logger.info(f'Starting job loop for {job_id}')
 
             controller = JobsController(job_id, dag_yaml, job_logger,
-                                        self.starting, self._job_tasks_lock)
+                                        self.starting, self._job_tasks_lock,
+                                        self._starting_signal, pool)
 
             async with self._job_tasks_lock:
                 if job_id in self.job_tasks:
@@ -860,7 +908,8 @@ class Controller:
 
             await self._cleanup(job_id,
                                 dag_yaml=dag_yaml,
-                                job_logger=job_logger)
+                                job_logger=job_logger,
+                                pool=pool)
             job_logger.info(
                 f'Cluster of managed job {job_id} has been cleaned up.')
 
@@ -897,6 +946,10 @@ class Controller:
                     # just in case we were cancelled or some other error
                     # occurred during launch
                     self.starting.remove(job_id)
+                    # its fine if we notify again, better to wake someone up
+                    # and have them go to sleep again, then have some stuck
+                    # sleeping.
+                    self._starting_signal.notify()
                 except KeyError:
                     pass
 
@@ -910,6 +963,7 @@ class Controller:
         job_id: int,
         dag_yaml: str,
         env_file_path: Optional[str] = None,
+        pool: Optional[str] = None,
     ):
         """Start a new job.
 
@@ -943,7 +997,8 @@ class Controller:
                         f'env_file_path={env_file_path}')
 
         await create_background_task(
-            self.run_job_loop(job_id, dag_yaml, job_logger, env_file_path))
+            self.run_job_loop(job_id, dag_yaml, job_logger, env_file_path,
+                              pool))
 
         job_logger.info(f'Job {job_id} started successfully')
 
@@ -966,7 +1021,7 @@ class Controller:
 
                         os.remove(f'{jobs_constants.CONSOLIDATED_SIGNAL_PATH}/'
                                   f'{job_id}')
-            await asyncio.sleep(1)
+            await asyncio.sleep(15)
 
     async def monitor_loop(self):
         """Monitor the job loop."""
@@ -1025,6 +1080,7 @@ class Controller:
             job_id = waiting_job['job_id']
             dag_yaml_path = waiting_job['dag_yaml_path']
             env_file_path = waiting_job.get('env_file_path')
+            pool = waiting_job.get('pool', None)
 
             cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
             if str(job_id) in cancels:
@@ -1040,11 +1096,7 @@ class Controller:
                         job_id=job_id, task_id=None, task=None))
                 continue
 
-            # here we need to sync, because we are modifying it
-            async with self._job_tasks_lock:
-                self.starting.add(job_id)
-
-            await self.start_job(job_id, dag_yaml_path, env_file_path)
+            await self.start_job(job_id, dag_yaml_path, env_file_path, pool)
 
 
 async def main():
