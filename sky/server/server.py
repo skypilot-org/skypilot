@@ -48,7 +48,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
-from sky.server import responses
+from sky.schemas.api import responses
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
