@@ -1,4 +1,4 @@
-"""fix initial schema
+"""fix initial revision
 
 Revision ID: 003
 Revises: 002
