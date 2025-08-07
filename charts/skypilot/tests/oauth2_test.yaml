@@ -394,7 +394,7 @@ tests:
             valueFrom:
               secretKeyRef:
                 name: "redis-credentials"
-                key: "redis-url"
+                key: "redis_url"
 
 
   - it: should not create redis when redis-secret is configured
