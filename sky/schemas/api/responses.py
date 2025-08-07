@@ -45,6 +45,15 @@ class DictLikeModel(pydantic.BaseModel):
     def __contains__(self, key):
         return hasattr(self, key)
 
+    def keys(self):
+        return self.model_dump().keys()
+
+    def values(self):
+        return self.model_dump().values()
+
+    def items(self):
+        return self.model_dump().items()
+
 
 class APIHealthResponse(DictLikeModel):
     """Response for the API health endpoint."""
