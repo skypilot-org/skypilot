@@ -28,19 +28,19 @@ def upgrade() -> None:
                                              'storage_mounts_metadata',
                                              sa.LargeBinary(),
                                              server_default=None)
-        # Set the value to replace existing entries to 1 so that all the existing clusters 
-        # before #2977 are considered as ever up, i.e:
+        # Set the value to replace existing entries to 1 so that all the
+        # existing clusters before #2977 are considered as ever up, i.e:
         #   existing cluster's default (null) -> 1;
         #   new cluster's default -> 0;
         # This is conservative for the existing clusters: even if some INIT
         # clusters were never really UP, setting it to 1 means they won't be
         # auto-deleted during any failover.
-        db_utils.add_column_to_table_alembic('clusters',
-                                             'cluster_ever_up',
-                                             sa.Integer(),
-                                             server_default='0',
-                                             value_to_replace_existing_entries='1'
-                                             )
+        db_utils.add_column_to_table_alembic(
+            'clusters',
+            'cluster_ever_up',
+            sa.Integer(),
+            server_default='0',
+            value_to_replace_existing_entries=1)
         db_utils.add_column_to_table_alembic('clusters',
                                              'status_updated_at',
                                              sa.Integer(),
