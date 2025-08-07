@@ -210,5 +210,5 @@ if sys.version_info < (3, 10):
 else:
     extras_require['all'] = sum(extras_require.values(), [])
 
-# Separate from 'all'
+# Intentionally separated from 'all'
 extras_require['dev'] = dev_dependencies
