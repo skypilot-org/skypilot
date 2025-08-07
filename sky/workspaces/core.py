@@ -95,6 +95,169 @@ def _validate_workspace_config(workspace_name: str,
         raise ValueError(str(e)) from e
 
 
+def _compare_workspace_configs(current_config: Dict[str, Any],
+                               new_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Compare current and new workspace configurations.
+
+    Args:
+        current_config: The current workspace configuration.
+        new_config: The new workspace configuration.
+
+    Returns:
+        A dictionary containing:
+        - 'only_user_access_changes': bool - True if only allowed_users
+          or private changed
+        - 'private_changed': bool - True if private setting changed
+        - 'private_old': bool - Old private setting value
+        - 'private_new': bool - New private setting value
+        - 'allowed_users_changed': bool - True if allowed_users changed
+        - 'allowed_users_old': List[str] - Old allowed users
+        - 'allowed_users_new': List[str] - New allowed users
+        - 'removed_users': List[str] - Users removed from allowed_users
+        - 'added_users': List[str] - Users added to allowed_users
+    """
+    # Get private settings
+    private_old = current_config.get('private', False)
+    private_new = new_config.get('private', False)
+    private_changed = private_old != private_new
+
+    # Get allowed users (resolve to user IDs for comparison)
+    allowed_users_old = workspaces_utils.get_workspace_users(
+        current_config) if private_old else []
+    allowed_users_new = workspaces_utils.get_workspace_users(
+        new_config) if private_new else []
+
+    # Convert to sets for easier comparison
+    old_users_set = set(allowed_users_old) if allowed_users_old != ['*'
+                                                                   ] else set()
+    new_users_set = set(allowed_users_new) if allowed_users_new != ['*'
+                                                                   ] else set()
+
+    allowed_users_changed = old_users_set != new_users_set
+    removed_users = list(old_users_set - new_users_set)
+    added_users = list(new_users_set - old_users_set)
+
+    # Check if only user access related fields changed
+    # Create copies without the user access fields for comparison
+    current_without_access = {
+        k: v
+        for k, v in current_config.items()
+        if k not in ['private', 'allowed_users']
+    }
+    new_without_access = {
+        k: v
+        for k, v in new_config.items()
+        if k not in ['private', 'allowed_users']
+    }
+
+    only_user_access_changes = current_without_access == new_without_access
+
+    return {
+        'only_user_access_changes': only_user_access_changes,
+        'private_changed': private_changed,
+        'private_old': private_old,
+        'private_new': private_new,
+        'allowed_users_changed': allowed_users_changed,
+        'allowed_users_old': allowed_users_old,
+        'allowed_users_new': allowed_users_new,
+        'removed_users': removed_users,
+        'added_users': added_users
+    }
+
+
+def _validate_workspace_config_changes(workspace_name: str,
+                                       current_config: Dict[str, Any],
+                                       new_config: Dict[str, Any]) -> None:
+    """Validate workspace configuration changes based on active resources.
+
+    This function implements the logic described in the comments:
+    - If only allowed_users or private changed:
+      - If private changed from true to false: allow it
+      - If private changed from false to true: check that all active resources
+        belong to allowed_users
+      - If private didn't change: check that removed users don't have active
+        resources
+    - Otherwise: check that workspace has no active resources
+
+    Args:
+        workspace_name: The name of the workspace.
+        current_config: The current workspace configuration.
+        new_config: The new workspace configuration.
+
+    Raises:
+        ValueError: If the configuration change is not allowed due to active
+        resources.
+    """
+    config_comparison = _compare_workspace_configs(current_config, new_config)
+    logger.info(f'daniel echo: Config comparison: {config_comparison}')
+
+    if config_comparison['only_user_access_changes']:
+        # Only user access settings changed
+        if config_comparison['private_changed']:
+            if config_comparison[
+                    'private_old'] and not config_comparison['private_new']:
+                # Changed from private to public - always allow
+                logger.info(
+                    f'Workspace {workspace_name!r} changed from private to'
+                    f' public.')
+                return
+            elif not config_comparison['private_old'] and config_comparison[
+                    'private_new']:
+                # Changed from public to private - check that all active
+                # resources belong to the new allowed users
+                logger.info(
+                    f'Workspace {workspace_name!r} changed from public to'
+                    f' private. Checking that all active resources belong'
+                    f' to allowed users.')
+
+                error_summary, missed_users_names = (
+                    resource_checker.check_users_workspaces_active_resources(
+                        config_comparison['allowed_users_new'],
+                        [workspace_name]))
+                logger.info(f'daniel echo: Error summary: {error_summary}')
+                logger.info(
+                    f'daniel echo: Missed users names: {missed_users_names}')
+                if error_summary:
+                    error_msg=f'Cannot change workspace {workspace_name!r}' \
+                    f' to private '
+                    if missed_users_names:
+                        missed_users_list = ', '.join(missed_users_names)
+                        if len(missed_users_names) == 1:
+                            error_msg += f'because the user ' \
+                            f'{missed_users_list!r} has {error_summary}'
+                        else:
+                            error_msg += f'because the users ' \
+                            f'{missed_users_list!r} have {error_summary}'
+                        error_msg += ' but not in the allowed_users list.' \
+                        ' Please either add the users to allowed_users or' \
+                        ' ask them to terminate their resources.'
+                    raise ValueError(error_msg)
+        else:
+            # Private setting didn't change, but allowed_users changed
+            if (config_comparison['allowed_users_changed'] and
+                    config_comparison['removed_users']):
+                # Check that removed users don't have active resources
+                logger.info(
+                    f'Checking that removed users'
+                    f' {config_comparison["removed_users"]} do not have'
+                    f' active resources in workspace {workspace_name!r}.')
+                user_operations = []
+                for user_id in config_comparison['removed_users']:
+                    user_operations.append((user_id, 'remove'))
+                resource_checker.check_no_active_resources_for_users(
+                    user_operations)
+    else:
+        # Other configuration changes - check that workspace has no active
+        # resources
+        logger.info(
+            f'Non-user-access configuration changes detected for'
+            f' workspace {workspace_name!r}. Checking that workspace has'
+            f' no active resources.')
+        resource_checker.check_no_active_resources_for_workspaces([
+            (workspace_name, 'update')
+        ])
+
+
 @usage_lib.entrypoint
 def update_workspace(workspace_name: str, config: Dict[str,
                                                        Any]) -> Dict[str, Any]:
@@ -109,17 +272,31 @@ def update_workspace(workspace_name: str, config: Dict[str,
 
     Raises:
         ValueError: If the workspace configuration is invalid, or if there are
-            active clusters or managed jobs in the workspace.
+            active clusters or managed jobs that prevent the configuration
+            change.
+            The validation logic depends on what changed:
+            - If only allowed_users or private changed:
+              - Private true->false: Always allowed
+              - Private false->true: All active resources must belong to
+                allowed_users
+              - allowed_users changes: Removed users must not have active
+                resources
+            - Other changes: Workspace must have no active resources
         FileNotFoundError: If the config file cannot be found.
         PermissionError: If the config file cannot be written.
     """
     _validate_workspace_config(workspace_name, config)
 
-    # Check for active clusters and managed jobs in the workspace
-    # TODO(zhwu): we should allow the edits that only contain changes to
-    # allowed_users or private.
-    resource_checker.check_no_active_resources_for_workspaces([(workspace_name,
-                                                                'update')])
+    # Get the current workspace configuration for comparison
+    current_workspaces = skypilot_config.get_nested(('workspaces',),
+                                                    default_value={})
+    current_config = current_workspaces.get(workspace_name, {})
+
+    # Only validate changes if the workspace already exists
+    if current_config:
+        # Validate the configuration changes based on active resources
+        _validate_workspace_config_changes(workspace_name, current_config,
+                                           config)
 
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
