@@ -18,7 +18,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
-                    TypeVar, Union)
+                    Union)
 
 import colorama
 import grpc
@@ -84,7 +84,6 @@ if typing.TYPE_CHECKING:
     from sky import dag
 
 Path = str
-T = TypeVar('T')
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = constants.SKY_REMOTE_WORKDIR
@@ -4842,7 +4841,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 down=down,
             )
             try:
-                self._invoke_skylet_with_retries(
+                backend_utils.invoke_skylet_with_retries(
                     handle, lambda: SkyletClient(handle.get_grpc_channel()).
                     set_autostop(request))
             except Exception:  # pylint: disable=broad-except
@@ -4888,7 +4887,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return False
         try:
             request = autostop_pb2.IsAutostoppingRequest()
-            response = self._invoke_skylet_with_retries(
+            response = backend_utils.invoke_skylet_with_retries(
                 handle, lambda: SkyletClient(handle.get_grpc_channel()).
                 is_autostopping(request))
             return response.is_autostopping
@@ -4906,48 +4905,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          f'{returncode}: {stdout+stderr}\n'
                          f'Command: {code}')
             return False
-
-    def _invoke_skylet_with_retries(self, handle: CloudVmRayResourceHandle,
-                                    func: Callable[..., T]) -> T:
-        """Generic helper for making Skylet gRPC requests.
-
-        This method handles the common pattern of:
-        1. Try the gRPC request
-        2. If SSH tunnel is closed, recreate it and retry
-        """
-        max_attempts = 3
-        backoff = common_utils.Backoff(initial_backoff=0.5)
-        last_exception: Optional[Exception] = None
-
-        for _ in range(max_attempts):
-            try:
-                return func()
-            except grpc.RpcError as e:
-                last_exception = e
-                if e.code() == grpc.StatusCode.INTERNAL:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.SkyletInternalError(e.details())
-                elif e.code() == grpc.StatusCode.UNAVAILABLE:
-                    recreate_tunnel = True
-                    try:
-                        if handle.skylet_ssh_tunnel is not None:
-                            proc = psutil.Process(handle.skylet_ssh_tunnel.pid)
-                            if proc.is_running(
-                            ) and proc.status() != psutil.STATUS_ZOMBIE:
-                                recreate_tunnel = False
-                    except psutil.NoSuchProcess:
-                        pass
-
-                    if recreate_tunnel:
-                        handle.open_and_update_skylet_tunnel()
-
-                    time.sleep(backoff.current_backoff())
-                else:
-                    raise e
-
-        raise RuntimeError(
-            f'Failed to invoke Skylet after {max_attempts} attempts'
-        ) from last_exception
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.

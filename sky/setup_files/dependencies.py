@@ -88,6 +88,8 @@ local_ray = [
     'ray[default] >= 2.2.0, != 2.6.0',
 ]
 
+# See requirements-dev.txt for the version of grpc and protobuf
+# used to generate the code during development.
 remote = [
     # The grpc version at runtime has to be newer than the version
     # used to generate the code.

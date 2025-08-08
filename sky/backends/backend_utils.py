@@ -13,11 +13,14 @@ import sys
 import tempfile
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
+                    TypeVar, Union)
 import uuid
 
 import colorama
+import grpc
 from packaging import version
+import psutil
 from typing_extensions import Literal
 
 import sky
@@ -3324,3 +3327,49 @@ def cluster_status_lock_id(cluster_name: str) -> str:
 def cluster_file_mounts_lock_id(cluster_name: str) -> str:
     """Get the lock ID for cluster file mounts operations."""
     return f'{cluster_name}_file_mounts'
+
+
+T = TypeVar('T')
+
+
+def invoke_skylet_with_retries(
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+        func: Callable[..., T]) -> T:
+    """Generic helper for making Skylet gRPC requests.
+
+    This method handles the common pattern of:
+    1. Try the gRPC request
+    2. If SSH tunnel is closed, recreate it and retry
+    """
+    max_attempts = 3
+    backoff = common_utils.Backoff(initial_backoff=0.5)
+    last_exception: Optional[Exception] = None
+
+    for _ in range(max_attempts):
+        try:
+            return func()
+        except grpc.RpcError as e:
+            last_exception = e
+            if e.code() == grpc.StatusCode.INTERNAL:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.SkyletInternalError(e.details())
+            elif e.code() == grpc.StatusCode.UNAVAILABLE:
+                recreate_tunnel = True
+                try:
+                    if handle.skylet_ssh_tunnel is not None:
+                        proc = psutil.Process(handle.skylet_ssh_tunnel.pid)
+                        if proc.is_running(
+                        ) and proc.status() != psutil.STATUS_ZOMBIE:
+                            recreate_tunnel = False
+                except psutil.NoSuchProcess:
+                    pass
+
+                if recreate_tunnel:
+                    handle.open_and_update_skylet_tunnel()
+
+                time.sleep(backoff.current_backoff())
+            else:
+                raise e
+
+    raise RuntimeError(f'Failed to invoke Skylet after {max_attempts} attempts'
+                      ) from last_exception
