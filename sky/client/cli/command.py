@@ -1658,11 +1658,10 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     # The endpoint request is relatively fast, so we don't add special handling
     # for keyboard interrupt and abort the request to avoid additional latency.
     if show_endpoints:
-        assert isinstance(endpoint, int)
         if endpoint:
             request_id = sdk.endpoints(cluster_record['name'], endpoint)
             cluster_endpoints = sdk.stream_and_get(request_id)
-            cluster_endpoint = cluster_endpoints.get(endpoint, None)
+            cluster_endpoint = cluster_endpoints.get(str(endpoint), None)
             if not cluster_endpoint:
                 raise click.Abort(f'Endpoint {endpoint} not found for cluster '
                                   f'{cluster_record["name"]!r}.')
