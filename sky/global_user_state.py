@@ -100,6 +100,7 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('last_creation_command',
                       sqlalchemy.Text,
                       server_default=None),
+    sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
 )
 
 storage_table = sqlalchemy.Table(
@@ -428,7 +429,8 @@ def add_or_update_cluster(cluster_name: str,
                           ready: bool,
                           is_launch: bool = True,
                           config_hash: Optional[str] = None,
-                          task_config: Optional[Dict[str, Any]] = None):
+                          task_config: Optional[Dict[str, Any]] = None,
+                          is_managed: bool = False):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -441,6 +443,8 @@ def add_or_update_cluster(cluster_name: str,
             and last_use will be updated. Otherwise, use the old value.
         config_hash: Configuration hash for the cluster.
         task_config: The config of the task being launched.
+        is_managed: Whether the cluster is launched by the
+            controller.
     """
     assert _SQLALCHEMY_ENGINE is not None
     # FIXME: launched_at will be changed when `sky launch -c` is called.
@@ -544,6 +548,7 @@ def add_or_update_cluster(cluster_name: str,
             cluster_hash=cluster_hash,
             # set storage_mounts_metadata to server default (null)
             status_updated_at=status_updated_at,
+            is_managed=int(is_managed),
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
             index_elements=[cluster_table.c.name],
@@ -965,6 +970,7 @@ def get_cluster_from_name(
         'workspace': row.workspace,
         'last_creation_yaml': row.last_creation_yaml,
         'last_creation_command': row.last_creation_command,
+        'is_managed': bool(row.is_managed),
     }
 
     return record
@@ -1003,6 +1009,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'workspace': row.workspace,
             'last_creation_yaml': row.last_creation_yaml,
             'last_creation_command': row.last_creation_command,
+            'is_managed': bool(row.is_managed),
         }
 
         records.append(record)

@@ -1,7 +1,7 @@
 """Implementation of SDK for SkyServe."""
 import json
 import typing
-from typing import List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import click
 
@@ -25,7 +25,7 @@ def up(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[Tuple[str, str]]:
     assert not pool, 'Command `up` is not supported for pool.'
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -69,7 +69,7 @@ def update(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     assert not pool, 'Command `update` is not supported for pool.'
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -112,7 +112,7 @@ def apply(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     assert pool, 'Command `apply` is only supported for pool.'
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -153,7 +153,7 @@ def down(
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False,
     pool: bool = False,
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     if pool:
         body = payloads.JobsPoolDownBody(
             pool_names=service_names,
@@ -177,7 +177,7 @@ def down(
 def status(
     service_names: Optional[Union[str, List[str]]],
     pool: bool = False,
-) -> server_common.RequestId:
+) -> server_common.RequestId[List[Dict[str, Any]]]:
     if pool:
         body = payloads.JobsPoolStatusBody(pool_names=service_names)
     else:
@@ -222,7 +222,8 @@ def tail_logs(service_name: str,
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
         stream=True)
-    request_id = server_common.get_request_id(response)
+    request_id: server_common.RequestId[None] = server_common.get_request_id(
+        response)
     return sdk.stream_response(request_id=request_id,
                                response=response,
                                output_stream=output_stream,
@@ -265,7 +266,9 @@ def sync_down_logs(service_name: str,
         '/jobs/pool_sync-down-logs' if pool else '/serve/sync-down-logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
-    remote_dir = sdk.stream_and_get(server_common.get_request_id(response))
+    request_id: server_common.RequestId[str] = server_common.get_request_id(
+        response)
+    remote_dir = sdk.stream_and_get(request_id)
 
     # Download from API server paths to the client's local_dir
     client_common.download_logs_from_api_server([remote_dir], remote_dir,
