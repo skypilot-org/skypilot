@@ -13,7 +13,6 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
-import psutil
 import requests
 
 import sky
@@ -50,10 +49,6 @@ _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 _RETRY_INIT_GAP_SECONDS = 60
 _DEFAULT_DRAIN_SECONDS = 120
-
-# Since sky.launch is very resource demanding, we limit the number of
-# concurrent sky.launch process to avoid overloading the machine.
-_MAX_NUM_LAUNCH = psutil.cpu_count() * 2
 
 
 # TODO(tian): Combine this with
@@ -989,8 +984,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 schedule_next_jobs = False
                 if info.status == serve_state.ReplicaStatus.PENDING:
                     # sky.launch not started yet
-                    if (serve_state.total_number_provisioning_replicas() <
-                            _MAX_NUM_LAUNCH):
+                    if jobs_scheduler.can_provision(pool=self._is_pool):
                         p.start()
                         info.status_property.sky_launch_status = (
                             ProcessStatus.RUNNING)
