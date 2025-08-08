@@ -5,6 +5,8 @@ import { showToast } from '@/data/connectors/toast';
 import { apiClient } from '@/data/connectors/client';
 import dashboardCache from '@/lib/cache';
 
+const DEFAULT_TAIL_LINES = 10000;
+
 /**
  * Truncates a string in the middle, preserving parts from beginning and end.
  * @param {string} str - The string to truncate
@@ -185,7 +187,7 @@ export async function streamClusterJobLogs({
         follow: false,
         cluster_name: clusterName,
         job_id: jobId,
-        tail: 1000,
+        tail: DEFAULT_TAIL_LINES,
         override_skypilot_config: {
           active_workspace: workspace || 'default',
         },
