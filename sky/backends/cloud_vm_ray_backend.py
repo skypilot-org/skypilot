@@ -1365,12 +1365,6 @@ class RetryingVmProvisioner(object):
         # the instance type in the target region. If not, fail early
         # instead of trying to provision and failing later.
         try:
-            # Add cluster event for quota check
-            global_user_state.add_cluster_event(
-                cluster_name, 
-                status_lib.ClusterStatus.INIT, 
-                "Checking if user has quota for requested resources."
-            )
             need_provision = to_provision.cloud.check_quota_available(
                 to_provision)
 
@@ -1525,6 +1519,14 @@ class RetryingVmProvisioner(object):
                 cluster_handle=handle,
                 requested_resources=requested_resources,
                 ready=False,
+            )
+
+            # Add cluster event for actual provisioning start
+            global_user_state.add_cluster_event(
+                cluster_name, 
+                status_lib.ClusterStatus.INIT, 
+                f"Provisioning on {to_provision.cloud.display_name()}" +
+                f"in {to_provision.region}"
             )
 
             global_user_state.set_owner_identity_for_cluster(
@@ -2923,13 +2925,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # exceptions.ClusterOwnerIdentityMismatchError
         backend_utils.check_owner_identity(cluster_name)
         
-        # Add cluster event for provisioning start
-        global_user_state.add_cluster_event(
-            cluster_name, 
-            status_lib.ClusterStatus.INIT, 
-            "Starting cluster provisioning process"
-        )
-        
         lock_id = backend_utils.cluster_status_lock_id(cluster_name)
         with timeline.DistributedLockEvent(lock_id):
             # Try to launch the exiting cluster first. If no existing cluster,
@@ -2951,14 +2946,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with timeline.Event('backend.provision.wheel_build'):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
-                
-                # Add cluster event for wheel building completion
-                global_user_state.add_cluster_event(
-                    cluster_name, 
-                    status_lib.ClusterStatus.INIT, 
-                    "Building SkyPilot wheel package for deployment"
-                )
-
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
@@ -2987,13 +2974,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     log_path = os.path.join(self.log_dir, 'provision.log')
                     rich_utils.force_update_status(
                         ux_utils.spinner_message('Launching', log_path))
-                    
-                    # Add cluster event for actual provisioning start
-                    global_user_state.add_cluster_event(
-                        cluster_name, 
-                        status_lib.ClusterStatus.INIT, 
-                        f"Launching instances on {to_provision_config.resources.cloud.display_name()} in {to_provision_config.resources.region}"
-                    )
                     
                     config_dict = retry_provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs,
