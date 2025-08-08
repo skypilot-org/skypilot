@@ -1698,13 +1698,12 @@ def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
 
 
 @_init_db
-def get_service_account_tokens_by_sa_user_id(
-        service_account_user_id: str) -> List[Dict[str, Any]]:
-    """Get all service account tokens for a service account."""
+def get_tokens_by_user_id(user_id: str) -> List[Dict[str, Any]]:
+    """Get all tokens for a user."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(service_account_token_table).filter_by(
-            service_account_user_id=service_account_user_id).all()
+            service_account_user_id=user_id).all()
     return [{
         'token_id': row.token_id,
         'token_name': row.token_name,
@@ -1741,6 +1740,21 @@ def delete_service_account_token(token_id: str) -> bool:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         result = session.query(service_account_token_table).filter_by(
             token_id=token_id).delete()
+        session.commit()
+    return result > 0
+
+
+@_init_db
+def delete_tokens_by_user_id(user_id: str) -> bool:
+    """Delete tokens by user id.
+
+    Returns:
+        True if token was found and deleted.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.query(service_account_token_table).filter_by(
+            service_account_user_id=user_id).delete()
         session.commit()
     return result > 0
 

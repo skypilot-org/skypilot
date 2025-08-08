@@ -37,6 +37,7 @@ from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.server import rest
 from sky.server import versions
+from sky.server.auth import utils as auth_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.users import rbac
@@ -513,10 +514,76 @@ def get_request_id(response: 'requests.Response') -> RequestId[T]:
     return RequestId[T](request_id)
 
 
-def _initialize_jwt_secret():
-    sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
-                                'false').lower()
-    if sa_enabled != 'true':
+def _create_token(
+    creator_user_id: str,
+    service_account_user_id: str,
+    token_name: str,
+    expires_in_days: int,
+) -> Dict[str, Any]:
+    token_service = token_lib.TokenService()
+    initial_token = token_service.create_token(
+        creator_user_id=creator_user_id,
+        service_account_user_id=service_account_user_id,
+        token_name=token_name,
+        expires_in_days=expires_in_days)
+    global_user_state.add_service_account_token(
+        token_id=initial_token['token_id'],
+        token_name=token_name,
+        token_hash=initial_token['token_hash'],
+        creator_user_hash=creator_user_id,
+        service_account_user_id=service_account_user_id,
+        expires_at=initial_token['expires_at'])
+    return initial_token
+
+
+def _create_user_and_token(
+    user_id: str,
+    user_name: str,
+    creator_user_id: str,
+    expires_in_days: int,
+) -> Dict[str, Any]:
+    initial_token = _create_token(
+        creator_user_id=creator_user_id,
+        service_account_user_id=user_id,
+        token_name=user_name,
+        expires_in_days=expires_in_days,
+    )
+
+    service_account_user = models.User(id=user_id, name=user_name)
+    global_user_state.add_or_update_user(service_account_user,
+                                         allow_duplicate_name=False)
+    permission_service.update_role(user_id, rbac.RoleName.ADMIN.value)
+    return initial_token
+
+
+def _initialize_token_for_existing_users():
+    """Initialize token for existing users."""
+    # If OAuth2 proxy is enabled, we don't need to initialize token
+    # for existing users.
+    if auth_utils.is_oauth2_proxy_enabled():
+        return
+
+    users = global_user_state.get_all_users()
+    for user in users:
+        # Check if any token exists for the user.
+        tokens = global_user_state.get_tokens_by_user_id(user.id)
+        if len(tokens) > 0:
+            logger.info(
+                f'Token already exists for user {user.name} ({user.id}),'
+                ' skipping generation')
+            continue
+        logger.info(f'Creating token for user {user.name} ({user.id})')
+        _create_token(
+            creator_user_id=constants.SKYPILOT_SYSTEM_USER_ID,
+            service_account_user_id=user.id,
+            token_name=user.name,
+            expires_in_days=constants.SKYPILOT_SYSTEM_SA_TOKEN_DURATION_DAYS,
+        )
+
+
+def _initialize_tokens():
+    """Initialize tokens for the system service account and existing users."""
+    if not common_utils.is_service_account_token_enabled():
         return
 
     # Check if file exists and is not empty
@@ -527,8 +594,7 @@ def _initialize_jwt_secret():
         )
         return
 
-    token_service = token_lib.TokenService()
-    tokens = global_user_state.get_service_account_tokens_by_sa_user_id(
+    tokens = global_user_state.get_tokens_by_user_id(
         constants.SKYPILOT_SYSTEM_SA_ID)
     if len(tokens) > 0:
         logger.debug(f'Initial token has been generated for '
@@ -536,25 +602,14 @@ def _initialize_jwt_secret():
         return
 
     logger.info(f'Creating initial token for {constants.SKYPILOT_SYSTEM_SA_ID}')
-    initial_token = token_service.create_token(
+    initial_token = _create_user_and_token(
         creator_user_id=constants.SKYPILOT_SYSTEM_USER_ID,
-        service_account_user_id=constants.SKYPILOT_SYSTEM_SA_ID,
-        token_name=constants.SKYPILOT_SYSTEM_SA_ID,
-        expires_in_days=constants.SKYPILOT_SYSTEM_SA_TOKEN_DURATION_DAYS)
-    global_user_state.add_service_account_token(
-        token_id=initial_token['token_id'],
-        token_name=constants.SKYPILOT_SYSTEM_SA_ID,
-        token_hash=initial_token['token_hash'],
-        creator_user_hash=constants.SKYPILOT_SYSTEM_USER_ID,
-        service_account_user_id=constants.SKYPILOT_SYSTEM_SA_ID,
-        expires_at=initial_token['expires_at'])
+        user_id=constants.SKYPILOT_SYSTEM_SA_ID,
+        user_name=constants.SKYPILOT_SYSTEM_SA_ID,
+        expires_in_days=constants.SKYPILOT_SYSTEM_SA_TOKEN_DURATION_DAYS,
+    )
 
-    service_account_user = models.User(id=constants.SKYPILOT_SYSTEM_SA_ID,
-                                       name=constants.SKYPILOT_SYSTEM_SA_ID)
-    global_user_state.add_or_update_user(service_account_user,
-                                         allow_duplicate_name=False)
-    permission_service.update_role(constants.SKYPILOT_SYSTEM_SA_ID,
-                                   rbac.RoleName.ADMIN.value)
+    _initialize_token_for_existing_users()
 
     # Create the directory if it doesn't exist
     os.makedirs(os.path.dirname(token_path), exist_ok=True)
@@ -564,10 +619,12 @@ def _initialize_jwt_secret():
     return
 
 
-# This function is used to do some initialization before the API server
-# workers start e.g. generate the initial system service account token.
 def _initialize_before_workers_start():
-    _initialize_jwt_secret()
+    """Initialize before the API server workers start, e.g. generate
+       the initial system service account token and create tokens for
+       existing users.
+    """
+    _initialize_tokens()
 
 
 def _start_api_server(deploy: bool = False,
