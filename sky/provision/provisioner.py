@@ -67,11 +67,6 @@ def _bulk_provision(
                                            cluster_name.name_on_cloud,
                                            bootstrap_config)
     # Add cluster event for instance status check
-    global_user_state.add_cluster_event(
-        str(cluster_name), 
-        status_lib.ClusterStatus.INIT, 
-        "Starting instances."
-    )
     provision_record = provision.run_instances(provider_name,
                                                region_name,
                                                cluster_name.name_on_cloud,
@@ -104,6 +99,13 @@ def _bulk_provision(
     logger.debug(
         f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
         f'seconds.')
+
+    # Add cluster event for provisioning completion
+    global_user_state.add_cluster_event(
+        str(cluster_name), 
+        status_lib.ClusterStatus.INIT, 
+        f"Instances launched on {cloud.display_name()} in {region}"
+    )
 
     return provision_record
 
