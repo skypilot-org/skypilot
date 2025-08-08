@@ -858,6 +858,47 @@ def tail_logs(cluster_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@rest.retry_transient_errors()
+def tail_provision_logs(cluster_name: str,
+                        follow: bool = True,
+                        tail: int = 0,
+                        output_stream: Optional['io.TextIOBase'] = None) -> int:
+    """Tails the provisioning logs (provision.log) for a cluster.
+
+    Args:
+        cluster_name: name of the cluster.
+        follow: follow the logs.
+        tail: lines from end to tail.
+        output_stream: optional stream to write logs.
+    Returns:
+        Exit code 0 on streaming success; raises on HTTP error.
+    """
+    body = payloads.ClusterNameBody(cluster_name=cluster_name)
+    params = {
+        'follow': str(follow).lower(),
+        'tail': tail,
+    }
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/provision_logs',
+        json=json.loads(body.model_dump_json()),
+        params=params,
+        stream=True,
+        timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
+                 None))
+    # Provision logs are not tied to an API request id for tailing
+    # Do not use resumable mode since this stream has no request_id context.
+    # Stream and then return 0 to indicate success.
+    stream_response(request_id=None,
+                    response=response,
+                    output_stream=output_stream,
+                    resumable=False)
+    return 0
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
 def download_logs(cluster_name: str,
                   job_ids: Optional[List[str]]) -> Dict[str, str]:
     """Downloads the logs of jobs.
