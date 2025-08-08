@@ -121,6 +121,7 @@ CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 _CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
+WORKSPACE_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -3340,3 +3341,8 @@ def cluster_status_lock_id(cluster_name: str) -> str:
 def cluster_file_mounts_lock_id(cluster_name: str) -> str:
     """Get the lock ID for cluster file mounts operations."""
     return f'{cluster_name}_file_mounts'
+
+
+def workspace_lock_id(workspace_name: str) -> str:
+    """Get the lock ID for workspace operations."""
+    return f'{workspace_name}_workspace'
