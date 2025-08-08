@@ -176,7 +176,7 @@ def check_users_workspaces_active_resources(
         for job in all_managed_jobs:
             user_hash = job.get('user_hash')
             if user_hash and user_hash not in user_ids:
-                missed_users.add(job.get('user_hash'))
+                missed_users.add(user_hash)
                 active_job_names.append(str(job['job_id']))
         if active_job_names:
             job_list = ', '.join(active_job_names)
