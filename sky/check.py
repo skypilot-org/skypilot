@@ -34,7 +34,8 @@ def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
     # clouds. Also validate names with get_cloud_tuple.
     config_allowed_cloud_names = skypilot_config.get_nested(
         ('allowed_clouds',),
-        [repr(c) for c in registry.CLOUD_REGISTRY.values()] + [cloudflare.NAME, coreweave.NAME])
+        [repr(c) for c in registry.CLOUD_REGISTRY.values()] +
+        [cloudflare.NAME, coreweave.NAME])
     # filter out the clouds that are disabled in the workspace config
     workspace_disabled_clouds = []
     for cloud in config_allowed_cloud_names:
@@ -122,7 +123,8 @@ def check_capabilities(
                 cloud_name: str
         ) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
             # Validates cloud_name and returns a tuple of the cloud's name and
-            # the cloud object. Includes special handling for Cloudflare and CoreWeave.
+            # the cloud object. Includes special handling for Cloudflare and
+            # CoreWeave.
             if cloud_name.lower().startswith('cloudflare'):
                 return cloudflare.NAME, cloudflare
             elif cloud_name.lower().startswith('coreweave'):
@@ -222,21 +224,19 @@ def check_capabilities(
         # allowed_clouds in config.yaml, it will be disabled.
         all_enabled_clouds: Set[str] = set()
         for capability in capabilities:
-            # Cloudflare and CoreWeave are not real clouds in registry.CLOUD_REGISTRY, and
-            # should not be inserted into the DB (otherwise `sky launch` and
-            # other code would error out when it's trying to look it up in the
-            # registry).
+            # Cloudflare and CoreWeave are not real clouds in
+            # registry.CLOUD_REGISTRY, and should not be inserted into the DB
+            # (otherwise `sky launch` and other code would error out when it's
+            # trying to look it up in the registry).
             enabled_clouds_set = {
                 cloud for cloud, capabilities in enabled_clouds.items()
-                if capability in capabilities and
-                not cloud.startswith('Cloudflare') and
-                not cloud.startswith('CoreWeave')
+                if capability in capabilities and not cloud.startswith(
+                    'Cloudflare') and not cloud.startswith('CoreWeave')
             }
             disabled_clouds_set = {
                 cloud for cloud, capabilities in disabled_clouds.items()
-                if capability in capabilities and
-                not cloud.startswith('Cloudflare') and
-                not cloud.startswith('CoreWeave')
+                if capability in capabilities and not cloud.startswith(
+                    'Cloudflare') and not cloud.startswith('CoreWeave')
             }
             config_allowed_clouds_set = {
                 cloud for cloud in config_allowed_cloud_names
@@ -436,7 +436,7 @@ def get_cloud_credential_file_mounts(
     if r2_is_enabled:
         r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
-    
+
     # Similarly, handle CoreWeave storage credentials
     coreweave_is_enabled, _ = coreweave.check_storage_credentials()
     if coreweave_is_enabled:
