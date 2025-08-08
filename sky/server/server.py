@@ -318,9 +318,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                             sa_token: str, call_next):
         """Handle SkyPilot service account tokens."""
         # Check if service account tokens are enabled
-        sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
-                                    'false').lower()
-        if sa_enabled != 'true':
+        sa_enabled = common_utils.is_service_account_token_enabled()
+        if not sa_enabled:
             return fastapi.responses.JSONResponse(
                 status_code=401,
                 content={'detail': 'Service account authentication disabled'})
@@ -1611,9 +1610,8 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         'user': user.to_dict() if user is not None else None,
         'basic_auth_enabled': os.environ.get(
             constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
-        'service_account_token_enabled': os.environ.get(
-            constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS, 'false').lower() ==
-                                         'true',
+        'service_account_token_enabled':
+            (common_utils.is_service_account_token_enabled()),
     }
 
 
