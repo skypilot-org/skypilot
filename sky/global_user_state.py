@@ -1107,6 +1107,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'last_creation_command': row.last_creation_command,
             'last_event': last_event,
             'is_managed': bool(row.is_managed),
+            'last_event': last_event,
         }
 
         records.append(record)
