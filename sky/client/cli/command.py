@@ -1669,7 +1669,6 @@ def _show_endpoint(query_clusters: Optional[List[str]],
         else:
             request_id = sdk.endpoints(cluster_record['name'])
             cluster_endpoints = sdk.stream_and_get(request_id)
-            print(cluster_endpoints.items())
             assert isinstance(cluster_endpoints, dict)
             if not cluster_endpoints:
                 raise click.Abort(f'No endpoint found for cluster '
