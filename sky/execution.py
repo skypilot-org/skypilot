@@ -387,10 +387,9 @@ def _execute_dag(
                         # Add cluster event for resource optimization
                         if cluster_name is not None:
                             global_user_state.add_cluster_event(
-                                cluster_name, 
-                                status_lib.ClusterStatus.INIT, 
-                                f"Optimizing resource selection for {controller.value.name}"
-                            )
+                                cluster_name, status_lib.ClusterStatus.INIT,
+                                'Optimizing resource selection for ' +
+                                f'{controller.value.name}')
                     dag = optimizer.Optimizer.optimize(dag,
                                                        minimize=optimize_target,
                                                        quiet=_quiet_optimizer)
@@ -444,20 +443,16 @@ def _execute_dag(
             # Add cluster event for file syncing start
             if cluster_name is not None:
                 global_user_state.add_cluster_event(
-                    cluster_name, 
-                    status_lib.ClusterStatus.INIT, 
-                    "Syncing files to cluster"
-                )
+                    cluster_name, status_lib.ClusterStatus.INIT,
+                    'Syncing files to cluster')
             backend.sync_workdir(handle, task.workdir, task.envs_and_secrets)
 
         if do_file_mounts:
             # Add cluster event for file syncing completion
             if cluster_name is not None:
-                global_user_state.add_cluster_event(
-                    cluster_name, 
-                    status_lib.ClusterStatus.UP, 
-                    "Syncing file mounts"
-                )
+                global_user_state.add_cluster_event(cluster_name,
+                                                    status_lib.ClusterStatus.UP,
+                                                    'Syncing file mounts')
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
@@ -471,10 +466,8 @@ def _execute_dag(
                 # Add cluster event for setup start
                 if cluster_name is not None:
                     global_user_state.add_cluster_event(
-                        cluster_name, 
-                        status_lib.ClusterStatus.UP, 
-                        "Running setup commands to install dependencies"
-                    )
+                        cluster_name, status_lib.ClusterStatus.UP,
+                        'Running setup commands to install dependencies')
                 backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
@@ -487,15 +480,13 @@ def _execute_dag(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                
+
                 # Add cluster event for job execution start
                 if cluster_name is not None:
                     global_user_state.add_cluster_event(
-                        cluster_name, 
-                        status_lib.ClusterStatus.UP, 
-                        "Starting job execution"
-                    )
-                    
+                        cluster_name, status_lib.ClusterStatus.UP,
+                        'Starting job execution')
+
                 job_id = backend.execute(handle,
                                          task,
                                          detach_run,

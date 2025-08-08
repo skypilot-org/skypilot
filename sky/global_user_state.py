@@ -613,9 +613,9 @@ def add_or_update_cluster(cluster_name: str,
 
         session.commit()
 
+
 @_init_db
-def add_cluster_event(cluster_name: str,
-                      new_status: status_lib.ClusterStatus,
+def add_cluster_event(cluster_name: str, new_status: status_lib.ClusterStatus,
                       reason: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
@@ -631,25 +631,31 @@ def add_cluster_event(cluster_name: str,
             raise ValueError('Unsupported database dialect')
 
         cluster_row = session.query(cluster_table).filter_by(name=cluster_name)
-        last_status = cluster_row.first().status if cluster_row and cluster_row.first() is not None else None
+        last_status = cluster_row.first(
+        ).status if cluster_row and cluster_row.first() is not None else None
 
-        session.execute(insert_func(cluster_event_table).values(
-            cluster_hash=cluster_hash,
-            name=cluster_name,
-            starting_status=last_status,
-            ending_status=new_status.value,
-            reason=reason,
-            transitioned_at=int(time.time()),
-        ))
+        session.execute(
+            insert_func(cluster_event_table).values(
+                cluster_hash=cluster_hash,
+                name=cluster_name,
+                starting_status=last_status,
+                ending_status=new_status.value,
+                reason=reason,
+                transitioned_at=int(time.time()),
+            ))
         session.commit()
+
 
 def get_last_cluster_event(cluster_name: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_event_table).filter_by(name=cluster_name).order_by(cluster_event_table.c.transitioned_at.desc()).first()
+        row = session.query(cluster_event_table).filter_by(
+            name=cluster_name).order_by(
+                cluster_event_table.c.transitioned_at.desc()).first()
     if row is None:
         return None
     return row.reason
+
 
 def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
     """Returns the user hash or the current user hash, if user_hash is None.

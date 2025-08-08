@@ -102,10 +102,8 @@ def _bulk_provision(
 
     # Add cluster event for provisioning completion
     global_user_state.add_cluster_event(
-        str(cluster_name), 
-        status_lib.ClusterStatus.INIT, 
-        f"Instances launched on {cloud.display_name()} in {region}"
-    )
+        str(cluster_name), status_lib.ClusterStatus.INIT,
+        f'Instances launched on {cloud.display_name()} in {region}')
 
     return provision_record
 
@@ -183,10 +181,8 @@ def bulk_provision(
 
             # Add cluster event for teardown start
             global_user_state.add_cluster_event(
-                cluster_name, 
-                status_lib.ClusterStatus.INIT, 
-                "Cluster failed to provision. Tearing down cluster."
-            )
+                cluster_name, status_lib.ClusterStatus.INIT,
+                'Cluster failed to provision. Tearing down cluster.')
             while True:
                 try:
                     teardown_cluster(
