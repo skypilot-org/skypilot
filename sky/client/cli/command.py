@@ -2922,15 +2922,15 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
-    # TODO(tian): We also need to check pools after we allow running pools on
-    # jobs controller.
     with rich_utils.client_status(
-            '[bold cyan]Checking for in-progress managed jobs[/]'):
+            '[bold cyan]Checking for in-progress managed jobs and pools[/]'):
         try:
             request_id = managed_jobs.queue(refresh=False,
                                             skip_finished=True,
                                             all_users=True)
             managed_jobs_ = sdk.stream_and_get(request_id)
+            request_id_pools = managed_jobs.pool_status(pool_names=None)
+            pools_ = sdk.stream_and_get(request_id_pools)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -2945,6 +2945,7 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             # the controller being STOPPED or being firstly launched, i.e.,
             # there is no in-prgress managed jobs.
             managed_jobs_ = []
+            pools_ = []
         except exceptions.InconsistentConsolidationModeError:
             # If this error is raised, it means the user switched to the
             # consolidation mode but the previous controller cluster is still
@@ -2962,6 +2963,8 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
                                                 skip_finished=True,
                                                 all_users=True)
                 managed_jobs_ = sdk.stream_and_get(request_id)
+                request_id_pools = managed_jobs.pool_status(pool_names=None)
+                pools_ = sdk.stream_and_get(request_id_pools)
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'jobs controller. Please be aware of the following:'
@@ -2983,9 +2986,23 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
         else:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(msg)
+    elif pools_:
+        pool_names = ', '.join([pool['name'] for pool in pools_])
+        if purge:
+            logger.warning('--purge is set, ignoring the in-progress pools. '
+                           'This could cause leaked clusters!')
+        else:
+            msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
+                   'jobs controller is not supported, as it is currently '
+                   f'hosting the following pools: {pool_names}. Please '
+                   'terminate the pools first with '
+                   f'{colorama.Style.BRIGHT}sky jobs pool down -a'
+                   f'{colorama.Style.RESET_ALL}.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(msg)
     else:
-        click.echo(' * No in-progress managed jobs found. It should be safe to '
-                   'terminate (see caveats above).')
+        click.echo(' * No in-progress managed jobs or pools found. It should be'
+                   ' safe to terminate (see caveats above).')
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
