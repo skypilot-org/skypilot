@@ -648,16 +648,24 @@ def add_cluster_event(cluster_name: str, new_status: status_lib.ClusterStatus,
         last_status = cluster_row.first(
         ).status if cluster_row and cluster_row.first() is not None else None
 
-        session.execute(
-            insert_func(cluster_event_table).values(
-                cluster_hash=cluster_hash,
-                name=cluster_name,
-                starting_status=last_status,
-                ending_status=new_status.value,
-                reason=reason,
-                transitioned_at=int(time.time()),
-            ))
-        session.commit()
+        try:
+            session.execute(
+                insert_func(cluster_event_table).values(
+                    cluster_hash=cluster_hash,
+                    name=cluster_name,
+                    starting_status=last_status,
+                    ending_status=new_status.value,
+                    reason=reason,
+                    transitioned_at=int(time.time()),
+                ))
+            session.commit()
+        except sqlalchemy.exc.IntegrityError as e:
+            if 'UNIQUE constraint failed' in str(e):
+                # This can happen if the cluster event is added twice.
+                # We can ignore this error.
+                pass
+            else:
+                raise e
 
 
 def get_last_cluster_event(cluster_name: str) -> Optional[str]:

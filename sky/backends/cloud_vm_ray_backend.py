@@ -3017,11 +3017,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 except exceptions.ResourcesUnavailableError as e:
                     log_path = retry_provisioner.log_dir + '/provision.log'
 
-                    # Add cluster event for provisioning failure.
-                    global_user_state.add_cluster_event(
-                        cluster_name, status_lib.ClusterStatus.INIT,
-                        f'Provisioning failed: {str(e)[:100]}...')
-
                     error_message = (
                         f'{colorama.Fore.RED}Failed to provision all '
                         f'possible launchable resources.'
