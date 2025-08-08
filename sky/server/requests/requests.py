@@ -42,7 +42,8 @@ COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
-# Path to the cluster provision log (e.g., ~/sky_logs/<run_timestamp>/provision.log)
+# Path to the cluster provision log
+# (e.g., ~/sky_logs/<run_timestamp>/provision.log)
 COL_PROVISION_LOG_PATH = 'provision_log_path'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
