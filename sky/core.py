@@ -275,10 +275,10 @@ def endpoints(cluster: str,
     with rich_utils.safe_status(
             ux_utils.spinner_message(
                 f'Fetching endpoints for cluster {cluster}')):
-        endpoints = backend_utils.get_endpoints(cluster=cluster, port=port)
+        result = backend_utils.get_endpoints(cluster=cluster, port=port)
         # Convert int keys to str keys.
         # In JSON, each key must be a string.
-        return {str(k): v for k, v in endpoints.items()}
+        return {str(k): v for k, v in result.items()}
 
 
 @usage_lib.entrypoint
