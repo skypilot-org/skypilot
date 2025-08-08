@@ -42,6 +42,8 @@ COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
+# Path to the cluster provision log (e.g., ~/sky_logs/<run_timestamp>/provision.log)
+COL_PROVISION_LOG_PATH = 'provision_log_path'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
@@ -98,6 +100,7 @@ REQUEST_COLUMNS = [
     COL_STATUS_MSG,
     COL_SHOULD_RETRY,
     COL_FINISHED_AT,
+    COL_PROVISION_LOG_PATH,
 ]
 
 
@@ -132,6 +135,8 @@ class Request:
     should_retry: bool = False
     # When the request finished.
     finished_at: Optional[float] = None
+    # The absolute path to provision.log for this request, if applicable
+    provision_log_path: Optional[str] = None
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -219,6 +224,7 @@ class Request:
             status_msg=self.status_msg,
             should_retry=self.should_retry,
             finished_at=self.finished_at,
+            provision_log_path=self.provision_log_path,
         )
 
     def encode(self) -> payloads.RequestPayload:
@@ -242,6 +248,7 @@ class Request:
                 status_msg=self.status_msg,
                 should_retry=self.should_retry,
                 finished_at=self.finished_at,
+                provision_log_path=self.provision_log_path,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -275,6 +282,7 @@ class Request:
                 status_msg=payload.status_msg,
                 should_retry=payload.should_retry,
                 finished_at=payload.finished_at,
+                provision_log_path=getattr(payload, 'provision_log_path', None),
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -387,7 +395,8 @@ def create_table(cursor, conn):
         {COL_USER_ID} TEXT,
         {COL_STATUS_MSG} TEXT,
         {COL_SHOULD_RETRY} INTEGER,
-        {COL_FINISHED_AT} REAL
+        {COL_FINISHED_AT} REAL,
+        {COL_PROVISION_LOG_PATH} TEXT
         )""")
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
@@ -396,6 +405,8 @@ def create_table(cursor, conn):
                                  'INTEGER')
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_FINISHED_AT,
                                  'REAL')
+    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE,
+                                 COL_PROVISION_LOG_PATH, 'TEXT')
 
 
 _DB = None
