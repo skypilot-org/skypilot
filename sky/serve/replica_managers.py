@@ -132,10 +132,6 @@ def launch_cluster(replica_id: int,
         else:  # No exception, the launch succeeds.
             return
 
-        global_user_state.add_cluster_event(cluster_name,
-                                            None,
-                                            "Replica cluster failed to launch.")
-
         terminate_cluster(cluster_name)
         if retry_cnt >= max_retry:
             raise RuntimeError('Failed to launch the sky serve replica cluster '

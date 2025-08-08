@@ -663,7 +663,6 @@ def add_cluster_event(cluster_name: str, new_status: status_lib.ClusterStatus,
         cluster_row = session.query(cluster_table).filter_by(name=cluster_name)
         last_status = cluster_row.first(
         ).status if cluster_row and cluster_row.first() is not None else None
-        last_status = cluster_row.first().status if cluster_row and cluster_row.first() is not None else None
 
         session.execute(
             insert_func(cluster_event_table).values(
