@@ -784,3 +784,5 @@ class RequestPayload(BasePayload):
     status_msg: Optional[str] = None
     should_retry: bool = False
     finished_at: Optional[float] = None
+    # Optional path to provision.log for this request, if applicable
+    provision_log_path: Optional[str] = None
