@@ -198,6 +198,10 @@ def launch(
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(dag)
     if not managed_job_utils.is_consolidation_mode():
+        mutated_user_config.set_nested(
+            ('jobs', 'controller', 'consolidation_mode'), True)
+        mutated_user_config.set_nested(
+            ('serve', 'controller', 'consolidation_mode'), True)
         db_path = mutated_user_config.get('db', None)
         if db_path is not None:
             parsed = urlparse.urlparse(db_path)
