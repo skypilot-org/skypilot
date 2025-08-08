@@ -47,6 +47,7 @@ import os
 import sys
 import typing
 from typing import Optional, Set
+import uuid
 
 import filelock
 
@@ -124,7 +125,7 @@ def start_controller() -> None:
     logs_dir = os.path.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
-    log_path = os.path.join(logs_dir, 'controller.log')
+    log_path = os.path.join(logs_dir, f'controller_{uuid.uuid4()}.log')
 
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
     run_controller_cmd = (f'{sys.executable} -u -m'
