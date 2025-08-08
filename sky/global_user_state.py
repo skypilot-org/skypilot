@@ -615,7 +615,7 @@ def add_or_update_cluster(cluster_name: str,
 @_init_db
 def add_cluster_event(cluster_name: str,
                       new_status: status_lib.ClusterStatus,
-                      reason: str):
+                      reason: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -641,6 +641,14 @@ def add_cluster_event(cluster_name: str,
             transitioned_at=int(time.time()),
         ))
         session.commit()
+
+def get_last_cluster_event(cluster_name: str) -> Optional[str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(cluster_event_table).filter_by(name=cluster_name).order_by(cluster_event_table.c.transitioned_at.desc()).first()
+    if row is None:
+        return None
+    return row.reason
 
 def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
     """Returns the user hash or the current user hash, if user_hash is None.
@@ -1033,6 +1041,10 @@ def get_clusters() -> List[Dict[str, Any]]:
         user_hash = _get_user_hash_or_current_user(row.user_hash)
         user = get_user(user_hash)
         user_name = user.name if user is not None else None
+
+        # Make another call to get the last event.
+        last_event = get_last_cluster_event(row.name)
+
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
@@ -1055,6 +1067,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'workspace': row.workspace,
             'last_creation_yaml': row.last_creation_yaml,
             'last_creation_command': row.last_creation_command,
+            'last_event': last_event,
         }
 
         records.append(record)
