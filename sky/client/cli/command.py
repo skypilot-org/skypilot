@@ -1599,11 +1599,10 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     # The endpoint request is relatively fast, so we don't add special handling
     # for keyboard interrupt and abort the request to avoid additional latency.
     if show_endpoints:
-        assert isinstance(endpoint, int)
         if endpoint:
             request_id = sdk.endpoints(cluster_record['name'], endpoint)
             cluster_endpoints = sdk.stream_and_get(request_id)
-            cluster_endpoint = cluster_endpoints.get(endpoint, None)
+            cluster_endpoint = cluster_endpoints.get(str(endpoint), None)
             if not cluster_endpoint:
                 raise click.Abort(f'Endpoint {endpoint} not found for cluster '
                                   f'{cluster_record["name"]!r}.')
@@ -2923,6 +2922,8 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
+    # TODO(tian): We also need to check pools after we allow running pools on
+    # jobs controller.
     with rich_utils.client_status(
             '[bold cyan]Checking for in-progress managed jobs[/]'):
         try:
@@ -3019,6 +3020,21 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
             # controller being STOPPED or being firstly launched, i.e., there is
             # no in-prgress services.
             services = []
+        except exceptions.InconsistentConsolidationModeError:
+            # If this error is raised, it means the user switched to the
+            # consolidation mode but the previous controller cluster is still
+            # running. We should allow the user to tear down the controller
+            # cluster in this case.
+            with skypilot_config.override_skypilot_config(
+                {'serve': {
+                    'controller': {
+                        'consolidation_mode': False
+                    }
+                }}):
+                # Check again with the consolidation mode disabled. This is to
+                # make sure there is no in-progress services.
+                request_id = serve_lib.status(service_names=None)
+                services = sdk.stream_and_get(request_id)
 
     if services:
         service_names = [service['name'] for service in services]
