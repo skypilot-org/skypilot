@@ -37,6 +37,7 @@ from sky.skylet import job_lib
 from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
@@ -259,14 +260,43 @@ def get_service_filelock_path(pool: str) -> str:
     return str(path)
 
 
+def _validate_consolidation_mode_config(current_is_consolidation_mode: bool,
+                                        pool: bool) -> None:
+    """Validate the consolidation mode config."""
+    # Check whether the consolidation mode config is changed.
+    controller = controller_utils.get_controller_for_pool(pool).value
+    if current_is_consolidation_mode:
+        controller_cn = controller.cluster_name
+        if global_user_state.get_cluster_from_name(controller_cn) is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.InconsistentConsolidationModeError(
+                    f'{colorama.Fore.RED}Consolidation mode for '
+                    f'{controller.controller_type} is enabled, but the '
+                    f'controller cluster {controller_cn} is still running. '
+                    'Please terminate the controller cluster first.'
+                    f'{colorama.Style.RESET_ALL}')
+    else:
+        noun = 'pool' if pool else 'service'
+        all_services = [
+            svc for svc in serve_state.get_services() if svc['pool'] == pool
+        ]
+        if all_services:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.InconsistentConsolidationModeError(
+                    f'{colorama.Fore.RED}Consolidation mode for '
+                    f'{controller.controller_type} is disabled, but there are '
+                    f'still {len(all_services)} {noun}s running. Please '
+                    f'terminate those {noun}s first.{colorama.Style.RESET_ALL}')
+
+
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode(pool: bool = False) -> bool:
     # Use jobs config for pool consolidation mode.
-    controller_type = 'jobs' if pool else 'serve'
+    controller = controller_utils.get_controller_for_pool(pool).value
     consolidation_mode = skypilot_config.get_nested(
-        (controller_type, 'controller', 'consolidation_mode'),
+        (controller.controller_type, 'controller', 'consolidation_mode'),
         default_value=False)
-    # _check_consolidation_mode_consistency(consolidation_mode, pool)
+    _validate_consolidation_mode_config(consolidation_mode, pool)
     return consolidation_mode
 
 
