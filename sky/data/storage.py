@@ -62,8 +62,8 @@ STORE_ENABLED_CLOUDS: List[str] = [
     str(clouds.IBM()),
     str(clouds.OCI()),
     str(clouds.Nebius()),
-    str(clouds.CoreWeave()),
     cloudflare.NAME,
+    coreweave.NAME,
 ]
 
 # Maximum number of concurrent rsync upload processes
@@ -95,6 +95,12 @@ def get_cached_enabled_storage_cloud_names_or_refresh(
     r2_is_enabled, _ = cloudflare.check_storage_credentials()
     if r2_is_enabled:
         enabled_clouds.append(cloudflare.NAME)
+    
+    # Similarly, handle CoreWeave storage credentials
+    coreweave_is_enabled, _ = coreweave.check_storage_credentials()
+    if coreweave_is_enabled:
+        enabled_clouds.append(coreweave.NAME)
+    
     if raise_if_no_cloud_access and not enabled_clouds:
         raise exceptions.NoCloudAccessError(
             'No cloud access available for storage. '
