@@ -258,13 +258,13 @@ class TestWorkspaceManagement(unittest.TestCase):
         result = core._compare_workspace_configs(current_config, new_config)
 
         # Should detect no changes
-        self.assertTrue(result['only_user_access_changes'])
-        self.assertFalse(result['private_changed'])
-        self.assertFalse(result['private_old'])
-        self.assertFalse(result['private_new'])
-        self.assertFalse(result['allowed_users_changed'])
-        self.assertEqual(result['removed_users'], [])
-        self.assertEqual(result['added_users'], [])
+        self.assertTrue(result.only_user_access_changes)
+        self.assertFalse(result.private_changed)
+        self.assertFalse(result.private_old)
+        self.assertFalse(result.private_new)
+        self.assertFalse(result.allowed_users_changed)
+        self.assertEqual(result.removed_users, [])
+        self.assertEqual(result.added_users, [])
 
     @mock.patch('sky.workspaces.utils.get_workspace_users')
     def test_compare_workspace_configs_private_changed_to_public(
@@ -286,15 +286,15 @@ class TestWorkspaceManagement(unittest.TestCase):
         result = core._compare_workspace_configs(current_config, new_config)
 
         # Should detect private change and user access changes only
-        self.assertTrue(result['only_user_access_changes'])
-        self.assertTrue(result['private_changed'])
-        self.assertTrue(result['private_old'])
-        self.assertFalse(result['private_new'])
-        self.assertTrue(result['allowed_users_changed'])
-        self.assertEqual(set(result['allowed_users_old']), {'user1', 'user2'})
-        self.assertEqual(set(result['allowed_users_new']), set())
-        self.assertEqual(set(result['removed_users']), {'user1', 'user2'})
-        self.assertEqual(set(result['added_users']), set())
+        self.assertTrue(result.only_user_access_changes)
+        self.assertTrue(result.private_changed)
+        self.assertTrue(result.private_old)
+        self.assertFalse(result.private_new)
+        self.assertTrue(result.allowed_users_changed)
+        self.assertEqual(set(result.allowed_users_old), {'user1', 'user2'})
+        self.assertEqual(set(result.allowed_users_new), set())
+        self.assertEqual(set(result.removed_users), {'user1', 'user2'})
+        self.assertEqual(set(result.added_users), set())
 
     @mock.patch('sky.workspaces.utils.get_workspace_users')
     def test_compare_workspace_configs_private_changed_to_private(
@@ -321,15 +321,15 @@ class TestWorkspaceManagement(unittest.TestCase):
         result = core._compare_workspace_configs(current_config, new_config)
 
         # Should detect private change and user access changes only
-        self.assertTrue(result['only_user_access_changes'])
-        self.assertTrue(result['private_changed'])
-        self.assertFalse(result['private_old'])
-        self.assertTrue(result['private_new'])
-        self.assertTrue(result['allowed_users_changed'])
-        self.assertEqual(result['allowed_users_old'], [])
-        self.assertEqual(set(result['allowed_users_new']), {'user1', 'user2'})
-        self.assertEqual(set(result['removed_users']), set())
-        self.assertEqual(set(result['added_users']), {'user1', 'user2'})
+        self.assertTrue(result.only_user_access_changes)
+        self.assertTrue(result.private_changed)
+        self.assertFalse(result.private_old)
+        self.assertTrue(result.private_new)
+        self.assertTrue(result.allowed_users_changed)
+        self.assertEqual(result.allowed_users_old, [])
+        self.assertEqual(set(result.allowed_users_new), {'user1', 'user2'})
+        self.assertEqual(set(result.removed_users), set())
+        self.assertEqual(set(result.added_users), {'user1', 'user2'})
 
     @mock.patch('sky.workspaces.utils.get_workspace_users')
     def test_compare_workspace_configs_allowed_users_changed(
@@ -356,16 +356,16 @@ class TestWorkspaceManagement(unittest.TestCase):
         result = core._compare_workspace_configs(current_config, new_config)
 
         # Should detect user access changes only
-        self.assertTrue(result['only_user_access_changes'])
-        self.assertFalse(result['private_changed'])
-        self.assertTrue(result['private_old'])
-        self.assertTrue(result['private_new'])
-        self.assertTrue(result['allowed_users_changed'])
-        self.assertEqual(set(result['allowed_users_old']),
+        self.assertTrue(result.only_user_access_changes)
+        self.assertFalse(result.private_changed)
+        self.assertTrue(result.private_old)
+        self.assertTrue(result.private_new)
+        self.assertTrue(result.allowed_users_changed)
+        self.assertEqual(set(result.allowed_users_old),
                          {'user1', 'user2', 'user3'})
-        self.assertEqual(set(result['allowed_users_new']), {'user1', 'user4'})
-        self.assertEqual(set(result['removed_users']), {'user2', 'user3'})
-        self.assertEqual(set(result['added_users']), {'user4'})
+        self.assertEqual(set(result.allowed_users_new), {'user1', 'user4'})
+        self.assertEqual(set(result.removed_users), {'user2', 'user3'})
+        self.assertEqual(set(result.added_users), {'user4'})
 
     @mock.patch('sky.workspaces.utils.get_workspace_users')
     def test_compare_workspace_configs_non_user_access_changes(
@@ -393,9 +393,9 @@ class TestWorkspaceManagement(unittest.TestCase):
         result = core._compare_workspace_configs(current_config, new_config)
 
         # Should detect non-user-access changes
-        self.assertFalse(result['only_user_access_changes'])
-        self.assertFalse(result['private_changed'])
-        self.assertFalse(result['allowed_users_changed'])
+        self.assertFalse(result.only_user_access_changes)
+        self.assertFalse(result.private_changed)
+        self.assertFalse(result.allowed_users_changed)
 
     @mock.patch('sky.workspaces.utils.get_workspace_users')
     def test_compare_workspace_configs_wildcard_users(self, mock_get_users):
@@ -417,9 +417,9 @@ class TestWorkspaceManagement(unittest.TestCase):
         result = core._compare_workspace_configs(current_config, new_config)
 
         # Should handle wildcard correctly (convert to empty set)
-        self.assertTrue(result['allowed_users_changed'])
-        self.assertEqual(result['removed_users'], [])  # Empty set from wildcard
-        self.assertEqual(result['added_users'], ['user1'])
+        self.assertTrue(result.allowed_users_changed)
+        self.assertEqual(result.removed_users, [])  # Empty set from wildcard
+        self.assertEqual(result.added_users, ['user1'])
 
     @mock.patch(
         'sky.utils.resource_checker.check_users_workspaces_active_resources')
@@ -427,14 +427,16 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_validate_workspace_config_changes_private_to_public(
             self, mock_compare_configs, mock_check_resources):
         """Test validation when changing from private to public (should allow)."""
-        mock_compare_configs.return_value = {
-            'only_user_access_changes': True,
-            'private_changed': True,
-            'private_old': True,
-            'private_new': False,
-            'allowed_users_changed': True,
-            'removed_users': ['user1']
-        }
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=True,
+            private_old=True,
+            private_new=False,
+            allowed_users_changed=True,
+            allowed_users_old=['user1'],
+            allowed_users_new=[],
+            removed_users=['user1'],
+            added_users=[])
 
         # Should not raise any exception
         core._validate_workspace_config_changes('test-workspace', {}, {})
@@ -448,13 +450,16 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_validate_workspace_config_changes_public_to_private_success(
             self, mock_compare_configs, mock_check_resources):
         """Test validation when changing from public to private (resources belong to allowed users)."""
-        mock_compare_configs.return_value = {
-            'only_user_access_changes': True,
-            'private_changed': True,
-            'private_old': False,
-            'private_new': True,
-            'allowed_users_new': ['user1', 'user2']
-        }
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=True,
+            private_old=False,
+            private_new=True,
+            allowed_users_changed=True,
+            allowed_users_old=[],
+            allowed_users_new=['user1', 'user2'],
+            removed_users=[],
+            added_users=['user1', 'user2'])
 
         # Mock that all resources belong to allowed users
         mock_check_resources.return_value = ('', [])
@@ -472,13 +477,17 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_validate_workspace_config_changes_public_to_private_failure(
             self, mock_compare_configs, mock_check_resources):
         """Test validation when changing from public to private (unauthorized resources exist)."""
-        mock_compare_configs.return_value = {
-            'only_user_access_changes': True,
-            'private_changed': True,
-            'private_old': False,
-            'private_new': True,
-            'allowed_users_new': ['user1']
-        }
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=True,
+            private_old=False,
+            private_new=True,
+            allowed_users_new=['user1'],
+            removed_users=[],
+            added_users=[],
+            allowed_users_old=[],
+            allowed_users_changed=True,
+        )
 
         # Mock that some resources don't belong to allowed users
         mock_check_resources.return_value = (
@@ -501,13 +510,17 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_validate_workspace_config_changes_public_to_private_multiple_users(
             self, mock_compare_configs, mock_check_resources):
         """Test validation with multiple unauthorized users."""
-        mock_compare_configs.return_value = {
-            'only_user_access_changes': True,
-            'private_changed': True,
-            'private_old': False,
-            'private_new': True,
-            'allowed_users_new': ['user1']
-        }
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=True,
+            private_old=False,
+            private_new=True,
+            allowed_users_new=['user1'],
+            removed_users=[],
+            added_users=[],
+            allowed_users_old=[],
+            allowed_users_changed=True,
+        )
 
         # Mock multiple unauthorized users
         mock_check_resources.return_value = (
@@ -529,12 +542,16 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_validate_workspace_config_changes_removed_users(
             self, mock_compare_configs, mock_check_resources):
         """Test validation when users are removed from allowed_users."""
-        mock_compare_configs.return_value = {
-            'only_user_access_changes': True,
-            'private_changed': False,
-            'allowed_users_changed': True,
-            'removed_users': ['user2', 'user3']
-        }
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=False,
+            allowed_users_changed=True,
+            removed_users=['user2', 'user3'],
+            added_users=[],
+            allowed_users_old=[],
+            allowed_users_new=[],
+            private_old=False,
+            private_new=False)
 
         # Should not raise any exception
         core._validate_workspace_config_changes('test-workspace', {}, {})
@@ -549,9 +566,17 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_validate_workspace_config_changes_non_user_access_changes(
             self, mock_compare_configs, mock_check_resources):
         """Test validation when non-user-access configuration changes are made."""
-        mock_compare_configs.return_value = {
-            'only_user_access_changes': False,
-        }
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=False,
+            private_new=False,
+            allowed_users_changed=False,
+            removed_users=[],
+            added_users=[],
+            allowed_users_old=[],
+            allowed_users_new=[],
+        )
 
         # Should not raise any exception
         core._validate_workspace_config_changes('test-workspace', {}, {})
@@ -566,12 +591,16 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_validate_workspace_config_changes_no_removed_users(
             self, mock_compare_configs, mock_check_resources):
         """Test validation when allowed_users changed but no users were removed."""
-        mock_compare_configs.return_value = {
-            'only_user_access_changes': True,
-            'private_changed': False,
-            'allowed_users_changed': True,
-            'removed_users': []  # No removed users
-        }
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=False,
+            allowed_users_changed=True,
+            removed_users=[],
+            added_users=[],
+            allowed_users_old=[],
+            allowed_users_new=[],
+            private_old=False,
+            private_new=False)
 
         # Should not raise any exception
         core._validate_workspace_config_changes('test-workspace', {}, {})

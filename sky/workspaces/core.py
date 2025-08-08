@@ -1,5 +1,6 @@
 """Workspace management core."""
 
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Tuple
 
 import filelock
@@ -9,12 +10,14 @@ from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.users import permission
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import locks
 from sky.utils import resource_checker
 from sky.utils import schemas
 from sky.workspaces import utils as workspaces_utils
@@ -23,6 +26,37 @@ logger = sky_logging.init_logger(__name__)
 
 # Lock for workspace configuration updates to prevent race conditions
 _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60
+
+
+@dataclass
+class WorkspaceConfigComparison:
+    """Result of comparing current and new workspace configurations.
+
+    This class encapsulates the results of analyzing differences between
+    workspace configurations, particularly focusing on user access changes
+    and their implications for resource validation.
+
+    Attributes:
+        only_user_access_changes: True if only allowed_users or private changed
+        private_changed: True if private setting changed
+        private_old: Old private setting value
+        private_new: New private setting value
+        allowed_users_changed: True if allowed_users changed
+        allowed_users_old: Old allowed users list
+        allowed_users_new: New allowed users list
+        removed_users: Users removed from allowed_users
+        added_users: Users added to allowed_users
+    """
+    only_user_access_changes: bool
+    private_changed: bool
+    private_old: bool
+    private_new: bool
+    allowed_users_changed: bool
+    allowed_users_old: List[str]
+    allowed_users_new: List[str]
+    removed_users: List[str]
+    added_users: List[str]
+
 
 # =========================
 # = Workspace Management =
@@ -95,8 +129,10 @@ def _validate_workspace_config(workspace_name: str,
         raise ValueError(str(e)) from e
 
 
-def _compare_workspace_configs(current_config: Dict[str, Any],
-                               new_config: Dict[str, Any]) -> Dict[str, Any]:
+def _compare_workspace_configs(
+    current_config: Dict[str, Any],
+    new_config: Dict[str, Any],
+) -> WorkspaceConfigComparison:
     """Compare current and new workspace configurations.
 
     Args:
@@ -104,17 +140,7 @@ def _compare_workspace_configs(current_config: Dict[str, Any],
         new_config: The new workspace configuration.
 
     Returns:
-        A dictionary containing:
-        - 'only_user_access_changes': bool - True if only allowed_users
-          or private changed
-        - 'private_changed': bool - True if private setting changed
-        - 'private_old': bool - Old private setting value
-        - 'private_new': bool - New private setting value
-        - 'allowed_users_changed': bool - True if allowed_users changed
-        - 'allowed_users_old': List[str] - Old allowed users
-        - 'allowed_users_new': List[str] - New allowed users
-        - 'removed_users': List[str] - Users removed from allowed_users
-        - 'added_users': List[str] - Users added to allowed_users
+        WorkspaceConfigComparison object containing the comparison results.
     """
     # Get private settings
     private_old = current_config.get('private', False)
@@ -150,17 +176,16 @@ def _compare_workspace_configs(current_config: Dict[str, Any],
 
     only_user_access_changes = current_without_access == new_without_access
 
-    return {
-        'only_user_access_changes': only_user_access_changes,
-        'private_changed': private_changed,
-        'private_old': private_old,
-        'private_new': private_new,
-        'allowed_users_changed': allowed_users_changed,
-        'allowed_users_old': allowed_users_old,
-        'allowed_users_new': allowed_users_new,
-        'removed_users': removed_users,
-        'added_users': added_users
-    }
+    return WorkspaceConfigComparison(
+        only_user_access_changes=only_user_access_changes,
+        private_changed=private_changed,
+        private_old=private_old,
+        private_new=private_new,
+        allowed_users_changed=allowed_users_changed,
+        allowed_users_old=allowed_users_old,
+        allowed_users_new=allowed_users_new,
+        removed_users=removed_users,
+        added_users=added_users)
 
 
 def _validate_workspace_config_changes(workspace_name: str,
@@ -188,18 +213,18 @@ def _validate_workspace_config_changes(workspace_name: str,
     """
     config_comparison = _compare_workspace_configs(current_config, new_config)
 
-    if config_comparison['only_user_access_changes']:
+    if config_comparison.only_user_access_changes:
         # Only user access settings changed
-        if config_comparison['private_changed']:
-            if config_comparison[
-                    'private_old'] and not config_comparison['private_new']:
+        if config_comparison.private_changed:
+            if (config_comparison.private_old and
+                    not config_comparison.private_new):
                 # Changed from private to public - always allow
                 logger.info(
                     f'Workspace {workspace_name!r} changed from private to'
                     f' public.')
                 return
-            elif not config_comparison['private_old'] and config_comparison[
-                    'private_new']:
+            elif (not config_comparison.private_old and
+                  config_comparison.private_new):
                 # Changed from public to private - check that all active
                 # resources belong to the new allowed users
                 logger.info(
@@ -209,8 +234,7 @@ def _validate_workspace_config_changes(workspace_name: str,
 
                 error_summary, missed_users_names = (
                     resource_checker.check_users_workspaces_active_resources(
-                        config_comparison['allowed_users_new'],
-                        [workspace_name]))
+                        config_comparison.allowed_users_new, [workspace_name]))
                 if error_summary:
                     error_msg=f'Cannot change workspace {workspace_name!r}' \
                     f' to private '
@@ -228,15 +252,15 @@ def _validate_workspace_config_changes(workspace_name: str,
                     raise ValueError(error_msg)
         else:
             # Private setting didn't change, but allowed_users changed
-            if (config_comparison['allowed_users_changed'] and
-                    config_comparison['removed_users']):
+            if (config_comparison.allowed_users_changed and
+                    config_comparison.removed_users):
                 # Check that removed users don't have active resources
                 logger.info(
                     f'Checking that removed users'
-                    f' {config_comparison["removed_users"]} do not have'
+                    f' {config_comparison.removed_users} do not have'
                     f' active resources in workspace {workspace_name!r}.')
                 user_operations = []
-                for user_id in config_comparison['removed_users']:
+                for user_id in config_comparison.removed_users:
                     user_operations.append((user_id, 'remove'))
                 resource_checker.check_no_active_resources_for_users(
                     user_operations)
@@ -287,9 +311,19 @@ def update_workspace(workspace_name: str, config: Dict[str,
     current_config = current_workspaces.get(workspace_name, {})
 
     if current_config:
-        # Validate the configuration changes based on active resources
-        _validate_workspace_config_changes(workspace_name, current_config,
-                                           config)
+        lock_id = backend_utils.workspace_lock_id(workspace_name)
+        lock_timeout = backend_utils.WORKSPACE_LOCK_TIMEOUT_SECONDS
+        try:
+            with locks.get_lock(lock_id, lock_timeout):
+                # Validate the configuration changes based on active resources
+                _validate_workspace_config_changes(workspace_name,
+                                                   current_config, config)
+        except locks.LockTimeout as e:
+            raise RuntimeError(
+                f'Failed to validate workspace {workspace_name!r} due to '
+                'a timeout when trying to access database. Please '
+                f'try again or manually remove the lock at {lock_id}. '
+                f'{common_utils.format_exception(e)}') from None
 
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
