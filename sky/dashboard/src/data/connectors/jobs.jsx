@@ -10,7 +10,7 @@ import dashboardCache from '@/lib/cache';
 import { apiClient } from './client';
 
 // Configuration
-const DEFAULT_TAIL_LINES = 1000;
+const DEFAULT_TAIL_LINES = 10000;
 
 export async function getManagedJobs({ allUsers = true } = {}) {
   try {
