@@ -133,7 +133,8 @@ def check_credentials(
     elif cloud_capability == cloud.CloudCapability.STORAGE:
         return check_storage_credentials()
     else:
-        from sky import exceptions
+        # Import here to avoid circular import
+        from sky import exceptions  # pylint: disable=import-outside-toplevel
         raise exceptions.NotSupportedError(
             f'{NAME} does not support {cloud_capability}.')
 
@@ -143,41 +144,44 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
 
     Returns:
         A tuple of a boolean value and a hint message where the bool
-        is True when both credentials needed for CoreWeave storage is set. It is False
-        when either of those are not set, which would hint with a
+        is True when both credentials needed for CoreWeave storage is set.
+        It is False when either of those are not set, which would hint with a
         string on unset credential.
     """
     hints = None
-    credentials_path = os.path.expanduser(COREWEAVE_CREDENTIALS_PATH)
-    config_path = os.path.expanduser(COREWEAVE_CONFIG_PATH)
-    
+
     if not coreweave_profile_in_aws_cred():
-        hints = f'[{COREWEAVE_PROFILE_NAME}] profile is not set in {COREWEAVE_CREDENTIALS_PATH}.'
+        hints = (f'[{COREWEAVE_PROFILE_NAME}] profile is not set in '
+                 f'{COREWEAVE_CREDENTIALS_PATH}.')
     if not coreweave_profile_in_aws_config():
         if hints:
             hints += ' Additionally, '
         else:
             hints = ''
-        hints += f'[profile {COREWEAVE_PROFILE_NAME}] is not set in {COREWEAVE_CONFIG_PATH}.'
-    
+        hints += (f'[profile {COREWEAVE_PROFILE_NAME}] is not set in '
+                  f'{COREWEAVE_CONFIG_PATH}.')
+
     if hints:
         hints += ' Run the following commands:'
         if not coreweave_profile_in_aws_cred():
             hints += f'\n{_INDENT_PREFIX}  $ pip install boto3'
-            hints += f'\n{_INDENT_PREFIX}  $ aws configure --profile {COREWEAVE_PROFILE_NAME}'
+            hints += (f'\n{_INDENT_PREFIX}  $ aws configure --profile '
+                      f'{COREWEAVE_PROFILE_NAME}')
         if not coreweave_profile_in_aws_config():
-            hints += f'\n{_INDENT_PREFIX}  $ aws configure set region {DEFAULT_REGION} --profile {COREWEAVE_PROFILE_NAME}'
-        hints += f'\n{_INDENT_PREFIX}For more info: see CoreWeave Object Storage documentation'
+            hints += (f'\n{_INDENT_PREFIX}  $ aws configure set region '
+                      f'{DEFAULT_REGION} --profile {COREWEAVE_PROFILE_NAME}')
+        hints += (f'\n{_INDENT_PREFIX}For more info: see CoreWeave Object '
+                  'Storage documentation')
 
     return (False, hints) if hints else (True, hints)
 
 
 def coreweave_profile_in_aws_cred() -> bool:
     """Checks if CoreWeave profile is set in aws credentials"""
-    credentials_path = os.path.expanduser(COREWEAVE_CREDENTIALS_PATH)
+    cred_path = os.path.expanduser(COREWEAVE_CREDENTIALS_PATH)
     coreweave_profile_exists = False
-    if os.path.isfile(credentials_path):
-        with open(credentials_path, 'r', encoding='utf-8') as file:
+    if os.path.isfile(cred_path):
+        with open(cred_path, 'r', encoding='utf-8') as file:
             for line in file:
                 if f'[{COREWEAVE_PROFILE_NAME}]' in line:
                     coreweave_profile_exists = True
@@ -187,10 +191,10 @@ def coreweave_profile_in_aws_cred() -> bool:
 
 def coreweave_profile_in_aws_config() -> bool:
     """Checks if CoreWeave profile is set in aws config"""
-    config_path = os.path.expanduser(COREWEAVE_CONFIG_PATH)
+    conf_path = os.path.expanduser(COREWEAVE_CONFIG_PATH)
     coreweave_profile_exists = False
-    if os.path.isfile(config_path):
-        with open(config_path, 'r', encoding='utf-8') as file:
+    if os.path.isfile(conf_path):
+        with open(conf_path, 'r', encoding='utf-8') as file:
             for line in file:
                 if f'[profile {COREWEAVE_PROFILE_NAME}]' in line:
                     coreweave_profile_exists = True
@@ -200,26 +204,28 @@ def coreweave_profile_in_aws_config() -> bool:
 
 def get_credential_file_mounts() -> Dict[str, str]:
     """Returns credential file mounts for CoreWeave.
-    
+
     Returns:
         Dict[str, str]: A dictionary mapping source paths to destination paths
         for credential files.
     """
     coreweave_credential_mounts = {}
-    
+
     # Add AWS credentials if CoreWeave profile exists
     if coreweave_profile_in_aws_cred():
-        coreweave_credential_mounts[COREWEAVE_CREDENTIALS_PATH] = COREWEAVE_CREDENTIALS_PATH
-    
+        coreweave_credential_mounts[
+            COREWEAVE_CREDENTIALS_PATH] = COREWEAVE_CREDENTIALS_PATH
+
     # Add AWS config if CoreWeave profile exists
     if coreweave_profile_in_aws_config():
-        coreweave_credential_mounts[COREWEAVE_CONFIG_PATH] = COREWEAVE_CONFIG_PATH
-    
+        coreweave_credential_mounts[
+            COREWEAVE_CONFIG_PATH] = COREWEAVE_CONFIG_PATH
+
     # Add any additional credential file paths
     for path in get_credential_file_paths():
         if os.path.exists(os.path.expanduser(path)):
             coreweave_credential_mounts[path] = path
-    
+
     return coreweave_credential_mounts
 
 
