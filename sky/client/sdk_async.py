@@ -27,6 +27,7 @@ import sky.catalog
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
@@ -786,7 +787,7 @@ async def dashboard(starting_page: Optional[str] = None) -> None:
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_info() -> Dict[str, Any]:
+async def api_info() -> responses.APIHealthResponse:
     """Async version of api_info() that gets the server's status, commit and
       version."""
     return await context_utils.to_thread(sdk.api_info)
