@@ -108,10 +108,6 @@ def up(
     pool: bool = False,
 ) -> Tuple[str, str]:
     """Spins up a service or a pool."""
-    if pool and not serve_utils.is_consolidation_mode(pool):
-        raise ValueError(
-            'Pool is only supported in consolidation mode. To fix, set '
-            '`jobs.controller.consolidation_mode: true` in SkyPilot config.')
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
     assert task.service is not None
