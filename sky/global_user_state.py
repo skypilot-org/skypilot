@@ -471,7 +471,8 @@ def add_or_update_cluster(cluster_name: str,
     # when the cluster failover through multiple regions (one entry per region).
     # It can be more inaccurate for the multi-node cluster
     # as the failover can have the nodes partially UP.
-    cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+    cluster_hash = _get_hash_for_existing_cluster(cluster_name) or str(
+        uuid.uuid4())
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     # first time a cluster is being launched
@@ -726,7 +727,7 @@ def get_handle_from_cluster_name(
     assert cluster_name is not None, 'cluster_name cannot be None'
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
-    if row is None or row.handle is None:
+    if row is None:
         return None
     return pickle.loads(row.handle)
 
@@ -747,8 +748,7 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
                     _glob_to_similar(cluster_name))).all()
         else:
             raise ValueError('Unsupported database dialect')
-    result = [row.name for row in rows]
-    return result
+    return [row.name for row in rows]
 
 
 @_init_db
@@ -923,27 +923,10 @@ def set_owner_identity_for_cluster(cluster_name: str,
 def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.query(cluster_table).filter_by(name=cluster_name)
-        if result and result.first():
-            return result.first().cluster_hash
-        else: 
-            # Insert new cluster hash and insert.
-            cluster_hash = str(uuid.uuid4())
-            if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
-                insert_func = sqlite.insert
-            elif (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-                insert_func = postgresql.insert
-            else:
-                raise ValueError('Unsupported database dialect')
-            insert_stmnt = insert_func(cluster_table).values(
-                name=cluster_name,
-                cluster_hash=cluster_hash,
-            )
-            session.execute(insert_stmnt)
-            session.commit()
-            return cluster_hash
+        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+    if row is None or row.cluster_hash is None:
+        return None
+    return row.cluster_hash
 
 
 @_init_db
@@ -999,7 +982,7 @@ def get_cluster_from_name(
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
-    if row is None or row.handle is None:
+    if row is None:
         return None
     user_hash = _get_user_hash_or_current_user(row.user_hash)
     user = get_user(user_hash)
@@ -1027,6 +1010,7 @@ def get_cluster_from_name(
         'last_creation_yaml': row.last_creation_yaml,
         'last_creation_command': row.last_creation_command,
     }
+
     return record
 
 
@@ -1200,8 +1184,7 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(cluster_table).filter(
             cluster_table.c.name.like(f'{starts_with}%')).all()
-    result = [row.name for row in rows]
-    return result
+    return [row.name for row in rows]
 
 
 @_init_db
