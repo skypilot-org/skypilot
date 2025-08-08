@@ -587,7 +587,7 @@ async def endpoints(
     cluster: str,
     port: Optional[Union[int, str]] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Dict[int, str]:
+) -> Dict[str, str]:
     """Async version of endpoints() that gets the endpoint for a given cluster
       and port number."""
     request_id = await context_utils.to_thread(sdk.endpoints, cluster, port)
