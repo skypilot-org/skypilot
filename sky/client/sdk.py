@@ -479,11 +479,11 @@ def launch(
             This option works in conjunction with ``idle_minutes_to_autostop``.
             Choices:
 
-            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-               AND all SSH sessions to disconnect.
-            2. "jobs" - Wait for all jobs to complete.
-            3. "none" - Stop immediately after idle time expires,
-               regardless of running jobs or SSH connections.
+            1. "jobs_and_ssh" (default) - Wait for in-progress jobs and SSH
+               connections to finish.
+            2. "jobs" - Only wait for in-progress jobs.
+            3. "none" - Wait for nothing; autostop right after
+               ``idle_minutes_to_autostop``.
         dryrun: if True, do not actually launch the cluster.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
@@ -935,11 +935,11 @@ def start(
             This option works in conjunction with ``idle_minutes_to_autostop``.
             Choices:
 
-            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-               AND all SSH sessions to disconnect.
-            2. "jobs" - Wait for all jobs to complete.
-            3. "none" - Stop immediately after idle time expires,
-               regardless of running jobs or SSH connections.
+            1. "jobs_and_ssh" (default) - Wait for in-progress jobs and SSH
+               connections to finish.
+            2. "jobs" - Only wait for in-progress jobs.
+            3. "none" - Wait for nothing; autostop right after
+               ``idle_minutes_to_autostop``.
         retry_until_up: whether to retry launching the cluster until it is
             up.
         down: Autodown the cluster: tear down the cluster after specified
@@ -1118,11 +1118,10 @@ def autostop(
             This option works in conjunction with ``idle_minutes``.
             Choices:
 
-            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-               AND all SSH sessions to disconnect.
-            2. "jobs" - Wait for all jobs to complete.
-            3. "none" - Stop immediately after idle time expires,
-               regardless of running jobs or SSH connections.
+            1. "jobs_and_ssh" (default) - Wait for in-progress jobs and SSH
+               connections to finish.
+            2. "jobs" - Only wait for in-progress jobs.
+            3. "none" - Wait for nothing; autostop right after ``idle_minutes``.
         down: if true, use autodown (tear down the cluster; non-restartable),
             rather than autostop (restartable).
 

@@ -46,7 +46,9 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`ports <yaml-spec-resources-ports>`: 8081
     :ref:`labels <yaml-spec-resources-labels>`:
       my-label: my-value
-    :ref:`autostop <yaml-spec-resources-autostop>`: 10m
+    :ref:`autostop <yaml-spec-resources-autostop>`:
+      idle_minutes: 10
+      wait_for: none
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -283,11 +285,9 @@ Format:
   - ``wait_for``: Determines the condition for resetting the idleness timer.
     Options:
 
-    - ``jobs_and_ssh`` (default): Wait for all jobs to complete AND all SSH
-      sessions to disconnect.
-    - ``jobs``: Wait for all jobs to complete.
-    - ``none``: Stop immediately after idle time expires, regardless of running
-      jobs or SSH connections.
+    - ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish
+    - ``jobs``: Only wait for in‑progress jobs
+    - ``none``: Wait for nothing; autostop right after ``idle_minutes``
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
