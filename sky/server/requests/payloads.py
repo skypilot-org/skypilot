@@ -382,6 +382,7 @@ class UserCreateBody(RequestBody):
     username: str
     password: str
     role: Optional[str] = None
+    expires_in_days: Optional[int] = None
 
 
 class UserDeleteBody(RequestBody):

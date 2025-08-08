@@ -1,12 +1,13 @@
 """REST API for workspace management."""
 
 import contextlib
+from dataclasses import dataclass
 import hashlib
 import os
 import re
 import secrets
 import time
-from typing import Any, Dict, Generator, List
+from typing import Any, Dict, Generator, List, Optional
 
 import fastapi
 import filelock
@@ -33,23 +34,49 @@ USER_LOCK_TIMEOUT_SECONDS = 20
 router = fastapi.APIRouter()
 
 
+@dataclass
+class UserInfo:
+    id: str
+    name: str
+    created_at: str
+    role: str
+    token_id: Optional[str]
+    last_used_at: Optional[int]
+    expires_at: Optional[str]
+
+
+@dataclass
+class UserTokenInfo:
+    user_id: str
+    creator_user_id: str
+    token_id: Optional[str]
+    token: Optional[str]
+    expires_at: Optional[str]
+    message: Optional[str]
+
+
 @router.get('')
-async def users() -> List[Dict[str, Any]]:
+async def users() -> List[UserInfo]:
     """Gets all users."""
     all_users = []
     user_list = global_user_state.get_all_users()
     for user in user_list:
-        # Filter out service accounts - they have IDs starting with "sa-"
-        if user.is_service_account():
-            continue
-
         user_roles = permission.permission_service.get_user_roles(user.id)
-        all_users.append({
-            'id': user.id,
-            'name': user.name,
-            'created_at': user.created_at,
-            'role': user_roles[0] if user_roles else ''
-        })
+        tokens = global_user_state.get_tokens_by_user_id(user.id)
+        token = None
+        if tokens:
+            # TODO(hailong): handle multiple tokens
+            token = tokens[0]
+        all_users.append(
+            UserInfo(
+                id=user.id,
+                name=user.name,
+                created_at=user.created_at,
+                role=user_roles[0] if user_roles else '',
+                token_id=token['token_id'] if token else None,
+                last_used_at=token['last_used_at'] if token else None,
+                expires_at=token['expires_at'] if token else None,
+            ))
     return all_users
 
 
@@ -70,14 +97,44 @@ async def get_current_user_role(request: fastapi.Request):
 
 
 @router.post('/create')
-async def user_create(user_create_body: payloads.UserCreateBody) -> None:
-    username = user_create_body.username
+async def user_create(
+    request: fastapi.Request,
+    user_create_body: payloads.UserCreateBody,
+) -> UserTokenInfo:
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        raise fastapi.HTTPException(status_code=401,
+                                    detail='Authentication required')
+
+    username = user_create_body.username.strip()
     password = user_create_body.password
     role = user_create_body.role
+    expires_in_days = user_create_body.expires_in_days
 
-    if not username or not password:
+    sa_enabled = common_utils.is_service_account_token_enabled()
+
+    if not username:
         raise fastapi.HTTPException(status_code=400,
-                                    detail='Username and password are required')
+                                    detail='Username is required')
+    # Check if username follows a valid format
+    if not re.match(constants.CLUSTER_NAME_VALID_REGEX, username):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Username must match the regex: '
+                                    f'{constants.CLUSTER_NAME_VALID_REGEX}. '
+                                    'Please use a different username.')
+    password_hash = None
+    if sa_enabled:
+        # Validate expiration (allow 0 as special value for "never expire")
+        if (expires_in_days is not None and expires_in_days < 0):
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail='Expiration days must be positive or 0 for never expire')
+    else:
+        if not password:
+            raise fastapi.HTTPException(status_code=400,
+                                        detail='Password is required')
+        password_hash = apr_md5_crypt.hash(password)
+
     if role and role not in rbac.get_supported_roles():
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid role: {role}')
@@ -86,17 +143,89 @@ async def user_create(user_create_body: payloads.UserCreateBody) -> None:
         role = rbac.get_default_role()
 
     # Create user
-    password_hash = apr_md5_crypt.hash(password)
     user_hash = hashlib.md5(
         username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     with _user_lock(user_hash):
-        # Check if user already exists
-        if global_user_state.get_user_by_name(username):
-            raise fastapi.HTTPException(
-                status_code=400, detail=f'User {username!r} already exists')
-        global_user_state.add_or_update_user(
-            models.User(id=user_hash, name=username, password=password_hash))
-        permission.permission_service.update_role(user_hash, role)
+        return _create_user_and_token(user_id=user_hash,
+                                      user_name=username,
+                                      role=role,
+                                      creator_user_id=auth_user.id,
+                                      sa_enabled=sa_enabled,
+                                      password_hash=password_hash,
+                                      expires_in_days=expires_in_days)
+
+
+def _create_user_and_token(
+        user_id: str,
+        user_name: str,
+        role: str,
+        creator_user_id: str,
+        sa_enabled: bool,
+        password_hash: Optional[str] = None,
+        expires_in_days: Optional[int] = None) -> UserTokenInfo:
+    """Create a new user and token."""
+
+    try:
+        # Create a user
+        service_account_user = models.User(id=user_id,
+                                           name=user_name,
+                                           password=password_hash)
+        is_new_user = global_user_state.add_or_update_user(
+            service_account_user, allow_duplicate_name=False)
+
+        if not is_new_user:
+            raise fastapi.HTTPException(status_code=400,
+                                        detail=f'User {user_name!r} '
+                                        f'already exists ({user_id}). '
+                                        'Please use a different name.')
+
+        # Add user to permission system with role
+        # Import here to avoid circular imports
+        # pylint: disable=import-outside-toplevel
+        from sky.users.permission import permission_service
+        permission_service.update_role(user_id, role)
+
+        if not sa_enabled:
+            return UserTokenInfo(user_id=user_id,
+                                 creator_user_id=creator_user_id,
+                                 token_id=None,
+                                 token=None,
+                                 expires_at=None,
+                                 message=None)
+
+        # Handle expiration: 0 means "never expire"
+        if expires_in_days == 0:
+            expires_in_days = None
+
+        # Create JWT-based token with service account user ID
+        token_data = token_service.token_service.create_token(
+            creator_user_id=creator_user_id,
+            service_account_user_id=user_id,
+            token_name=user_name,
+            expires_in_days=expires_in_days)
+
+        # Store token metadata in database
+        global_user_state.add_service_account_token(
+            token_id=token_data['token_id'],
+            token_name=user_name,
+            token_hash=token_data['token_hash'],
+            creator_user_hash=creator_user_id,
+            service_account_user_id=user_id,
+            expires_at=token_data['expires_at'])
+
+        # Return the JWT token only once (never stored in plain text)
+        return UserTokenInfo(
+            user_id=user_id,
+            creator_user_id=creator_user_id,
+            token_id=token_data['token_id'],
+            token=token_data['token'],  # Full JWT token with sky_ prefix
+            expires_at=token_data['expires_at'],
+            message='Please save this token - it will not be shown again!')
+
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to create user and token: {e}')
+        raise fastapi.HTTPException(
+            status_code=500, detail=f'Failed to create user and token: {e}')
 
 
 @router.post('/update')
@@ -178,6 +307,7 @@ def _delete_user(user_id: str) -> None:
     with _user_lock(user_id):
         global_user_state.delete_user(user_id)
         permission.permission_service.delete_user(user_id)
+        global_user_state.delete_tokens_by_user_id(user_id)
 
 
 @router.post('/delete')
@@ -602,6 +732,7 @@ async def update_service_account_role(
 
 
 @router.post('/service-account-tokens/rotate')
+@router.post('/rotate')
 async def rotate_service_account_token(
         request: fastapi.Request,
         token_body: payloads.ServiceAccountTokenRotateBody) -> Dict[str, Any]:

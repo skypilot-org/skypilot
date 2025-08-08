@@ -124,6 +124,10 @@ spec:
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"
         {{- end }}
+        {{- if include "skypilot.ingressOAuthEnabled" . | trim | eq "true" }}
+        - name: SKYPILOT_INGRESS_OAUTH2_PROXY_ENABLED
+          value: "true"
+        {{- end }}
         {{- if and .Values.auth .Values.auth.oauth .Values.auth.oauth.enabled }}
         - name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
           value: "true"
