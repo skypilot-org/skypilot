@@ -100,6 +100,11 @@ def _bulk_provision(
         f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
         f'seconds.')
 
+    # Add cluster event for provisioning completion.
+    global_user_state.add_cluster_event(
+        str(cluster_name), status_lib.ClusterStatus.INIT,
+        f'Instances launched on {cloud.display_name()} in {region}')
+
     return provision_record
 
 
