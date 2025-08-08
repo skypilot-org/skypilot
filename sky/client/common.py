@@ -156,13 +156,13 @@ class FileChunkIterator:
 
 @dataclasses.dataclass
 class UploadChunkParams:
-    client: 'httpx.Client'
     upload_id: str
     chunk_index: int
     total_chunks: int
     file_path: str
     upload_logger: logging.Logger
     log_file: str
+    timeout: 'httpx.Timeout'
 
 
 def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
@@ -174,23 +174,28 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
     server_url = server_common.get_server_url()
     max_attempts = 3
     sa_headers = service_account_auth.get_service_account_headers()
-    with open(params.file_path, 'rb') as f:
-        for attempt in range(max_attempts):
-            response = params.client.post(
-                f'{server_url}/upload',
-                params={
-                    'user_hash': common_utils.get_user_hash(),
-                    'upload_id': params.upload_id,
-                    'chunk_index': str(params.chunk_index),
-                    'total_chunks': str(params.total_chunks),
-                },
-                content=FileChunkIterator(f, _UPLOAD_CHUNK_BYTES,
-                                          params.chunk_index),
-                headers={
-                    'Content-Type': 'application/octet-stream',
-                    **sa_headers,
-                },
-                cookies=server_common.get_api_cookie_jar())
+
+    # Create a new httpx client for each upload to avoid connection reuse issues
+    # that can cause SSL_ALERT_BAD_RECORD_MAC errors when multiple threads
+    # share the same client instance
+    with httpx.Client(timeout=params.timeout) as client:
+        with open(params.file_path, 'rb') as f:
+            for attempt in range(max_attempts):
+                response = client.post(
+                    f'{server_url}/upload',
+                    params={
+                        'user_hash': common_utils.get_user_hash(),
+                        'upload_id': params.upload_id,
+                        'chunk_index': str(params.chunk_index),
+                        'total_chunks': str(params.total_chunks),
+                    },
+                    content=FileChunkIterator(f, _UPLOAD_CHUNK_BYTES,
+                                              params.chunk_index),
+                    headers={
+                        'Content-Type': 'application/octet-stream',
+                        **sa_headers,
+                    },
+                    cookies=server_common.get_api_cookie_jar())
             if response.status_code == 200:
                 data = response.json()
                 status = data.get('status')
@@ -347,15 +352,14 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                     log_file,
                     is_local=True))
 
-            with httpx.Client(timeout=timeout) as client:
-                chunk_params = [
-                    UploadChunkParams(client, upload_id, chunk_index,
-                                      total_chunks, temp_zip_file.name,
-                                      upload_logger, log_file)
-                    for chunk_index in range(total_chunks)
-                ]
-                subprocess_utils.run_in_parallel(_upload_chunk_with_retry,
-                                                 chunk_params)
+            chunk_params = [
+                UploadChunkParams(upload_id, chunk_index, total_chunks,
+                                  temp_zip_file.name, upload_logger, log_file,
+                                  timeout)
+                for chunk_index in range(total_chunks)
+            ]
+            subprocess_utils.run_in_parallel(_upload_chunk_with_retry,
+                                             chunk_params)
         os.unlink(temp_zip_file.name)
         upload_logger.info(f'Uploaded files: {upload_list}')
         logger.info(
