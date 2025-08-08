@@ -13,9 +13,9 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import volume as volume_lib
 
-
 COREWEAVE_CREDENTIALS_PATH = '~/.aws/credentials'
 COREWEAVE_CONFIG_PATH = '~/.aws/config'
+
 
 def coreweave_profile_in_aws_cred_and_config() -> bool:
     """Checks if CoreWeave Object Storage profile is set in aws credentials
@@ -174,7 +174,6 @@ class CoreWeave(clouds.Cloud):
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> resources_utils.FeasibleResources:
-        # CoreWeave doesn't support compute instances - return empty feasible resources
         return resources_utils.FeasibleResources([], [], None)
 
     @classmethod
@@ -188,7 +187,7 @@ class CoreWeave(clouds.Cloud):
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         # CoreWeave is storage-only and doesn't support compute instances
-        return False, f'{cls._REPR} is a storage-only cloud and does not support compute instances.'
+        return False, f'{cls._REPR} is does not support compute instances.'
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the credential file mounts for CoreWeave."""

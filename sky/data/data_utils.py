@@ -539,6 +539,7 @@ def parallel_upload(source_path_list: List[str],
             zip(commands, [access_denied_message] * len(commands),
                 [bucket_name] * len(commands), [log_path] * len(commands)))
 
+
 def get_gsutil_command() -> Tuple[str, str]:
     """Gets the alias'd command for gsutil and a command to define the alias.
 
@@ -934,7 +935,6 @@ def split_oci_path(oci_path: str) -> Tuple[str, str]:
 
 def create_coreweave_client(region: Optional[str] = None) -> Client:
     """Create CoreWeave S3 client.
-    
     Args:
         region: The region to configure the client for. If None, uses the
                 region from the session configuration.
