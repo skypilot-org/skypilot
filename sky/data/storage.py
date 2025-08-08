@@ -4509,6 +4509,7 @@ class S3Store(S3CompatibleStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
+
 @register_s3_compatible_store
 class R2Store(S3CompatibleStore):
     """R2Store inherits from S3CompatibleStore and represents the backend
@@ -4627,12 +4628,13 @@ class CoreWeaveStore(S3CompatibleStore):
         return S3CompatibleConfig(
             store_type='COREWEAVE',
             url_prefix='cw://',
-            client_factory=lambda region: data_utils.create_coreweave_client(region),
+            client_factory=data_utils.create_coreweave_client,
             resource_factory=lambda name: coreweave.resource('s3').Bucket(name),
             split_path=data_utils.split_coreweave_path,
             verify_bucket=data_utils.verify_coreweave_bucket,
             aws_profile=coreweave.COREWEAVE_PROFILE_NAME,
-            get_endpoint_url=lambda: data_utils.create_coreweave_client().meta.endpoint_url,
+            get_endpoint_url=lambda: data_utils.create_coreweave_client().meta.
+            endpoint_url,
             extra_cli_args=[],
             cloud_name='CoreWeave',
             default_region=coreweave.DEFAULT_REGION,
@@ -4691,30 +4693,39 @@ class CoreWeaveStore(S3CompatibleStore):
     def _create_bucket(self, bucket_name: str) -> StorageHandle:
         """Create bucket using S3 API with timing handling for CoreWeave."""
         result = super()._create_bucket(bucket_name)
-        
+
         # Add retry mechanism to ensure bucket is accessible after creation
-        # THIS IS SPECIFIC TO COREWEAVE since the bucket isn't immediately created...
+        # THIS IS SPECIFIC TO COREWEAVE since
+        # the bucket isn't immediately created...
         max_retries = 60
         retry_count = 0
-        
+        dim = colorama.Style.DIM
+        reset = colorama.Style.RESET_ALL
+
         while retry_count < max_retries:
             try:
-                # Try to list objects in the bucket to verify it's accessible
+                # Try to list objects in the bucket to verify
                 self.client.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
                 logger.info(
-                    f'  {colorama.Style.DIM}Bucket {bucket_name!r} is now accessible '
-                    f'after {retry_count * 5} seconds{colorama.Style.RESET_ALL}')
+                    '  %sBucket %r is now accessible after %d seconds%s', dim,
+                    bucket_name, retry_count * 5, reset)
                 break
-            except Exception as e:
+            except (coreweave.botocore_exceptions().ClientError,
+                    coreweave.botocore_exceptions().BotoCoreError) as e:
                 retry_count += 1
                 logger.debug(
-                    f'  {colorama.Style.DIM}Bucket {bucket_name!r} not yet accessible '
-                    f'(attempt {retry_count}/{max_retries}): {str(e)}{colorama.Style.RESET_ALL}')
+                    '  %sBucket %r not yet accessible (attempt %d/%d): %s%s',
+                    dim, bucket_name, retry_count, max_retries, str(e), reset)
                 if retry_count < max_retries:
                     time.sleep(5)
                 else:
                     logger.warning(
-                        f'  {colorama.Style.DIM}Bucket {bucket_name!r} may not be fully ready '
-                        f'after {max_retries * 5} seconds, proceeding anyway{colorama.Style.RESET_ALL}')
-        
+                        '  %sBucket %r may not be fully ready after %d '
+                        'seconds, proceeding anyway%s',
+                        dim,
+                        bucket_name,
+                        max_retries * 5,
+                        reset,
+                    )
+
         return result

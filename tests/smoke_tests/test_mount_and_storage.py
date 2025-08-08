@@ -1428,7 +1428,9 @@ class TestStorageWithCredentials:
             try:
                 subprocess.check_call(
                     f'aws s3 ls {bucket_uri} --profile={coreweave.COREWEAVE_PROFILE_NAME}',
-                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL)
                 break
             except subprocess.CalledProcessError:
                 if attempt < max_retries - 1:
@@ -1436,12 +1438,11 @@ class TestStorageWithCredentials:
                 else:
                     # If we can't list after max retries, still try to delete
                     break
-        
+
         yield tmp_bucket_name, f'cw://{tmp_bucket_name}'
         subprocess.check_call(
             f'aws s3 rb {bucket_uri} --force --profile={coreweave.COREWEAVE_PROFILE_NAME}',
             shell=True)
-
 
     @pytest.fixture
     def tmp_ibm_cos_bucket(self, tmp_bucket_name):
