@@ -2229,6 +2229,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Launched resources
     - (optional) Docker user name
     - (optional) If TPU(s) are managed, a path to a deletion script.
+    - (optional) Skylet SSH tunnel info.
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
@@ -2281,7 +2282,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'\n\tlaunched_resources={self.launched_nodes}x '
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
-                f'\n\tssh_user={self.ssh_user}')
+                f'\n\tssh_user={self.ssh_user},'
+                f'\n\tskylet_ssh_tunnel={self.skylet_ssh_tunnel}')
 
     def get_cluster_name(self):
         return self.cluster_name
@@ -2766,7 +2768,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 state['_cluster_yaml'] = None
 
         if version < 11:
-            # Version 11 adds SSH tunnel info for gRPC connections
             state['skylet_ssh_tunnel'] = None
 
         self.__dict__.update(state)
