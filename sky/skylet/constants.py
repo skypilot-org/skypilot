@@ -406,7 +406,7 @@ PERSISTENT_RUN_SCRIPT_DIR = '~/.sky/.controller_recovery_task_run'
 PERSISTENT_RUN_RESTARTING_SIGNAL_FILE = (
     '~/.sky/.controller_recovery_restarting_signal')
 
-HA_PERSISTENT_RECOVERY_LOG_PATH = '/tmp/ha_recovery.log'
+HA_PERSISTENT_RECOVERY_LOG_PATH = '/tmp/{}ha_recovery.log'
 
 # The placeholder for the local skypilot config path in file mounts for
 # controllers.

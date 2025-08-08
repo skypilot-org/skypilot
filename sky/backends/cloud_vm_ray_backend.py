@@ -168,6 +168,9 @@ _MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
 _RESOURCES_UNAVAILABLE_LOG = (
     'Reasons for provision failures (for details, please check the log above):')
 
+# Number of seconds to wait locking the cluster before communicating with user.
+_CLUSTER_LOCK_TIMEOUT = 5.0
+
 
 def _is_command_length_over_limit(command: str) -> bool:
     """Check if the length of the command exceeds the limit.
@@ -1174,7 +1177,8 @@ class RetryingVmProvisioner(object):
                  local_wheel_path: pathlib.Path,
                  wheel_hash: str,
                  blocked_resources: Optional[Iterable[
-                     resources_lib.Resources]] = None):
+                     resources_lib.Resources]] = None,
+                 is_managed: Optional[bool] = None):
         self._blocked_resources: Set[resources_lib.Resources] = set()
         if blocked_resources:
             # blocked_resources is not None and not empty.
@@ -1186,6 +1190,7 @@ class RetryingVmProvisioner(object):
         self._requested_features = requested_features
         self._local_wheel_path = local_wheel_path
         self._wheel_hash = wheel_hash
+        self._is_managed = is_managed
 
     def _yield_zones(
             self, to_provision: resources_lib.Resources, num_nodes: int,
@@ -1519,6 +1524,7 @@ class RetryingVmProvisioner(object):
                 cluster_handle=handle,
                 requested_resources=requested_resources,
                 ready=False,
+                is_managed=self._is_managed,
             )
 
             global_user_state.set_owner_identity_for_cluster(
@@ -2750,6 +2756,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._dag = None
         self._optimize_target = None
         self._requested_features = set()
+        self._dump_final_script = False
+        self._is_managed = False
 
         # Command for running the setup script. It is only set when the
         # setup needs to be run outside the self._setup() and as part of
@@ -2766,6 +2774,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
         self._dump_final_script = kwargs.pop('dump_final_script', False)
+        self._is_managed = kwargs.pop('is_managed', False)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
@@ -2917,10 +2926,36 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # exceptions.ClusterOwnerIdentityMismatchError
         backend_utils.check_owner_identity(cluster_name)
         lock_id = backend_utils.cluster_status_lock_id(cluster_name)
-        with timeline.DistributedLockEvent(lock_id):
-            # Try to launch the exiting cluster first. If no existing cluster,
-            # this function will create a to_provision_config with required
-            # resources.
+        communicated_with_user = False
+
+        while True:
+            try:
+                return self._locked_provision(lock_id, task, to_provision,
+                                              dryrun, stream_logs, cluster_name,
+                                              retry_until_up,
+                                              skip_unnecessary_provisioning)
+            except locks.LockTimeout:
+                if not communicated_with_user:
+                    logger.info(f'{colorama.Fore.YELLOW}'
+                                f'Launching delayed, check concurrent tasks: '
+                                f'sky api status')
+                    communicated_with_user = True
+
+    def _locked_provision(
+        self,
+        lock_id: str,
+        task: task_lib.Task,
+        to_provision: Optional[resources_lib.Resources],
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: str,
+        retry_until_up: bool = False,
+        skip_unnecessary_provisioning: bool = False,
+    ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
+        with timeline.DistributedLockEvent(lock_id, _CLUSTER_LOCK_TIMEOUT):
+            # Try to launch the exiting cluster first. If no existing
+            # cluster, this function will create a to_provision_config
+            # with required resources.
             to_provision_config = self._check_existing_cluster(
                 task, to_provision, cluster_name, dryrun)
             assert to_provision_config.resources is not None, (
@@ -2961,7 +2996,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         self._requested_features,
                         local_wheel_path,
                         wheel_hash,
-                        blocked_resources=task.blocked_resources)
+                        blocked_resources=task.blocked_resources,
+                        is_managed=self._is_managed)
                     log_path = os.path.join(self.log_dir, 'provision.log')
                     rich_utils.force_update_status(
                         ux_utils.spinner_message('Launching', log_path))

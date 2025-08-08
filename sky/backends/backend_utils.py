@@ -125,6 +125,7 @@ CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 _CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
+WORKSPACE_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -2790,6 +2791,9 @@ def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _include_is_managed: bool = False,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
 
@@ -2810,6 +2814,8 @@ def get_clusters(
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
+        _include_is_managed: Whether to force include clusters created by the
+            controller.
 
     Returns:
         A list of cluster records. If the cluster does not exist or has been
@@ -2817,6 +2823,13 @@ def get_clusters(
     """
     records = global_user_state.get_clusters()
     current_user = common_utils.get_current_user()
+
+    # Filter out clusters created by the controller.
+    if (not env_options.Options.SHOW_DEBUG_INFO.get() and
+            not _include_is_managed):
+        records = [
+            record for record in records if not record.get('is_managed', False)
+        ]
 
     # Filter by user if requested
     if not all_users:
@@ -3251,7 +3264,8 @@ def get_endpoints(cluster: str,
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
     cluster_records = get_clusters(refresh=common.StatusRefreshMode.NONE,
-                                   cluster_names=[cluster])
+                                   cluster_names=[cluster],
+                                   _include_is_managed=True)
     if not cluster_records:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
@@ -3341,3 +3355,8 @@ def cluster_status_lock_id(cluster_name: str) -> str:
 def cluster_file_mounts_lock_id(cluster_name: str) -> str:
     """Get the lock ID for cluster file mounts operations."""
     return f'{cluster_name}_file_mounts'
+
+
+def workspace_lock_id(workspace_name: str) -> str:
+    """Get the lock ID for workspace operations."""
+    return f'{workspace_name}_workspace'

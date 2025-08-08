@@ -277,6 +277,7 @@ def mock_job_table_one_job(monkeypatch):
             'pool': None,
             'current_cluster_name': None,
             'job_id_on_pool_cluster': None,
+            'pool_hash': None,
         }
         return 0, message_utils.encode_payload([job_data]), ''
 

@@ -563,8 +563,7 @@ export function ClusterTable({
         markedHistoryClusters.forEach((histCluster) => {
           const existsInActive = activeClusters.some(
             (activeCluster) =>
-              (activeCluster.cluster || activeCluster.name) ===
-              (histCluster.cluster || histCluster.name)
+              activeCluster.cluster_hash === histCluster.cluster_hash
           );
           if (!existsInActive) {
             combinedData.push(histCluster);

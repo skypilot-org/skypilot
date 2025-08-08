@@ -17,6 +17,9 @@ def test_kubernetes_instance_type():
         (4, 16, 4, "4090", "4CPU--16GB--4090:4"),
         (4, 16, 1, "H100-80GB", "4CPU--16GB--H100-80GB:1"),
         (1, 6, 1, "K80", "1CPU--6GB--K80:1"),
+        # Test underscore-based GPU names (CoreWeave format)
+        (2, 8, 1, "H100_NVLINK_80GB", "2CPU--8GB--H100_NVLINK_80GB:1"),
+        (8, 32, 4, "A100_SXM4_80GB", "8CPU--32GB--A100_SXM4_80GB:4"),
     ]
 
     for cpus, memory, accelerator_count, accelerator_type, expected in test_cases:
@@ -69,3 +72,42 @@ def test_kubernetes_instance_type():
     assert memory == 16, f'Failed parse check for {prev_instance_type_name}'
     assert accelerator_count == 1, f'Failed parse check for {prev_instance_type_name}'
     assert accelerator_type == 'V100', f'Failed parse check for {prev_instance_type_name}'
+
+
+def test_gpu_name_underscore_preservation():
+    """Test that GPU names with underscores are preserved exactly as-is.
+    
+    This specifically tests the fix for CoreWeave H100_NVLINK_80GB support
+    where underscores were incorrectly converted to spaces during parsing.
+    """
+    test_cases = [
+        # (accelerator_name, expected_preserved_name)
+        ("H100_NVLINK_80GB", "H100_NVLINK_80GB"),
+        ("A100_SXM4_80GB", "A100_SXM4_80GB"),
+        ("RTX4090", "RTX4090"),
+        # Also test hyphen-based names continue to work
+        ("H100-80GB", "H100-80GB"),
+        ("A100-40GB", "A100-40GB"),
+    ]
+
+    for original_name, expected_name in test_cases:
+        # Create instance type with accelerator name
+        instance = KubernetesInstanceType.from_resources(
+            cpus=4,
+            memory=16,
+            accelerator_count=1,
+            accelerator_type=original_name)
+
+        # Parse it back from the instance type string
+        parsed_instance = KubernetesInstanceType.from_instance_type(
+            instance.name)
+
+        # Verify the accelerator name is preserved exactly
+        assert parsed_instance.accelerator_type == expected_name, (
+            f"Expected accelerator name '{expected_name}' but got "
+            f"'{parsed_instance.accelerator_type}' after round-trip parsing")
+
+        # Verify the full instance type string contains the original name
+        assert original_name in instance.name, (
+            f"Instance type string '{instance.name}' should contain "
+            f"original accelerator name '{original_name}'")

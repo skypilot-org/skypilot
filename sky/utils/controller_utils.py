@@ -209,6 +209,13 @@ class Controllers(enum.Enum):
         return None
 
 
+def get_controller_for_pool(pool: bool) -> Controllers:
+    """Get the controller type."""
+    if pool:
+        return Controllers.JOBS_CONTROLLER
+    return Controllers.SKY_SERVE_CONTROLLER
+
+
 def high_availability_specified(cluster_name: Optional[str]) -> bool:
     """Check if the controller high availability is specified in user config.
     """

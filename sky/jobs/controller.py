@@ -459,7 +459,8 @@ class JobsController:
                         backend_utils.get_clusters,
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
-                        all_users=True)
+                        all_users=True,
+                        _include_is_managed=True)
                     if clusters:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')

@@ -119,6 +119,7 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('job_id_on_pool_cluster',
                       sqlalchemy.Integer,
                       server_default=None),
+    sqlalchemy.Column('pool_hash', sqlalchemy.Text, server_default=None),
 )
 
 ha_recovery_script_table = sqlalchemy.Table(
@@ -339,6 +340,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'pool': r['pool'],
         'current_cluster_name': r['current_cluster_name'],
         'job_id_on_pool_cluster': r['job_id_on_pool_cluster'],
+        'pool_hash': r['pool_hash'],
     }
 
 
@@ -586,7 +588,8 @@ def get_processing_jobs_count() -> int:
 
 @_init_db
 def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
-                                pool: Optional[str]) -> int:
+                                pool: Optional[str],
+                                pool_hash: Optional[str]) -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -604,6 +607,7 @@ def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
             workspace=workspace,
             entrypoint=entrypoint,
             pool=pool,
+            pool_hash=pool_hash,
         )
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==

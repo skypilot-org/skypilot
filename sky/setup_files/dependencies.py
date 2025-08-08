@@ -71,6 +71,7 @@ install_requires = [
     'gitpython',
     'types-paramiko',
     'alembic',
+    'aiohttp',
 ]
 
 server_dependencies = [
@@ -78,6 +79,7 @@ server_dependencies = [
     'sqlalchemy_adapter',
     'passlib',
     'pyjwt',
+    'aiohttp',
 ]
 
 local_ray = [

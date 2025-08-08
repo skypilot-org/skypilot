@@ -147,7 +147,7 @@ def _validate_consolidation_mode_config(
         if global_user_state.get_cluster_from_name(controller_cn) is not None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InconsistentConsolidationModeError(
-                    f'{colorama.Fore.RED}Consolidation mode is '
+                    f'{colorama.Fore.RED}Consolidation mode for jobs is '
                     f'enabled, but the controller cluster '
                     f'{controller_cn} is still running. Please '
                     'terminate the controller cluster first.'
@@ -196,7 +196,8 @@ def ha_recovery_for_consolidation_mode():
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
     runner = command_runner.LocalProcessCommandRunner()
     scheduler.maybe_start_controllers()
-    with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH, 'w',
+    with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('jobs_'),
+              'w',
               encoding='utf-8') as f:
         start = time.time()
         f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
@@ -332,6 +333,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         This function should not throw any exception. If it fails, it will
         capture the error message, and log/return it.
         """
+        managed_job_state.remove_ha_recovery_script(job_id)
         error_msg = None
         tasks = managed_job_state.get_managed_jobs(job_id)
         for task in tasks:

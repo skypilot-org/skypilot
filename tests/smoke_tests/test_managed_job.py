@@ -143,7 +143,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.no_vast  # The pipeline.yaml uses other clouds
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.managed_jobs
 def test_job_pipeline(generic_cloud: str):
@@ -189,7 +189,7 @@ def test_job_pipeline(generic_cloud: str):
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not support spot instances
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_failed_setup(generic_cloud: str):
@@ -221,7 +221,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_vast  # Test fails to stay within a single cloud
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
@@ -465,7 +465,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not have spot instances
 @pytest.mark.no_vast  # Uses other clouds
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_recovery_default_resources(generic_cloud: str):
@@ -815,7 +815,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.no_vast  # Uses other clouds
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_storage(generic_cloud: str):
@@ -841,7 +841,7 @@ def test_managed_jobs_storage(generic_cloud: str):
     # However, we inject this testing only for AWS and GCP since they are the
     # supported object storage providers in SkyPilot.
     if generic_cloud == 'aws':
-        region = 'eu-central-1'
+        region = 'us-east-2'
         region_flag = f'/{region}'
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.S3, bucket_name=output_storage_name)
@@ -944,7 +944,6 @@ def test_managed_jobs_storage(generic_cloud: str):
     # This is useful for jobs consolidation mode, where the job submission is
     # very fast (don't need to launch a controller VM) and the bucket might not
     # be created yet immediately after the job submission.
-    region_validation_cmd_with_retry = region_validation_base_cmd
     region_validation_timeout_for_consolidation = 30
     # Only apply to non-trivial region validation commands.
     if region_validation_base_cmd != 'true':

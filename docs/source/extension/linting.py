@@ -16,6 +16,7 @@ ALLOWED_TERMS = {
     'OpenAI',
     'API',
     'GPU',
+    'GPT-OSS',
     'VM',
     'GUI',
     'AWS',
@@ -77,6 +78,7 @@ MULTI_WORD_TERMS = {
     'Google Workspace',
     'Google Auth Platform',
     'Google Cloud Logging',
+    'AWS Systems Manager',
 }
 
 
