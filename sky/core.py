@@ -277,7 +277,7 @@ def endpoints(cluster: str,
                 f'Fetching endpoints for cluster {cluster}')):
         result = backend_utils.get_endpoints(cluster=cluster, port=port)
         # Convert int keys to str keys.
-        # In JSON, each key must be a string.
+        # In JSON serialization, each key must be a string.
         return {str(k): v for k, v in result.items()}
 
 
