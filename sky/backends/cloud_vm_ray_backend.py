@@ -1357,19 +1357,18 @@ class RetryingVmProvisioner(object):
         # Record provision log path on the current API request (server-side)
         try:
             # Import lazily to avoid client-side import issues
-            from sky.utils import annotations as _ann
-            if _ann.is_on_api_server:
-                from sky.utils import common_utils as _common_utils
-                from sky.server.requests import requests as _requests_lib
-                _req_id = _common_utils.get_current_request_id()
-                with _requests_lib.update_request(_req_id) as _req:
-                    if _req is not None:
-                        _req.provision_log_path = log_abs_path
+            if annotations.is_on_api_server:
+                req_id = common_utils.get_current_request_id()
+                with requests_lib.update_request(req_id) as req:
+                    if req is not None:
+                        req.provision_log_path = log_abs_path
         except Exception:  # pylint: disable=broad-except
             # Best-effort: failure to persist should not affect launching
             pass
         rich_utils.force_update_status(
-            ux_utils.spinner_message('Launching', log_path))
+            ux_utils.spinner_message('Launching',
+                                     log_path,
+                                     cluster_name=cluster_name))
 
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
@@ -2182,14 +2181,11 @@ class RetryingVmProvisioner(object):
             logger.warning(f'\n{retry_message}')
             log_path = os.path.join(self.log_dir, 'provision.log')
             try:
-                from sky.utils import annotations as _ann
-                if _ann.is_on_api_server:
-                    from sky.utils import common_utils as _common_utils
-                    from sky.server.requests import requests as _requests_lib
-                    _req_id = _common_utils.get_current_request_id()
-                    with _requests_lib.update_request(_req_id) as _req:
-                        if _req is not None:
-                            _req.provision_log_path = os.path.abspath(log_path)
+                if annotations.is_on_api_server:
+                    req_id = common_utils.get_current_request_id()
+                    with requests_lib.update_request(req_id) as req:
+                        if req is not None:
+                            req.provision_log_path = os.path.abspath(log_path)
             except Exception:  # pylint: disable=broad-except
                 pass
             rich_utils.force_update_status(
@@ -3035,7 +3031,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         is_managed=self._is_managed)
                     log_path = os.path.join(self.log_dir, 'provision.log')
                     rich_utils.force_update_status(
-                        ux_utils.spinner_message('Launching', log_path))
+                        ux_utils.spinner_message('Launching',
+                                                 log_path,
+                                                 cluster_name=cluster_name))
                     config_dict = retry_provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs,
                         skip_unnecessary_provisioning)
