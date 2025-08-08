@@ -2636,9 +2636,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """Opens an SSH tunnel to the Skylet on the head node,
         updates the cluster handle, and persists it to the database."""
         local_port = common_utils.find_free_port(10000)
-        logger.info(
-            f'Opening SSH tunnel to {self.head_ip} on port {local_port}')
-
         runners = self.get_command_runners()
         head_runner = runners[0]
         if isinstance(head_runner, command_runner.SSHCommandRunner):
