@@ -1527,6 +1527,12 @@ class RetryingVmProvisioner(object):
                 is_managed=self._is_managed,
             )
 
+            # Add cluster event for actual provisioning start.
+            global_user_state.add_cluster_event(
+                cluster_name, status_lib.ClusterStatus.INIT,
+                f'Provisioning on {to_provision.cloud.display_name()} ' +
+                f'in {to_provision.region}')
+
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_identity)
 
@@ -3010,6 +3016,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     break
                 except exceptions.ResourcesUnavailableError as e:
                     log_path = retry_provisioner.log_dir + '/provision.log'
+
+                    # Add cluster event for provisioning failure.
+                    global_user_state.add_cluster_event(
+                        cluster_name, status_lib.ClusterStatus.INIT,
+                        f'Provisioning failed: {str(e)[:100]}...')
+
                     error_message = (
                         f'{colorama.Fore.RED}Failed to provision all '
                         f'possible launchable resources.'
@@ -3026,6 +3038,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         hint_message = (f'\n{retry_message} '
                                         f'{ux_utils.log_path_hint(log_path)}'
                                         f'{colorama.Style.RESET_ALL}')
+
+                        # Add cluster event for retry.
+                        global_user_state.add_cluster_event(
+                            cluster_name, status_lib.ClusterStatus.INIT,
+                            f'Retrying provisioning after {gap_seconds:.0f}s')
+
                         raise exceptions.ExecutionRetryableError(
                             error_message,
                             hint=hint_message,
@@ -3077,6 +3095,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 #    and other necessary files to the VM.
                 # 3. Run setup commands to install dependencies.
                 # 4. Starting ray cluster and skylet.
+
+                # Add cluster event for runtime setup start
+                global_user_state.add_cluster_event(
+                    handle.cluster_name, status_lib.ClusterStatus.INIT,
+                    'Setting up SkyPilot runtime on cluster')
+
                 cluster_info = provisioner.post_provision_runtime_setup(
                     repr(handle.launched_resources.cloud),
                     resources_utils.ClusterName(handle.cluster_name,
@@ -3262,6 +3286,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 config_hash=config_hash,
                 task_config=user_specified_task_config,
             )
+
+            # Add cluster event for successful provisioning.
+            global_user_state.add_cluster_event(
+                handle.cluster_name, status_lib.ClusterStatus.UP,
+                'Cluster successfully provisioned with ' +
+                f'{handle.launched_nodes} nodes')
+
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
             # We still add the cluster to ssh config file on API server, this
