@@ -150,7 +150,6 @@ export async function getClusterHistory() {
         workspace: cluster.workspace || 'default',
         autostop: -1,
         to_down: false,
-        cluster_hash: cluster.cluster_hash,
         usage_intervals: cluster.usage_intervals,
         command: cluster.last_creation_command || '',
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -186,6 +185,7 @@ export async function streamClusterJobLogs({
         follow: false,
         cluster_name: clusterName,
         job_id: jobId,
+        tail: 1000,
         override_skypilot_config: {
           active_workspace: workspace || 'default',
         },
