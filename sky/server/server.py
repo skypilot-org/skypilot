@@ -30,9 +30,9 @@ import uvloop
 
 import sky
 from sky import catalog
-from sky import check as sky_check
 from sky import clouds
 from sky import core
+from sky import credentials_check
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
@@ -680,7 +680,7 @@ async def check(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name='check',
         request_body=check_body,
-        func=sky_check.check,
+        func=credentials_check.check,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 

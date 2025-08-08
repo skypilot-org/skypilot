@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Tuple
 
 import filelock
 
-from sky import check as sky_check
+from sky import credentials_check
 from sky import exceptions
 from sky import models
 from sky import sky_logging
@@ -337,7 +337,7 @@ def update_workspace(workspace_name: str, config: Dict[str,
 
     # Validate the workspace by running sky check for it
     try:
-        sky_check.check(quiet=True, workspace=workspace_name)
+        credentials_check.check(quiet=True, workspace=workspace_name)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Workspace {workspace_name} configuration saved but '
                        f'validation check failed: {e}')
@@ -385,7 +385,7 @@ def create_workspace(workspace_name: str, config: Dict[str,
 
     # Validate the workspace by running sky check for it
     try:
-        sky_check.check(quiet=True, workspace=workspace_name)
+        credentials_check.check(quiet=True, workspace=workspace_name)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Workspace {workspace_name} configuration saved but '
                        f'validation check failed: {e}')
@@ -558,7 +558,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Validate the configuration by running sky check
     try:
-        sky_check.check(quiet=True)
+        credentials_check.check(quiet=True)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Configuration saved but '
                        f'validation check failed: {e}')

@@ -9,8 +9,8 @@ import colorama
 from sky import admin_policy
 from sky import backends
 from sky import catalog
-from sky import check as sky_check
 from sky import clouds
+from sky import credentials_check
 from sky import dag as dag_lib
 from sky import data
 from sky import exceptions
@@ -1301,9 +1301,10 @@ def local_down() -> None:
         # Run sky check
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Running sky check...')):
-            sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
-                                       clouds=['kubernetes'],
-                                       quiet=True)
+            credentials_check.check_capability(
+                sky_cloud.CloudCapability.COMPUTE,
+                clouds=['kubernetes'],
+                quiet=True)
         logger.info(
             ux_utils.finishing_message('Local cluster removed.',
                                        log_path=log_path,

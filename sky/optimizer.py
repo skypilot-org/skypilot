@@ -9,8 +9,8 @@ import colorama
 import numpy as np
 import prettytable
 
-from sky import check as sky_check
 from sky import clouds
+from sky import credentials_check
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
@@ -371,7 +371,7 @@ class Optimizer:
                 # mention "kubernetes cluster" and/instead of "catalog"
                 # in the error message.
                 enabled_clouds = (
-                    sky_check.get_cached_enabled_clouds_or_refresh(
+                    credentials_check.get_cached_enabled_clouds_or_refresh(
                         sky_cloud.CloudCapability.COMPUTE))
                 if clouds.cloud_in_iterable(clouds.Kubernetes(),
                                             enabled_clouds):
@@ -1202,7 +1202,7 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
     Args:
         dag: The DAG specified by a user.
     """
-    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+    enabled_clouds = credentials_check.get_cached_enabled_clouds_or_refresh(
         capability=sky_cloud.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 
@@ -1224,12 +1224,12 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         clouds_to_check_again = list(clouds_need_recheck -
                                      global_disabled_clouds)
         if len(clouds_to_check_again) > 0:
-            sky_check.check_capability(
+            credentials_check.check_capability(
                 sky_cloud.CloudCapability.COMPUTE,
                 quiet=True,
                 clouds=clouds_to_check_again,
                 workspace=skypilot_config.get_active_workspace())
-        enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        enabled_clouds = credentials_check.get_cached_enabled_clouds_or_refresh(
             capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
         disabled_clouds = (clouds_need_recheck -
@@ -1326,7 +1326,7 @@ def _fill_in_launchable_resources(
       ResourcesUnavailableError: if all resources required by the task are on
         a cloud that is not enabled.
     """
-    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+    enabled_clouds = credentials_check.get_cached_enabled_clouds_or_refresh(
         capability=sky_cloud.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 

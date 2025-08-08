@@ -23,8 +23,8 @@ from typing_extensions import Literal
 import sky
 from sky import authentication as auth
 from sky import backends
-from sky import check as sky_check
 from sky import clouds
+from sky import credentials_check
 from sky import exceptions
 from sky import global_user_state
 from sky import logs
@@ -716,7 +716,8 @@ def write_cluster_config(
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
                 excluded_clouds.add(cloud_obj)
 
-    credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
+    credentials = credentials_check.get_cloud_credential_file_mounts(
+        excluded_clouds)
 
     logging_agent = logs.get_logging_agent()
     if logging_agent:

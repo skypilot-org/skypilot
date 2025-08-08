@@ -25,9 +25,9 @@ import yaml
 import sky
 from sky import backends
 from sky import catalog
-from sky import check as sky_check
 from sky import cloud_stores
 from sky import clouds
+from sky import credentials_check
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
@@ -2040,8 +2040,9 @@ class RetryingVmProvisioner(object):
         # is running. Here we check the enabled clouds and expiring credentials
         # and raise a warning to the user.
         if task.is_controller_task():
-            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-                sky_cloud.CloudCapability.COMPUTE)
+            enabled_clouds = (
+                credentials_check.get_cached_enabled_clouds_or_refresh(
+                    sky_cloud.CloudCapability.COMPUTE))
             expirable_clouds = backend_utils.get_expirable_clouds(
                 enabled_clouds)
 

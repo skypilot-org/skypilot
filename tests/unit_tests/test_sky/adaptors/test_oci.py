@@ -3,7 +3,7 @@ import logging
 
 import pytest
 
-from sky import check as sky_check
+from sky import credentials_check
 from sky.adaptors import oci
 from sky.utils import log_utils
 

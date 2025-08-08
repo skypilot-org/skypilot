@@ -95,6 +95,7 @@ from sky.client.sdk import api_status
 from sky.client.sdk import api_stop
 from sky.client.sdk import autostop
 from sky.client.sdk import cancel
+from sky.client.sdk import check
 from sky.client.sdk import cost_report
 from sky.client.sdk import down
 from sky.client.sdk import download_logs
@@ -183,6 +184,7 @@ __all__ = [
     'Task',
     'Resources',
     # core APIs
+    'check',
     'optimize',
     'launch',
     'exec',

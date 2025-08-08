@@ -6,8 +6,8 @@ import enum
 import typing
 from typing import Any, Dict, List, Optional, Set
 
-from sky import check as sky_check
 from sky import clouds as sky_clouds
+from sky import credentials_check
 from sky import sky_logging
 from sky.clouds import cloud as sky_cloud
 from sky.utils import registry
@@ -126,7 +126,7 @@ def _get_possible_location_from_task(task: 'task_lib.Task') -> List[Location]:
         # If the cloud list is empty, that means the user has no location
         # related requirements. Then we start with all enabled clouds and
         # all possible regions and zones.
-        clouds_list = sky_check.get_cached_enabled_clouds_or_refresh(
+        clouds_list = credentials_check.get_cached_enabled_clouds_or_refresh(
             capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=False)
         for cloud in clouds_list:

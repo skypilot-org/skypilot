@@ -5,8 +5,8 @@ from unittest import mock
 
 import pytest
 
-from sky import check
 from sky import clouds
+from sky import credentials_check
 from sky import global_user_state
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
@@ -106,7 +106,7 @@ def test_no_cloud_labels_resources():
                                          sky_cloud.CloudCapability.COMPUTE,
                                          constants.SKYPILOT_DEFAULT_WORKSPACE)
     global_user_state.set_allowed_clouds(
-        check._get_workspace_allowed_clouds(
+        credentials_check._get_workspace_allowed_clouds(
             constants.SKYPILOT_DEFAULT_WORKSPACE),
         constants.SKYPILOT_DEFAULT_WORKSPACE)
     allowed_labels = {
@@ -125,7 +125,7 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
                                          sky_cloud.CloudCapability.COMPUTE,
                                          constants.SKYPILOT_DEFAULT_WORKSPACE)
     global_user_state.set_allowed_clouds(
-        check._get_workspace_allowed_clouds(
+        credentials_check._get_workspace_allowed_clouds(
             constants.SKYPILOT_DEFAULT_WORKSPACE),
         constants.SKYPILOT_DEFAULT_WORKSPACE)
     allowed_labels = {

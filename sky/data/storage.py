@@ -14,8 +14,8 @@ import urllib.parse
 
 import colorama
 
-from sky import check as sky_check
 from sky import clouds
+from sky import credentials_check
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -86,7 +86,7 @@ def get_cached_enabled_storage_cloud_names_or_refresh(
         raise_if_no_cloud_access: bool = False) -> List[str]:
     # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
     # is resolved by implementing separate 'enabled_storage_clouds'
-    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+    enabled_clouds = credentials_check.get_cached_enabled_clouds_or_refresh(
         sky_cloud.CloudCapability.STORAGE)
     enabled_clouds = [str(cloud) for cloud in enabled_clouds]
 
@@ -108,7 +108,7 @@ def _is_storage_cloud_enabled(cloud_name: str,
         return True
     if try_fix_with_sky_check:
         # TODO(zhwu): Only check the specified cloud to speed up.
-        sky_check.check_capability(
+        credentials_check.check_capability(
             sky_cloud.CloudCapability.STORAGE,
             quiet=True,
             workspace=skypilot_config.get_active_workspace())

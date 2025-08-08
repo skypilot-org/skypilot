@@ -4,8 +4,8 @@ from typing import Callable, ForwardRef
 
 import sky
 from sky import catalog
-from sky import check
 from sky import core
+from sky import credentials_check
 from sky import execution
 from sky.client import sdk
 from sky.jobs.client import sdk as jobs_sdk
@@ -49,7 +49,7 @@ def _check_return_type(sdk_function: Callable, internal_function: Callable):
 
 def test_check_return_type():
     """Test that sdk.check and check.check return types match."""
-    _check_return_type(sdk.check, check.check)
+    _check_return_type(sdk.check, credentials_check.check)
 
 
 def test_enabled_clouds_return_type():

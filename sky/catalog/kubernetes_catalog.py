@@ -7,8 +7,8 @@ import re
 import typing
 from typing import Dict, List, Optional, Set, Tuple
 
-from sky import check as sky_check
 from sky import clouds as sky_clouds
+from sky import credentials_check
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
@@ -133,7 +133,7 @@ def _list_accelerators(
 
     # First check if Kubernetes is enabled. This ensures k8s python client is
     # installed. Do not put any k8s-specific logic before this check.
-    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+    enabled_clouds = credentials_check.get_cached_enabled_clouds_or_refresh(
         cloud.CloudCapability.COMPUTE)
     if not sky_clouds.cloud_in_iterable(sky_clouds.Kubernetes(),
                                         enabled_clouds):

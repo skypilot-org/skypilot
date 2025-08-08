@@ -10,8 +10,8 @@ import uuid
 
 import colorama
 
-from sky import check as sky_check
 from sky import clouds
+from sky import credentials_check
 from sky import exceptions
 from sky import global_user_state
 from sky import resources
@@ -257,10 +257,10 @@ def _get_cloud_dependencies_installation_commands(
                     f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
 
     enabled_compute_clouds = set(
-        sky_check.get_cached_enabled_clouds_or_refresh(
+        credentials_check.get_cached_enabled_clouds_or_refresh(
             sky_cloud.CloudCapability.COMPUTE))
     enabled_storage_clouds = set(
-        sky_check.get_cached_enabled_clouds_or_refresh(
+        credentials_check.get_cached_enabled_clouds_or_refresh(
             sky_cloud.CloudCapability.STORAGE))
     enabled_clouds = enabled_compute_clouds.union(enabled_storage_clouds)
     enabled_k8s_and_ssh = [

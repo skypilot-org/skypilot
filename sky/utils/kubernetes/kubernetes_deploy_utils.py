@@ -8,7 +8,7 @@ from typing import List, Optional
 
 import colorama
 
-from sky import check as sky_check
+from sky import credentials_check
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.clouds import cloud as sky_cloud
@@ -322,9 +322,9 @@ def deploy_local_cluster(gpus: bool):
                                f'\nError: {stderr}')
     # Run sky check
     with rich_utils.safe_status('[bold cyan]Running sky check...'):
-        sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
-                                   quiet=True,
-                                   clouds=['kubernetes'])
+        credentials_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                           quiet=True,
+                                           clouds=['kubernetes'])
     if cluster_created:
         # Prepare completion message which shows CPU and GPU count
         # Get number of CPUs
