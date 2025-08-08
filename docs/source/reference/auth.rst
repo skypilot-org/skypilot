@@ -404,7 +404,7 @@ During the login flow, the token provided by the web login will encode the cooki
 
 .. note::
 
-    If your auth proxy is not automatically detected, try using ``sky api login --relogin`` to force auth proxy mode.
+    If your auth proxy is not automatically detected, try using ``sky api login --relogin`` to force relogin.
 
 If the ``X-Auth-Request-Email`` header is set by your auth proxy, SkyPilot will use it as the username in all requests. You can customize the authentication header name if your auth proxy uses a different header than the default ``X-Auth-Request-Email``.
 
