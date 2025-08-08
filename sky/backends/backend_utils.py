@@ -2124,7 +2124,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # Add cluster event for instance status check.
         global_user_state.add_cluster_event(
             cluster_name, status_lib.ClusterStatus.UP,
-            'All nodes up + ray cluster healthy.')
+            'All nodes up + ray cluster healthy.',
+            global_user_state.ClusterEventType.STATUS_CHANGE)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -2304,7 +2305,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
         global_user_state.add_cluster_event(
             cluster_name, status_lib.ClusterStatus.INIT,
-            f'Cluster is abnormal because {init_reason} transitioning to INIT.')
+            f'Cluster is abnormal because {init_reason} transitioning to INIT.',
+            global_user_state.ClusterEventType.STATUS_CHANGE)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -2316,7 +2318,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     backend = backends.CloudVmRayBackend()
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     global_user_state.add_cluster_event(
-        cluster_name, None, 'All nodes stopped, terminating cluster.')
+        cluster_name, None, 'All nodes stopped, terminating cluster.',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 

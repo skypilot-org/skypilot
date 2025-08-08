@@ -1531,7 +1531,8 @@ class RetryingVmProvisioner(object):
             global_user_state.add_cluster_event(
                 cluster_name, status_lib.ClusterStatus.INIT,
                 f'Provisioning on {to_provision.cloud.display_name()} ' +
-                f'in {to_provision.region}')
+                f'in {to_provision.region}',
+                global_user_state.ClusterEventType.STATUS_CHANGE)
 
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_identity)
@@ -3037,7 +3038,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # Add cluster event for retry.
                         global_user_state.add_cluster_event(
                             cluster_name, status_lib.ClusterStatus.INIT,
-                            f'Retrying provisioning after {gap_seconds:.0f}s')
+                            f'Retrying provisioning after {gap_seconds:.0f}s',
+                            global_user_state.ClusterEventType.STATUS_CHANGE)
 
                         raise exceptions.ExecutionRetryableError(
                             error_message,
@@ -3094,7 +3096,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Add cluster event for runtime setup start
                 global_user_state.add_cluster_event(
                     handle.cluster_name, status_lib.ClusterStatus.INIT,
-                    'Setting up SkyPilot runtime on cluster')
+                    'Setting up SkyPilot runtime on cluster',
+                    global_user_state.ClusterEventType.STATUS_CHANGE)
 
                 cluster_info = provisioner.post_provision_runtime_setup(
                     repr(handle.launched_resources.cloud),
@@ -3286,7 +3289,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             global_user_state.add_cluster_event(
                 handle.cluster_name, status_lib.ClusterStatus.UP,
                 'Cluster successfully provisioned with ' +
-                f'{handle.launched_nodes} nodes')
+                f'{handle.launched_nodes} nodes',
+                global_user_state.ClusterEventType.STATUS_CHANGE)
 
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)

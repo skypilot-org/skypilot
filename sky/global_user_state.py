@@ -16,6 +16,7 @@ import time
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
+import enum
 
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
@@ -162,6 +163,14 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
 )
 
+class ClusterEventType(enum.Enum):
+    """Type of cluster event."""
+    DEBUG = 'DEBUG'
+    """Used to denote events that are not related to cluster status."""
+
+    STATUS_CHANGE = 'STATUS_CHANGE'
+    """Used to denote events that modify cluster status."""
+
 # Table for cluster status change events.
 # starting_status: Status of the cluster at the start of the event.
 # ending_status: Status of the cluster at the end of the event.
@@ -176,6 +185,7 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('ending_status', sqlalchemy.Text),
     sqlalchemy.Column('reason', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('type', sqlalchemy.Text),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -630,7 +640,7 @@ def add_or_update_cluster(cluster_name: str,
 
 @_init_db
 def add_cluster_event(cluster_name: str, new_status: status_lib.ClusterStatus,
-                      reason: str) -> None:
+                      reason: str, event_type: ClusterEventType) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -657,6 +667,7 @@ def add_cluster_event(cluster_name: str, new_status: status_lib.ClusterStatus,
                     ending_status=new_status.value,
                     reason=reason,
                     transitioned_at=int(time.time()),
+                    type=event_type.value,
                 ))
             session.commit()
         except sqlalchemy.exc.IntegrityError as e:
@@ -672,7 +683,8 @@ def get_last_cluster_event(cluster_name: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_event_table).filter_by(
-            name=cluster_name).order_by(
+            name=cluster_name,
+            type=ClusterEventType.STATUS_CHANGE.value).order_by(
                 cluster_event_table.c.transitioned_at.desc()).first()
     if row is None:
         return None

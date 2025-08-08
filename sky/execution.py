@@ -439,14 +439,16 @@ def _execute_dag(
             if cluster_name is not None:
                 global_user_state.add_cluster_event(
                     cluster_name, status_lib.ClusterStatus.INIT,
-                    'Syncing files to cluster')
+                    'Syncing files to cluster',
+                    global_user_state.ClusterEventType.STATUS_CHANGE)
             backend.sync_workdir(handle, task.workdir, task.envs_and_secrets)
 
         if do_file_mounts:
             if cluster_name is not None:
                 global_user_state.add_cluster_event(cluster_name,
-                                                    status_lib.ClusterStatus.UP,
-                                                    'Syncing file mounts')
+                            status_lib.ClusterStatus.UP,
+                            'Syncing file mounts',
+                            global_user_state.ClusterEventType.STATUS_CHANGE)
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
@@ -460,7 +462,8 @@ def _execute_dag(
                 if cluster_name is not None:
                     global_user_state.add_cluster_event(
                         cluster_name, status_lib.ClusterStatus.UP,
-                        'Running setup commands to install dependencies')
+                        'Running setup commands to install dependencies',
+                        global_user_state.ClusterEventType.STATUS_CHANGE)
                 backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
@@ -476,7 +479,8 @@ def _execute_dag(
                 if cluster_name is not None:
                     global_user_state.add_cluster_event(
                         cluster_name, status_lib.ClusterStatus.UP,
-                        'Starting job execution')
+                        'Starting job execution',
+                        global_user_state.ClusterEventType.STATUS_CHANGE)
                 job_id = backend.execute(handle,
                                          task,
                                          detach_run,
