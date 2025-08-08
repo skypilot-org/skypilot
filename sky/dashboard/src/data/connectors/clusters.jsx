@@ -90,6 +90,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
         autostop: cluster.autostop,
+        last_event: cluster.last_event,
         to_down: cluster.to_down,
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
