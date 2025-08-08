@@ -1532,9 +1532,11 @@ async def api_status(
         return encoded_request_tasks
 
 
-@app.get('/api/health',
-         response_model=responses.APIHealthResponse,
-         response_model_exclude_unset=True)
+@app.get(
+    '/api/health',
+    # response_model_exclude_unset omits unset fields
+    # in the response JSON.
+    response_model_exclude_unset=True)
 async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
