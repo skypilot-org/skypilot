@@ -445,10 +445,10 @@ def _execute_dag(
 
         if do_file_mounts:
             if cluster_name is not None:
-                global_user_state.add_cluster_event(cluster_name,
-                            status_lib.ClusterStatus.UP,
-                            'Syncing file mounts',
-                            global_user_state.ClusterEventType.STATUS_CHANGE)
+                global_user_state.add_cluster_event(
+                    cluster_name, status_lib.ClusterStatus.UP,
+                    'Syncing file mounts',
+                    global_user_state.ClusterEventType.STATUS_CHANGE)
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 

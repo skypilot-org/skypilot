@@ -6,6 +6,7 @@ Concepts:
 - Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
+import enum
 import functools
 import json
 import os
@@ -16,7 +17,6 @@ import time
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
-import enum
 
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
@@ -163,6 +163,7 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
 )
 
+
 class ClusterEventType(enum.Enum):
     """Type of cluster event."""
     DEBUG = 'DEBUG'
@@ -170,6 +171,7 @@ class ClusterEventType(enum.Enum):
 
     STATUS_CHANGE = 'STATUS_CHANGE'
     """Used to denote events that modify cluster status."""
+
 
 # Table for cluster status change events.
 # starting_status: Status of the cluster at the start of the event.

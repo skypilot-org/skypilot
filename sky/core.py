@@ -633,10 +633,10 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
 
-    global_user_state.add_cluster_event(cluster_name,
-                            status_lib.ClusterStatus.STOPPED,
-                            'Cluster was stopped by user.',
-                            global_user_state.ClusterEventType.STATUS_CHANGE)
+    global_user_state.add_cluster_event(
+        cluster_name, status_lib.ClusterStatus.STOPPED,
+        'Cluster was stopped by user.',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
 
     backend = backend_utils.get_backend_from_handle(handle)
 
