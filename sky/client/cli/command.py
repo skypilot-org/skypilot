@@ -35,7 +35,7 @@ import sys
 import traceback
 import typing
 from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
-                    Union)
+                    TypeVar, Union)
 
 import click
 import colorama
@@ -115,6 +115,8 @@ _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
+
+T = TypeVar('T')
 
 
 def _get_cluster_records_and_set_ssh_config(
@@ -224,8 +226,8 @@ def _get_glob_matches(candidate_names: List[str],
     return list(set(glob_storages))
 
 
-def _async_call_or_wait(request_id: str, async_call: bool,
-                        request_name: str) -> Any:
+def _async_call_or_wait(request_id: server_common.RequestId[T],
+                        async_call: bool, request_name: str) -> Any:
     short_request_id = request_id[:8]
     if not async_call:
         try:
@@ -1411,7 +1413,7 @@ def exec(
 
 
 def _handle_jobs_queue_request(
-        request_id: str,
+        request_id: server_common.RequestId[List[Dict[str, Any]]],
         show_all: bool,
         show_user: bool,
         max_num_jobs_to_show: Optional[int],
@@ -1492,7 +1494,7 @@ def _handle_jobs_queue_request(
 
 
 def _handle_services_request(
-    request_id: str,
+    request_id: server_common.RequestId[List[Dict[str, Any]]],
     service_names: Optional[List[str]],
     show_all: bool,
     show_endpoint: bool,
@@ -1656,10 +1658,11 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     # The endpoint request is relatively fast, so we don't add special handling
     # for keyboard interrupt and abort the request to avoid additional latency.
     if show_endpoints:
+        assert isinstance(endpoint, int)
         if endpoint:
             request_id = sdk.endpoints(cluster_record['name'], endpoint)
             cluster_endpoints = sdk.stream_and_get(request_id)
-            cluster_endpoint = cluster_endpoints.get(str(endpoint), None)
+            cluster_endpoint = cluster_endpoints.get(endpoint, None)
             if not cluster_endpoint:
                 raise click.Abort(f'Endpoint {endpoint} not found for cluster '
                                   f'{cluster_record["name"]!r}.')
@@ -1879,17 +1882,19 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                                   skip_finished=True,
                                   all_users=all_users)
 
-    def submit_services() -> Optional[str]:
+    def submit_services(
+    ) -> Optional[server_common.RequestId[List[Dict[str, Any]]]]:
         return serve_lib.status(service_names=None)
 
-    def submit_pools() -> Optional[str]:
+    def submit_pools(
+    ) -> Optional[server_common.RequestId[List[Dict[str, Any]]]]:
         try:
             return managed_jobs.pool_status(pool_names=None)
         except exceptions.APINotSupportedError as e:
             logger.debug(f'Pools are not supported in the remote server: {e}')
             return None
 
-    def submit_workspace() -> Optional[str]:
+    def submit_workspace() -> Optional[server_common.RequestId[Dict[str, Any]]]:
         try:
             return sdk.workspaces()
         except RuntimeError:
@@ -1928,11 +1933,14 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         if not (ip or show_endpoints):
             workspace_request_id = workspace_request_future.result()
 
-    managed_jobs_queue_request_id = ('' if not managed_jobs_queue_request_id
-                                     else managed_jobs_queue_request_id)
-    service_status_request_id = ('' if not service_status_request_id else
+    managed_jobs_queue_request_id = (server_common.RequestId()
+                                     if not managed_jobs_queue_request_id else
+                                     managed_jobs_queue_request_id)
+    service_status_request_id = (server_common.RequestId()
+                                 if not service_status_request_id else
                                  service_status_request_id)
-    pool_status_request_id = ('' if not pool_status_request_id else
+    pool_status_request_id = (server_common.RequestId()
+                              if not pool_status_request_id else
                               pool_status_request_id)
 
     # Phase 3: Get cluster records and handle special cases
@@ -1957,7 +1965,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     if workspace_request_id is not None:
         all_workspaces = sdk.get(workspace_request_id)
     else:
-        all_workspaces = [constants.SKYPILOT_DEFAULT_WORKSPACE]
+        all_workspaces = {constants.SKYPILOT_DEFAULT_WORKSPACE: {}}
     active_workspace = skypilot_config.get_active_workspace()
     show_workspace = len(all_workspaces) > 1
     _show_enabled_infra(active_workspace, show_workspace)
@@ -3836,7 +3844,7 @@ def show_gpus(
                 yield k8s_messages
                 yield '\n\n'
 
-            result = sdk.stream_and_get(
+            list_accelerator_counts_result = sdk.stream_and_get(
                 sdk.list_accelerator_counts(
                     gpus_only=True,
                     clouds=clouds_to_list,
@@ -3853,14 +3861,20 @@ def show_gpus(
 
             # "Common" GPUs
             for gpu in catalog.get_common_gpus():
-                if gpu in result:
-                    gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+                if gpu in list_accelerator_counts_result:
+                    gpu_table.add_row([
+                        gpu,
+                        _list_to_str(list_accelerator_counts_result.pop(gpu))
+                    ])
             yield from gpu_table.get_string()
 
             # Google TPUs
             for tpu in catalog.get_tpus():
-                if tpu in result:
-                    tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
+                if tpu in list_accelerator_counts_result:
+                    tpu_table.add_row([
+                        tpu,
+                        _list_to_str(list_accelerator_counts_result.pop(tpu))
+                    ])
             if tpu_table.get_string():
                 yield '\n\n'
             yield from tpu_table.get_string()
@@ -3868,7 +3882,7 @@ def show_gpus(
             # Other GPUs
             if show_all:
                 yield '\n\n'
-                for gpu, qty in sorted(result.items()):
+                for gpu, qty in sorted(list_accelerator_counts_result.items()):
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
@@ -3919,7 +3933,7 @@ def show_gpus(
 
         # For clouds other than Kubernetes, get the accelerator details
         # Case-sensitive
-        result = sdk.stream_and_get(
+        list_accelerators_result = sdk.stream_and_get(
             sdk.list_accelerators(gpus_only=True,
                                   name_filter=name,
                                   quantity_filter=quantity,
@@ -3935,8 +3949,8 @@ def show_gpus(
         #   - Group by cloud
         #   - Sort within each group by prices
         #   - Sort groups by each cloud's (min price, min spot price)
-        new_result = {}
-        for i, (gpu, items) in enumerate(result.items()):
+        new_result: Dict[str, List[catalog_common.InstanceTypeInfo]] = {}
+        for i, (gpu, items) in enumerate(list_accelerators_result.items()):
             df = pd.DataFrame([t._asdict() for t in items])
             # Determine the minimum prices for each cloud.
             min_price_df = df.groupby('cloud').agg(min_price=('price', 'min'),
@@ -3954,14 +3968,14 @@ def show_gpus(
                 for row in df.to_records(index=False)
             ]
             new_result[gpu] = sorted_dataclasses
-        result = new_result
+        list_accelerators_result = new_result
 
         if print_section_titles and not show_all:
             yield '\n\n'
             yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
-        if not result:
+        if not list_accelerators_result:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
             cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
@@ -3969,7 +3983,7 @@ def show_gpus(
             yield 'To show available accelerators, run: sky show-gpus --all'
             return
 
-        for i, (gpu, items) in enumerate(result.items()):
+        for i, (gpu, items) in enumerate(list_accelerators_result.items()):
             accelerator_table_headers = [
                 'GPU',
                 'QTY',
@@ -6039,7 +6053,8 @@ def api_logs(request_id: Optional[str], server_logs: bool,
     if request_id is not None and log_path is not None:
         raise click.BadParameter(
             'Only one of request ID and log path can be provided.')
-    sdk.stream_and_get(request_id, log_path, tail)
+    sdk.stream_and_get(server_common.RequestId[None](request_id), log_path,
+                       tail)
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
