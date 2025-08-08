@@ -36,6 +36,7 @@ class ResponseBaseModel(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra='ignore')
 
     # backward compatibility with dict
+    # TODO(syang): remove this in v0.13.0
     def __getitem__(self, key):
         try:
             return getattr(self, key)
