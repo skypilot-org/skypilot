@@ -1,13 +1,24 @@
 """Slurm utilities for SkyPilot."""
 import math
 import re
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+from sky.utils import command_runner
 from sky.utils import common_utils
 
 # TODO(jwj): Choose commonly used default values.
 DEFAULT_CLUSTER_NAME = "localcluster"
 DEFAULT_PARTITION = "debug"
+
+# For all job states, please refer to
+# https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES.
+JOB_STATES = {
+    "cancelled",
+    "completed",
+    "failed",
+    "pending",
+    "running",
+}
 
 
 class SlurmInstanceType:
@@ -151,3 +162,31 @@ def get_cluster_name_from_config(provider_config: Dict[str, Any]) -> str:
 
 def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
     return provider_config.get('partition', DEFAULT_PARTITION)
+
+
+def filter_jobs(ssh_config_dict: Dict[str, Any],
+                partition: str,
+                state_filters: List[str],
+                cluster_name: Optional[str] = None) -> List[str]:
+    """Filter Slurm jobs by job states."""
+    for state in state_filters:
+        if state not in JOB_STATES:
+            raise ValueError(f'{state} is not a valid Slurm job state.')
+    job_state_str = ','.join(state_filters)
+
+    runner = command_runner.SlurmCommandRunner(
+        (ssh_config_dict['hostname'], ssh_config_dict['port']),
+        ssh_config_dict['user'],
+        ssh_config_dict['private_key'],
+        cluster_name,
+        partition,
+        disable_control_master=True)
+
+    # TODO(jwj): Keep or remove ssh_user?
+    rc, stdout, stderr = runner.run(
+        f'squeue -u {ssh_config_dict["user"]} -t {job_state_str} -h -o "%i"',
+        require_outputs=True)
+
+    job_ids = stdout.splitlines()
+
+    return job_ids

@@ -201,10 +201,12 @@ class Slurm(clouds.Cloud):
             'memory': str(mem),
             'accelerator_count': str(acc_count),
             # TODO(jwj): Pass SSH config in a smarter way
-            'slurm_hostname': ssh_config_dict['hostname'],
-            'slurm_port': ssh_config_dict['port'],
-            'slurm_user': ssh_config_dict['user'],
-            'slurm_ssh_key': ssh_config_dict['identityfile'][0],
+            'ssh_hostname': ssh_config_dict['hostname'],
+            'ssh_port': ssh_config_dict['port'],
+            'ssh_user': ssh_config_dict['user'],
+            # TODO(jwj): Solve naming collision with 'ssh_private_key'.
+            # Please refer to slurm-ray.yml.j2 'ssh' and 'auth' sections.
+            'slurm_private_key': ssh_config_dict['identityfile'][0],
         }
 
         return deploy_vars

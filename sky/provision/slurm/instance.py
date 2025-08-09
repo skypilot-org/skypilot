@@ -146,10 +146,11 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 
     # Resume any stopped worker nodes or create new ones.
     # Use sbatch to submit a long-running job.
-    ssh_host = provider_config['hostname']
-    ssh_user = provider_config['user']
-    ssh_port = provider_config['port']
-    ssh_key = provider_config["ssh_key"]
+    ssh_config_dict = provider_config['ssh']
+    ssh_host = ssh_config_dict['hostname']
+    ssh_port = ssh_config_dict['port']
+    ssh_user = ssh_config_dict['user']
+    ssh_key = ssh_config_dict['private_key']
     runner = command_runner.SlurmCommandRunner((ssh_host, ssh_port),
                                                ssh_user,
                                                ssh_key,
@@ -225,38 +226,30 @@ def get_cluster_info(
     # Cross-cluster operations are supported by interacting with
     # the current controller. For details, please refer to
     # https://slurm.schedmd.com/multi_cluster.html.
-    ssh_host = provider_config['hostname']
-    ssh_user = provider_config['user']
-    ssh_port = provider_config['port']
-    ssh_key = provider_config["ssh_key"]
-    runner = command_runner.SlurmCommandRunner((ssh_host, ssh_port),
-                                               ssh_user,
-                                               ssh_key,
-                                               cluster_name,
-                                               partition,
-                                               disable_control_master=True)
-    rc, stdout, stderr = runner.run(
-        f'squeue -u {ssh_user} -t running | awk "NR=2 {{print $1}}"',
-        require_outputs=True)
+    ssh_config_dict = provider_config['ssh']
+    ssh_host = ssh_config_dict['hostname']
+    ssh_port = ssh_config_dict['port']
+    ssh_user = ssh_config_dict['user']
+    running_jobs = slurm_utils.filter_jobs(ssh_config_dict, partition,
+                                           ['running'], cluster_name)
 
-    logger.debug(f"[get_cluster_info] {stdout}")
-
-    # TODO(jwj): Filter out the running instances and get the head instance id.
-    provision_job_id = stdout
-    head_instance_id = f'{ssh_host}-{provision_job_id}'
-
-    instances: Dict[str, List[common.InstanceInfo]] = {}
-    instances[head_instance_id] = [
-        common.InstanceInfo(instance_id=head_instance_id,
-                            internal_ip=ssh_host,
-                            external_ip=ssh_host,
-                            ssh_port=ssh_port,
-                            tags={'test': 'test'})
-    ]
+    jobs: Dict[str, List[common.InstanceInfo]] = {}
+    head_job_id = None
+    for i, job_id in enumerate(running_jobs):
+        jobs[job_id] = [
+            common.InstanceInfo(instance_id=job_id,
+                                internal_ip=ssh_host,
+                                external_ip=ssh_host,
+                                ssh_port=ssh_port,
+                                tags={'test': 'test'})
+        ]
+        if i == 0:
+            # NOTE: The head job ID is dummy here. We may not need it.
+            head_job_id = job_id
 
     return common.ClusterInfo(
-        instances=instances,
-        head_instance_id=head_instance_id,
+        instances=jobs,
+        head_instance_id=head_job_id,
         ssh_user=ssh_user,
         provider_name='slurm',
         provider_config=provider_config,
