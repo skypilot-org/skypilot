@@ -2,6 +2,41 @@
 
 Compare multiple trained models side-by-side using Promptfoo and SkyPilot.
 
+## Architecture Overview
+
+```
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│   HuggingFace Hub   │     │    S3/GCS Bucket    │     │  SkyPilot Volume    │
+│  (Public Models)    │     │ (Custom Checkpoints)│     │  (Local Models)     │
+└──────────┬──────────┘     └──────────┬──────────┘     └──────────┬──────────┘
+           │                           │                           │
+           └───────────────────────────┴───────────────────────────┘
+                                       │
+                              ┌────────▼────────┐
+                              │ evaluate_models │
+                              │   .py (SDK)     │
+                              └────────┬────────┘
+                                       │ Parallel Launch
+           ┌───────────────────────────┼───────────────────────────┐
+           │                           │                           │
+    ┌──────▼──────┐            ┌──────▼──────┐            ┌──────▼──────┐
+    │  Cluster 1  │            │  Cluster 2  │            │  Cluster 3  │
+    │   (vLLM)    │            │   (vLLM)    │            │   (vLLM)    │
+    └──────┬──────┘            └──────┬──────┘            └──────┬──────┘
+           │                           │                           │
+           └───────────────────────────┴───────────────────────────┘
+                                       │
+                              ┌────────▼────────┐
+                              │   Promptfoo     │
+                              │  (Evaluation)   │
+                              └────────┬────────┘
+                                       │
+                              ┌────────▼────────┐
+                              │  Side-by-side   │
+                              │   Comparison    │
+                              └─────────────────┘
+```
+
 ## Quick Start
 
 ```bash
@@ -54,6 +89,30 @@ cleanup_on_complete: true
 ```
 
 ## How It Works
+
+```mermaid
+graph TD
+    A[models_config.yaml] -->|Read Config| B[evaluate_models.py]
+    B -->|Load Template| C[templates/serve-model.yaml]
+    
+    B -->|Launch Parallel| D[SkyPilot Clusters]
+    D --> E["Model 1<br/>(HuggingFace)"]
+    D --> F["Model 2<br/>(S3 Bucket)"]
+    D --> G["Model 3<br/>(Volume)"]
+    
+    E -->|vLLM API| H[Endpoints]
+    F -->|vLLM API| H
+    G -->|vLLM API| H
+    
+    H -->|Generate Config| I[promptfoo_config.yaml]
+    I -->|Evaluate| J[Promptfoo]
+    J -->|Compare| K[Results UI]
+    
+    style A fill:#e1f5fe
+    style B fill:#fff9c4
+    style J fill:#f3e5f5
+    style K fill:#c8e6c9
+```
 
 1. **Launch Models**: Each model runs on its own SkyPilot cluster with vLLM
 2. **Run Tests**: All models receive the same prompts for fair comparison
