@@ -56,6 +56,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
+from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -184,7 +185,7 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                 # an ALIVE_WAITING job, but we would be able to launch a WAITING
                 # job.
                 if current_state == state.ManagedJobScheduleState.ALIVE_WAITING:
-                    if not _can_lauch_in_alive_job():
+                    if not can_provision(pool=True):
                         # Can't schedule anything, break from scheduling loop.
                         break
                 elif current_state == state.ManagedJobScheduleState.WAITING:
@@ -336,13 +337,17 @@ def _get_launch_parallelism() -> int:
     return cpus * LAUNCHES_PER_CPU if cpus is not None else 1
 
 
+def can_provision(pool: bool) -> bool:
+    num_provision = (serve_state.total_number_provisioning_replicas(pool=pool) +
+                     state.get_num_launching_jobs())
+    return num_provision < _get_launch_parallelism()
+
+
 def _can_start_new_job(pool: Optional[str]) -> bool:
-    launching_jobs = state.get_num_launching_jobs()
-    alive_jobs = state.get_num_alive_jobs()
+    alive_jobs = serve_state.get_num_services() + state.get_num_alive_jobs()
 
     # Check basic resource limits
-    if not (launching_jobs < _get_launch_parallelism() and
-            alive_jobs < _get_job_parallelism()):
+    if not (can_provision(pool=True) and alive_jobs < _get_job_parallelism()):
         return False
 
     # Check if there are available replicas in the pool
@@ -353,11 +358,6 @@ def _can_start_new_job(pool: Optional[str]) -> bool:
             return False
 
     return True
-
-
-def _can_lauch_in_alive_job() -> bool:
-    launching_jobs = state.get_num_launching_jobs()
-    return launching_jobs < _get_launch_parallelism()
 
 
 if __name__ == '__main__':

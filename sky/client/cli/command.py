@@ -275,65 +275,6 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     return list(env_dict.items())
 
 
-def _format_job_ids_str(job_ids: List[int], max_length: int = 30) -> str:
-    """Format job IDs string with ellipsis if too long.
-
-    Args:
-        job_ids: List of job IDs to format.
-        max_length: Maximum length of the output string.
-
-    Returns:
-        Formatted string like "11,12,...,2017,2018" if truncated,
-        or the full string if it fits within max_length.
-    """
-    if not job_ids:
-        return ''
-
-    # Convert all to strings
-    job_strs = [str(job_id) for job_id in job_ids]
-    full_str = ','.join(job_strs)
-
-    # If it fits, return as is
-    if len(full_str) <= max_length:
-        return full_str
-
-    if len(job_strs) <= 2:
-        return full_str  # Can't truncate further
-
-    # Need to truncate with ellipsis
-    ellipsis = '...'
-
-    # Start with minimum: first and last
-    start_count = 1
-    end_count = 1
-
-    while start_count + end_count < len(job_strs):
-        # Try adding one more to start
-        if start_count + 1 + end_count < len(job_strs):
-            start_part = ','.join(job_strs[:start_count + 1])
-            end_part = ','.join(job_strs[-end_count:])
-            candidate = f'{start_part},{ellipsis},{end_part}'
-            if len(candidate) <= max_length:
-                start_count += 1
-                continue
-
-        # Try adding one more to end
-        if start_count + end_count + 1 < len(job_strs):
-            start_part = ','.join(job_strs[:start_count])
-            end_part = ','.join(job_strs[-(end_count + 1):])
-            candidate = f'{start_part},{ellipsis},{end_part}'
-            if len(candidate) <= max_length:
-                end_count += 1
-                continue
-
-        # Can't add more
-        break
-
-    start_part = ','.join(job_strs[:start_count])
-    end_part = ','.join(job_strs[-end_count:])
-    return f'{start_part},{ellipsis},{end_part}'
-
-
 def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for cluster names."""
@@ -2981,15 +2922,15 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
-    # TODO(tian): We also need to check pools after we allow running pools on
-    # jobs controller.
     with rich_utils.client_status(
-            '[bold cyan]Checking for in-progress managed jobs[/]'):
+            '[bold cyan]Checking for in-progress managed jobs and pools[/]'):
         try:
             request_id = managed_jobs.queue(refresh=False,
                                             skip_finished=True,
                                             all_users=True)
             managed_jobs_ = sdk.stream_and_get(request_id)
+            request_id_pools = managed_jobs.pool_status(pool_names=None)
+            pools_ = sdk.stream_and_get(request_id_pools)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -3004,6 +2945,7 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             # the controller being STOPPED or being firstly launched, i.e.,
             # there is no in-prgress managed jobs.
             managed_jobs_ = []
+            pools_ = []
         except exceptions.InconsistentConsolidationModeError:
             # If this error is raised, it means the user switched to the
             # consolidation mode but the previous controller cluster is still
@@ -3021,6 +2963,8 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
                                                 skip_finished=True,
                                                 all_users=True)
                 managed_jobs_ = sdk.stream_and_get(request_id)
+                request_id_pools = managed_jobs.pool_status(pool_names=None)
+                pools_ = sdk.stream_and_get(request_id_pools)
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'jobs controller. Please be aware of the following:'
@@ -3042,9 +2986,23 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
         else:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(msg)
+    elif pools_:
+        pool_names = ', '.join([pool['name'] for pool in pools_])
+        if purge:
+            logger.warning('--purge is set, ignoring the in-progress pools. '
+                           'This could cause leaked clusters!')
+        else:
+            msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
+                   'jobs controller is not supported, as it is currently '
+                   f'hosting the following pools: {pool_names}. Please '
+                   'terminate the pools first with '
+                   f'{colorama.Style.BRIGHT}sky jobs pool down -a'
+                   f'{colorama.Style.RESET_ALL}.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(msg)
     else:
-        click.echo(' * No in-progress managed jobs found. It should be safe to '
-                   'terminate (see caveats above).')
+        click.echo(' * No in-progress managed jobs or pools found. It should be'
+                   ' safe to terminate (see caveats above).')
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
@@ -4537,7 +4495,9 @@ def jobs_launch(
                                                 controller=False)
             sys.exit(returncode)
         else:
-            job_ids_str = _format_job_ids_str(job_ids)
+            # TODO(tian): This can be very long. Considering have a "group id"
+            # and query all job ids with the same group id.
+            job_ids_str = ','.join(map(str, job_ids))
             click.secho(
                 f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                 f'{job_ids_str}{colorama.Style.RESET_ALL}.'
