@@ -1,0 +1,23 @@
+# Default configuration for serving models with vLLM
+# The Python script will override these values as needed
+
+envs:
+  MODEL_PATH: meta-llama/Llama-2-7b-hf  # Default model path
+  API_TOKEN: default-token
+
+resources:
+  accelerators: L4:1
+  ports: 8000
+
+setup: |
+  pip install vllm==0.5.3post1
+  pip install vllm-flash-attn==2.5.9.post1
+
+run: |
+  echo "Starting vLLM server for model: $MODEL_PATH"
+  vllm serve $MODEL_PATH \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --max-model-len 2048 \
+    --api-key "$API_TOKEN"

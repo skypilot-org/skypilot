@@ -1,0 +1,2 @@
+pyyaml>=6.0
+skypilot[all]>=0.10.1
