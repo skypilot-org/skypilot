@@ -2936,10 +2936,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               skip_unnecessary_provisioning)
             except locks.LockTimeout:
                 if not communicated_with_user:
-                    logger.info(f'{colorama.Fore.YELLOW}'
-                                f'Launching delayed, check concurrent tasks: '
-                                f'sky api status')
-                    communicated_with_user = True
+                    rich_utils.force_update_status(
+                        ux_utils.spinner_message('Launching - blocked by ' +
+                                                 'other requests ' +
+                                                 colorama.Style.RESET_ALL +
+                                                 colorama.Style.DIM +
+                                                 'Check concurrent requests: ' +
+                                                 'sky api status '))
 
     def _locked_provision(
         self,
