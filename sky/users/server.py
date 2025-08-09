@@ -38,21 +38,21 @@ router = fastapi.APIRouter()
 class UserInfo:
     id: str
     name: str
-    created_at: str
     role: str
-    token_id: Optional[str]
-    last_used_at: Optional[int]
-    expires_at: Optional[str]
+    created_at: Optional[int] = None
+    token_id: Optional[str] = None
+    last_used_at: Optional[int] = None
+    expires_at: Optional[str] = None
 
 
 @dataclass
 class UserTokenInfo:
     user_id: str
     creator_user_id: str
-    token_id: Optional[str]
-    token: Optional[str]
-    expires_at: Optional[str]
-    message: Optional[str]
+    token_id: Optional[str] = None
+    token: Optional[str] = None
+    expires_at: Optional[str] = None
+    message: Optional[str] = None
 
 
 @router.get('')
@@ -186,12 +186,10 @@ def _create_user_and_token(
         permission_service.update_role(user_id, role)
 
         if not sa_enabled:
-            return UserTokenInfo(user_id=user_id,
-                                 creator_user_id=creator_user_id,
-                                 token_id=None,
-                                 token=None,
-                                 expires_at=None,
-                                 message=None)
+            return UserTokenInfo(
+                user_id=user_id,
+                creator_user_id=creator_user_id,
+            )
 
         # Handle expiration: 0 means "never expire"
         if expires_in_days == 0:
@@ -222,6 +220,8 @@ def _create_user_and_token(
             expires_at=token_data['expires_at'],
             message='Please save this token - it will not be shown again!')
 
+    except fastapi.HTTPException as e:
+        raise e
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to create user and token: {e}')
         raise fastapi.HTTPException(
@@ -732,7 +732,6 @@ async def update_service_account_role(
 
 
 @router.post('/service-account-tokens/rotate')
-@router.post('/rotate')
 async def rotate_service_account_token(
         request: fastapi.Request,
         token_body: payloads.ServiceAccountTokenRotateBody) -> Dict[str, Any]:
