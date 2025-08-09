@@ -102,6 +102,7 @@ def add_all_tables_to_db_sqlalchemy(
             else:
                 raise
 
+
 def add_table_to_db_sqlalchemy(
     metadata: sqlalchemy.MetaData,
     engine: sqlalchemy.Engine,
@@ -121,6 +122,7 @@ def add_table_to_db_sqlalchemy(
             pass
         else:
             raise
+
 
 def add_column_to_table_sqlalchemy(
     session: 'Session',
