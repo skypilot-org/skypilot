@@ -44,7 +44,7 @@ class PermissionService:
             if _enforcer_instance is None:
                 _enforcer_instance = self
                 engine = global_user_state.initialize_and_get_db()
-                db_utils.add_tables_to_db_sqlalchemy(
+                db_utils.add_all_tables_to_db_sqlalchemy(
                     sqlalchemy_adapter.Base.metadata, engine)
                 adapter = sqlalchemy_adapter.Adapter(engine)
                 model_path = os.path.join(os.path.dirname(__file__),

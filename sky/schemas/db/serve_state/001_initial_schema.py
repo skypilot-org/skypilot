@@ -26,7 +26,7 @@ def upgrade():
     """Create initial schema and add all backwards compatibility columns"""
     with op.get_context().autocommit_block():
         # Create all tables with their current schema
-        db_utils.add_tables_to_db_sqlalchemy(Base.metadata, op.get_bind())
+        db_utils.add_all_tables_to_db_sqlalchemy(Base.metadata, op.get_bind())
 
         # Add backwards compatibility columns using helper function that matches
         # original add_column_to_table_sqlalchemy behavior exactly
