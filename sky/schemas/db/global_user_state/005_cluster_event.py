@@ -24,8 +24,8 @@ def upgrade():
     """Add new table for cluster events."""
     with op.get_context().autocommit_block():
         # Add new table for cluster events.
-        db_utils.add_table_to_db_sqlalchemy(
-            Base.metadata, op.get_bind(), 'cluster_events')
+        db_utils.add_table_to_db_sqlalchemy(Base.metadata, op.get_bind(),
+                                            'cluster_events')
 
 
 def downgrade():
