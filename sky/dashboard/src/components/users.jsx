@@ -472,6 +472,63 @@ export function Users() {
     setResetPassword('');
   };
 
+  // Handle rotate token for both users and service accounts
+  const handleRotateToken = async () => {
+    if (!tokenToRotate) return;
+
+    setRotating(true);
+    try {
+      const payload = {
+        token_id: tokenToRotate.token_id,
+        expires_in_days:
+          rotateExpiration === '' ? null : parseInt(rotateExpiration),
+      };
+
+      // Use service-account-tokens endpoint for all token rotations
+      const response = await apiClient.post(
+        '/users/service-account-tokens/rotate',
+        payload
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setRotatedTokenInDialog(data.token);
+
+        // Refresh data based on current tab
+        if (activeMainTab === 'service-accounts') {
+          // Let ServiceAccountTokensView handle its own refresh
+          handleRefresh();
+        } else {
+          // Refresh user data when rotating user tokens
+          handleRefresh();
+        }
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to rotate token');
+      }
+    } catch (error) {
+      setCreateError(error);
+    } finally {
+      setRotating(false);
+    }
+  };
+
+  // State for rotate dialog
+  const [rotateExpiration, setRotateExpiration] = useState('');
+  const [rotatedTokenInDialog, setRotatedTokenInDialog] = useState(null);
+  const [copySuccess, setCopySuccess] = useState('');
+
+  // Copy to clipboard function
+  const copyToClipboard = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopySuccess('Copied!');
+      setTimeout(() => setCopySuccess(''), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
   return (
     <>
       {/* Main Tabs with Controls */}
@@ -659,10 +716,13 @@ export function Users() {
           onResetPassword={handleResetPasswordClick}
           onDeleteUser={handleDeleteUserClick}
           basicAuthEnabled={basicAuthEnabled}
+          serviceAccountTokenEnabled={serviceAccountTokenEnabled}
           currentUserRole={userRoleCache?.role}
           currentUserId={userRoleCache?.id}
           searchQuery={userSearchQuery}
           setSearchQuery={setUserSearchQuery}
+          setTokenToRotate={setTokenToRotate}
+          setShowRotateDialog={setShowRotateDialog}
         />
       ) : activeMainTab === 'service-accounts' && serviceAccountTokenEnabled ? (
         <ServiceAccountTokensView
@@ -680,6 +740,13 @@ export function Users() {
           setRotating={setRotating}
           searchQuery={serviceAccountSearchQuery}
           setSearchQuery={setServiceAccountSearchQuery}
+          handleRotateToken={handleRotateToken}
+          rotateExpiration={rotateExpiration}
+          setRotateExpiration={setRotateExpiration}
+          rotatedTokenInDialog={rotatedTokenInDialog}
+          setRotatedTokenInDialog={setRotatedTokenInDialog}
+          copyToClipboard={copyToClipboard}
+          copySuccess={copySuccess}
         />
       ) : (
         <div className="text-center py-12">
@@ -1075,6 +1142,140 @@ export function Users() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Rotate Token Dialog - Shared by both Users and Service Accounts */}
+      <Dialog
+        open={showRotateDialog}
+        onOpenChange={(open) => {
+          setShowRotateDialog(open);
+          if (!open) {
+            setTokenToRotate(null);
+            setRotateExpiration('');
+            setRotatedTokenInDialog(null);
+            setCreateError(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Rotate Token</DialogTitle>
+            <DialogDescription>
+              Rotate the token &quot;{tokenToRotate?.token_name}
+              &quot;
+              {tokenToRotate?.creator_user_hash !== userRoleCache?.id &&
+              userRoleCache?.role === 'admin'
+                ? ` owned by ${tokenToRotate?.creator_name}`
+                : ''}
+              . This will generate a new token value and invalidate the current
+              one.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            {rotatedTokenInDialog ? (
+              /* Token Rotated Successfully - Show Token */
+              <>
+                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center mb-3">
+                    <h4 className="text-sm font-medium text-green-900">
+                      🔄 Token rotated successfully - save this new token now!
+                    </h4>
+                    <CustomTooltip
+                      content={copySuccess ? 'Copied!' : 'Copy token'}
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={() => copyToClipboard(rotatedTokenInDialog)}
+                        className="flex items-center text-green-600 hover:text-green-800 transition-colors duration-200 p-1 ml-2"
+                      >
+                        {copySuccess ? (
+                          <CheckIcon className="w-4 h-4" />
+                        ) : (
+                          <CopyIcon className="w-4 h-4" />
+                        )}
+                      </button>
+                    </CustomTooltip>
+                  </div>
+                  <p className="text-sm text-green-700 mb-3">
+                    This new token replaces the old one. Please copy and store
+                    it securely. The old token is now invalid.
+                  </p>
+                  <div className="bg-white border border-green-300 rounded-md p-3">
+                    <code className="text-sm text-gray-800 font-mono break-all block">
+                      {rotatedTokenInDialog}
+                    </code>
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* Token Rotation Form */
+              <>
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    New Expiration (days)
+                  </label>
+                  <input
+                    type="number"
+                    className="border rounded px-3 py-2 w-full"
+                    placeholder="Leave empty to preserve current expiration"
+                    min="0"
+                    max="365"
+                    value={rotateExpiration}
+                    onChange={(e) => setRotateExpiration(e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Leave empty to preserve current expiration. Enter number of
+                    days for new expiration, or enter 0 to set to never expire.
+                    Maximum 365 days.
+                  </p>
+                </div>
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded">
+                  <p className="text-sm text-amber-700">
+                    ⚠️ Any systems using the current token will need to be
+                    updated with the new token.
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            {rotatedTokenInDialog ? (
+              <button
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-green-600 text-white hover:bg-green-700 h-10 px-4 py-2"
+                onClick={() => {
+                  setShowRotateDialog(false);
+                  setTokenToRotate(null);
+                  setRotateExpiration('');
+                  setRotatedTokenInDialog(null);
+                }}
+              >
+                Close
+              </button>
+            ) : (
+              <>
+                <button
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+                  onClick={() => {
+                    setShowRotateDialog(false);
+                    setTokenToRotate(null);
+                    setRotateExpiration('');
+                    setRotatedTokenInDialog(null);
+                  }}
+                  disabled={rotating}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                  onClick={handleRotateToken}
+                  disabled={rotating}
+                >
+                  {rotating ? 'Rotating...' : 'Rotate Token'}
+                </button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -1088,10 +1289,13 @@ function UsersTable({
   onResetPassword,
   onDeleteUser,
   basicAuthEnabled,
+  serviceAccountTokenEnabled,
   currentUserRole,
   currentUserId,
   searchQuery,
   setSearchQuery,
+  setTokenToRotate,
+  setShowRotateDialog,
 }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1333,10 +1537,18 @@ function UsersTable({
               </TableHead>
               <TableHead
                 onClick={() => requestSort('jobCount')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/7"
               >
                 Jobs{getSortDirection('jobCount')}
               </TableHead>
+              {serviceAccountTokenEnabled && (
+                <TableHead
+                  onClick={() => requestSort('expires_at')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/7"
+                >
+                  Expires{getSortDirection('expires_at')}
+                </TableHead>
+              )}
               {/* Show Actions column if basicAuthEnabled */}
               {(basicAuthEnabled || currentUserRole === 'admin') && (
                 <TableHead className="whitespace-nowrap w-1/7">
@@ -1451,6 +1663,19 @@ function UsersTable({
                     </Link>
                   )}
                 </TableCell>
+                {serviceAccountTokenEnabled && (
+                  <TableCell className="truncate">
+                    {!user.expires_at ? (
+                      'N/A'
+                    ) : new Date(user.expires_at * 1000) < new Date() ? (
+                      <span className="text-red-600">Expired</span>
+                    ) : (
+                      <TimestampWithTooltip
+                        date={new Date(user.expires_at * 1000)}
+                      />
+                    )}
+                  </TableCell>
+                )}
                 {/* Actions cell logic */}
                 {(basicAuthEnabled || currentUserRole === 'admin') && (
                   <TableCell className="relative">
@@ -1486,6 +1711,57 @@ function UsersTable({
                           <KeyRoundIcon className="h-4 w-4" />
                         </button>
                       )}
+                      {/* Rotate token button - only for admin and when service account tokens are enabled */}
+                      {currentUserRole === 'admin' &&
+                        serviceAccountTokenEnabled && (
+                          <CustomTooltip
+                            content={
+                              user.token_id
+                                ? 'Rotate token'
+                                : 'No token to rotate'
+                            }
+                            className="capitalize text-sm text-muted-foreground"
+                          >
+                            <button
+                              onClick={() => {
+                                if (user.token_id) {
+                                  checkPermissionAndAct(
+                                    'cannot rotate user tokens',
+                                    () => {
+                                      const tokenData = {
+                                        token_id: user.token_id,
+                                        token_name:
+                                          user.usernameDisplay ||
+                                          user.username ||
+                                          'User Token',
+                                        creator_user_hash: user.userId,
+                                        creator_name:
+                                          user.usernameDisplay ||
+                                          user.username ||
+                                          'Unknown',
+                                      };
+                                      setTokenToRotate(tokenData);
+                                      setShowRotateDialog(true);
+                                    }
+                                  );
+                                }
+                              }}
+                              className={
+                                user.token_id
+                                  ? 'text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center p-1'
+                                  : 'text-gray-300 cursor-not-allowed font-medium inline-flex items-center p-1'
+                              }
+                              title={
+                                user.token_id
+                                  ? 'Rotate token'
+                                  : 'No token to rotate'
+                              }
+                              disabled={!user.token_id}
+                            >
+                              <RotateCwIcon className="h-4 w-4" />
+                            </button>
+                          </CustomTooltip>
+                        )}
                       {/* Delete button - only show for admin */}
                       {currentUserRole === 'admin' && (
                         <button
@@ -1519,8 +1795,13 @@ UsersTable.propTypes = {
   onResetPassword: PropTypes.func.isRequired,
   onDeleteUser: PropTypes.func.isRequired,
   basicAuthEnabled: PropTypes.bool,
+  serviceAccountTokenEnabled: PropTypes.bool,
   currentUserRole: PropTypes.string,
   currentUserId: PropTypes.string,
+  searchQuery: PropTypes.string,
+  setSearchQuery: PropTypes.func,
+  setTokenToRotate: PropTypes.func,
+  setShowRotateDialog: PropTypes.func,
 };
 
 // Service Account Tokens Management Component
@@ -1784,7 +2065,14 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setRotatedTokenInDialog(data.token);
-        await fetchTokensAndCounts();
+
+        // Refresh both service account tokens and user data
+        if (activeMainTab === 'service-accounts') {
+          await fetchTokensAndCounts();
+        } else {
+          // Refresh user data when rotating user tokens
+          handleRefresh();
+        }
       } else {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to rotate token');
@@ -2230,9 +2518,9 @@ function ServiceAccountTokensView({
       >
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Rotate Service Account Token</DialogTitle>
+            <DialogTitle>Rotate Token</DialogTitle>
             <DialogDescription>
-              Rotate the service account token &quot;{tokenToRotate?.token_name}
+              Rotate the token &quot;{tokenToRotate?.token_name}
               &quot;
               {tokenToRotate?.creator_user_hash !== userRoleCache?.id &&
               userRoleCache?.role === 'admin'
@@ -2249,8 +2537,7 @@ function ServiceAccountTokensView({
                 <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                   <div className="flex items-center mb-3">
                     <h4 className="text-sm font-medium text-green-900">
-                      🔄 Service account token rotated successfully - save this
-                      new token now!
+                      🔄 Token rotated successfully - save this new token now!
                     </h4>
                     <CustomTooltip
                       content={copySuccess ? 'Copied!' : 'Copy token'}
