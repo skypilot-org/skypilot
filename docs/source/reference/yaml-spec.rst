@@ -46,7 +46,9 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`ports <yaml-spec-resources-ports>`: 8081
     :ref:`labels <yaml-spec-resources-labels>`:
       my-label: my-value
-    :ref:`autostop <yaml-spec-resources-autostop>`: 10m
+    :ref:`autostop <yaml-spec-resources-autostop>`:
+      idle_minutes: 10
+      wait_for: none
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -277,8 +279,15 @@ Format:
 - ``<num>``: Stop after this many idle minutes
 - ``<num><unit>``: Stop after this much time
 - Object with configuration:
+
   - ``idle_minutes``: Number of idle minutes before stopping
   - ``down``: If true, tear down the cluster instead of stopping it
+  - ``wait_for``: Determines the condition for resetting the idleness timer.
+    Options:
+
+    - ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish
+    - ``jobs``: Only wait for in‑progress jobs
+    - ``none``: Wait for nothing; autostop right after ``idle_minutes``
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -316,6 +325,15 @@ OR
     autostop:
       idle_minutes: 10
       down: true  # Use autodown instead of autostop
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop:
+      idle_minutes: 10
+      wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
 
 
 .. _yaml-spec-resources-accelerators:
@@ -526,7 +544,7 @@ Units supported (case-insensitive):
 
   resources:
     disk_size: 256
-  
+
 OR
 
 .. code-block:: yaml

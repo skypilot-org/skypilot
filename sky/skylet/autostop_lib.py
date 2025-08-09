@@ -55,11 +55,9 @@ Determines the condition for resetting the idleness timer.
 This option works in conjunction with ``--{pair}``. Options:
 
 \b
-1. ``jobs_and_ssh`` (default): Wait for all jobs to complete AND all SSH
-sessions to disconnect.
-2. ``jobs``: Wait for all jobs to complete.
-3. ``none``: Stop immediately after idle time expires, regardless of running
-jobs or SSH connections."""
+1. ``jobs_and_ssh`` (default): Wait for in-progress jobs and SSH connections to finish.
+2. ``jobs``: Only wait for in-progress jobs.
+3. ``none``: Wait for nothing; autostop right after ``{pair}``."""
 
     @classmethod
     def from_str(cls, mode: str) -> 'AutostopWaitFor':
