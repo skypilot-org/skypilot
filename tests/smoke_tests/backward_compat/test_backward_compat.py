@@ -286,7 +286,7 @@ class TestBackwardCompatibility:
             yaml_path = f.name
         commands = [
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
-            # Set intiial autostop in base
+            # Set initial autostop in base
             f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} {yaml_path}',
             f'{self.ACTIVATE_BASE} && sky status {cluster_name} | grep "5m"',
             # Change the autostop time in current

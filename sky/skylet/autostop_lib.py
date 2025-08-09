@@ -5,10 +5,11 @@ import shlex
 import subprocess
 import time
 import typing
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.schemas.generated import autostopv1_pb2
 from sky.skylet import configs
 from sky.skylet import constants
 from sky.utils import message_utils
@@ -77,6 +78,37 @@ jobs or SSH connections."""
                                  f'\'{cls.JOBS_AND_SSH.value}\', '
                                  f'\'{cls.JOBS.value}\', or '
                                  f'\'{cls.NONE.value}\'. ')
+
+    @classmethod
+    def from_protobuf(
+            cls, protobuf_value: autostopv1_pb2.AutostopWaitFor
+    ) -> 'AutostopWaitFor':
+        """Convert protobuf AutostopWaitFor enum to Python enum value."""
+        mapping = {
+            autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS_AND_SSH: cls.JOBS_AND_SSH,
+            autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS: cls.JOBS,
+            autostopv1_pb2.AUTOSTOP_WAIT_FOR_NONE: cls.NONE,
+        }
+
+        if protobuf_value not in mapping:
+            raise ValueError(
+                f'Unknown protobuf AutostopWaitFor value: {protobuf_value}')
+
+        return mapping[protobuf_value]
+
+    def to_protobuf(self) -> autostopv1_pb2.AutostopWaitFor:
+        """Convert this Python enum value to protobuf enum value."""
+        mapping: Dict[AutostopWaitFor, autostopv1_pb2.AutostopWaitFor] = {
+            AutostopWaitFor.JOBS_AND_SSH:
+                autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS_AND_SSH,
+            AutostopWaitFor.JOBS: autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS,
+            AutostopWaitFor.NONE: autostopv1_pb2.AUTOSTOP_WAIT_FOR_NONE,
+        }
+
+        if self not in mapping:
+            raise ValueError(f'Unknown AutostopWaitFor value: {self}')
+
+        return mapping[self]
 
 
 DEFAULT_AUTOSTOP_WAIT_FOR: AutostopWaitFor = AutostopWaitFor.JOBS_AND_SSH
