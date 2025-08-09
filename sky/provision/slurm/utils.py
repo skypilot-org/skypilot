@@ -1,9 +1,13 @@
 """Slurm utilities for SkyPilot."""
 import math
 import re
-from typing import Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 from sky.utils import common_utils
+
+# TODO(jwj): Choose commonly used default values.
+DEFAULT_CLUSTER_NAME = "localcluster"
+DEFAULT_PARTITION = "debug"
 
 
 class SlurmInstanceType:
@@ -139,3 +143,11 @@ class SlurmInstanceType:
                 f'memory={self.memory!r}, '
                 f'accelerator_count={self.accelerator_count!r}, '
                 f'accelerator_type={self.accelerator_type!r})')
+
+
+def get_cluster_name_from_config(provider_config: Dict[str, Any]) -> str:
+    return provider_config.get('cluster_name', DEFAULT_CLUSTER_NAME)
+
+
+def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
+    return provider_config.get('partition', DEFAULT_PARTITION)

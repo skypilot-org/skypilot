@@ -4,7 +4,8 @@ import typing
 from typing import Dict, List, Optional, Tuple
 
 from sky import sky_logging
-from sky.clouds.service_catalog import common
+from sky.catalog import common
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -66,7 +67,10 @@ def get_vcpus_mem_from_instance_type(
 
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+                              disk_tier: Optional[
+                                  resources_utils.DiskTier] = None,
+                              region: Optional[str] = None,
+                              zone: Optional[str] = None) -> Optional[str]:
     from sky.provision.slurm import utils as slurm_utils
 
     # Delete unused disk_tier.

@@ -1183,20 +1183,99 @@ class LocalProcessCommandRunner(CommandRunner):
                     stream_logs=stream_logs,
                     max_retry=max_retry)
 
-class SlurmCommandRunner(CommandRunner):
-    """Runner for Slurm commands."""
 
-    def __init__(self, node):
+class SlurmCommandRunner(SSHCommandRunner):
+    """Runner for Slurm commands.
+
+    SlurmCommandRunner sends commands over an SSH connection to the Slurm controller.
+    """
+
+    # For all supported user commands, please refer to
+    # https://slurm.schedmd.com/quickstart.html#arch.
+    USER_COMMANDS: List[str] = [
+        "sbatch",
+        "squeue",
+        "srun",
+    ]
+
+    def __init__(
+        self,
+        node: Tuple[str, int],
+        ssh_user: str,
+        ssh_private_key: str,
+        cluster_name: str,
+        partition: str,
+        job_id: Optional[str] = None,
+        **kwargs,
+    ):
         """Initialize SlurmCommandRunner.
 
         Example Usage:
-            runner = SlurmCommandRunner()
-            runner.run('ls -l')
+            runner = SlurmCommendRunner((ip, port),
+                                        ssh_user,
+                                        ssh_private_key,
+                                        clustername,
+                                        partition,
+                                        job_id)
+            runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
             runner.rsync(source, target, up=True)
 
         Args:
-            node:
+            node: (ip, port) The IP address and port of the remote machine.
+            cluster_name: The Slurm cluster name.
+            partition: The logical set of grouped compute nodes.
+            job_id: The provisioned long-running job ID.
         """
-        del kwargs
-        super().__init__(node)
-        # TODO(jwj): Define and parse a node
+        super().__init__(node, ssh_user, ssh_private_key, **kwargs)
+        self.cluster_name = cluster_name
+        self.partition = partition
+        self.job_id = job_id
+
+    @property
+    def node_id(self) -> str:
+        self.vnode_id
+
+    @property
+    def vnode_id(self) -> str:
+        if self.job_id is None:
+            raise ValueError(
+                f'Failed to get the Slurm virtual node ID. Please provide a valid Slurm job ID.'
+            )
+        return f'{self.cluster_name}-{self.partition}-{self.job_id}'
+
+    @timeline.event
+    @context_utils.cancellation_guard
+    def run(self, cmd: Union[str, List[str]],
+            **kwargs) -> Union[int, Tuple[int, str, str]]:
+        """Run Slurm-supported user commands over an SSH connection.
+
+        Args:
+            cmd: The Slurm-supported user command to run.
+
+        Returns:
+            returncode
+            or
+            A tuple of (returncode, stdout, stderr).
+        """
+        if isinstance(cmd, str):
+            cmd = cmd.split(' ')
+        base_cmd = cmd[0]
+        cmd = cmd[1:]
+        if base_cmd not in self.USER_COMMANDS:
+            raise ValueError(
+                f'{base_cmd} is not an Slurm-supported user command.')
+
+        # TODO(jwj): Support multi-cluster, multi-partition operations.
+        vnode_args = [
+            f'--partition={self.partition}',
+        ]
+        self.cluster_name = None
+        if self.cluster_name:
+            vnode_args += [f'--clusters={self.cluster_name}']
+
+        # Specify the Slurm virtual instance ID
+        if self.job_id is not None:
+            vnode_args += [f'--jobid={self.job_id}']
+
+        ssh_cmd = [base_cmd, *vnode_args, *cmd]
+        return super().run(ssh_cmd, **kwargs)

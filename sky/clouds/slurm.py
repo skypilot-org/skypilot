@@ -6,14 +6,15 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from paramiko.config import SSHConfig
 
+from sky import catalog
 from sky import clouds
 from sky import sky_logging
-from sky.clouds import service_catalog
 from sky.provision.slurm import utils as slurm_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -66,7 +67,7 @@ class Slurm(clouds.Cloud):
         if use_spot:
             return []
         else:
-            regions = service_catalog.get_region_zones_for_instance_type(
+            regions = catalog.get_region_zones_for_instance_type(
                 instance_type, use_spot, 'slurm')
 
         if region is not None:
@@ -78,8 +79,8 @@ class Slurm(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='slurm')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='slurm')
 
     @classmethod
     def zones_provision_loop(
@@ -100,11 +101,11 @@ class Slurm(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='slurm')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='slurm')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -137,35 +138,41 @@ class Slurm(clouds.Cloud):
         return isinstance(other, Slurm)
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for Slurm."""
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='slurm')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
+                                                 clouds='slurm')
 
     @classmethod
     def get_accelerators_from_instance_type(
             cls, instance_type: str) -> Optional[Dict[str, int]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='slurm')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='slurm')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: 'resources_utils.ClusterName',
-            region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: 'resources_utils.ClusterName',
+        region: Optional['clouds.Region'],
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Optional[str]]:
         del cluster_name, zones, dryrun  # Unused.
 
         # Suppose 'test' is our target SlurmctldHost alias
@@ -244,15 +251,15 @@ class Slurm(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            use_spot=resources.use_spot,
-            cpus=resources.cpus,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='slurm')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='slurm')
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
@@ -303,17 +310,15 @@ class Slurm(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, 'slurm')
+        return catalog.instance_type_exists(instance_type, 'slurm')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='slurm')
+        return catalog.validate_region_zone(region, zone, clouds='slurm')
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
                                       acc_count: int,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'slurm')
+        return catalog.accelerator_in_region_or_zone(accelerator, acc_count,
+                                                     region, zone, 'slurm')

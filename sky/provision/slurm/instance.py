@@ -9,6 +9,7 @@ from sky import sky_logging
 from sky.provision import common
 from sky.provision import constants as provision_constants
 from sky.provision.gcp import instance_utils
+from sky.provision.slurm import utils as slurm_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -140,15 +141,21 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
                    config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     provider_config = config.provider_config
+    cluster_name = slurm_utils.get_cluster_name_from_config(provider_config)
+    partition = slurm_utils.get_partition_from_config(provider_config)
 
     # Resume any stopped worker nodes or create new ones.
     # Use sbatch to submit a long-running job.
-    slurmctld_host = provider_config['hostname']
-    runner = command_runner.SSHCommandRunner(
-        (slurmctld_host, provider_config['port']),
-        provider_config['user'],
-        provider_config['ssh_key'],
-        disable_control_master=True)
+    ssh_host = provider_config['hostname']
+    ssh_user = provider_config['user']
+    ssh_port = provider_config['port']
+    ssh_key = provider_config["ssh_key"]
+    runner = command_runner.SlurmCommandRunner((ssh_host, ssh_port),
+                                               ssh_user,
+                                               ssh_key,
+                                               cluster_name,
+                                               partition,
+                                               disable_control_master=True)
 
     provision_script = """#!/bin/bash
 #SBATCH --job-name=interactive-bash
@@ -175,7 +182,7 @@ sleep 1000000000
     # Wait until the instance is running.
 
     # Handle instance identifiers.
-    head_instance_id = f'{slurmctld_host}-{provision_job_id}'
+    head_instance_id = f'{ssh_host}-{provision_job_id}'
     created_instance_ids = [head_instance_id]
 
     assert head_instance_id is not None, 'head_instance_id is None'
@@ -211,27 +218,38 @@ def get_cluster_info(
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     del region
     assert provider_config is not None, cluster_name_on_cloud
+    cluster_name = slurm_utils.get_cluster_name_from_config(provider_config)
+    partition = slurm_utils.get_partition_from_config(provider_config)
 
-    slurmctld_host = provider_config['hostname']
+    # The SSH host is the remote machine running slurmctld daemon.
+    # Cross-cluster operations are supported by interacting with
+    # the current controller. For details, please refer to
+    # https://slurm.schedmd.com/multi_cluster.html.
+    ssh_host = provider_config['hostname']
     ssh_user = provider_config['user']
     ssh_port = provider_config['port']
-    runner = command_runner.SSHCommandRunner((slurmctld_host, ssh_port),
-                                             ssh_user,
-                                             provider_config['ssh_key'],
-                                             disable_control_master=True)
+    ssh_key = provider_config["ssh_key"]
+    runner = command_runner.SlurmCommandRunner((ssh_host, ssh_port),
+                                               ssh_user,
+                                               ssh_key,
+                                               cluster_name,
+                                               partition,
+                                               disable_control_master=True)
     rc, stdout, stderr = runner.run(
         f'squeue -u {ssh_user} -t running | awk "NR=2 {{print $1}}"',
         require_outputs=True)
 
+    logger.debug(f"[get_cluster_info] {stdout}")
+
     # TODO(jwj): Filter out the running instances and get the head instance id.
     provision_job_id = stdout
-    head_instance_id = f'{slurmctld_host}-{provision_job_id}'
+    head_instance_id = f'{ssh_host}-{provision_job_id}'
 
     instances: Dict[str, List[common.InstanceInfo]] = {}
     instances[head_instance_id] = [
         common.InstanceInfo(instance_id=head_instance_id,
-                            internal_ip=slurmctld_host,
-                            external_ip=slurmctld_host,
+                            internal_ip=ssh_host,
+                            external_ip=ssh_host,
                             ssh_port=ssh_port,
                             tags={'test': 'test'})
     ]
