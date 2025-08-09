@@ -8,10 +8,10 @@ import grpc
 
 import sky
 from sky import sky_logging
+from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.skylet import constants
 from sky.skylet import events
 from sky.skylet import services
-from sky.skylet.autostop.v1 import autostop_pb2_grpc
 
 # Use the explicit logger name so that the logger is under the
 # `sky.skylet.skylet` namespace when executed directly, so as
@@ -47,7 +47,7 @@ def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
     server = grpc.server(
         concurrent.futures.ThreadPoolExecutor(max_workers=max_workers))
 
-    autostop_pb2_grpc.add_AutostopServiceServicer_to_server(
+    autostopv1_pb2_grpc.add_AutostopServiceServicer_to_server(
         services.AutostopServiceImpl(), server)
 
     listen_addr = f'127.0.0.1:{port}'

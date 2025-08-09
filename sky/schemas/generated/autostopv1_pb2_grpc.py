@@ -4,8 +4,8 @@ import warnings
 
 import grpc
 
-from sky.skylet.autostop.v1 import (
-    autostop_pb2 as sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2)
+from sky.schemas.generated import (
+    autostopv1_pb2 as sky_dot_schemas_dot_generated_dot_autostopv1__pb2)
 
 GRPC_GENERATED_VERSION = '1.63.0'
 GRPC_VERSION = grpc.__version__
@@ -23,7 +23,7 @@ except ImportError:
 if _version_not_supported:
     warnings.warn(
         f'The grpc package installed is at version {GRPC_VERSION},' +
-        f' but the generated code in sky/skylet/autostop/v1/autostop_pb2_grpc.py depends on'
+        f' but the generated code in sky/schemas/generated/autostopv1_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.' +
         f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         +
@@ -42,21 +42,19 @@ class AutostopServiceStub(object):
             channel: A grpc.Channel.
         """
         self.SetAutostop = channel.unary_unary(
-            '/sky.skylet.autostop.v1.AutostopService/SetAutostop',
-            request_serializer=
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
-            SetAutostopRequest.SerializeToString,
+            '/autostop.v1.AutostopService/SetAutostop',
+            request_serializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2
+            .SetAutostopRequest.SerializeToString,
             response_deserializer=
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
+            sky_dot_schemas_dot_generated_dot_autostopv1__pb2.
             SetAutostopResponse.FromString,
             _registered_method=True)
         self.IsAutostopping = channel.unary_unary(
-            '/sky.skylet.autostop.v1.AutostopService/IsAutostopping',
-            request_serializer=
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
-            IsAutostoppingRequest.SerializeToString,
+            '/autostop.v1.AutostopService/IsAutostopping',
+            request_serializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2
+            .IsAutostoppingRequest.SerializeToString,
             response_deserializer=
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
+            sky_dot_schemas_dot_generated_dot_autostopv1__pb2.
             IsAutostoppingResponse.FromString,
             _registered_method=True)
 
@@ -83,25 +81,21 @@ def add_AutostopServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
         'SetAutostop': grpc.unary_unary_rpc_method_handler(
             servicer.SetAutostop,
-            request_deserializer=
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
-            SetAutostopRequest.FromString,
-            response_serializer=
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
-            SetAutostopResponse.SerializeToString,
+            request_deserializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2
+            .SetAutostopRequest.FromString,
+            response_serializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2
+            .SetAutostopResponse.SerializeToString,
         ),
         'IsAutostopping': grpc.unary_unary_rpc_method_handler(
             servicer.IsAutostopping,
-            request_deserializer=
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
-            IsAutostoppingRequest.FromString,
-            response_serializer=
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
-            IsAutostoppingResponse.SerializeToString,
+            request_deserializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2
+            .IsAutostoppingRequest.FromString,
+            response_serializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2
+            .IsAutostoppingResponse.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-        'sky.skylet.autostop.v1.AutostopService', rpc_method_handlers)
+        'autostop.v1.AutostopService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
 
 
@@ -123,10 +117,10 @@ class AutostopService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/sky.skylet.autostop.v1.AutostopService/SetAutostop',
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
+            '/autostop.v1.AutostopService/SetAutostop',
+            sky_dot_schemas_dot_generated_dot_autostopv1__pb2.
             SetAutostopRequest.SerializeToString,
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
+            sky_dot_schemas_dot_generated_dot_autostopv1__pb2.
             SetAutostopResponse.FromString,
             options,
             channel_credentials,
@@ -152,10 +146,10 @@ class AutostopService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/sky.skylet.autostop.v1.AutostopService/IsAutostopping',
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
+            '/autostop.v1.AutostopService/IsAutostopping',
+            sky_dot_schemas_dot_generated_dot_autostopv1__pb2.
             IsAutostoppingRequest.SerializeToString,
-            sky_dot_skylet_dot_autostop_dot_v1_dot_autostop__pb2.
+            sky_dot_schemas_dot_generated_dot_autostopv1__pb2.
             IsAutostoppingResponse.FromString,
             options,
             channel_credentials,

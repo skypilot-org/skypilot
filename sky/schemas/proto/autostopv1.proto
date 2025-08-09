@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package sky.skylet.autostop.v1;
+package autostop.v1;
 
 service AutostopService {
   // Set autostop configuration for the cluster.

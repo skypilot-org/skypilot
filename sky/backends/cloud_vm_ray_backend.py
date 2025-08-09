@@ -51,13 +51,13 @@ from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.generated import autostopv1_pb2
+from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
-from sky.skylet.autostop.v1 import autostop_pb2
-from sky.skylet.autostop.v1 import autostop_pb2_grpc
 from sky.usage import usage_lib
 from sky.utils import accelerator_registry
 from sky.utils import annotations
@@ -2810,20 +2810,20 @@ class SkyletClient:
     """The client to interact with a remote cluster through Skylet."""
 
     def __init__(self, channel: grpc.Channel):
-        self._autostop_stub = autostop_pb2_grpc.AutostopServiceStub(channel)
+        self._autostop_stub = autostopv1_pb2_grpc.AutostopServiceStub(channel)
 
     def set_autostop(
         self,
-        request: autostop_pb2.SetAutostopRequest,
+        request: autostopv1_pb2.SetAutostopRequest,
         timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> autostop_pb2.SetAutostopResponse:
+    ) -> autostopv1_pb2.SetAutostopResponse:
         return self._autostop_stub.SetAutostop(request, timeout=timeout)
 
     def is_autostopping(
         self,
-        request: autostop_pb2.IsAutostoppingRequest,
+        request: autostopv1_pb2.IsAutostoppingRequest,
         timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> autostop_pb2.IsAutostoppingResponse:
+    ) -> autostopv1_pb2.IsAutostoppingResponse:
         return self._autostop_stub.IsAutostopping(request, timeout=timeout)
 
 
@@ -4831,11 +4831,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
-            request = autostop_pb2.SetAutostopRequest(
+            request = autostopv1_pb2.SetAutostopRequest(
                 idle_minutes=idle_minutes_to_autostop,
                 backend=self.NAME,
                 wait_for=wait_for.to_protobuf()
-                if wait_for else autostop_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
+                if wait_for else autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
                 down=down,
             )
             try:
@@ -4884,7 +4884,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # We cannot check if the cluster is autostopping.
             return False
         try:
-            request = autostop_pb2.IsAutostoppingRequest()
+            request = autostopv1_pb2.IsAutostoppingRequest()
             response = backend_utils.invoke_skylet_with_retries(
                 handle, lambda: SkyletClient(handle.get_grpc_channel()).
                 is_autostopping(request))
