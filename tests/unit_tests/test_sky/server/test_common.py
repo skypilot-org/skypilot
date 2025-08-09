@@ -350,3 +350,38 @@ def test_cookies_set_with_file(monkeypatch):
     assert found_cookie_jar['test-cookie-2'] == expected_cookie.value
 
     temp_cookie_dir.cleanup()
+
+
+def test_is_api_server_local_with_explicit_endpoint():
+    """Test is_api_server_local with explicit endpoint parameter."""
+    # Test local endpoints
+    assert common.is_api_server_local('http://127.0.0.1:46580') is True
+    assert common.is_api_server_local('http://localhost:46580') is True
+    assert common.is_api_server_local('http://0.0.0.0:46580') is True
+
+    # Test remote endpoints
+    assert common.is_api_server_local('http://remote-server.com:46580') is False
+    assert common.is_api_server_local('https://api.example.com:8080') is False
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+@mock.patch.dict('os.environ', {}, clear=True)
+def test_is_api_server_local_with_remote_config(mock_config):
+    """Test that is_api_server_local works correctly when remote endpoint is configured."""
+    # Clear cache to ensure fresh test
+    common.get_server_url.cache_clear()
+    common.is_api_server_local.cache_clear()
+
+    # Configure a remote endpoint
+    mock_config.return_value = 'http://remote-server.com:46580'
+
+    # When called without endpoint parameter, should use configured remote endpoint
+    assert common.is_api_server_local() is False
+
+    # When called with explicit local endpoint, should return True regardless of config
+    assert common.is_api_server_local('http://127.0.0.1:46580') is True
+    assert common.is_api_server_local('http://0.0.0.0:46580') is True
+
+    # Clean up cache
+    common.get_server_url.cache_clear()
+    common.is_api_server_local.cache_clear()
