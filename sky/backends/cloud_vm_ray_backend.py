@@ -2931,7 +2931,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             except locks.LockTimeout:
                 if not communicated_with_user:
                     rich_utils.force_update_status(
-                        ux_utils.spinner_message('Launching delayed  ' +
+                        ux_utils.spinner_message('Launching - blocked by ' +
+                                                 'other requests ' +
                                                  colorama.Style.RESET_ALL +
                                                  colorama.Style.DIM +
                                                  'Check concurrent requests: ' +
