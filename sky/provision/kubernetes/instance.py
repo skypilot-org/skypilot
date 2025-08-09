@@ -1,6 +1,7 @@
 """Kubernetes instance provisioning."""
 import copy
 import json
+import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -1270,6 +1271,49 @@ def _get_pod_termination_reason(pod: Any) -> str:
     return ' | '.join(reasons)
 
 
+def _analyze_pod_events(context: Optional[str], namespace: str,
+                        pod_name: str) -> None:
+    print(f'Analyzing events for pod {pod_name}')
+    pod_field_selector = (
+        f'involvedObject.kind=Pod,involvedObject.name={pod_name}')
+    pod_events = kubernetes.core_api(context).list_namespaced_event(
+        namespace,
+        field_selector=pod_field_selector,
+        _request_timeout=kubernetes.API_TIMEOUT).items
+    pod_events = sorted(pod_events,
+                        key=lambda event: event.metadata.creation_timestamp)
+    last_scheduled_node = None
+    for event in pod_events:
+        event_reason = event.reason
+        timestamp = event.metadata.creation_timestamp.strftime(
+            '%Y-%m-%d %H:%M:%S')
+        event_message = event.message
+        print('pod', event_reason, timestamp, event_message)
+        if event_reason == 'Scheduled':
+            pattern = r'Successfully assigned (\S+) to (\S+)'
+            match = re.search(pattern, event_message)
+            if match:
+                scheduled_node = match.group(2)
+                print('Scheduled node changed from '
+                      f'{last_scheduled_node} to {scheduled_node}')
+                last_scheduled_node = scheduled_node
+    if last_scheduled_node is not None:
+        node_field_selector = ('involvedObject.kind=Node,'
+                               f'involvedObject.name={last_scheduled_node}')
+        node_events = kubernetes.core_api(context).list_namespaced_event(
+            namespace,
+            field_selector=node_field_selector,
+            _request_timeout=kubernetes.API_TIMEOUT).items
+        node_events = sorted(
+            node_events, key=lambda event: event.metadata.creation_timestamp)
+        for event in node_events:
+            event_reason = event.reason
+            timestamp = event.metadata.creation_timestamp.strftime(
+                '%Y-%m-%d %H:%M:%S')
+            event_message = event.message
+            print('node', event_reason, timestamp, event_message)
+
+
 def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
@@ -1334,6 +1378,23 @@ def query_instances(
         pod_name = pod.metadata.name
         reason = f'{pod_name}: {reason}' if reason is not None else None
         cluster_status[pod_name] = (pod_status, reason)
+
+    # Find the list of pod names that should be there
+    # from k8s services. Filter duplicates as -ssh service
+    # creates a duplicate entry.
+    target_pod_names = list(
+        set([
+            service['spec']['selector']['component']
+            for service in provider_config.get('services', [])
+        ]))
+
+    for target_pod_name in target_pod_names:
+        if target_pod_name not in cluster_status:
+            # If the pod is not in the cluster_status, it means it's not
+            # running.
+            # Analyze what happened to the pod based on events.
+            _analyze_pod_events(context, namespace, target_pod_name)
+
     return cluster_status
 
 
