@@ -23,6 +23,7 @@ from sky import skypilot_config
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
+from sky.adaptors import coreweave
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
@@ -62,6 +63,7 @@ STORE_ENABLED_CLOUDS: List[str] = [
     str(clouds.OCI()),
     str(clouds.Nebius()),
     cloudflare.NAME,
+    coreweave.NAME,
 ]
 
 # Maximum number of concurrent rsync upload processes
@@ -93,6 +95,12 @@ def get_cached_enabled_storage_cloud_names_or_refresh(
     r2_is_enabled, _ = cloudflare.check_storage_credentials()
     if r2_is_enabled:
         enabled_clouds.append(cloudflare.NAME)
+
+    # Similarly, handle CoreWeave storage credentials
+    coreweave_is_enabled, _ = coreweave.check_storage_credentials()
+    if coreweave_is_enabled:
+        enabled_clouds.append(coreweave.NAME)
+
     if raise_if_no_cloud_access and not enabled_clouds:
         raise exceptions.NoCloudAccessError(
             'No cloud access available for storage. '
@@ -126,6 +134,7 @@ class StoreType(enum.Enum):
     IBM = 'IBM'
     OCI = 'OCI'
     NEBIUS = 'NEBIUS'
+    COREWEAVE = 'COREWEAVE'
     VOLUME = 'VOLUME'
 
     @classmethod
@@ -883,7 +892,7 @@ class Storage(object):
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius'
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -908,7 +917,8 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://. Got: {source}')
+                        f'r2://, cos://, oci://, nebius://, cw://. '
+                        f'Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self, name: Optional[str]) -> None:
@@ -923,7 +933,16 @@ class Storage(object):
             """
             prefix = name.split('://')[0]
             prefix = prefix.lower()
-            if prefix in ['s3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius']:
+            if prefix in [
+                    's3',
+                    'gs',
+                    'https',
+                    'r2',
+                    'cos',
+                    'oci',
+                    'nebius',
+                    'cw',
+            ]:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
                         'Prefix detected: `name` cannot start with '
@@ -1058,6 +1077,12 @@ class Storage(object):
                         _bucket_sub_path=self._bucket_sub_path)
                 elif s_type == StoreType.NEBIUS:
                     store = NebiusStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
+                elif s_type == StoreType.COREWEAVE:
+                    store = CoreWeaveStore.from_metadata(
                         s_metadata,
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction,
@@ -4570,3 +4595,118 @@ class NebiusStore(S3CompatibleStore):
             rclone_config, rclone_profile_name, self.bucket.name, mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
+
+
+@register_s3_compatible_store
+class CoreWeaveStore(S3CompatibleStore):
+    """CoreWeaveStore inherits from S3CompatibleStore and represents the backend
+    for CoreWeave Object Storage buckets.
+    """
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for CoreWeave Object Storage."""
+        return S3CompatibleConfig(
+            store_type='COREWEAVE',
+            url_prefix='cw://',
+            client_factory=data_utils.create_coreweave_client,
+            resource_factory=lambda name: coreweave.resource('s3').Bucket(name),
+            split_path=data_utils.split_coreweave_path,
+            verify_bucket=data_utils.verify_coreweave_bucket,
+            aws_profile=coreweave.COREWEAVE_PROFILE_NAME,
+            get_endpoint_url=lambda: data_utils.create_coreweave_client().meta.
+            endpoint_url,
+            extra_cli_args=[],
+            cloud_name='CoreWeave',
+            default_region=coreweave.DEFAULT_REGION,
+            mount_cmd_factory=cls._get_coreweave_mount_cmd,
+        )
+
+    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
+        """Get or create bucket using CoreWeave's S3 API"""
+        bucket = self.config.resource_factory(self.name)
+
+        # Use our custom bucket verification instead of head_bucket
+        if data_utils.verify_coreweave_bucket(self.name):
+            self._validate_existing_bucket()
+            return bucket, False
+
+        # Check if this is a source with URL prefix (existing bucket case)
+        if isinstance(self.source, str) and self.source.startswith(
+                self.config.url_prefix):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    'Attempted to use a non-existent bucket as a source: '
+                    f'{self.source}.')
+
+        # If bucket cannot be found, create it if needed
+        if self.sync_on_reconstruction:
+            bucket = self._create_bucket(self.name)
+            return bucket, True
+        else:
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
+
+    @classmethod
+    def _get_coreweave_mount_cmd(cls, bucket_name: str, mount_path: str,
+                                 bucket_sub_path: Optional[str]) -> str:
+        """Factory method for CoreWeave mount command."""
+        client = data_utils.create_coreweave_client()
+        endpoint_url = client.meta.endpoint_url
+        return mounting_utils.get_coreweave_mount_cmd(
+            coreweave.COREWEAVE_PROFILE_NAME, bucket_name, endpoint_url,
+            mount_path, bucket_sub_path)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        """CoreWeave-specific cached mount implementation using rclone."""
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.COREWEAVE.get_profile_name(
+                self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.COREWEAVE.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+    def _create_bucket(self, bucket_name: str) -> StorageHandle:
+        """Create bucket using S3 API with timing handling for CoreWeave."""
+        result = super()._create_bucket(bucket_name)
+
+        # Add retry mechanism to ensure bucket is accessible after creation
+        # THIS IS SPECIFIC TO COREWEAVE since
+        # the bucket isn't immediately created...
+        max_retries = 60
+        retry_count = 0
+        dim = colorama.Style.DIM
+        reset = colorama.Style.RESET_ALL
+
+        while retry_count < max_retries:
+            try:
+                # Try to list objects in the bucket to verify
+                self.client.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
+                logger.info(
+                    '  %sBucket %r is now accessible after %d seconds%s', dim,
+                    bucket_name, retry_count * 5, reset)
+                break
+            except (coreweave.botocore_exceptions().ClientError,
+                    coreweave.botocore_exceptions().BotoCoreError) as e:
+                retry_count += 1
+                logger.debug(
+                    '  %sBucket %r not yet accessible (attempt %d/%d): %s%s',
+                    dim, bucket_name, retry_count, max_retries, str(e), reset)
+                if retry_count < max_retries:
+                    time.sleep(5)
+                else:
+                    logger.warning(
+                        '  %sBucket %r may not be fully ready after %d '
+                        'seconds, proceeding anyway%s',
+                        dim,
+                        bucket_name,
+                        max_retries * 5,
+                        reset,
+                    )
+
+        return result

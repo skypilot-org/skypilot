@@ -19,6 +19,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
+from sky.adaptors import coreweave
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
@@ -625,6 +626,7 @@ class Rclone:
         R2 = 'R2'
         AZURE = 'AZURE'
         NEBIUS = 'NEBIUS'
+        COREWEAVE = 'COREWEAVE'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -642,7 +644,8 @@ class Rclone:
                 Rclone.RcloneStores.IBM: 'sky-ibm',
                 Rclone.RcloneStores.R2: 'sky-r2',
                 Rclone.RcloneStores.AZURE: 'sky-azure',
-                Rclone.RcloneStores.NEBIUS: 'sky-nebius'
+                Rclone.RcloneStores.NEBIUS: 'sky-nebius',
+                Rclone.RcloneStores.COREWEAVE: 'sky-coreweave'
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -747,6 +750,26 @@ class Rclone:
                     secret_access_key = {secret_access_key}
                     endpoint = {endpoint_url}
                     acl = private
+                    """)
+            elif self is Rclone.RcloneStores.COREWEAVE:
+                coreweave_session = coreweave.session()
+                coreweave_credentials = coreweave.get_coreweave_credentials(
+                    coreweave_session)
+                # Get endpoint URL from the client
+                client = coreweave.client('s3')
+                endpoint_url = client.meta.endpoint_url
+                access_key_id = coreweave_credentials.access_key
+                secret_access_key = coreweave_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    region = auto
+                    acl = private
+                    force_path_style = false
                     """)
             else:
                 with ux_utils.print_exception_no_traceback():
@@ -908,3 +931,36 @@ def split_oci_path(oci_path: str) -> Tuple[str, str]:
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
+
+
+def create_coreweave_client(region: Optional[str] = None) -> Client:
+    """Create CoreWeave S3 client.
+    Args:
+        region: The region to configure the client for. If None, uses the
+                region from the session configuration.
+    """
+    session = coreweave.session()
+    if region is not None:
+        return session.client('s3', region_name=region)
+    return session.client('s3')
+
+
+def split_coreweave_path(coreweave_path: str) -> Tuple[str, str]:
+    """Split cw://bucket/key into (bucket, key)."""
+    if coreweave_path.startswith('cw://'):
+        path_parts = coreweave_path.replace('cw://', '').split('/', 1)
+    else:
+        path_parts = coreweave_path.split('/', 1)
+    bucket = path_parts[0]
+    key = path_parts[1] if len(path_parts) > 1 else ''
+    return bucket, key
+
+
+def verify_coreweave_bucket(name: str) -> bool:
+    """Verify CoreWeave bucket exists and is accessible."""
+    coreweave_client = create_coreweave_client()
+    # CoreWeave S3 API doesn't support head_bucket reliably
+    # Use list_buckets instead to check if bucket exists
+    response = coreweave_client.list_buckets()
+    bucket_names = [bucket['Name'] for bucket in response['Buckets']]
+    return name in bucket_names
