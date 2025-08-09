@@ -155,6 +155,9 @@ export function Users() {
     role: 'user',
   });
   const [creating, setCreating] = useState(false);
+  const [newUserExpiresInDays, setNewUserExpiresInDays] = useState(30);
+  const [createdUserTokenInDialog, setCreatedUserTokenInDialog] =
+    useState(null);
   const [permissionDenialState, setPermissionDenialState] = useState({
     open: false,
     message: '',
@@ -298,28 +301,50 @@ export function Users() {
   };
 
   const handleCreateUser = async () => {
-    if (!newUser.username || !newUser.password) {
-      setCreateError(new Error('Username and password are required.'));
-      setShowCreateUser(false);
+    if (
+      !newUser.username ||
+      (!serviceAccountTokenEnabled && !newUser.password)
+    ) {
+      const msg = serviceAccountTokenEnabled
+        ? 'Username is required.'
+        : 'Username and password are required.';
+      setCreateError(new Error(msg));
       return;
     }
     setCreating(true);
     setCreateError(null);
     setCreateSuccess(null);
     try {
-      const response = await apiClient.post('/users/create', newUser);
+      const payload = serviceAccountTokenEnabled
+        ? {
+            username: newUser.username,
+            role: newUser.role,
+            expires_in_days:
+              newUserExpiresInDays == null ? null : newUserExpiresInDays,
+          }
+        : {
+            username: newUser.username,
+            password: newUser.password,
+            role: newUser.role,
+          };
+      const response = await apiClient.post('/users/create', payload);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to create user');
       }
-      setCreateSuccess(`User "${newUser.username}" created successfully!`);
-      setShowCreateUser(false);
-      setNewUser({ username: '', password: '', role: 'user' });
-      handleRefresh();
+      const data = await response.json();
+
+      if (serviceAccountTokenEnabled && data?.token) {
+        setCreatedUserTokenInDialog(data.token);
+        handleRefresh();
+      } else {
+        setCreateSuccess(`User "${newUser.username}" created successfully!`);
+        setShowCreateUser(false);
+        setNewUser({ username: '', password: '', role: 'user' });
+        handleRefresh();
+      }
     } catch (error) {
       setCreateError(error);
-      setShowCreateUser(false);
-      setNewUser({ username: '', password: '', role: 'user' });
     } finally {
       setCreating(false);
     }
@@ -766,83 +791,173 @@ export function Users() {
           setShowCreateUser(open);
           if (!open) {
             setCreateError(null);
+            setCreatedUserTokenInDialog(null);
+            setNewUser({ username: '', password: '', role: 'user' });
+            setNewUserExpiresInDays(30);
           }
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Create User</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
-            <div className="grid gap-2">
-              <label className="text-sm font-medium text-gray-700">
-                Username
-              </label>
-              <input
-                className="border rounded px-3 py-2 w-full"
-                placeholder="Username"
-                value={newUser.username}
-                onChange={(e) =>
-                  setNewUser({ ...newUser, username: e.target.value })
-                }
-              />
-            </div>
-            <div className="grid gap-2">
-              <label className="text-sm font-medium text-gray-700">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  className="border rounded px-3 py-2 w-full pr-10"
-                  placeholder="Password"
-                  type={showPassword ? 'text' : 'password'}
-                  value={newUser.password}
-                  onChange={(e) =>
-                    setNewUser({ ...newUser, password: e.target.value })
-                  }
-                />
-                <button
-                  type="button"
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? (
-                    <EyeOffIcon className="h-4 w-4" />
-                  ) : (
-                    <EyeIcon className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <label className="text-sm font-medium text-gray-700">Role</label>
-              <select
-                className="border rounded px-3 py-2 w-full"
-                value={newUser.role}
-                onChange={(e) =>
-                  setNewUser({ ...newUser, role: e.target.value })
-                }
-              >
-                <option value="user">User</option>
-                <option value="admin">Admin</option>
-              </select>
-            </div>
+            {createdUserTokenInDialog ? (
+              <>
+                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center mb-3">
+                    <h4 className="text-sm font-medium text-green-900">
+                      ⚠️ User created successfully - save this token now!
+                    </h4>
+                    <CustomTooltip
+                      content={copySuccess ? 'Copied!' : 'Copy token'}
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={() =>
+                          copyToClipboard(createdUserTokenInDialog)
+                        }
+                        className="flex items-center text-green-600 hover:text-green-800 transition-colors duration-200 p-1 ml-2"
+                      >
+                        {copySuccess ? (
+                          <CheckIcon className="w-4 h-4" />
+                        ) : (
+                          <CopyIcon className="w-4 h-4" />
+                        )}
+                      </button>
+                    </CustomTooltip>
+                  </div>
+                  <p className="text-sm text-green-700 mb-3">
+                    This user token will not be shown again. Please copy and
+                    store it securely.
+                  </p>
+                  <div className="bg-white border border-green-300 rounded-md p-3">
+                    <code className="text-sm text-gray-800 font-mono break-all block">
+                      {createdUserTokenInDialog}
+                    </code>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Username
+                  </label>
+                  <input
+                    className="border rounded px-3 py-2 w-full"
+                    placeholder="Username"
+                    value={newUser.username}
+                    onChange={(e) =>
+                      setNewUser({ ...newUser, username: e.target.value })
+                    }
+                  />
+                </div>
+                {!serviceAccountTokenEnabled && (
+                  <div className="grid gap-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Password
+                    </label>
+                    <div className="relative">
+                      <input
+                        className="border rounded px-3 py-2 w-full pr-10"
+                        placeholder="Password"
+                        type={showPassword ? 'text' : 'password'}
+                        value={newUser.password}
+                        onChange={(e) =>
+                          setNewUser({ ...newUser, password: e.target.value })
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? (
+                          <EyeOffIcon className="h-4 w-4" />
+                        ) : (
+                          <EyeIcon className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {serviceAccountTokenEnabled && (
+                  <div className="grid gap-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Token Expiration (days)
+                    </label>
+                    <input
+                      type="number"
+                      className="border rounded px-3 py-2 w-full"
+                      placeholder="e.g., 30"
+                      min="0"
+                      max="365"
+                      value={newUserExpiresInDays ?? ''}
+                      onChange={(e) =>
+                        setNewUserExpiresInDays(
+                          e.target.value ? parseInt(e.target.value) : null
+                        )
+                      }
+                    />
+                    <p className="text-xs text-gray-500">
+                      Leave empty or enter 0 to never expire. Maximum 365 days.
+                    </p>
+                  </div>
+                )}
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Role
+                  </label>
+                  <select
+                    className="border rounded px-3 py-2 w-full"
+                    value={newUser.role}
+                    onChange={(e) =>
+                      setNewUser({ ...newUser, role: e.target.value })
+                    }
+                  >
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+              </>
+            )}
           </div>
           <DialogFooter>
-            <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
-              onClick={() => setShowCreateUser(false)}
-              disabled={creating}
-            >
-              Cancel
-            </button>
-            <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
-              onClick={handleCreateUser}
-              disabled={creating}
-            >
-              {creating ? 'Creating...' : 'Create'}
-            </button>
+            {createdUserTokenInDialog ? (
+              <button
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                onClick={() => {
+                  setShowCreateUser(false);
+                  setCreatedUserTokenInDialog(null);
+                  setNewUser({ username: '', password: '', role: 'user' });
+                  setNewUserExpiresInDays(30);
+                }}
+              >
+                Close
+              </button>
+            ) : (
+              <>
+                <button
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+                  onClick={() => setShowCreateUser(false)}
+                  disabled={creating}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                  onClick={handleCreateUser}
+                  disabled={
+                    creating ||
+                    !newUser.username ||
+                    (!serviceAccountTokenEnabled && !newUser.password)
+                  }
+                >
+                  {creating ? 'Creating...' : 'Create'}
+                </button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
