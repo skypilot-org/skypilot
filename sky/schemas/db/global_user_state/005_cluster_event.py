@@ -26,7 +26,7 @@ def upgrade():
     with op.get_context().autocommit_block():
         # Add new table for cluster events.
         db_utils.add_tables_to_db_sqlalchemy(Base.metadata, op.get_bind())
-        
+
         db_utils.add_column_to_table_alembic('cluster_events',
                                              'cluster_hash',
                                              sa.Text(),
