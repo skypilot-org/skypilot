@@ -5,37 +5,71 @@ Compare multiple trained models side-by-side using Promptfoo and SkyPilot.
 ## Architecture Overview
 
 ```
-┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
-│   HuggingFace Hub   │     │    S3/GCS Bucket    │     │  SkyPilot Volume    │
-│  (Public Models)    │     │ (Custom Checkpoints)│     │  (Local Models)     │
-└──────────┬──────────┘     └──────────┬──────────┘     └──────────┬──────────┘
-           │                           │                           │
-           └───────────────────────────┴───────────────────────────┘
+                            ┌─────────────────────┐
+                            │   models_config.yaml │
+                            │  (Your Model Specs)  │
+                            └──────────┬──────────┘
                                        │
                               ┌────────▼────────┐
                               │ evaluate_models │
-                              │   .py (SDK)     │
-                              └────────┬────────┘
-                                       │ Parallel Launch
-           ┌───────────────────────────┼───────────────────────────┐
-           │                           │                           │
-    ┌──────▼──────┐            ┌──────▼──────┐            ┌──────▼──────┐
-    │  Cluster 1  │            │  Cluster 2  │            │  Cluster 3  │
-    │   (vLLM)    │            │   (vLLM)    │            │   (vLLM)    │
-    └──────┬──────┘            └──────┬──────┘            └──────┬──────┘
-           │                           │                           │
-           └───────────────────────────┴───────────────────────────┘
-                                       │
-                              ┌────────▼────────┐
-                              │   Promptfoo     │
-                              │  (Evaluation)   │
+                              │   .py           │
                               └────────┬────────┘
                                        │
-                              ┌────────▼────────┐
-                              │  Side-by-side   │
-                              │   Comparison    │
-                              └─────────────────┘
+                         ┌─────────────▼─────────────┐
+                         │    SkyPilot Python SDK    │
+                         │  • Task.from_yaml()       │
+                         │  • Parallel launching     │
+                         │  • Cloud abstraction      │
+                         └─────────────┬─────────────┘
+                                       │
+     ┌─────────────────────────────────┼─────────────────────────────────┐
+     │                                 │                                 │
+┌────▼─────┐                    ┌─────▼─────┐                    ┌──────▼────┐
+│ SkyPilot │                    │ SkyPilot  │                    │ SkyPilot  │
+│ Cluster  │                    │ Cluster   │                    │ Cluster   │
+├──────────┤                    ├───────────┤                    ├───────────┤
+│ Model 1  │                    │ Model 2   │                    │ Model 3   │
+│ • vLLM   │                    │ • vLLM    │                    │ • vLLM    │
+│ • GPU    │                    │ • GPU     │                    │ • GPU     │
+└────┬─────┘                    └─────┬─────┘                    └─────┬─────┘
+     │                                │                                │
+     │         ┌──────────────────────┴──────────────────────┐        │
+     │         │             Model Sources                    │        │
+     │         │  • HuggingFace Hub (public models)          │        │
+     │         │  • S3/GCS Buckets (custom checkpoints)      │        │
+     │         │  • SkyPilot Volumes (fast model loading)    │        │
+     │         └─────────────────────────────────────────────┘        │
+     │                                                                 │
+     └─────────────────────────────┬───────────────────────────────────┘
+                                   │ OpenAI-compatible APIs
+                          ┌────────▼────────┐
+                          │   Promptfoo     │
+                          │  • Evaluation   │
+                          │  • Comparison   │
+                          └────────┬────────┘
+                                   │
+                          ┌────────▼────────┐
+                          │  Results View   │
+                          │ (Side-by-side)  │
+                          └─────────────────┘
 ```
+
+### Key Components:
+
+1. **SkyPilot SDK**: Orchestrates the entire deployment
+   - Loads serving configuration from YAML template
+   - Launches multiple clusters in parallel
+   - Handles cloud resources and GPU allocation
+
+2. **SkyPilot Clusters**: Each model runs on its own cluster
+   - Automatic GPU provisioning based on model size
+   - vLLM for high-performance inference
+   - OpenAI-compatible API endpoints
+
+3. **Flexible Model Sources**: 
+   - HuggingFace Hub for public models
+   - Cloud buckets (S3/GCS) for custom checkpoints
+   - SkyPilot Volumes for fast repeated access
 
 ## Quick Start
 
@@ -90,33 +124,10 @@ cleanup_on_complete: true
 
 ## How It Works
 
-```mermaid
-graph TD
-    A[models_config.yaml] -->|Read Config| B[evaluate_models.py]
-    B -->|Load Template| C[templates/serve-model.yaml]
-    
-    B -->|Launch Parallel| D[SkyPilot Clusters]
-    D --> E["Model 1<br/>(HuggingFace)"]
-    D --> F["Model 2<br/>(S3 Bucket)"]
-    D --> G["Model 3<br/>(Volume)"]
-    
-    E -->|vLLM API| H[Endpoints]
-    F -->|vLLM API| H
-    G -->|vLLM API| H
-    
-    H -->|Generate Config| I[promptfoo_config.yaml]
-    I -->|Evaluate| J[Promptfoo]
-    J -->|Compare| K[Results UI]
-    
-    style A fill:#e1f5fe
-    style B fill:#fff9c4
-    style J fill:#f3e5f5
-    style K fill:#c8e6c9
-```
-
-1. **Launch Models**: Each model runs on its own SkyPilot cluster with vLLM
-2. **Run Tests**: All models receive the same prompts for fair comparison
-3. **View Results**: See outputs side-by-side in the Promptfoo UI
+1. **Configure Models**: Edit `models_config.yaml` with your model sources
+2. **Launch with SkyPilot**: The script uses SkyPilot SDK to deploy each model on its own GPU cluster
+3. **Evaluate with Promptfoo**: All models receive the same test prompts
+4. **Compare Results**: View outputs side-by-side in the Promptfoo UI
 
 ## Model Sources
 
