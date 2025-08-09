@@ -9,7 +9,6 @@ Create Date: 2025-08-08
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
 
 from sky.global_user_state import Base
 from sky.utils.db import db_utils
@@ -26,35 +25,6 @@ def upgrade():
     with op.get_context().autocommit_block():
         # Add new table for cluster events.
         db_utils.add_tables_to_db_sqlalchemy(Base.metadata, op.get_bind())
-
-        db_utils.add_column_to_table_alembic('cluster_events',
-                                             'cluster_hash',
-                                             sa.Text(),
-                                             server_default=None)
-        db_utils.add_column_to_table_alembic('cluster_events',
-                                             'name',
-                                             sa.Text(),
-                                             server_default=None)
-        db_utils.add_column_to_table_alembic('cluster_events',
-                                             'starting_status',
-                                             sa.Text(),
-                                             server_default=None)
-        db_utils.add_column_to_table_alembic('cluster_events',
-                                             'ending_status',
-                                             sa.Text(),
-                                             server_default=None)
-        db_utils.add_column_to_table_alembic('cluster_events',
-                                             'reason',
-                                             sa.Text(),
-                                             server_default=None)
-        db_utils.add_column_to_table_alembic('cluster_events',
-                                             'transitioned_at',
-                                             sa.Integer(),
-                                             server_default=None)
-        db_utils.add_column_to_table_alembic('cluster_events',
-                                             'type',
-                                             sa.Text(),
-                                             server_default=None)
 
 
 def downgrade():
