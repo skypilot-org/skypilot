@@ -29,6 +29,7 @@ logger = sky_logging.init_logger(__name__)
 # confusing to users.
 OAUTH2_PROXY_BASE_URL_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL'
 OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
+INGRESS_OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_INGRESS_OAUTH2_PROXY_ENABLED'
 
 
 class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):

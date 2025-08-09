@@ -14,18 +14,18 @@ class TestServiceAccountAuth:
 
     @mock.patch.dict(
         os.environ, {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'sky_test_token'})
-    def test_get_service_account_token_from_env(self):
+    def testget_service_account_token_from_env(self):
         """Test getting service account token from environment variable."""
-        token = service_account_auth._get_service_account_token()
+        token = service_account_auth.get_service_account_token()
         assert token == 'sky_test_token'
 
     @mock.patch.dict(os.environ, {}, clear=True)
     @mock.patch('sky.skypilot_config.get_nested')
-    def test_get_service_account_token_from_config(self, mock_get_nested):
+    def testget_service_account_token_from_config(self, mock_get_nested):
         """Test getting service account token from config file."""
         mock_get_nested.return_value = 'sky_config_token'
 
-        token = service_account_auth._get_service_account_token()
+        token = service_account_auth.get_service_account_token()
         assert token == 'sky_config_token'
 
         # Verify the correct config path is used
@@ -38,7 +38,7 @@ class TestServiceAccountAuth:
         """Test no token returned when none available."""
         mock_get_nested.return_value = None
 
-        token = service_account_auth._get_service_account_token()
+        token = service_account_auth.get_service_account_token()
         assert token is None
 
     @mock.patch.dict(os.environ,
@@ -46,7 +46,7 @@ class TestServiceAccountAuth:
     def test_invalid_token_format_env(self):
         """Test validation of token format from environment."""
         with pytest.raises(ValueError) as exc_info:
-            service_account_auth._get_service_account_token()
+            service_account_auth.get_service_account_token()
 
         assert 'Invalid service account token format' in str(exc_info.value)
         assert 'Token must start with "sky_"' in str(exc_info.value)
@@ -58,7 +58,7 @@ class TestServiceAccountAuth:
         mock_get_nested.return_value = 'invalid_token'
 
         with pytest.raises(ValueError) as exc_info:
-            service_account_auth._get_service_account_token()
+            service_account_auth.get_service_account_token()
 
         assert 'Invalid service account token format in config' in str(
             exc_info.value)
@@ -87,7 +87,7 @@ class TestServiceAccountAuth:
         """Test that environment variable takes priority over config."""
         mock_get_nested.return_value = 'sky_config_token'
 
-        token = service_account_auth._get_service_account_token()
+        token = service_account_auth.get_service_account_token()
         # Should get env token, not config token
         assert token == 'sky_test_token'
 
@@ -147,7 +147,7 @@ class TestServiceAccountAuth:
         with mock.patch('sky.skypilot_config.get_nested') as mock_get_nested:
             mock_get_nested.return_value = 'sky_config_fallback'
 
-            token = service_account_auth._get_service_account_token()
+            token = service_account_auth.get_service_account_token()
             assert token == 'sky_config_fallback'
 
             # Should check config since env token is empty

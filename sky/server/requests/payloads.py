@@ -380,8 +380,9 @@ class ClusterJobsDownloadLogsBody(RequestBody):
 class UserCreateBody(RequestBody):
     """The request body for the user create endpoint."""
     username: str
-    password: str
+    password: Optional[str] = None
     role: Optional[str] = None
+    expires_in_days: Optional[int] = None
 
 
 class UserDeleteBody(RequestBody):

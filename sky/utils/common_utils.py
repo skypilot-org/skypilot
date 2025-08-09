@@ -1137,3 +1137,9 @@ def removeprefix(string: str, prefix: str) -> str:
     if string.startswith(prefix):
         return string[len(prefix):]
     return string
+
+
+def is_service_account_token_enabled() -> bool:
+    """Check if service account token is enabled."""
+    return os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
+                          'false').lower() == 'true'

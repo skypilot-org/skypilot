@@ -40,9 +40,11 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
                                     zone=volume.zone,
                                     size=volume.size,
                                     config=volume.config)
-    response = requests.post(f'{server_common.get_server_url()}/volumes/apply',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/volumes/apply',
+        json=json.loads(body.model_dump_json()),
+    )
     return server_common.get_request_id(response)
 
 
@@ -56,8 +58,10 @@ def ls() -> server_common.RequestId[List[Dict[str, Any]]]:
     Returns:
         The request ID of the list request.
     """
-    response = requests.get(f'{server_common.get_server_url()}/volumes',
-                            cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'GET',
+        '/volumes',
+    )
     return server_common.get_request_id(response)
 
 
@@ -75,7 +79,9 @@ def delete(names: List[str]) -> server_common.RequestId[None]:
         The request ID of the delete request.
     """
     body = payloads.VolumeDeleteBody(names=names)
-    response = requests.post(f'{server_common.get_server_url()}/volumes/delete',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/volumes/delete',
+        json=json.loads(body.model_dump_json()),
+    )
     return server_common.get_request_id(response)
