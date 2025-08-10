@@ -148,7 +148,7 @@ def get_model_path_and_mounts(source: str) -> Tuple:
         # Extract HuggingFace model ID: hf://org/model
         model_id = source[len('hf://'):]
         return model_id, None, None
-    
+
     if source.startswith('ollama://'):
         # Extract Ollama model ID: ollama://model:tag
         model_id = source[len('ollama://'):]
