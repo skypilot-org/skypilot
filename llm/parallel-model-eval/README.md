@@ -4,6 +4,8 @@ Compare multiple trained models and agents side-by-side using Promptfoo and SkyP
 
 ![](https://i.imgur.com/85MrID8.png)
 
+![](https://i.imgur.com/ptuYADo.png)
+
 ## Architecture Overview
 
 ```
