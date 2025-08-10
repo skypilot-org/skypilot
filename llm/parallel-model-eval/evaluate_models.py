@@ -191,7 +191,8 @@ def launch_models_parallel(models: List[Dict],
     return launched_models
 
 
-def create_evaluation_config(models: List[Dict], config: Dict, output_path: str):
+def create_evaluation_config(models: List[Dict], config: Dict,
+                             output_path: str):
     """Create Promptfoo configuration by merging deployed models with eval config."""
     # Build provider list from deployed models
     providers = []
@@ -214,7 +215,7 @@ def create_evaluation_config(models: List[Dict], config: Dict, output_path: str)
 
     # Start with the promptfoo config from the YAML (or use defaults)
     promptfoo_config = config.get('promptfoo', {})
-    
+
     # If no promptfoo config provided, use sensible defaults
     if not promptfoo_config:
         promptfoo_config = {
@@ -239,10 +240,10 @@ def create_evaluation_config(models: List[Dict], config: Dict, output_path: str)
             }],
             'outputPath': './results.json'
         }
-    
+
     # Merge the providers into the promptfoo config
     promptfoo_config['providers'] = providers
-    
+
     # Ensure outputPath is set
     if 'outputPath' not in promptfoo_config:
         promptfoo_config['outputPath'] = './results.json'
@@ -251,7 +252,9 @@ def create_evaluation_config(models: List[Dict], config: Dict, output_path: str)
         yaml.dump(promptfoo_config, f, default_flow_style=False)
 
     num_tests = len(promptfoo_config.get('tests', []))
-    print(f"\n📝 Created evaluation config for {len(providers)} models with {num_tests} tests")
+    print(
+        f"\n📝 Created evaluation config for {len(providers)} models with {num_tests} tests"
+    )
 
 
 def run_evaluation(config_path: str):
@@ -403,7 +406,8 @@ def main():
 
     try:
         # Create and run evaluation
-        create_evaluation_config(launched_models, config, 'promptfoo_config.yaml')
+        create_evaluation_config(launched_models, config,
+                                 'promptfoo_config.yaml')
         run_evaluation('promptfoo_config.yaml')
 
     finally:
