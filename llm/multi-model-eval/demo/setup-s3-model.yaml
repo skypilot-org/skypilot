@@ -1,0 +1,59 @@
+# Setup S3 bucket with a model for demo
+# This downloads a model and saves it to S3 using SkyPilot file_mounts
+# Usage: sky launch setup-s3-model.yaml -c setup-s3 --down -y
+
+resources:
+  accelerators: L4:1
+  disk_size: 20  # Smaller disk for 1.5B model
+
+workdir: .
+
+# Mount S3 bucket directly - SkyPilot handles the sync
+file_mounts:
+  /buckets/my-models:
+    name: skypilot-agent-models
+    store: s3
+    mode: MOUNT_CACHED
+
+envs:
+  MODEL_NAME: qwen-agent  # Path in bucket (matching finetune-to-s3.yaml)
+  OUTPUT_PATH: /buckets/my-models/qwen-agent
+
+setup: |
+  uv venv --seed --python 3.10
+  source .venv/bin/activate
+  uv pip install torch transformers accelerate
+
+run: |
+  source .venv/bin/activate
+  
+  # Download and save model directly to S3 mount
+  python -c "
+  from transformers import AutoModelForCausalLM, AutoTokenizer
+  import torch
+  import os
+  
+  print('Downloading Qwen2.5-1.5B-Instruct from HuggingFace...')
+  model_id = 'Qwen/Qwen2.5-1.5B-Instruct'  # Same as finetune-to-s3.yaml
+  output_path = os.environ['OUTPUT_PATH']
+  
+  # Download model
+  model = AutoModelForCausalLM.from_pretrained(
+      model_id,
+      torch_dtype=torch.float16,
+      device_map='auto'
+  )
+  tokenizer = AutoTokenizer.from_pretrained(model_id)
+  
+  # Save directly to S3 mount
+  print(f'Saving model to S3: {output_path}')
+  model.save_pretrained(output_path)
+  tokenizer.save_pretrained(output_path)
+  print(f'✅ Qwen2.5-1.5B saved to S3: {output_path}')
+  "
+  
+  # Verify the files were saved
+  echo "Verifying files in S3..."
+  ls -la ${OUTPUT_PATH}/
+  
+  echo "✅ Model ready at s3://my-models/${MODEL_NAME}"

@@ -8,7 +8,10 @@ resources:
 workdir: .
 
 file_mounts:
-  /buckets/my-models: s3://my-models  # Your S3 bucket
+  /buckets/my-models:
+    name: skypilot-agent-models
+    store: s3
+    mode: MOUNT_CACHED
 
 envs:
   BASE_MODEL: Qwen/Qwen2.5-1.5B-Instruct

@@ -1,19 +1,20 @@
 # Models to evaluate
 models:
-  # Public model from HuggingFace
+  # Public model from HuggingFace (no auth required)
   - name: "mistral-7b"
     source: "huggingface"
-    model_id: "mistralai/Mistral-7B-Instruct-v0.3"
+    model_id: "mistralai/Mistral-7B-Instruct-v0.1"
     accelerators: "L4:1"
     
-  # Custom model from S3 bucket
-  - name: "agent-qwen"
-    source: "s3://my-models/qwen-7b-agent"
-    accelerators: "L4:1"
-    
-  # Model from SkyPilot volume
+  # Model from SkyPilot volume (Llama-3.2-1B from setup-volume.yaml)
   - name: "agent-llama"
     source: "volume://model-checkpoints/agent-llama"
+    accelerators: "L4:1"
+    
+  # Custom model from S3 bucket (Qwen2.5-1.5B)
+  # Run demo/setup-s3-model.yaml first
+  - name: "agent-qwen"
+    source: "s3://skypilot-agent-models/qwen-agent"
     accelerators: "L4:1"
 
 # Cleanup clusters after evaluation

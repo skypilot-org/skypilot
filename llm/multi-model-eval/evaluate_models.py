@@ -6,7 +6,6 @@ Example usage:
     python evaluate_models.py
 """
 
-import concurrent.futures
 import subprocess
 import time
 from typing import Dict, List
@@ -64,70 +63,94 @@ def get_model_path_and_mounts(source: str, model_id: str = None) -> tuple:
     raise ValueError(f"Unknown source type: {source}")
 
 
-def launch_model(model: Dict) -> Dict:
-    """Launch a single model on SkyPilot."""
+def prepare_model_task(model: Dict) -> tuple:
+    """Prepare a model task for launching."""
     name = model['name']
     cluster_name = f"eval-{name}"
     
-    print(f"\n🚀 Launching {name}...")
+    # Get model path, mounts, and volumes
+    model_path, file_mounts, volumes = get_model_path_and_mounts(
+        model['source'], 
+        model.get('model_id')
+    )
     
-    try:
-        # Get model path, mounts, and volumes
-        model_path, file_mounts, volumes = get_model_path_and_mounts(
-            model['source'], 
-            model.get('model_id')
+    # Load task template
+    task = sky.Task.from_yaml(SERVE_TEMPLATE)
+    task.name = f"serve-{name}"
+    
+    # Set environment variables
+    task.update_envs({
+        'MODEL_PATH': model_path,
+        'API_TOKEN': API_TOKEN
+    })
+    
+    # Set resources
+    task.set_resources(
+        sky.Resources(
+            accelerators=model['accelerators'],
+            ports=[8000]
         )
-        
-        # Load task template
-        task = sky.Task.from_yaml(SERVE_TEMPLATE)
-        task.name = f"serve-{name}"
-        
-        # Set environment variables
-        task.update_envs({
-            'MODEL_PATH': model_path,
-            'API_TOKEN': API_TOKEN
-        })
-        
-        # Set resources
-        task.set_resources(
-            sky.Resources(
-                accelerators=model['accelerators'],
-                ports=[8000]
-            )
-        )
-        
-        # Set file mounts if needed
-        if file_mounts:
-            task.set_file_mounts(file_mounts)
-        
-        # Set volumes if needed (for Kubernetes)
-        if volumes:
-            task.set_volumes(volumes)
-        
-        # Launch cluster
-        sky.launch(task, cluster_name=cluster_name)
-        print(f"✅ Launched {cluster_name}")
-        
-        # Wait for model to load
-        print("⏳ Waiting for model to load...")
-        time.sleep(60)
-        
-        # Get endpoint
-        status = sky.status(cluster_name)
-        if status and status[0].get('handle'):
-            ip = status[0]['handle'].head_ip
-            endpoint = f"{ip}:8000/v1"
-            print(f"📡 Endpoint: http://{endpoint}")
-            
-            return {
-                'name': name,
-                'cluster_name': cluster_name,
-                'endpoint': endpoint
+    )
+    
+    # Set file mounts if needed
+    if file_mounts:
+        task.set_file_mounts(file_mounts)
+    
+    # Set volumes if needed (for Kubernetes)
+    if volumes:
+        task.set_volumes(volumes)
+    
+    return task, cluster_name, name
+
+
+def launch_models_parallel(models: List[Dict]) -> List[Dict]:
+    """Launch all models in parallel using futures."""
+    print(f"\n📋 Launching {len(models)} models in parallel...")
+    
+    # Prepare and launch all models in parallel
+    launch_requests = {}
+    for model in models:
+        try:
+            task, cluster_name, name = prepare_model_task(model)
+            print(f"🚀 Launching {name}...")
+            request_id = sky.launch(task, cluster_name=cluster_name)
+            launch_requests[name] = {
+                'request_id': request_id,
+                'cluster_name': cluster_name
             }
+        except Exception as e:
+            print(f"❌ Failed to launch {model['name']}: {e}")
     
-    except Exception as e:
-        print(f"❌ Failed to launch {name}: {e}")
-        return None
+    # Wait for all launches to complete
+    print("\n⏳ Waiting for all clusters to launch...")
+    launched_models = []
+    
+    for name, info in launch_requests.items():
+        try:
+            # Get the launch result
+            result = sky.get(info['request_id'])
+            print(f"✅ {name} launched successfully")
+            
+            # Get cluster status to find endpoint
+            status_request = sky.status(cluster_names=[info['cluster_name']])
+            cluster_info = sky.get(status_request)
+            
+            if cluster_info and len(cluster_info) > 0:
+                handle = cluster_info[0].get('handle')
+                if handle and hasattr(handle, 'head_ip'):
+                    ip = handle.head_ip
+                    endpoint = f"{ip}:8000/v1"
+                    print(f"📡 {name} endpoint: http://{endpoint}")
+                    
+                    launched_models.append({
+                        'name': name,
+                        'cluster_name': info['cluster_name'],
+                        'endpoint': endpoint
+                    })
+        except Exception as e:
+            print(f"❌ {name} failed: {e}")
+    
+    return launched_models
 
 
 def create_evaluation_config(models: List[Dict], output_path: str):
@@ -199,7 +222,8 @@ def cleanup_clusters(models: List[Dict]):
     for model in models:
         if model:
             try:
-                sky.down(model['cluster_name'])
+                request_id = sky.down(model['cluster_name'])
+                result = sky.get(request_id)
                 print(f"  ✓ Terminated {model['cluster_name']}")
             except Exception as e:
                 print(f"  ✗ Failed to terminate {model['cluster_name']}: {e}")
@@ -207,8 +231,8 @@ def cleanup_clusters(models: List[Dict]):
 
 def main():
     """Main workflow."""
-    print("🎯 Multi-Model Evaluation")
-    print("=" * 25)
+    print("🎯 Multi-Model Evaluation with Parallel Launch")
+    print("=" * 45)
     
     # Check for custom config file from command line
     import sys
@@ -224,17 +248,14 @@ def main():
         config = yaml.safe_load(f)
     models = config['models']
     
-    # Launch models in parallel
-    print(f"\n📋 Launching {len(models)} models...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [executor.submit(launch_model, m) for m in models]
-        launched_models = [f.result() for f in futures if f.result()]
+    # Launch all models in parallel using futures
+    launched_models = launch_models_parallel(models)
     
     if not launched_models:
         print("\n❌ No models launched successfully")
         return
     
-    print(f"\n✅ Successfully launched {len(launched_models)} models")
+    print(f"\n🎉 Successfully launched {len(launched_models)}/{len(models)} models")
     
     try:
         # Create and run evaluation
