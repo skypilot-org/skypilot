@@ -112,6 +112,7 @@ from sky.client.sdk import storage_delete
 from sky.client.sdk import storage_ls
 from sky.client.sdk import stream_and_get
 from sky.client.sdk import tail_logs
+from sky import jobs as managed_jobs
 from sky.dag import Dag
 from sky.data import Storage
 from sky.data import StorageMode
