@@ -5,15 +5,35 @@ workdir: .
 volumes:
   /volumes: model-checkpoints
 envs:
-  HF_TOKEN: ${HF_TOKEN}  # Set your HuggingFace token
+  HF_TOKEN: null
 setup: |
-  pip install transformers torch accelerate
+  uv venv --seed --python 3.10
+  source .venv/bin/activate
+  uv pip install torch transformers accelerate huggingface_hub
 run: |
+  source .venv/bin/activate
   python -c "
   from transformers import AutoModelForCausalLM, AutoTokenizer
-  model = AutoModelForCausalLM.from_pretrained('meta-llama/Llama-2-7b-hf', torch_dtype='auto')
-  tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf') 
+  import torch
+  import os
+  
+  # Use Llama-3.2-1B model
+  hf_token = os.environ.get('HF_TOKEN')
+  print(f'HF_TOKEN available: {bool(hf_token)}')
+  
+  print('Loading Llama-3.2-1B from HuggingFace...')
+  model_id = 'meta-llama/Llama-3.2-1B'
+  
+  model = AutoModelForCausalLM.from_pretrained(
+      model_id, 
+      torch_dtype=torch.float16, 
+      device_map='auto',
+      token=hf_token
+  )
+  tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)
+  
+  print('Saving model to /volumes/agent-llama...')
   model.save_pretrained('/volumes/agent-llama')
   tokenizer.save_pretrained('/volumes/agent-llama')
-  print('✅ Llama-2-7B saved to volume')
+  print('✅ Llama-3.2-1B saved to volume at /volumes/agent-llama')
   "
