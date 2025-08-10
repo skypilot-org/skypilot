@@ -5,53 +5,38 @@ Compare multiple trained models side-by-side using Promptfoo and SkyPilot.
 ## Architecture Overview
 
 ```
-                            ┌─────────────────────┐
-                            │   models_config.yaml │
-                            │  (Your Model Specs)  │
-                            └──────────┬──────────┘
-                                       │
-                              ┌────────▼────────┐
-                              │ evaluate_models │
-                              │   .py           │
-                              └────────┬────────┘
-                                       │
-                         ┌─────────────▼─────────────┐
-                         │    SkyPilot Python SDK    │
-                         │  • Task.from_yaml()       │
-                         │  • Parallel launching     │
-                         │  • Cloud abstraction      │
-                         └─────────────┬─────────────┘
-                                       │
-     ┌─────────────────────────────────┼─────────────────────────────────┐
-     │                                 │                                 │
-┌────▼─────┐                    ┌─────▼─────┐                    ┌──────▼────┐
-│ SkyPilot │                    │ SkyPilot  │                    │ SkyPilot  │
-│ Cluster  │                    │ Cluster   │                    │ Cluster   │
-├──────────┤                    ├───────────┤                    ├───────────┤
-│ Model 1  │                    │ Model 2   │                    │ Model 3   │
-│ • vLLM   │                    │ • vLLM    │                    │ • vLLM    │
-│ • GPU    │                    │ • GPU     │                    │ • GPU     │
-└────┬─────┘                    └─────┬─────┘                    └─────┬─────┘
-     │                                │                                │
-     │         ┌──────────────────────┴──────────────────────┐        │
-     │         │             Model Sources                    │        │
-     │         │  • HuggingFace Hub (public models)          │        │
-     │         │  • S3/GCS Buckets (custom checkpoints)      │        │
-     │         │  • SkyPilot Volumes (fast model loading)    │        │
-     │         └─────────────────────────────────────────────┘        │
-     │                                                                 │
-     └─────────────────────────────┬───────────────────────────────────┘
-                                   │ OpenAI-compatible APIs
-                          ┌────────▼────────┐
-                          │   Promptfoo     │
-                          │  • Evaluation   │
-                          │  • Comparison   │
-                          └────────┬────────┘
-                                   │
-                          ┌────────▼────────┐
-                          │  Results View   │
-                          │ (Side-by-side)  │
-                          └─────────────────┘
+                    models_config.yaml
+                           │
+                           ▼
+                  python evaluate_models.py
+                           │
+                           ▼
+                ┌──────────────────────┐
+                │      SkyPilot        │
+                │  Parallel Launch     │
+                └──────────┬───────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        ▼                  ▼                  ▼
+   HuggingFace          S3 Bucket      SkyPilot Volume
+   mistral-7b         agent-qwen       agent-deepseek
+        │                  │                  │
+        ▼                  ▼                  ▼
+   ┌─────────┐        ┌─────────┐       ┌─────────┐
+   │ Cluster │        │ Cluster │       │ Cluster │
+   │ • L4 GPU│        │ • L4 GPU│       │ • L4 GPU│
+   │ • vLLM  │        │ • vLLM  │       │ • vLLM  │
+   └────┬────┘        └────┬────┘       └────┬────┘
+        │                  │                  │
+        └──────────────────┴──────────────────┘
+                           │
+                   OpenAI-compatible APIs
+                           │
+                           ▼
+                   ┌──────────────┐
+                   │  Promptfoo   │
+                   │  Evaluation  │
+                   └──────────────┘
 ```
 
 ### Key Components:
@@ -93,6 +78,11 @@ multi-model-eval/
 │   └── serve-model.yaml    # vLLM serving template
 ├── scripts/
 │   └── test_setup.sh       # Check dependencies
+├── finetuning/             # Fine-tuning examples
+│   ├── finetune.py         # Fine-tuning script
+│   ├── finetune-to-s3.yaml
+│   ├── finetune-to-volume.yaml
+│   └── README.md
 └── README.md
 ```
 
@@ -102,23 +92,22 @@ Edit `models_config.yaml` to specify your models:
 
 ```yaml
 models:
-  # HuggingFace Hub model
-  - name: "llama2-base"
+  # Public model from HuggingFace
+  - name: "mistral-7b"
     source: "huggingface"
-    model_id: "meta-llama/Llama-2-7b-chat-hf"
+    model_id: "mistralai/Mistral-7B-Instruct-v0.3"
     accelerators: "L4:1"
     
-  # Custom model from S3
-  - name: "my-finetuned-model"
-    source: "s3://my-bucket/models/llama2-finance"
+  # Custom model from S3 bucket
+  - name: "agent-qwen"
+    source: "s3://my-models/qwen-7b-agent"
     accelerators: "L4:1"
     
   # Model from SkyPilot volume
-  - name: "mistral-custom"
-    source: "volume://model-checkpoints/mistral-7b"
-    accelerators: "A10:1"
+  - name: "agent-deepseek"
+    source: "volume://model-checkpoints/deepseek-7b-agent"
+    accelerators: "L4:1"
 
-# Cleanup clusters after evaluation
 cleanup_on_complete: true
 ```
 
@@ -134,6 +123,68 @@ cleanup_on_complete: true
 - **HuggingFace**: Any public model from the Hub
 - **S3/GCS**: Your trained models in cloud storage
 - **Volumes**: Models stored in SkyPilot volumes for fast loading
+
+### Using SkyPilot Volumes (Kubernetes)
+
+For Kubernetes deployments, SkyPilot volumes provide persistent storage for models:
+
+1. **Create a volume** (if not already exists):
+   ```bash
+   # For GKE clusters:
+   sky volumes apply finetuning/create-volume.yaml
+   
+   # Or create custom volume:
+   cat > my-volume.yaml <<EOF
+   name: model-checkpoints
+   type: k8s-pvc
+   infra: kubernetes
+   size: 50Gi
+   config:
+     namespace: default
+     storage_class_name: standard  # GKE default storage class
+     access_mode: ReadWriteOnce   # Standard GKE persistent disks
+   EOF
+   
+   sky volumes apply my-volume.yaml
+   ```
+
+2. **Reference in model config**:
+   ```yaml
+   models:
+     - name: "mistral-custom"
+       source: "volume://model-checkpoints/mistral-7b"
+       accelerators: "A10:1"
+   ```
+
+   The path format is `volume://<volume-name>/<path-within-volume>`
+
+3. **List existing volumes**:
+   ```bash
+   sky volumes ls
+   ```
+
+### Multiple Volumes and Buckets
+
+The evaluation tool automatically handles multiple volumes and buckets by creating unique mount points:
+
+```yaml
+models:
+  # Different S3 buckets get unique mount points
+  - name: "model-1"
+    source: "s3://bucket-a/models/llama"  # Mounts at /buckets/bucket-a/
+    
+  - name: "model-2"  
+    source: "s3://bucket-b/checkpoints/qwen"  # Mounts at /buckets/bucket-b/
+    
+  # Different volumes also get unique mount points
+  - name: "model-3"
+    source: "volume://volume-1/agent-model"  # Mounts at /volumes/volume-1/
+    
+  - name: "model-4"
+    source: "volume://volume-2/base-model"  # Mounts at /volumes/volume-2/
+```
+
+This prevents conflicts when using models from multiple sources.
 
 ## GPU Selection
 
@@ -151,17 +202,21 @@ Common configurations:
 
 📋 Launching 3 models...
 
-🚀 Launching llama2-base...
-✅ Launched eval-llama2-base
+🚀 Launching mistral-7b...
+✅ Launched eval-mistral-7b
 📡 Endpoint: http://34.125.23.45:8000/v1
 
-🚀 Launching my-finetuned-model...
-✅ Launched eval-my-finetuned-model
+🚀 Launching agent-qwen...
+✅ Launched eval-agent-qwen
 📡 Endpoint: http://35.223.12.89:8000/v1
 
-✅ Successfully launched 2 models
+🚀 Launching agent-deepseek...
+✅ Launched eval-agent-deepseek
+📡 Endpoint: http://35.198.76.12:8000/v1
 
-📝 Created evaluation config for 2 models
+✅ Successfully launched 3 models
+
+📝 Created evaluation config for 3 models
 
 🔍 Running evaluation...
 ✅ Evaluation complete!
@@ -175,6 +230,25 @@ View results: promptfoo view
 - Launch happens in parallel for speed
 - Results saved to `results.json`
 - View detailed comparison with `promptfoo view`
+
+## Fine-tuning Workflow
+
+See `finetuning/` for complete examples of:
+1. Fine-tuning models and saving to S3 or volumes
+2. Using fine-tuned models in evaluation
+
+Quick example:
+```bash
+# Fine-tune and save to S3
+cd finetuning
+sky launch finetune-to-s3.yaml -c my-finetune
+
+# Or save to volume (Kubernetes)
+sky volumes apply create-volume.yaml  # One-time setup
+sky launch finetune-to-volume.yaml -c my-finetune
+
+# Then use in evaluation by updating models_config.yaml
+```
 
 ## Troubleshooting
 

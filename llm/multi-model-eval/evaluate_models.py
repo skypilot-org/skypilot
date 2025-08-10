@@ -6,15 +6,15 @@ Example usage:
     python evaluate_models.py
 """
 
-import uuid
+import concurrent.futures
+import subprocess
 import time
 from typing import Dict, List
-import concurrent.futures
+import uuid
+
+import yaml
 
 import sky
-import yaml
-import subprocess
-
 
 # Configuration
 API_TOKEN = uuid.uuid4().hex
@@ -30,28 +30,38 @@ def load_models_config() -> Dict:
 
 def get_model_path_and_mounts(source: str, model_id: str = None) -> tuple:
     """
-    Determine model path and file mounts based on model source.
+    Determine model path, file mounts, and volumes based on model source.
     
     Returns:
-        (model_path, file_mounts_dict)
+        (model_path, file_mounts_dict, volumes_dict)
     """
     if source == 'huggingface':
-        return model_id, None
+        return model_id, None, None
     
-    elif source.startswith('s3://') or source.startswith('gs://'):
-        # Cloud bucket - mount at /model
-        return "/model", {'/model': source}
-    
-    elif source.startswith('volume://'):
-        # SkyPilot volume - extract volume name and path
-        parts = source.replace('volume://', '').split('/', 1)
-        volume_name = parts[0]
-        model_path = parts[1] if len(parts) > 1 else ''
+    if source.startswith(('s3://', 'gs://')):
+        # Extract bucket name and path: s3://bucket/path or gs://bucket/path
+        prefix_len = len('s3://') if source.startswith('s3://') else len('gs://')
+        path_parts = source[prefix_len:].split('/', 1)
+        bucket_name = path_parts[0]
+        bucket_path = path_parts[1] if len(path_parts) > 1 else ''
         
-        return f"/volumes/{model_path}", {'/volumes': volume_name}
+        # Mount at unique path per bucket
+        mount_path = f"/buckets/{bucket_name}"
+        model_path = f"{mount_path}/{bucket_path}" if bucket_path else mount_path
+        return model_path, {mount_path: source}, None
     
-    else:
-        raise ValueError(f"Unknown source type: {source}")
+    if source.startswith('volume://'):
+        # Extract volume name and path: volume://volume-name/path
+        path_parts = source[len('volume://'):].split('/', 1)
+        volume_name = path_parts[0]
+        volume_path = path_parts[1] if len(path_parts) > 1 else ''
+        
+        # Mount at unique path per volume
+        mount_path = f"/volumes/{volume_name}"
+        model_path = f"{mount_path}/{volume_path}" if volume_path else mount_path
+        return model_path, None, {mount_path: volume_name}
+    
+    raise ValueError(f"Unknown source type: {source}")
 
 
 def launch_model(model: Dict) -> Dict:
@@ -62,8 +72,8 @@ def launch_model(model: Dict) -> Dict:
     print(f"\n🚀 Launching {name}...")
     
     try:
-        # Get model path and mounts
-        model_path, file_mounts = get_model_path_and_mounts(
+        # Get model path, mounts, and volumes
+        model_path, file_mounts, volumes = get_model_path_and_mounts(
             model['source'], 
             model.get('model_id')
         )
@@ -89,6 +99,10 @@ def launch_model(model: Dict) -> Dict:
         # Set file mounts if needed
         if file_mounts:
             task.set_file_mounts(file_mounts)
+        
+        # Set volumes if needed (for Kubernetes)
+        if volumes:
+            task.set_volumes(volumes)
         
         # Launch cluster
         sky.launch(task, cluster_name=cluster_name)
@@ -196,8 +210,18 @@ def main():
     print("🎯 Multi-Model Evaluation")
     print("=" * 25)
     
+    # Check for custom config file from command line
+    import sys
+    config_file = MODELS_CONFIG
+    if len(sys.argv) > 1 and '--config' in sys.argv:
+        idx = sys.argv.index('--config')
+        if idx + 1 < len(sys.argv):
+            config_file = sys.argv[idx + 1]
+            print(f"📋 Using config: {config_file}")
+    
     # Load configuration
-    config = load_models_config()
+    with open(config_file, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
     models = config['models']
     
     # Launch models in parallel

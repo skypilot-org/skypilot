@@ -1,20 +1,20 @@
-# Models to evaluate - mix of HuggingFace models and custom checkpoints
+# Models to evaluate
 models:
-  # Example 1: Model from HuggingFace Hub
-  - name: "llama2-base"
+  # Public model from HuggingFace
+  - name: "mistral-7b"
     source: "huggingface"
-    model_id: "meta-llama/Llama-2-7b-chat-hf"
+    model_id: "mistralai/Mistral-7B-Instruct-v0.3"
     accelerators: "L4:1"
     
-  # Example 2: Fine-tuned model from S3 bucket  
-  - name: "llama2-finance"
-    source: "s3://my-models/llama2-7b-finance"
+  # Custom model from S3 bucket
+  - name: "agent-qwen"
+    source: "s3://my-models/qwen-7b-agent"
     accelerators: "L4:1"
     
-  # Example 3: Model from SkyPilot volume
-  - name: "mistral-custom"
-    source: "volume://my-model-volume/mistral-7b-custom"
-    accelerators: "A10:1"
+  # Model from SkyPilot volume
+  - name: "agent-llama"
+    source: "volume://model-checkpoints/agent-llama"
+    accelerators: "L4:1"
 
 # Cleanup clusters after evaluation
 cleanup_on_complete: true

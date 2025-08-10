@@ -1,0 +1,22 @@
+# Fine-tune a model and save to S3 bucket
+# Usage: sky launch finetune-to-s3.yaml
+name: finetune-to-s3
+
+resources:
+  accelerators: L4:1
+
+workdir: .
+
+file_mounts:
+  /buckets/my-models: s3://my-models  # Your S3 bucket
+
+envs:
+  BASE_MODEL: Qwen/Qwen2.5-1.5B-Instruct
+  OUTPUT_PATH: /buckets/my-models/qwen-agent
+
+setup: |
+  uv pip install torch transformers datasets accelerate
+
+run: |
+  python finetune.py
+  echo "✅ Model saved to S3: ${OUTPUT_PATH}"

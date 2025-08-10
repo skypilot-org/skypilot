@@ -1,0 +1,22 @@
+# Fine-tune a model and save to persistent volume
+# Usage: sky launch finetune-to-volume.yaml
+name: finetune-to-volume
+
+resources:
+  accelerators: L4:1
+
+workdir: .
+
+volumes:
+  /volumes: model-checkpoints  # Created with create-volume.yaml
+
+envs:
+  BASE_MODEL: Qwen/Qwen2.5-1.5B-Instruct
+  OUTPUT_PATH: /volumes/qwen-agent
+
+setup: |
+  uv pip install torch transformers datasets accelerate
+
+run: |
+  python finetune.py
+  echo "✅ Model saved to volume: ${OUTPUT_PATH}"
