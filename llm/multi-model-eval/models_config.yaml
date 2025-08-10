@@ -17,5 +17,6 @@ models:
     source: "s3://skypilot-agent-models/qwen-agent"
     accelerators: "L4:1"
 
-# Cleanup clusters after evaluation
-cleanup_on_complete: true
+# Evaluation settings
+skip_launch: false  # Set to true to use existing clusters without launching
+cleanup_on_complete: false  # Set to false to keep clusters running after evaluation

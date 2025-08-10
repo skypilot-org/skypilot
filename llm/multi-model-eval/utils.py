@@ -138,14 +138,14 @@ def get_model_path_and_mounts(source: str, model_id: str = None) -> Tuple:
     if source.startswith(('s3://', 'gs://')):
         # Extract bucket name and path: s3://bucket/path or gs://bucket/path
         prefix_len = len('s3://') if source.startswith('s3://') else len('gs://')
-        path_parts = source[prefix_len:].split('/', 1)
-        bucket_name = path_parts[0]
-        bucket_path = path_parts[1] if len(path_parts) > 1 else ''
+        path = source[prefix_len:]
+        mount_path = f"/buckets/{path}"
         
-        # Mount at unique path per bucket
-        mount_path = f"/buckets/{bucket_name}"
-        model_path = f"{mount_path}/{bucket_path}" if bucket_path else mount_path
-        return model_path, {mount_path: source}, None
+        # Create proper SkyPilot storage configuration for S3/GCS
+        file_mounts = {
+            mount_path: source
+        }
+        return mount_path, file_mounts, None
     
     if source.startswith('volume://'):
         # Extract volume name and path: volume://volume-name/path

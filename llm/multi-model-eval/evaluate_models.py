@@ -4,8 +4,10 @@ Evaluate multiple trained models using Promptfoo and SkyPilot.
 
 Example usage:
     python evaluate_models.py
+    python evaluate_models.py --config models_config_test.yaml
 """
 
+import argparse
 import os
 import subprocess
 from typing import Dict, List
@@ -260,6 +262,47 @@ def run_evaluation(config_path: str):
               f'{result.stderr}')
 
 
+def get_existing_clusters(models: List[Dict]) -> List[Dict]:
+    """Get endpoints for existing clusters without launching."""
+    print(f"\n{'='*60}")
+    print(f"🔍 CHECKING EXISTING CLUSTERS")
+    print(f"{'='*60}\n")
+    
+    existing_models = []
+    for i, model in enumerate(models, 1):
+        name = model['name']
+        cluster_name = f"eval-{name}"
+        
+        # Determine the model ID
+        if model.get('source') == 'huggingface':
+            actual_model_id = model.get('model_id')
+        else:
+            model_path, _, _ = utils.get_model_path_and_mounts(
+                model.get('source'), 
+                model.get('model_id')
+            )
+            actual_model_id = model_path
+        
+        print(f"[{i}/{len(models)}] Checking {name}...")
+        
+        # Check if cluster exists and get endpoint
+        exists, endpoint = utils.check_cluster_ready(cluster_name, utils.API_TOKEN)
+        
+        if exists and endpoint:
+            print(f"  ✅ Found at {endpoint}")
+            existing_models.append({
+                'name': name,
+                'cluster_name': cluster_name,
+                'endpoint': endpoint,
+                'source': model.get('source', 'unknown'),
+                'model_id': actual_model_id
+            })
+        else:
+            print(f"  ❌ Not found or not ready")
+    
+    return existing_models
+
+
 def cleanup_clusters(models: List[Dict]):
     """Terminate all clusters."""
     print("\n🧹 Cleaning up...")
@@ -274,33 +317,73 @@ def cleanup_clusters(models: List[Dict]):
                 print(f"  ✗ Failed to terminate {model['cluster_name']}: {e}")
 
 
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Evaluate multiple models using Promptfoo and SkyPilot',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Launch clusters and run evaluation (default)
+  python evaluate_models.py
+  
+  # Use custom config file
+  python evaluate_models.py --config models_config_test.yaml
+  
+  # To skip launch or cleanup, edit the config file:
+  # skip_launch: true      # Use existing clusters
+  # cleanup_on_complete: false  # Keep clusters running
+        """
+    )
+    
+    parser.add_argument(
+        '--config',
+        default=utils.MODELS_CONFIG,
+        help=f'Model configuration file (default: {utils.MODELS_CONFIG})'
+    )
+    
+    return parser.parse_args()
+
+
 def main():
     """Main workflow."""
+    # Parse arguments
+    args = parse_arguments()
+    
     print("🎯 Multi-Model Evaluation with Parallel Launch")
     print("=" * 45)
     
-    # Check for custom config file from command line
-    import sys
-    config_file = utils.MODELS_CONFIG
-    if len(sys.argv) > 1 and '--config' in sys.argv:
-        idx = sys.argv.index('--config')
-        if idx + 1 < len(sys.argv):
-            config_file = sys.argv[idx + 1]
-            print(f"📋 Using config: {config_file}")
+    if args.config != utils.MODELS_CONFIG:
+        print(f"📋 Using config: {args.config}")
     
     # Load configuration
-    with open(config_file, 'r', encoding='utf-8') as f:
+    with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
+    
     models = config['models']
+    skip_launch = config.get('skip_launch', False)
+    cleanup_on_complete = config.get('cleanup_on_complete', True)
     
-    # Launch all models in parallel using futures
-    launched_models = launch_models_parallel(models)
+    # Show configuration settings
+    if skip_launch:
+        print("⏭️  Skipping cluster launch (using existing clusters)")
+    if not cleanup_on_complete:
+        print("🔒 Clusters will not be terminated after evaluation")
     
-    if not launched_models:
-        print("\n❌ No models launched successfully")
-        return
-    
-    print(f"\n🎉 Successfully launched {len(launched_models)}/{len(models)} models")
+    # Either get existing clusters or launch new ones
+    if skip_launch:
+        launched_models = get_existing_clusters(models)
+        if not launched_models:
+            print("\n❌ No existing clusters found. Please launch clusters first or set skip_launch: false")
+            return
+        print(f"\n🎉 Found {len(launched_models)}/{len(models)} existing clusters")
+    else:
+        # Launch all models in parallel
+        launched_models = launch_models_parallel(models)
+        if not launched_models:
+            print("\n❌ No models launched successfully")
+            return
+        print(f"\n🎉 Successfully launched {len(launched_models)}/{len(models)} models")
     
     try:
         # Create and run evaluation
@@ -308,8 +391,8 @@ def main():
         run_evaluation('promptfoo_config.yaml')
         
     finally:
-        # Cleanup
-        if config.get('cleanup_on_complete', True):
+        # Cleanup based on config settings
+        if cleanup_on_complete and not skip_launch:
             cleanup_clusters(launched_models)
 
 
