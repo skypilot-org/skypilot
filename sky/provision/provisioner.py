@@ -630,7 +630,8 @@ def _post_provision_setup(
                              'async setup to complete...')
                 time.sleep(1)
 
-        if head_ray_needs_restart:
+        not_slurm = cloud_name.lower() != 'slurm'
+        if head_ray_needs_restart and not_slurm:
             logger.debug('Starting Ray on the entire cluster.')
             instance_setup.start_ray_on_head_node(
                 cluster_name.name_on_cloud,
@@ -653,7 +654,7 @@ def _post_provision_setup(
         # We don't need to restart ray on worker nodes if the ray cluster is
         # already healthy, i.e. the head node has expected number of nodes
         # connected to the ray cluster.
-        if cluster_info.num_instances > 1 and not ray_cluster_healthy:
+        if cluster_info.num_instances > 1 and not ray_cluster_healthy and not_slurm:
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
                 no_restart=not head_ray_needs_restart,

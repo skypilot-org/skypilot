@@ -3785,6 +3785,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
                                         task.metadata_json)
 
+        is_slurm = str(valid_resource.cloud).lower() == 'slurm'
+        if is_slurm:
+            cmd = task_copy.run
+            if isinstance(cmd, list):
+                cmd = ' '.join(cmd)
+            runner = handle.get_command_runners()[0]
+
+            provisioned_job_id = handle.cached_cluster_info.head_instance_id
+            rc, stdout, stderr = runner.run(f'srun --jobid={provisioned_job_id} {cmd}', require_outputs=True)
+
+            return job_id
+
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
