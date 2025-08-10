@@ -1,11 +1,11 @@
-# Multi-Model Evaluation Example
+# Large-scale parallel evaluation of models and agents with SkyPilot and Promptfoo
 
-Compare multiple trained models side-by-side using Promptfoo and SkyPilot.
+Compare multiple trained models and agents side-by-side using Promptfoo and SkyPilot.
 
 ## Architecture Overview
 
 ```
-                    models_config.yaml
+                 configs/models_config.yaml
                            │
                            ▼
                   python evaluate_models.py
@@ -18,8 +18,8 @@ Compare multiple trained models side-by-side using Promptfoo and SkyPilot.
                            │
         ┌──────────────────┼──────────────────┐
         ▼                  ▼                  ▼
-   HuggingFace          S3 Bucket      SkyPilot Volume
-   mistral-7b         agent-qwen       agent-deepseek
+   HuggingFace       Cloud Bucket   Kubernetes Volume
+   mistral-7b         agent-qwen       agent-llama
         │                  │                  │
         ▼                  ▼                  ▼
    ┌─────────┐        ┌─────────┐       ┌─────────┐
@@ -63,7 +63,7 @@ Compare multiple trained models side-by-side using Promptfoo and SkyPilot.
 pip install skypilot[all] pyyaml
 npm install -g promptfoo
 
-# 2. Configure models (edit models_config.yaml)
+# 2. Configure models (edit configs/models_config.yaml)
 # 3. Run evaluation
 python evaluate_models.py
 ```
@@ -73,47 +73,42 @@ python evaluate_models.py
 ```
 multi-model-eval/
 ├── evaluate_models.py      # Main script
-├── models_config.yaml      # Your model configurations
-├── templates/
+├── configs/
+│   ├── models_config.yaml  # Your model configurations
 │   └── serve-model.yaml    # vLLM serving template
 ├── scripts/
 │   └── test_setup.sh       # Check dependencies
-├── finetuning/             # Fine-tuning examples
-│   ├── finetune.py         # Fine-tuning script
-│   ├── finetune-to-s3.yaml
-│   ├── finetune-to-volume.yaml
+├── model_stores/           # Demo model setup
+│   ├── setup-volume.yaml   # Setup models in K8s volume
+│   ├── setup-s3-model.yaml # Setup models in S3
 │   └── README.md
 └── README.md
 ```
 
 ## Model Configuration
 
-Edit `models_config.yaml` to specify your models:
+Edit `configs/models_config.yaml` to specify your models:
 
 ```yaml
 models:
   # Public model from HuggingFace
   - name: "mistral-7b"
-    source: "huggingface"
-    model_id: "mistralai/Mistral-7B-Instruct-v0.3"
-    accelerators: "L4:1"
+    source: "hf://mistralai/Mistral-7B-Instruct-v0.3"
     
   # Custom model from S3 bucket
   - name: "agent-qwen"
     source: "s3://my-models/qwen-7b-agent"
-    accelerators: "L4:1"
     
   # Model from SkyPilot volume
-  - name: "agent-deepseek"
-    source: "volume://model-checkpoints/deepseek-7b-agent"
-    accelerators: "L4:1"
+  - name: "agent-llama"
+    source: "volume://model-checkpoints/agent-llama"
 
 cleanup_on_complete: true
 ```
 
 ## How It Works
 
-1. **Configure Models**: Edit `models_config.yaml` with your model sources
+1. **Configure Models**: Edit `configs/models_config.yaml` with your model sources
 2. **Launch with SkyPilot**: The script uses SkyPilot SDK to deploy each model on its own GPU cluster
 3. **Evaluate with Promptfoo**: All models receive the same test prompts
 4. **Compare Results**: View outputs side-by-side in the Promptfoo UI
@@ -126,42 +121,21 @@ cleanup_on_complete: true
 
 ### Using SkyPilot Volumes (Kubernetes)
 
-For Kubernetes deployments, SkyPilot volumes provide persistent storage for models:
+For Kubernetes deployments, SkyPilot volumes provide persistent storage for models. See `model_stores/README.md` for detailed setup instructions and examples of using your own fine-tuned models.
 
-1. **Create a volume** (if not already exists):
-   ```bash
-   # For GKE clusters:
-   sky volumes apply finetuning/create-volume.yaml
-   
-   # Or create custom volume:
-   cat > my-volume.yaml <<EOF
-   name: model-checkpoints
-   type: k8s-pvc
-   infra: kubernetes
-   size: 50Gi
-   config:
-     namespace: default
-     storage_class_name: standard  # GKE default storage class
-     access_mode: ReadWriteOnce   # Standard GKE persistent disks
-   EOF
-   
-   sky volumes apply my-volume.yaml
-   ```
+**Quick setup:**
+```bash
+# Create volume (one-time setup)
+sky volumes apply model_stores/create-volume.yaml
 
-2. **Reference in model config**:
-   ```yaml
-   models:
-     - name: "mistral-custom"
-       source: "volume://model-checkpoints/mistral-7b"
-       accelerators: "A10:1"
-   ```
+# Reference in model config
+models:
+  - name: "my-model"
+    source: "volume://model-checkpoints/my-model"
+    accelerators: "L4:1"
+```
 
-   The path format is `volume://<volume-name>/<path-within-volume>`
-
-3. **List existing volumes**:
-   ```bash
-   sky volumes ls
-   ```
+The path format is `volume://<volume-name>/<path-within-volume>`
 
 ### Multiple Volumes and Buckets
 
@@ -231,24 +205,21 @@ View results: promptfoo view
 - Results saved to `results.json`
 - View detailed comparison with `promptfoo view`
 
-## Fine-tuning Workflow
+## Model Stores
 
-See `finetuning/` for complete examples of:
-1. Fine-tuning models and saving to S3 or volumes
-2. Using fine-tuned models in evaluation
+See `model_stores/` for:
+- Setting up demo models in volumes and S3 buckets
+- Using your own fine-tuned models with the evaluation
 
-Quick example:
+Quick setup:
 ```bash
-# Fine-tune and save to S3
-cd finetuning
-sky launch finetune-to-s3.yaml -c my-finetune
-
-# Or save to volume (Kubernetes)
+# Setup demo models
+cd model_stores
 sky volumes apply create-volume.yaml  # One-time setup
-sky launch finetune-to-volume.yaml -c my-finetune
-
-# Then use in evaluation by updating models_config.yaml
+sky launch setup-volume.yaml -c setup --down -y
 ```
+
+To use your fine-tuned models, simply save them to a volume or S3 bucket during training, then reference in `configs/models_config.yaml`.
 
 ## Troubleshooting
 

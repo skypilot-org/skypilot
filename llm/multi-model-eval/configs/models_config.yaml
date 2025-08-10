@@ -5,7 +5,7 @@
 #   - name: <model_name>
 #     source: <source_path>
 #     # Optional: specify the accelerator type, default is from
-#     # templates/serve-model.yaml
+#     # configs/serve-model.yaml
 #     accelerators: <accelerator_type>
 #
 # Source path can be:
@@ -28,8 +28,8 @@ models:
   - name: "tinyllama"
     source: "hf://TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
-  - name: "phi"
-    source: "hf://microsoft/Phi-4-mini-instruct"
+  - name: "gemma"
+    source: "hf://google/gemma-3-1b-it"
 
 # Evaluation settings
 cluster_prefix: "eval"  # Prefix for cluster names (e.g., "eval-mistral-7b")
