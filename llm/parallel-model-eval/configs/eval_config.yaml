@@ -56,7 +56,7 @@ promptfoo:
     
     - description: "Test JSON generation"
       vars:
-        message: "Generate a JSON object with name and age fields"
+        message: "Generate a JSON object with name and age fields. The response should only include valid JSON, nothing else."
       assert:
         - type: is-json
         - type: javascript
