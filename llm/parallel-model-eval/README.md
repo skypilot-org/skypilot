@@ -2,7 +2,7 @@
 
 Compare multiple trained models and agents side-by-side using Promptfoo and SkyPilot.
 
-![](https://i.imgur.com/85MrID8.png)
+![](https://i.imgur.com/BskVWdn.png)
 
 ![](https://i.imgur.com/ptuYADo.png)
 
