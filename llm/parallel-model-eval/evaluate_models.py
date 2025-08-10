@@ -112,7 +112,7 @@ def launch_models_parallel(models: List[Dict],
                 print(f"  Re-launching task...")
                 request_id = sky.launch(task,
                                         cluster_name=cluster_name,
-                                        fast=True)
+                                        fast=False)
                 launch_requests[name] = {
                     'request_id': request_id,
                     'cluster_name': cluster_name,
@@ -387,7 +387,7 @@ def main():
     default_serve_template = config.get('default_serve_template', None)
 
     # Show configuration settings
-    print(f"📛 Using cluster prefix: '{cluster_prefix}'")
+    print(f"🗒️ Using cluster prefix: '{cluster_prefix}'")
     if default_serve_template:
         print(
             f"📄 Using custom default serve template: {default_serve_template}")

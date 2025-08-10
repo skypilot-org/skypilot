@@ -2,7 +2,7 @@
 # Ollama provides easy model management and serving
 
 envs:
-  MODEL_PATH: meta-llama/Llama-2-7b-hf  # Default model path
+  MODEL_PATH: llama2:7b  # Default Ollama model (will be overridden by evaluate_models.py)
   API_TOKEN: default-token
 
 resources:
@@ -63,14 +63,15 @@ run: |
   ollama serve &
   sleep 5
   
-  # Pull or create model based on MODEL_PATH
-  if [[ $MODEL_PATH == hf://* ]]; then
-    MODEL_ID=${MODEL_PATH#hf://}
-    # For HuggingFace models, create from GGUF or use pre-converted
-    ollama pull ${MODEL_ID##*/}:latest || ollama pull llama2:7b
-  else
-    # Try to pull the model directly
-    ollama pull ${MODEL_PATH##*/}:latest || ollama pull llama2:7b
+  # MODEL_PATH contains the Ollama model ID directly (e.g., tinyllama:1.1b)
+  echo "Pulling Ollama model: $MODEL_PATH"
+  ollama pull $MODEL_PATH
+  
+  # Verify model was pulled
+  if ! ollama list | grep -q "$MODEL_PATH"; then
+    echo "Warning: Model $MODEL_PATH may not have been pulled successfully"
+    echo "Available models:"
+    ollama list
   fi
   
   # Start the authentication proxy on port 8000

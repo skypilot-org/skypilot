@@ -29,7 +29,7 @@ Compare multiple trained models and agents side-by-side using Promptfoo and SkyP
    ┌──────────┐       ┌─────────┐       ┌─────────┐
    │ Cluster  │       │ Cluster │       │ Cluster │
    │ • L4 GPU │       │ • L4 GPU│       │ • L4 GPU│
-   │ • SGLang │       │ • vLLM  │       │ • vLLM  │
+   │ • vLLM   │       │ • vLLM  │       │ • Ollama│
    └────┬─────┘       └────┬────┘       └────┬────┘
         │                  │                 │
         └──────────────────┴─────────────────┘
@@ -54,7 +54,7 @@ Compare multiple trained models and agents side-by-side using Promptfoo and SkyP
 
 2. **SkyPilot Clusters**: Each model runs on its own cluster
    - Automatic GPU provisioning based on model size
-   - vLLM for high-performance inference
+   - Multiple inference engines supported (vLLM, Ollama)
    - OpenAI-compatible API endpoints
    - Auto-configured networking with public IPs
 
@@ -91,17 +91,19 @@ python evaluate_models.py
 ## Project Structure
 
 ```
-multi-model-eval/
+parallel-model-eval/
 ├── evaluate_models.py      # Main script
+├── utils.py                # Utility functions
 ├── configs/
 │   ├── eval_config.yaml    # Models & evaluation config
-│   └── serve-model.yaml    # vLLM serving template
-├── scripts/
-│   └── test_setup.sh       # Check dependencies
+│   └── templates/          # Inference engine templates
+│       ├── serve-vllm.yaml    # vLLM (default)
+│       └── serve-ollama.yaml  # Ollama
 ├── model_stores/           # Demo model setup
 │   ├── setup-volume.yaml   # Setup models in K8s volume
 │   ├── setup-s3-model.yaml # Setup models in S3
 │   └── README.md
+├── requirements.txt        # Python dependencies
 └── README.md
 ```
 
@@ -115,6 +117,10 @@ models:
   - name: "mistral-7b"
     source: "hf://mistralai/Mistral-7B-Instruct-v0.3"
     
+  - name: "tinyllama"
+    source: "ollama://tinyllama:1.1b"  # Use Ollama's pre-built model
+    serve_template: "configs/templates/serve-ollama.yaml"
+    
   - name: "agent-qwen"
     source: "s3://my-models/qwen-7b-agent"
     
@@ -124,6 +130,7 @@ models:
 # Deployment settings
 cluster_prefix: "eval"
 cleanup_on_complete: true
+# default_serve_template: "configs/templates/serve-vllm.yaml"  # Optional: change default engine
 
 # Promptfoo evaluation config (https://www.promptfoo.dev/docs/configuration/guide/)
 promptfoo:
@@ -148,6 +155,35 @@ promptfoo:
           value: "len(output) > 10"
 ```
 
+## Inference Engine Templates
+
+The evaluation system supports multiple inference engines through configurable templates:
+
+### Available Templates
+
+1. **vLLM** (`configs/templates/serve-vllm.yaml`) - Default
+   - High-performance GPU inference
+   - Best for production deployments
+   - Industry standard for LLM serving
+   
+2. **Ollama** (`configs/templates/serve-ollama.yaml`)
+   - Simple deployment and management
+   - Supports GGUF format models
+   - Good for development and testing
+
+### Using Different Engines
+
+```yaml
+# Global default for all models
+default_serve_template: "configs/templates/serve-ollama.yaml"
+
+# Per-model override
+models:
+  - name: "fast-model"
+    source: "hf://mistralai/Mistral-7B-Instruct-v0.3"
+    serve_template: "configs/templates/serve-vllm.yaml"  # Use vLLM for this model
+```
+
 ## How It Works
 
 1. **Configure**: Edit `configs/eval_config.yaml` with your models and tests
@@ -157,9 +193,10 @@ promptfoo:
 
 ## Model Sources
 
-- **HuggingFace**: Any public model from the Hub
-- **S3/GCS**: Your trained models in cloud storage
-- **Volumes**: Models stored in SkyPilot volumes for fast loading
+- **HuggingFace**: `hf://org/model` - Any public model from the Hub
+- **Ollama**: `ollama://model:tag` - Pre-built Ollama models
+- **S3/GCS**: `s3://bucket/path` or `gs://bucket/path` - Your trained models in cloud storage
+- **Volumes**: `volume://volume-name/path` - Models stored in SkyPilot volumes for fast loading
 
 ### Using SkyPilot Volumes (Kubernetes)
 
@@ -213,26 +250,42 @@ Common configurations:
 ## Example Output
 
 ```
-🎯 Multi-Model Evaluation
-=========================
+🎯 Multi-Model Evaluation with Parallel Launch
+=============================================
 
-📋 Launching 3 models...
+📛 Using cluster prefix: 'eval'
+📄 Using custom default serve template: configs/templates/serve-ollama.yaml
 
-🚀 Launching mistral-7b...
-✅ Launched eval-mistral-7b
-📡 Endpoint: http://34.125.23.45:8000/v1
+============================================================
+🚀 LAUNCHING 3 MODELS IN PARALLEL
+============================================================
 
-🚀 Launching agent-qwen...
-✅ Launched eval-agent-qwen
-📡 Endpoint: http://35.223.12.89:8000/v1
+[1/3] Launching mistral-7b...
+[2/3] Launching agent-qwen...
+[3/3] Launching agent-llama...
 
-🚀 Launching agent-deepseek...
-✅ Launched eval-agent-deepseek
-📡 Endpoint: http://35.198.76.12:8000/v1
+------------------------------------------------------------
+⏳ WAITING FOR CLUSTERS TO PROVISION
+------------------------------------------------------------
 
-✅ Successfully launched 3 models
+  ✅ mistral-7b: cluster provisioned
+  ✅ agent-qwen: cluster provisioned
+  ✅ agent-llama: cluster provisioned
 
-📝 Created evaluation config for 3 models
+------------------------------------------------------------
+🔄 WAITING FOR MODEL SERVERS TO START
+------------------------------------------------------------
+
+  ✅ mistral-7b is ready!
+  🌐 mistral-7b: endpoint verified at http://34.125.23.45:8000
+  ✅ agent-qwen is ready!
+  🌐 agent-qwen: endpoint verified at http://35.223.12.89:8000
+  ✅ agent-llama is ready!
+  🌐 agent-llama: endpoint verified at http://35.198.76.12:8000
+
+🎉 Successfully launched 3/3 models
+
+📝 Created evaluation config for 3 models with 2 tests
 
 🔍 Running evaluation...
 ✅ Evaluation complete!
@@ -246,6 +299,8 @@ View results: promptfoo view
 - Launch happens in parallel for speed
 - Results saved to `results.json`
 - View detailed comparison with `promptfoo view`
+- Use `skip_launch: true` to reuse existing clusters
+- Set `cleanup_on_complete: false` to keep clusters running
 
 ## Customizing Evaluation Tests
 
@@ -310,15 +365,47 @@ To use your fine-tuned models, simply save them to a volume or S3 bucket during 
 ## Troubleshooting
 
 ```bash
-# Check dependencies
-./scripts/test_setup.sh
-
 # View model logs
 sky logs eval-<model-name>
 
 # List running clusters
 sky status
 
+# Check cluster endpoints
+sky endpoints eval-<model-name> 8000
+
 # Manually cleanup
-sky down -a
+sky down eval-*
+
+# Use existing clusters without relaunching
+# Set skip_launch: true in configs/eval_config.yaml
 ```
+
+## Advanced Usage
+
+### Custom Serving Templates
+
+Create your own serving template by copying and modifying an existing one:
+
+```yaml
+# configs/templates/serve-custom.yaml
+envs:
+  MODEL_PATH: model-default
+  API_TOKEN: default-token
+
+resources:
+  accelerators: L4:1
+  ports: 8000
+
+setup: |
+  # Your setup commands
+
+run: |
+  # Start server with OpenAI-compatible API on port 8000
+  # Use $MODEL_PATH and $API_TOKEN
+```
+
+Requirements for custom templates:
+- Must expose OpenAI-compatible API on port 8000
+- Should use `$MODEL_PATH` and `$API_TOKEN` environment variables
+- Should handle HuggingFace, S3, and volume model sources

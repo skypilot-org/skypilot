@@ -90,7 +90,8 @@ def wait_for_model_ready(cluster_name: str,
             dots = (dots + 1) % 4
             progress = "." * dots + " " * (3 - dots)
             print(
-                f"\r  ⏳ {cluster_name}: waiting for vLLM server to start{progress} ({elapsed}s)",
+                f'\r  ⏳ {cluster_name}: waiting for inference engine to start'
+                f'{progress} ({elapsed}s)',
                 end="")
             sys.stdout.flush()
 
@@ -146,6 +147,11 @@ def get_model_path_and_mounts(source: str) -> Tuple:
     if source.startswith('hf://'):
         # Extract HuggingFace model ID: hf://org/model
         model_id = source[len('hf://'):]
+        return model_id, None, None
+    
+    if source.startswith('ollama://'):
+        # Extract Ollama model ID: ollama://model:tag
+        model_id = source[len('ollama://'):]
         return model_id, None, None
 
     if source.startswith(('s3://', 'gs://')):

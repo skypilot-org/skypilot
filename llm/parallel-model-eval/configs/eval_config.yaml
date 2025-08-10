@@ -4,7 +4,8 @@ models:
   - name: "mistral-7b"
     source: "hf://mistralai/Mistral-7B-Instruct-v0.1"
     # accelerators: "L4:1"  # Optional: override default from serve template
-    # serve_template: "configs/templates/serve-sglang.yaml"  # Optional: use custom template for this model
+    # serve_template: "configs/templates/serve-ollama.yaml"  # Optional: use custom template for this model
+    
     
   - name: "agent-llama"
     source: "volume://model-checkpoints/agent-llama"
@@ -12,12 +13,13 @@ models:
   - name: "agent-qwen"
     source: "s3://skypilot-agent-models/qwen-agent"
 
-  - name: "tinyllama"
-    source: "hf://TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-
   - name: "gemma"
     source: "hf://google/gemma-3-1b-it"
-    serve_template: "configs/templates/serve-sglang.yaml"
+
+  - name: "tinyllama"
+    source: "ollama://tinyllama:1.1b"  # Ollama model ID
+    serve_template: "configs/templates/serve-ollama.yaml"
+
 
 # SkyPilot deployment settings
 cluster_prefix: "eval"  # Prefix for cluster names (e.g., "eval-mistral-7b")

@@ -1,0 +1,32 @@
+description: Multi-model evaluation
+outputPath: ./results.json
+prompts:
+- You are a helpful AI assistant. {{message}}
+providers:
+- config:
+    apiBaseUrl: http://35.192.143.237:8000/v1
+    apiKey: skypilot-eval-token
+    max_tokens: 512
+    temperature: 0.7
+  id: openai:chat:tinyllama:1.1b
+  label: tinyllama
+tests:
+- assert:
+  - type: contains
+    value: quantum
+  vars:
+    message: What is quantum computing?
+- assert:
+  - type: contains
+    value: print
+  - type: python
+    value: len(output) > 10
+  vars:
+    message: Write a hello world in Python
+- assert:
+  - type: is-json
+  - type: javascript
+    value: JSON.parse(output).name && JSON.parse(output).age
+  description: Test JSON generation
+  vars:
+    message: Generate a JSON object with name and age fields
