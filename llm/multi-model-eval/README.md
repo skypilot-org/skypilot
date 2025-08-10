@@ -184,7 +184,7 @@ Common configurations:
 - `"L4:1"` - Good for 7B models
 - `"A10:1"` - Good for 7-13B models  
 - `"A100:1"` - For larger models
-- `"A100-80GB:1"` - For 70B+ models
+- `"A100-80GB:1"`/`"H100:1"` - For 70B+ models
 
 ## Example Output
 
