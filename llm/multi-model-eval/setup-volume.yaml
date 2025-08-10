@@ -1,0 +1,19 @@
+resources:
+  accelerators: L4:1
+  disk_size: 50
+workdir: .
+volumes:
+  /volumes: model-checkpoints
+envs:
+  HF_TOKEN: ${HF_TOKEN}  # Set your HuggingFace token
+setup: |
+  pip install transformers torch accelerate
+run: |
+  python -c "
+  from transformers import AutoModelForCausalLM, AutoTokenizer
+  model = AutoModelForCausalLM.from_pretrained('meta-llama/Llama-2-7b-hf', torch_dtype='auto')
+  tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf') 
+  model.save_pretrained('/volumes/agent-llama')
+  tokenizer.save_pretrained('/volumes/agent-llama')
+  print('✅ Llama-2-7B saved to volume')
+  "
