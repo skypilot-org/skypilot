@@ -1,0 +1,77 @@
+# Configuration for serving models with Ollama
+# Ollama provides easy model management and serving
+
+envs:
+  MODEL_PATH: meta-llama/Llama-2-7b-hf  # Default model path
+  API_TOKEN: default-token
+
+resources:
+  accelerators: L4:1
+  ports: 8000
+
+setup: |
+  # Install Ollama
+  curl -fsSL https://ollama.ai/install.sh | sh
+  
+  # Install proxy to add authentication to Ollama API
+  pip install fastapi uvicorn httpx
+
+  # Create a simple proxy script to add authentication
+  cat > ollama_proxy.py << 'EOF'
+  from fastapi import FastAPI, HTTPException, Request, Header
+  from fastapi.responses import StreamingResponse
+  import httpx
+  import os
+  import json
+
+  app = FastAPI()
+  OLLAMA_URL = "http://localhost:11434"
+  API_TOKEN = os.environ.get("API_TOKEN", "default-token")
+
+  @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+  async def proxy(path: str, request: Request, authorization: str = Header(None)):
+      # Check API token
+      if authorization != f"Bearer {API_TOKEN}":
+          raise HTTPException(status_code=401, detail="Unauthorized")
+      
+      # Forward request to Ollama
+      async with httpx.AsyncClient() as client:
+          url = f"{OLLAMA_URL}/{path}"
+          headers = dict(request.headers)
+          headers.pop("authorization", None)
+          headers.pop("host", None)
+          
+          response = await client.request(
+              method=request.method,
+              url=url,
+              headers=headers,
+              content=await request.body(),
+              follow_redirects=True
+          )
+          
+          return StreamingResponse(
+              response.iter_bytes(),
+              status_code=response.status_code,
+              headers=dict(response.headers)
+          )
+  EOF
+
+run: |
+  echo "Starting Ollama server for model: $MODEL_PATH"
+  
+  # Start Ollama service
+  ollama serve &
+  sleep 5
+  
+  # Pull or create model based on MODEL_PATH
+  if [[ $MODEL_PATH == hf://* ]]; then
+    MODEL_ID=${MODEL_PATH#hf://}
+    # For HuggingFace models, create from GGUF or use pre-converted
+    ollama pull ${MODEL_ID##*/}:latest || ollama pull llama2:7b
+  else
+    # Try to pull the model directly
+    ollama pull ${MODEL_PATH##*/}:latest || ollama pull llama2:7b
+  fi
+  
+  # Start the authentication proxy on port 8000
+  uvicorn ollama_proxy:app --host 0.0.0.0 --port 8000

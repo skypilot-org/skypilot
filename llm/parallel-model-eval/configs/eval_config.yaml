@@ -3,7 +3,8 @@
 models:
   - name: "mistral-7b"
     source: "hf://mistralai/Mistral-7B-Instruct-v0.1"
-    # accelerators: "L4:1"  # Optional: override default from serve-model.yaml
+    # accelerators: "L4:1"  # Optional: override default from serve template
+    # serve_template: "configs/templates/serve-sglang.yaml"  # Optional: use custom template for this model
     
   - name: "agent-llama"
     source: "volume://model-checkpoints/agent-llama"
@@ -16,11 +17,13 @@ models:
 
   - name: "gemma"
     source: "hf://google/gemma-3-1b-it"
+    serve_template: "configs/templates/serve-sglang.yaml"
 
 # SkyPilot deployment settings
 cluster_prefix: "eval"  # Prefix for cluster names (e.g., "eval-mistral-7b")
 skip_launch: false  # Set to true to use existing clusters without launching
 cleanup_on_complete: false  # Set to false to keep clusters running after evaluation
+# default_serve_template: "configs/templates/serve-vllm.yaml"  # Default: vLLM template (uncomment to specify custom template)
 
 # Promptfoo evaluation configuration
 # See: https://www.promptfoo.dev/docs/configuration/guide/

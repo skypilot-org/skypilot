@@ -26,13 +26,13 @@ Compare multiple trained models and agents side-by-side using Promptfoo and SkyP
    mistral-7b         agent-qwen       agent-llama
         │                  │                  │
         ▼                  ▼                  ▼
-   ┌─────────┐        ┌─────────┐       ┌─────────┐
-   │ Cluster │        │ Cluster │       │ Cluster │
-   │ • L4 GPU│        │ • L4 GPU│       │ • L4 GPU│
-   │ • vLLM  │        │ • vLLM  │       │ • vLLM  │
-   └────┬────┘        └────┬────┘       └────┬────┘
-        │                  │                  │
-        └──────────────────┴──────────────────┘
+   ┌──────────┐       ┌─────────┐       ┌─────────┐
+   │ Cluster  │       │ Cluster │       │ Cluster │
+   │ • L4 GPU │       │ • L4 GPU│       │ • L4 GPU│
+   │ • SGLang │       │ • vLLM  │       │ • vLLM  │
+   └────┬─────┘       └────┬────┘       └────┬────┘
+        │                  │                 │
+        └──────────────────┴─────────────────┘
                            │
                    OpenAI-compatible APIs
                            │

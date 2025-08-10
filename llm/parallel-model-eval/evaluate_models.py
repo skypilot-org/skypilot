@@ -24,7 +24,9 @@ def load_eval_config() -> Dict:
         return yaml.safe_load(f)
 
 
-def prepare_model_task(model: Dict, cluster_prefix: str = "eval") -> tuple:
+def prepare_model_task(model: Dict,
+                       cluster_prefix: str = "eval",
+                       serve_template: str = None) -> tuple:
     """Prepare a model task for launching."""
     name = model['name']
     cluster_name = f"{cluster_prefix}-{name}"
@@ -33,8 +35,12 @@ def prepare_model_task(model: Dict, cluster_prefix: str = "eval") -> tuple:
     model_path, file_mounts, volumes = utils.get_model_path_and_mounts(
         model['source'])
 
+    # Use model-specific template if provided, then global template, then default
+    template_path = model.get(
+        'serve_template') or serve_template or utils.SERVE_TEMPLATE
+
     # Load task template - this includes all defaults (resources, envs, setup, run, etc.)
-    task = sky.Task.from_yaml(utils.SERVE_TEMPLATE)
+    task = sky.Task.from_yaml(template_path)
     task.name = f"serve-{name}"
 
     # Override environment variables
@@ -66,7 +72,8 @@ def prepare_model_task(model: Dict, cluster_prefix: str = "eval") -> tuple:
 
 
 def launch_models_parallel(models: List[Dict],
-                           cluster_prefix: str = "eval") -> List[Dict]:
+                           cluster_prefix: str = "eval",
+                           serve_template: str = None) -> List[Dict]:
     """Launch all models in parallel using futures."""
     print(f"\n{'='*60}")
     print(f"🚀 LAUNCHING {len(models)} MODELS IN PARALLEL")
@@ -78,7 +85,8 @@ def launch_models_parallel(models: List[Dict],
 
     for i, model in enumerate(models, 1):
         try:
-            task, cluster_name, name = prepare_model_task(model, cluster_prefix)
+            task, cluster_name, name = prepare_model_task(
+                model, cluster_prefix, serve_template)
 
             # Determine the model ID that vLLM will use
             # Get the model path for all sources
@@ -376,9 +384,13 @@ def main():
     skip_launch = config.get('skip_launch', False)
     cleanup_on_complete = config.get('cleanup_on_complete', True)
     cluster_prefix = config.get('cluster_prefix', 'eval')
+    default_serve_template = config.get('default_serve_template', None)
 
     # Show configuration settings
     print(f"📛 Using cluster prefix: '{cluster_prefix}'")
+    if default_serve_template:
+        print(
+            f"📄 Using custom default serve template: {default_serve_template}")
     if skip_launch:
         print("⏭️  Skipping cluster launch (using existing clusters)")
     if not cleanup_on_complete:
@@ -396,7 +408,8 @@ def main():
             f"\n🎉 Found {len(launched_models)}/{len(models)} existing clusters")
     else:
         # Launch all models in parallel
-        launched_models = launch_models_parallel(models, cluster_prefix)
+        launched_models = launch_models_parallel(models, cluster_prefix,
+                                                 default_serve_template)
         if not launched_models:
             print("\n❌ No models launched successfully")
             return
