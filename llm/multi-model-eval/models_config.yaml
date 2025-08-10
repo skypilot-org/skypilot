@@ -1,22 +1,37 @@
 # Models to evaluate
+# Specify the models you want to evaluate here
+# Syntax:
+# models:
+#   - name: <model_name>
+#     source: <source_path>
+#     # Optional: specify the accelerator type, default is from
+#     # templates/serve-model.yaml
+#     accelerators: <accelerator_type>
+#
+# Source path can be:
+# - "hf://<model_id>" for HuggingFace models
+# - "volume://<path>" for SkyPilot volume models
+# - "s3://<bucket_name>/<path>" for S3 bucket models
+# - "gcs://<bucket_name>/<path>" for GCS bucket models
+# - "r2://<bucket_name>/<path>" for R2 bucket models
+
 models:
-  # Public model from HuggingFace (no auth required)
   - name: "mistral-7b"
-    source: "huggingface"
-    model_id: "mistralai/Mistral-7B-Instruct-v0.1"
-    accelerators: "L4:1"
+    source: "hf://mistralai/Mistral-7B-Instruct-v0.1"
     
-  # Model from SkyPilot volume (Llama-3.2-1B from setup-volume.yaml)
   - name: "agent-llama"
     source: "volume://model-checkpoints/agent-llama"
-    accelerators: "L4:1"
     
-  # Custom model from S3 bucket (Qwen2.5-1.5B)
-  # Run demo/setup-s3-model.yaml first
   - name: "agent-qwen"
     source: "s3://skypilot-agent-models/qwen-agent"
-    accelerators: "L4:1"
+
+  - name: "tinyllama"
+    source: "hf://TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+
+  - name: "phi"
+    source: "hf://microsoft/Phi-tiny-MoE-instruct"
 
 # Evaluation settings
+cluster_prefix: "eval"  # Prefix for cluster names (e.g., "eval-mistral-7b")
 skip_launch: false  # Set to true to use existing clusters without launching
 cleanup_on_complete: false  # Set to false to keep clusters running after evaluation

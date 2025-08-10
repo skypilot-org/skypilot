@@ -125,14 +125,16 @@ def get_cluster_endpoint(cluster_name: str, port: int = 8000) -> Optional[str]:
     return None
 
 
-def get_model_path_and_mounts(source: str, model_id: str = None) -> Tuple:
+def get_model_path_and_mounts(source: str) -> Tuple:
     """
     Determine model path, file mounts, and volumes based on model source.
     
     Returns:
         (model_path, file_mounts_dict, volumes_dict)
     """
-    if source == 'huggingface':
+    if source.startswith('hf://'):
+        # Extract HuggingFace model ID: hf://org/model
+        model_id = source[len('hf://'):]
         return model_id, None, None
     
     if source.startswith(('s3://', 'gs://')):

@@ -24,35 +24,35 @@ def load_models_config() -> Dict:
         return yaml.safe_load(f)
 
 
-def prepare_model_task(model: Dict) -> tuple:
+def prepare_model_task(model: Dict, cluster_prefix: str = "eval") -> tuple:
     """Prepare a model task for launching."""
     name = model['name']
-    cluster_name = f"eval-{name}"
+    cluster_name = f"{cluster_prefix}-{name}"
     
     # Get model path, mounts, and volumes
     model_path, file_mounts, volumes = utils.get_model_path_and_mounts(
-        model['source'], 
-        model.get('model_id')
+        model['source']
     )
     
-    # Load task template
+    # Load task template - this includes all defaults (resources, envs, setup, run, etc.)
     task = sky.Task.from_yaml(utils.SERVE_TEMPLATE)
     task.name = f"serve-{name}"
     
-    # Set environment variables
+    # Override environment variables
     task.update_envs({
         'MODEL_PATH': model_path,
         'API_TOKEN': utils.API_TOKEN,
         'HF_TOKEN': os.environ.get('HF_TOKEN', None)
     })
     
-    # Set resources
-    task.set_resources(
-        sky.Resources(
-            accelerators=model['accelerators'],
-            ports=[8000]
-        )
-    )
+    # Override resources only if explicitly specified in model config
+    # The template already has default resources loaded
+    if 'accelerators' in model:
+        # Update each resource in the set with the new accelerators
+        updated_resources = []
+        for resource in task.resources:
+            updated_resources.append(resource.copy(accelerators=model['accelerators']))
+        task.set_resources(updated_resources)
     
     # Set file mounts if needed
     if file_mounts:
@@ -67,7 +67,7 @@ def prepare_model_task(model: Dict) -> tuple:
 
 
 
-def launch_models_parallel(models: List[Dict]) -> List[Dict]:
+def launch_models_parallel(models: List[Dict], cluster_prefix: str = "eval") -> List[Dict]:
     """Launch all models in parallel using futures."""
     print(f"\n{'='*60}")
     print(f"🚀 LAUNCHING {len(models)} MODELS IN PARALLEL")
@@ -79,18 +79,13 @@ def launch_models_parallel(models: List[Dict]) -> List[Dict]:
     
     for i, model in enumerate(models, 1):
         try:
-            task, cluster_name, name = prepare_model_task(model)
+            task, cluster_name, name = prepare_model_task(model, cluster_prefix)
             
             # Determine the model ID that vLLM will use
-            if model.get('source') == 'huggingface':
-                actual_model_id = model.get('model_id')
-            else:
-                # For volume/S3 sources, get the model path
-                model_path, _, _ = utils.get_model_path_and_mounts(
-                    model.get('source'), 
-                    model.get('model_id')
-                )
-                actual_model_id = model_path
+            # Get the model path for all sources
+            actual_model_id, _, _ = utils.get_model_path_and_mounts(
+                model.get('source')
+            )
             
             # Check if cluster already exists and is serving
             exists, _ = utils.check_cluster_ready(cluster_name, utils.API_TOKEN)
@@ -112,7 +107,7 @@ def launch_models_parallel(models: List[Dict]) -> List[Dict]:
                     'request_id': request_id,
                     'cluster_name': cluster_name,
                     'model': model,
-                    'model_id': actual_model_id
+                    'model_path': actual_model_id
                 }
             else:
                 print(f"[{i}/{len(models)}] Launching {name}...")
@@ -121,7 +116,7 @@ def launch_models_parallel(models: List[Dict]) -> List[Dict]:
                     'request_id': request_id,
                     'cluster_name': cluster_name,
                     'model': model,
-                    'model_id': actual_model_id
+                    'model_path': actual_model_id
                 }
         except Exception as e:
             print(f"  ❌ Failed to launch: {e}")
@@ -153,7 +148,7 @@ def launch_models_parallel(models: List[Dict]) -> List[Dict]:
                         'endpoint': endpoint,
                         'source': info['model'].get('source', 'unknown'),
                         'job_id': str(job_id),
-                        'model_id': info.get('model_id')
+                        'model_path': info.get('model_path')
                     })
                 else:
                     print(f"  ⚠️  {name}: endpoint not found")
@@ -176,8 +171,8 @@ def launch_models_parallel(models: List[Dict]) -> List[Dict]:
                 # Verify endpoint is accessible
                 if utils.verify_endpoint(model['endpoint'], utils.API_TOKEN):
                     print(f"  🌐 {model['name']}: endpoint verified at http://{model['endpoint']}")
-                    if model.get('model_id'):
-                        print(f"      Using model: {model['model_id']}")
+                    if model.get('model_path'):
+                        print(f"      Using model: {model['model_path']}")
                     ready_models.append(model)
                 else:
                     print(f"  ⚠️  {model['name']}: endpoint not accessible")
@@ -195,8 +190,8 @@ def create_evaluation_config(models: List[Dict], output_path: str):
     providers = []
     for model in models:
         if model:
-            # Get model ID - use the actual model ID from server if available
-            model_id = model.get('model_id', 'auto')
+            # Get model ID - use the actual model path from server if available
+            model_id = model.get('model_path', 'auto')
             
             # Use openai provider with custom endpoint
             providers.append({
@@ -262,7 +257,7 @@ def run_evaluation(config_path: str):
               f'{result.stderr}')
 
 
-def get_existing_clusters(models: List[Dict]) -> List[Dict]:
+def get_existing_clusters(models: List[Dict], cluster_prefix: str = "eval") -> List[Dict]:
     """Get endpoints for existing clusters without launching."""
     print(f"\n{'='*60}")
     print(f"🔍 CHECKING EXISTING CLUSTERS")
@@ -271,17 +266,12 @@ def get_existing_clusters(models: List[Dict]) -> List[Dict]:
     existing_models = []
     for i, model in enumerate(models, 1):
         name = model['name']
-        cluster_name = f"eval-{name}"
+        cluster_name = f"{cluster_prefix}-{name}"
         
-        # Determine the model ID
-        if model.get('source') == 'huggingface':
-            actual_model_id = model.get('model_id')
-        else:
-            model_path, _, _ = utils.get_model_path_and_mounts(
-                model.get('source'), 
-                model.get('model_id')
-            )
-            actual_model_id = model_path
+        # Get the model path for all sources
+        actual_model_path, _, _ = utils.get_model_path_and_mounts(
+            model.get('source')
+        )
         
         print(f"[{i}/{len(models)}] Checking {name}...")
         
@@ -295,7 +285,7 @@ def get_existing_clusters(models: List[Dict]) -> List[Dict]:
                 'cluster_name': cluster_name,
                 'endpoint': endpoint,
                 'source': model.get('source', 'unknown'),
-                'model_id': actual_model_id
+                'model_path': actual_model_path
             })
         else:
             print(f"  ❌ Not found or not ready")
@@ -363,8 +353,10 @@ def main():
     models = config['models']
     skip_launch = config.get('skip_launch', False)
     cleanup_on_complete = config.get('cleanup_on_complete', True)
+    cluster_prefix = config.get('cluster_prefix', 'eval')
     
     # Show configuration settings
+    print(f"📛 Using cluster prefix: '{cluster_prefix}'")
     if skip_launch:
         print("⏭️  Skipping cluster launch (using existing clusters)")
     if not cleanup_on_complete:
@@ -372,14 +364,14 @@ def main():
     
     # Either get existing clusters or launch new ones
     if skip_launch:
-        launched_models = get_existing_clusters(models)
+        launched_models = get_existing_clusters(models, cluster_prefix)
         if not launched_models:
             print("\n❌ No existing clusters found. Please launch clusters first or set skip_launch: false")
             return
         print(f"\n🎉 Found {len(launched_models)}/{len(models)} existing clusters")
     else:
         # Launch all models in parallel
-        launched_models = launch_models_parallel(models)
+        launched_models = launch_models_parallel(models, cluster_prefix)
         if not launched_models:
             print("\n❌ No models launched successfully")
             return
