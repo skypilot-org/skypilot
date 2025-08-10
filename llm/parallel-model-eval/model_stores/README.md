@@ -46,7 +46,7 @@ run: |
 ```
 
 ### Use in Evaluation
-Add to `configs/models_config.yaml`:
+Add to `configs/eval_config.yaml`:
 ```yaml
 models:
   - name: "my-finetuned-model"

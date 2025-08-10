@@ -4,7 +4,7 @@ Evaluate multiple trained models using Promptfoo and SkyPilot.
 
 Example usage:
     python evaluate_models.py
-    python evaluate_models.py --config models_config_test.yaml
+    python evaluate_models.py --config eval_config_test.yaml
 """
 
 import argparse
@@ -18,9 +18,9 @@ import yaml
 import sky
 
 
-def load_models_config() -> Dict:
-    """Load model configurations."""
-    with open(utils.MODELS_CONFIG, 'r', encoding='utf-8') as f:
+def load_eval_config() -> Dict:
+    """Load evaluation configurations."""
+    with open(utils.EVAL_CONFIG, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
 
@@ -191,9 +191,9 @@ def launch_models_parallel(models: List[Dict],
     return launched_models
 
 
-def create_evaluation_config(models: List[Dict], output_path: str):
-    """Create Promptfoo configuration."""
-    # Build provider list
+def create_evaluation_config(models: List[Dict], config: Dict, output_path: str):
+    """Create Promptfoo configuration by merging deployed models with eval config."""
+    # Build provider list from deployed models
     providers = []
     for model in models:
         if model:
@@ -212,43 +212,46 @@ def create_evaluation_config(models: List[Dict], output_path: str):
                 }
             })
 
-    # Define evaluation
-    config = {
-        'description': 'Model comparison',
-        'providers': providers,
-        'prompts': ["You are a helpful AI assistant. {{message}}"],
-        'tests': [{
-            'vars': {
-                'message': 'What is quantum computing?'
-            },
-            'assert': [{
-                'type': 'contains',
-                'value': 'quantum'
-            }]
-        }, {
-            'vars': {
-                'message': 'Write a hello world in Python'
-            },
-            'assert': [{
-                'type': 'contains',
-                'value': 'print'
-            }]
-        }, {
-            'vars': {
-                'message': 'Explain machine learning'
-            },
-            'assert': [{
-                'type': 'contains',
-                'value': 'learn'
-            }]
-        }],
-        'outputPath': './results.json'
-    }
+    # Start with the promptfoo config from the YAML (or use defaults)
+    promptfoo_config = config.get('promptfoo', {})
+    
+    # If no promptfoo config provided, use sensible defaults
+    if not promptfoo_config:
+        promptfoo_config = {
+            'description': 'Multi-model evaluation',
+            'prompts': ["You are a helpful AI assistant. {{message}}"],
+            'tests': [{
+                'vars': {
+                    'message': 'What is quantum computing?'
+                },
+                'assert': [{
+                    'type': 'contains',
+                    'value': 'quantum'
+                }]
+            }, {
+                'vars': {
+                    'message': 'Write a hello world in Python'
+                },
+                'assert': [{
+                    'type': 'contains',
+                    'value': 'print'
+                }]
+            }],
+            'outputPath': './results.json'
+        }
+    
+    # Merge the providers into the promptfoo config
+    promptfoo_config['providers'] = providers
+    
+    # Ensure outputPath is set
+    if 'outputPath' not in promptfoo_config:
+        promptfoo_config['outputPath'] = './results.json'
 
     with open(output_path, 'w', encoding='utf-8') as f:
-        yaml.dump(config, f, default_flow_style=False)
+        yaml.dump(promptfoo_config, f, default_flow_style=False)
 
-    print(f"\n📝 Created evaluation config for {len(providers)} models")
+    num_tests = len(promptfoo_config.get('tests', []))
+    print(f"\n📝 Created evaluation config for {len(providers)} models with {num_tests} tests")
 
 
 def run_evaluation(config_path: str):
@@ -345,8 +348,8 @@ Examples:
 
     parser.add_argument(
         '--config',
-        default=utils.MODELS_CONFIG,
-        help=f'Model configuration file (default: {utils.MODELS_CONFIG})')
+        default=utils.EVAL_CONFIG,
+        help=f'Evaluation configuration file (default: {utils.EVAL_CONFIG})')
 
     return parser.parse_args()
 
@@ -359,7 +362,7 @@ def main():
     print("🎯 Multi-Model Evaluation with Parallel Launch")
     print("=" * 45)
 
-    if args.config != utils.MODELS_CONFIG:
+    if args.config != utils.EVAL_CONFIG:
         print(f"📋 Using config: {args.config}")
 
     # Load configuration
@@ -400,7 +403,7 @@ def main():
 
     try:
         # Create and run evaluation
-        create_evaluation_config(launched_models, 'promptfoo_config.yaml')
+        create_evaluation_config(launched_models, config, 'promptfoo_config.yaml')
         run_evaluation('promptfoo_config.yaml')
 
     finally:

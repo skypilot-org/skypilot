@@ -14,7 +14,7 @@ import sky
 # Configuration constants
 API_TOKEN = 'skypilot-eval-token'  # vLLM accepts any string as API key
 SERVE_TEMPLATE = 'configs/serve-model.yaml'
-MODELS_CONFIG = 'configs/models_config.yaml'
+EVAL_CONFIG = 'configs/eval_config.yaml'
 MODEL_READY_TIMEOUT = 600  # 10 minutes
 ENDPOINT_VERIFY_RETRIES = 3
 DEFAULT_PORT = 8000

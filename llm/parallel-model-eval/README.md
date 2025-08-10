@@ -9,7 +9,7 @@ Compare multiple trained models and agents side-by-side using Promptfoo and SkyP
 ## Architecture Overview
 
 ```
-                 configs/models_config.yaml
+                 configs/eval_config.yaml
                            │
                            ▼
                   python evaluate_models.py
@@ -83,7 +83,7 @@ Compare multiple trained models and agents side-by-side using Promptfoo and SkyP
 pip install skypilot[all] pyyaml
 npm install -g promptfoo
 
-# 2. Configure models (edit configs/models_config.yaml)
+# 2. Configure models and tests (edit configs/eval_config.yaml)
 # 3. Run evaluation
 python evaluate_models.py
 ```
@@ -94,7 +94,7 @@ python evaluate_models.py
 multi-model-eval/
 ├── evaluate_models.py      # Main script
 ├── configs/
-│   ├── models_config.yaml  # Your model configurations
+│   ├── eval_config.yaml    # Models & evaluation config
 │   └── serve-model.yaml    # vLLM serving template
 ├── scripts/
 │   └── test_setup.sh       # Check dependencies
@@ -105,30 +105,52 @@ multi-model-eval/
 └── README.md
 ```
 
-## Model Configuration
+## Configuration
 
-Edit `configs/models_config.yaml` to specify your models:
+Edit `configs/eval_config.yaml` to specify your models and evaluation tests:
 
 ```yaml
+# Models to deploy (SkyPilot will create OpenAI-compatible endpoints)
 models:
-  # Public model from HuggingFace
   - name: "mistral-7b"
     source: "hf://mistralai/Mistral-7B-Instruct-v0.3"
     
-  # Custom model from S3 bucket
   - name: "agent-qwen"
     source: "s3://my-models/qwen-7b-agent"
     
-  # Model from SkyPilot volume
   - name: "agent-llama"
     source: "volume://model-checkpoints/agent-llama"
 
+# Deployment settings
+cluster_prefix: "eval"
 cleanup_on_complete: true
+
+# Promptfoo evaluation config (https://www.promptfoo.dev/docs/configuration/guide/)
+promptfoo:
+  description: "Multi-model evaluation"
+  
+  prompts:
+    - "You are a helpful AI assistant. {{message}}"
+  
+  tests:
+    - vars:
+        message: "What is quantum computing?"
+      assert:
+        - type: contains
+          value: "quantum"
+    
+    - vars:
+        message: "Write a hello world in Python"
+      assert:
+        - type: contains
+          value: "print"
+        - type: python
+          value: "len(output) > 10"
 ```
 
 ## How It Works
 
-1. **Configure Models**: Edit `configs/models_config.yaml` with your model sources
+1. **Configure**: Edit `configs/eval_config.yaml` with your models and tests
 2. **Launch with SkyPilot**: The script uses SkyPilot SDK to deploy each model on its own GPU cluster
 3. **Evaluate with Promptfoo**: All models receive the same test prompts
 4. **Compare Results**: View outputs side-by-side in the Promptfoo UI
@@ -225,6 +247,50 @@ View results: promptfoo view
 - Results saved to `results.json`
 - View detailed comparison with `promptfoo view`
 
+## Customizing Evaluation Tests
+
+The evaluation uses [Promptfoo's native configuration format](https://www.promptfoo.dev/docs/configuration/guide/). Add more tests to `configs/eval_config.yaml`:
+
+```yaml
+promptfoo:
+  tests:
+    # Test reasoning with LLM grading
+    - vars:
+        message: "If all roses are flowers and some flowers fade quickly, can we conclude that some roses fade quickly?"
+      assert:
+        - type: llm-rubric
+          value: "The answer correctly identifies that we cannot make this conclusion"
+    
+    # Test code generation with multiple checks
+    - vars:
+        message: "Write a Python function to calculate factorial"
+      assert:
+        - type: contains
+          value: "def"
+        - type: python
+          value: "'factorial' in output"
+        - type: javascript
+          value: "output.includes('return') || output.includes('yield')"
+    
+    # Test structured output
+    - vars:
+        message: "Generate a JSON object with name and age fields"
+      assert:
+        - type: is-json
+        - type: javascript
+          value: "JSON.parse(output).name && JSON.parse(output).age"
+    
+    # Test with similarity matching
+    - vars:
+        message: "Explain photosynthesis"
+      assert:
+        - type: similar
+          value: "Photosynthesis is the process by which plants convert sunlight into chemical energy"
+          threshold: 0.8
+```
+
+See [Promptfoo's assertion documentation](https://www.promptfoo.dev/docs/configuration/expected-outputs/) for all available test types.
+
 ## Model Stores
 
 See `model_stores/` for:
@@ -239,7 +305,7 @@ sky volumes apply create-volume.yaml  # One-time setup
 sky launch setup-volume.yaml -c setup --down -y
 ```
 
-To use your fine-tuned models, simply save them to a volume or S3 bucket during training, then reference in `configs/models_config.yaml`.
+To use your fine-tuned models, simply save them to a volume or S3 bucket during training, then reference in `configs/eval_config.yaml`.
 
 ## Troubleshooting
 

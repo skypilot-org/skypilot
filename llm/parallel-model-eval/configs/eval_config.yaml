@@ -1,0 +1,84 @@
+# SkyPilot model deployment configuration
+# These models will be deployed and exposed as OpenAI-compatible endpoints
+models:
+  - name: "mistral-7b"
+    source: "hf://mistralai/Mistral-7B-Instruct-v0.1"
+    # accelerators: "L4:1"  # Optional: override default from serve-model.yaml
+    
+  - name: "agent-llama"
+    source: "volume://model-checkpoints/agent-llama"
+    
+  - name: "agent-qwen"
+    source: "s3://skypilot-agent-models/qwen-agent"
+
+  - name: "tinyllama"
+    source: "hf://TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+
+  - name: "gemma"
+    source: "hf://google/gemma-3-1b-it"
+
+# SkyPilot deployment settings
+cluster_prefix: "eval"  # Prefix for cluster names (e.g., "eval-mistral-7b")
+skip_launch: false  # Set to true to use existing clusters without launching
+cleanup_on_complete: false  # Set to false to keep clusters running after evaluation
+
+# Promptfoo evaluation configuration
+# See: https://www.promptfoo.dev/docs/configuration/guide/
+promptfoo:
+  description: "Multi-model evaluation"
+  
+  # Prompts to test
+  prompts:
+    - "You are a helpful AI assistant. {{message}}"
+    # - file://prompts/agent_prompt.txt  # Load from file
+    # - "{{role}}: {{message}}"  # Multiple variables
+  
+  # Test cases
+  tests:
+    - vars:
+        message: "What is quantum computing?"
+      assert:
+        - type: contains
+          value: "quantum"
+    
+    - vars:
+        message: "Write a hello world in Python"
+      assert:
+        - type: contains
+          value: "print"
+        - type: python
+          value: "len(output) > 10"
+    
+    - vars:
+        message: "Explain machine learning in one sentence"
+      assert:
+        - type: similar
+          value: "Machine learning is a type of artificial intelligence that enables computers to learn from data"
+          threshold: 0.7
+    
+    # More test examples:
+    # - description: "Test JSON generation"
+    #   vars:
+    #     message: "Generate a JSON object with name and age fields"
+    #   assert:
+    #     - type: is-json
+    #     - type: javascript
+    #       value: "JSON.parse(output).name && JSON.parse(output).age"
+    
+    # - description: "Test reasoning"
+    #   vars:
+    #     message: "If all roses are flowers and some flowers fade quickly, can we conclude that some roses fade quickly?"
+    #   assert:
+    #     - type: llm-rubric
+    #       value: "The answer correctly identifies that we cannot make this conclusion"
+  
+  # Optional: Output settings
+  outputPath: "./results.json"
+  
+  # Optional: Default test assertions
+  # defaultTest:
+  #   assert:
+  #     - type: not-contains
+  #       value: "error"
+  #     - type: latency
+  #       threshold: 5000  # ms
