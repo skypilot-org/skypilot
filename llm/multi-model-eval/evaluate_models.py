@@ -6,64 +6,20 @@ Example usage:
     python evaluate_models.py
 """
 
-import subprocess
-import time
 import os
+import subprocess
 from typing import Dict, List
-import uuid
 
-import requests
 import yaml
 
 import sky
-
-# Configuration
-# API_TOKEN = uuid.uuid4().hex
-API_TOKEN = 'default-api-token'
-SERVE_TEMPLATE = 'templates/serve-model.yaml'
-MODELS_CONFIG = 'models_config.yaml'
+import utils
 
 
 def load_models_config() -> Dict:
     """Load model configurations."""
-    with open(MODELS_CONFIG, 'r', encoding='utf-8') as f:
+    with open(utils.MODELS_CONFIG, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
-
-
-def get_model_path_and_mounts(source: str, model_id: str = None) -> tuple:
-    """
-    Determine model path, file mounts, and volumes based on model source.
-    
-    Returns:
-        (model_path, file_mounts_dict, volumes_dict)
-    """
-    if source == 'huggingface':
-        return model_id, None, None
-    
-    if source.startswith(('s3://', 'gs://')):
-        # Extract bucket name and path: s3://bucket/path or gs://bucket/path
-        prefix_len = len('s3://') if source.startswith('s3://') else len('gs://')
-        path_parts = source[prefix_len:].split('/', 1)
-        bucket_name = path_parts[0]
-        bucket_path = path_parts[1] if len(path_parts) > 1 else ''
-        
-        # Mount at unique path per bucket
-        mount_path = f"/buckets/{bucket_name}"
-        model_path = f"{mount_path}/{bucket_path}" if bucket_path else mount_path
-        return model_path, {mount_path: source}, None
-    
-    if source.startswith('volume://'):
-        # Extract volume name and path: volume://volume-name/path
-        path_parts = source[len('volume://'):].split('/', 1)
-        volume_name = path_parts[0]
-        volume_path = path_parts[1] if len(path_parts) > 1 else ''
-        
-        # Mount at unique path per volume
-        mount_path = f"/volumes/{volume_name}"
-        model_path = f"{mount_path}/{volume_path}" if volume_path else mount_path
-        return model_path, None, {mount_path: volume_name}
-    
-    raise ValueError(f"Unknown source type: {source}")
 
 
 def prepare_model_task(model: Dict) -> tuple:
@@ -72,19 +28,19 @@ def prepare_model_task(model: Dict) -> tuple:
     cluster_name = f"eval-{name}"
     
     # Get model path, mounts, and volumes
-    model_path, file_mounts, volumes = get_model_path_and_mounts(
+    model_path, file_mounts, volumes = utils.get_model_path_and_mounts(
         model['source'], 
         model.get('model_id')
     )
     
     # Load task template
-    task = sky.Task.from_yaml(SERVE_TEMPLATE)
+    task = sky.Task.from_yaml(utils.SERVE_TEMPLATE)
     task.name = f"serve-{name}"
     
     # Set environment variables
     task.update_envs({
         'MODEL_PATH': model_path,
-        'API_TOKEN': API_TOKEN,
+        'API_TOKEN': utils.API_TOKEN,
         'HF_TOKEN': os.environ.get('HF_TOKEN', None)
     })
     
@@ -107,62 +63,6 @@ def prepare_model_task(model: Dict) -> tuple:
     return task, cluster_name, name
 
 
-def wait_for_model_ready(cluster_name: str, job_id: str, timeout: int = 300) -> bool:
-    """Wait for model server to be ready by checking logs."""
-    import io
-    import sys
-    
-    start_time = time.time()
-    check_interval = 5
-    dots = 0
-    
-    while time.time() - start_time < timeout:
-        try:
-            # Create a string buffer to capture logs
-            output_buffer = io.StringIO()
-            
-            # Get logs from the cluster using Sky Python API
-            sky.tail_logs(cluster_name, job_id=job_id, follow=False, 
-                         tail=100, output_stream=output_buffer)
-            
-            logs = output_buffer.getvalue()
-            output_buffer.close()
-            
-            if logs and 'Application startup complete.' in logs:
-                print(f"\r  ✅ {cluster_name} is ready!                    ")
-                return True
-            
-            # Show progress indicator
-            elapsed = int(time.time() - start_time)
-            dots = (dots + 1) % 4
-            progress = "." * dots + " " * (3 - dots)
-            print(f"\r  ⏳ {cluster_name}: waiting for vLLM server to start{progress} ({elapsed}s)", end="")
-            sys.stdout.flush()
-            
-            time.sleep(check_interval)
-        except Exception as e:
-            print(f"\r  ⚠️  Error checking {cluster_name}: {e}          ")
-            time.sleep(check_interval)
-    
-    print(f"\r  ⏱️  {cluster_name}: timeout after {timeout}s          ")
-    return False
-
-
-def verify_endpoint(endpoint: str, api_token: str, max_retries: int = 3) -> bool:
-    """Verify that the model endpoint is accessible."""
-    url = f"http://{endpoint}/models"
-    headers = {"Authorization": f"Bearer {api_token}"}
-    
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, headers=headers, timeout=5)
-            if response.status_code == 200:
-                return True
-        except:
-            pass
-        if attempt < max_retries - 1:
-            time.sleep(2)
-    return False
 
 
 def launch_models_parallel(models: List[Dict]) -> List[Dict]:
@@ -171,55 +71,92 @@ def launch_models_parallel(models: List[Dict]) -> List[Dict]:
     print(f"🚀 LAUNCHING {len(models)} MODELS IN PARALLEL")
     print(f"{'='*60}\n")
     
-    # Prepare and launch all models in parallel
+    # Check existing clusters and prepare launch requests
     launch_requests = {}
+    existing_models = []
+    
     for i, model in enumerate(models, 1):
         try:
             task, cluster_name, name = prepare_model_task(model)
-            print(f"[{i}/{len(models)}] Launching {name}...")
-            request_id = sky.launch(task, cluster_name=cluster_name, fast=True)
-            launch_requests[name] = {
-                'request_id': request_id,
-                'cluster_name': cluster_name,
-                'model': model
-            }
+            
+            # Determine the model ID that vLLM will use
+            if model.get('source') == 'huggingface':
+                actual_model_id = model.get('model_id')
+            else:
+                # For volume/S3 sources, get the model path
+                model_path, _, _ = utils.get_model_path_and_mounts(
+                    model.get('source'), 
+                    model.get('model_id')
+                )
+                actual_model_id = model_path
+            
+            # Check if cluster already exists and is serving
+            exists, _ = utils.check_cluster_ready(cluster_name, utils.API_TOKEN)
+            
+            if exists:
+                print(f"[{i}/{len(models)}] {name}: cluster exists")
+                # Cancel any running jobs before re-launching
+                try:
+                    print(f"  Cancelling existing jobs if any on {cluster_name}...")
+                    cancel_request = sky.cancel(cluster_name, all=True)
+                    sky.get(cancel_request)
+                    print(f"  ✓ Cancelled existing jobs")
+                except Exception as e:
+                    print(f"  ⚠️  Could not cancel jobs: {e}")
+                
+                print(f"  Re-launching task...")
+                request_id = sky.launch(task, cluster_name=cluster_name, fast=True)
+                launch_requests[name] = {
+                    'request_id': request_id,
+                    'cluster_name': cluster_name,
+                    'model': model,
+                    'model_id': actual_model_id
+                }
+            else:
+                print(f"[{i}/{len(models)}] Launching {name}...")
+                request_id = sky.launch(task, cluster_name=cluster_name, fast=True)
+                launch_requests[name] = {
+                    'request_id': request_id,
+                    'cluster_name': cluster_name,
+                    'model': model,
+                    'model_id': actual_model_id
+                }
         except Exception as e:
             print(f"  ❌ Failed to launch: {e}")
     
-    if not launch_requests:
-        return []
+    # Combine existing models with newly launched ones
+    launched_models = existing_models.copy()
     
-    # Wait for all launches to complete
-    print(f"\n{'─'*60}")
-    print("⏳ WAITING FOR CLUSTERS TO PROVISION")
-    print(f"{'─'*60}\n")
-    
-    launched_models = []
-    for name, info in launch_requests.items():
-        try:
-            # Get the launch result
-            result = sky.get(info['request_id'])
-            job_id = result[0]
-            print(f"  ✅ {name}: cluster provisioned")
-            
-            # Get cluster status to find endpoint
-            port = 8000
-            endpoint = sky.get(sky.endpoints(info['cluster_name'], port))
-            
-            if endpoint:
-                endpoint = endpoint[str(port)]
-                print(f"Endpoint: {endpoint}")
-                launched_models.append({
-                    'name': name,
-                    'cluster_name': info['cluster_name'],
-                    'endpoint': endpoint,
-                    'source': info['model'].get('source', 'unknown'),
-                    'job_id': str(job_id)
-                })
-            else:
-                print(f"  ⚠️  {name}: endpoint not found")
-        except Exception as e:
-            print(f"  ❌ {name}: provisioning failed - {e}")
+    if launch_requests:
+        # Wait for all launches to complete
+        print(f"\n{'─'*60}")
+        print("⏳ WAITING FOR CLUSTERS TO PROVISION")
+        print(f"{'─'*60}\n")
+        
+        for name, info in launch_requests.items():
+            try:
+                # Get the launch result
+                result = sky.get(info['request_id'])
+                job_id = result[0]
+                print(f"  ✅ {name}: cluster provisioned")
+                
+                # Get cluster status to find endpoint
+                endpoint = utils.get_cluster_endpoint(info['cluster_name'])
+                
+                if endpoint:
+                    print(f"Endpoint: {endpoint}")
+                    launched_models.append({
+                        'name': name,
+                        'cluster_name': info['cluster_name'],
+                        'endpoint': endpoint,
+                        'source': info['model'].get('source', 'unknown'),
+                        'job_id': str(job_id),
+                        'model_id': info.get('model_id')
+                    })
+                else:
+                    print(f"  ⚠️  {name}: endpoint not found")
+            except Exception as e:
+                print(f"  ❌ {name}: provisioning failed - {e}")
     
     # Wait for all models to be ready
     if launched_models:
@@ -229,10 +166,16 @@ def launch_models_parallel(models: List[Dict]) -> List[Dict]:
         
         ready_models = []
         for model in launched_models:
-            if wait_for_model_ready(model['cluster_name'], job_id=model['job_id']):
+            # Skip waiting for existing models that are already verified
+            if model['job_id'] == 'existing':
+                print(f"  ✅ {model['name']}: already serving (skipping wait)")
+                ready_models.append(model)
+            elif utils.wait_for_model_ready(model['cluster_name'], job_id=model['job_id']):
                 # Verify endpoint is accessible
-                if verify_endpoint(model['endpoint'], API_TOKEN):
+                if utils.verify_endpoint(model['endpoint'], utils.API_TOKEN):
                     print(f"  🌐 {model['name']}: endpoint verified at http://{model['endpoint']}")
+                    if model.get('model_id'):
+                        print(f"      Using model: {model['model_id']}")
                     ready_models.append(model)
                 else:
                     print(f"  ⚠️  {model['name']}: endpoint not accessible")
@@ -250,11 +193,16 @@ def create_evaluation_config(models: List[Dict], output_path: str):
     providers = []
     for model in models:
         if model:
+            # Get model ID - use the actual model ID from server if available
+            model_id = model.get('model_id', 'auto')
+            
+            # Use openai provider with custom endpoint
             providers.append({
-                'id': f'openai:chat:{model["name"]}',
+                'id': f'openai:chat:{model_id}',
+                'label': model["name"],
                 'config': {
-                    'baseUrl': f"http://{model['endpoint']}",
-                    'apiKey': API_TOKEN,
+                    'apiBaseUrl': f"http://{model['endpoint']}/v1",
+                    'apiKey': utils.API_TOKEN,
                     'temperature': 0.7,
                     'max_tokens': 512
                 }
@@ -292,11 +240,16 @@ def run_evaluation(config_path: str):
     """Run Promptfoo evaluation."""
     print("\n🔍 Running evaluation...")
     
+    # Set environment variable to disable SSL verification for local endpoints
+    env = os.environ.copy()
+    env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0'
+    
     result = subprocess.run(
         ['promptfoo', 'eval', '-c', config_path, '--no-progress-bar'],
         capture_output=True,
         text=True,
-        check=False
+        check=False,
+        env=env
     )
     
     if result.returncode == 0:
@@ -328,7 +281,7 @@ def main():
     
     # Check for custom config file from command line
     import sys
-    config_file = MODELS_CONFIG
+    config_file = utils.MODELS_CONFIG
     if len(sys.argv) > 1 and '--config' in sys.argv:
         idx = sys.argv.index('--config')
         if idx + 1 < len(sys.argv):

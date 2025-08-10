@@ -17,12 +17,12 @@ run: |
   import torch
   import os
   
-  # Use Llama-3.2-1B model
+  # Use Llama-3.2-1B-Instruct model (has chat template)
   hf_token = os.environ.get('HF_TOKEN')
   print(f'HF_TOKEN available: {bool(hf_token)}')
   
-  print('Loading Llama-3.2-1B from HuggingFace...')
-  model_id = 'meta-llama/Llama-3.2-1B'
+  print('Loading Llama-3.2-1B-Instruct from HuggingFace...')
+  model_id = 'meta-llama/Llama-3.2-1B-Instruct'
   
   model = AutoModelForCausalLM.from_pretrained(
       model_id, 
@@ -35,5 +35,5 @@ run: |
   print('Saving model to /volumes/agent-llama...')
   model.save_pretrained('/volumes/agent-llama')
   tokenizer.save_pretrained('/volumes/agent-llama')
-  print('✅ Llama-3.2-1B saved to volume at /volumes/agent-llama')
+  print('✅ Llama-3.2-1B-Instruct saved to volume at /volumes/agent-llama')
   "
