@@ -299,7 +299,7 @@ View results: promptfoo view
 - Launch happens in parallel for speed
 - Results saved to `results.json`
 - View detailed comparison with `promptfoo view`
-- Use `skip_launch: true` to reuse existing clusters
+- Use `eval_only: true` to run evaluation on existing clusters
 - Set `cleanup_on_complete: false` to keep clusters running
 
 ## Customizing Evaluation Tests
@@ -378,7 +378,7 @@ sky endpoints eval-<model-name> 8000
 sky down eval-*
 
 # Use existing clusters without relaunching
-# Set skip_launch: true in configs/eval_config.yaml
+# Set eval_only: true in configs/eval_config.yaml
 ```
 
 ## Advanced Usage

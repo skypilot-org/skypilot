@@ -353,7 +353,7 @@ Examples:
   python evaluate_models.py --config models_config_test.yaml
   
   # To skip launch or cleanup, edit the config file:
-  # skip_launch: true      # Use existing clusters
+  # eval_only: true      # Use existing clusters
   # cleanup_on_complete: false  # Keep clusters running
         """)
 
@@ -381,7 +381,7 @@ def main():
         config = yaml.safe_load(f)
 
     models = config['models']
-    skip_launch = config.get('skip_launch', False)
+    eval_only = config.get('eval_only', False)
     cleanup_on_complete = config.get('cleanup_on_complete', True)
     cluster_prefix = config.get('cluster_prefix', 'eval')
     default_serve_template = config.get('default_serve_template', None)
@@ -391,17 +391,17 @@ def main():
     if default_serve_template:
         print(
             f"📄 Using custom default serve template: {default_serve_template}")
-    if skip_launch:
-        print("⏭️  Skipping cluster launch (using existing clusters)")
+    if eval_only:
+        print("📊 Evaluation-only mode (using existing clusters)")
     if not cleanup_on_complete:
         print("🔒 Clusters will not be terminated after evaluation")
 
     # Either get existing clusters or launch new ones
-    if skip_launch:
+    if eval_only:
         launched_models = get_existing_clusters(models, cluster_prefix)
         if not launched_models:
             print(
-                "\n❌ No existing clusters found. Please launch clusters first or set skip_launch: false"
+                "\n❌ No existing clusters found. Please launch clusters first or set eval_only: false"
             )
             return
         print(
@@ -425,7 +425,7 @@ def main():
 
     finally:
         # Cleanup based on config settings
-        if cleanup_on_complete and not skip_launch:
+        if cleanup_on_complete and not eval_only:
             cleanup_clusters(launched_models)
 
 
