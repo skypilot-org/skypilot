@@ -646,6 +646,10 @@ def add_cluster_event(cluster_name: str,
                       reason: str, event_type: ClusterEventType) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+    if cluster_hash is None:
+        logger.debug(f'Hash for cluster {cluster_name} not found. '
+                     'Skipping event.')
+        return
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
