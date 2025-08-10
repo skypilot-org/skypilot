@@ -163,6 +163,8 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 #SBATCH --output=interactive-bash.out
 #SBATCH --error=interactive-bash.err
 #SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem-per-cpu=1G
 #SBATCH --time=1:00:00
 
 sleep 1000000000
