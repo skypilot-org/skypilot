@@ -29,7 +29,7 @@ models:
     source: "hf://TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
   - name: "phi"
-    source: "hf://microsoft/Phi-tiny-MoE-instruct"
+    source: "hf://microsoft/Phi-4-mini-instruct"
 
 # Evaluation settings
 cluster_prefix: "eval"  # Prefix for cluster names (e.g., "eval-mistral-7b")
