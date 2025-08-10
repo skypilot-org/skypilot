@@ -52,8 +52,3 @@ run: |
   print(f'✅ Qwen2.5-1.5B saved to S3: {output_path}')
   "
   
-  # Verify the files were saved
-  echo "Verifying files in S3..."
-  ls -la ${OUTPUT_PATH}/
-  
-  echo "✅ Model ready at s3://my-models/${MODEL_NAME}"

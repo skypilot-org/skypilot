@@ -98,6 +98,7 @@ from sky.client.sdk import cancel
 from sky.client.sdk import cost_report
 from sky.client.sdk import down
 from sky.client.sdk import download_logs
+from sky.client.sdk import endpoints
 from sky.client.sdk import exec  # pylint: disable=redefined-builtin
 from sky.client.sdk import get
 from sky.client.sdk import job_status
@@ -189,6 +190,7 @@ __all__ = [
     'reload_config',
     # core APIs
     'status',
+    'endpoints',
     'start',
     'stop',
     'down',

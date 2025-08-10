@@ -5,7 +5,8 @@ This folder contains everything needed to demo SkyPilot's multi-model evaluation
 ## Prerequisites
 - HuggingFace token with Llama access (set as `HF_TOKEN` environment variable)
 - Access to GKE cluster
-- AWS credentials for S3 demo
+- AWS credentials for S3 demo (optional - S3 setup may have issues on GKE)
+- Node.js/npm installed (for promptfoo)
 
 ## Quick Start
 
@@ -20,14 +21,19 @@ This folder contains everything needed to demo SkyPilot's multi-model evaluation
 # 1. Connect to GKE
 gcloud container clusters get-credentials zhwu-api-test --region us-central1-c
 
-# 2. Create Kubernetes volume
-sky volumes apply finetuning/create-volume.yaml
+# 2. Install evaluation tool
+npm install -g promptfoo
 
-# 3. Setup models from different sources
+# 3. Create Kubernetes volume
+sky volumes apply finetuning/create-volume.yaml -y
+
+# 4. Setup models from different sources
 sky launch demo/setup-volume.yaml -c setup --down -y --env HF_TOKEN
+
+# 5. (Optional) Setup S3 model - may have issues on GKE
 sky launch demo/setup-s3-model.yaml -c setup-s3 --down -y
 
-# 4. Run evaluation
+# 6. Run evaluation
 python evaluate_models.py
 ```
 
@@ -122,9 +128,16 @@ sky status
 
 ## Troubleshooting
 
+### Known Issues
+- **S3 setup on GKE**: The S3 model setup may fail with fusermount errors on GKE. Use HuggingFace and volume models for demo.
+
+### Debug Commands
 ```bash
 # Debug specific cluster
 sky logs eval-<model-name> --tail 100
+
+# Check cluster status
+sky status | grep eval
 
 # Force restart a model
 sky down eval-<model-name>
