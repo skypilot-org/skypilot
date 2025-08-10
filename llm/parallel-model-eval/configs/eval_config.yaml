@@ -49,22 +49,16 @@ promptfoo:
         - type: python
           value: "len(output) > 10"
     
-    - vars:
-        message: "Explain machine learning in one sentence"
+    - description: "Test JSON generation"
+      vars:
+        message: "Generate a JSON object with name and age fields"
       assert:
-        - type: similar
-          value: "Machine learning is a type of artificial intelligence that enables computers to learn from data"
-          threshold: 0.7
+        - type: is-json
+        - type: javascript
+          value: "JSON.parse(output).name && JSON.parse(output).age"
+    
     
     # More test examples:
-    # - description: "Test JSON generation"
-    #   vars:
-    #     message: "Generate a JSON object with name and age fields"
-    #   assert:
-    #     - type: is-json
-    #     - type: javascript
-    #       value: "JSON.parse(output).name && JSON.parse(output).age"
-    
     # - description: "Test reasoning"
     #   vars:
     #     message: "If all roses are flowers and some flowers fade quickly, can we conclude that some roses fade quickly?"
