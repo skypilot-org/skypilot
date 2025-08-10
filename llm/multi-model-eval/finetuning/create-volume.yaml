@@ -6,7 +6,7 @@ size: 100Gi
 config:
   namespace: default
   # GKE storage class for standard persistent disk
-  storage_class_name: standard
+  storage_class_name: premium-rwo
   # Note: Use ReadWriteOnce for standard GKE storage
   # For shared access across multiple pods, consider GKE Filestore
   access_mode: ReadWriteOnce

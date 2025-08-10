@@ -15,8 +15,11 @@ envs:
   OUTPUT_PATH: /volumes/qwen-agent
 
 setup: |
+  uv venv --seed --python 3.10
+  source .venv/bin/activate
   uv pip install torch transformers datasets accelerate
 
 run: |
+  source .venv/bin/activate
   python finetune.py
   echo "✅ Model saved to volume: ${OUTPUT_PATH}"
