@@ -2,6 +2,8 @@
 
 Compare multiple trained models and agents side-by-side using Promptfoo and SkyPilot.
 
+![](https://i.imgur.com/85MrID8.png)
+
 ## Architecture Overview
 
 ```
@@ -39,22 +41,38 @@ Compare multiple trained models and agents side-by-side using Promptfoo and SkyP
                    └──────────────┘
 ```
 
+
 ### Key Components:
 
 1. **SkyPilot SDK**: Orchestrates the entire deployment
    - Loads serving configuration from YAML template
    - Launches multiple clusters in parallel
-   - Handles cloud resources and GPU allocation
+   - Handles cloud and reserved resources and GPU allocation
+   - Sets up networking and exposes endpoints automatically
 
 2. **SkyPilot Clusters**: Each model runs on its own cluster
    - Automatic GPU provisioning based on model size
    - vLLM for high-performance inference
    - OpenAI-compatible API endpoints
+   - Auto-configured networking with public IPs
 
 3. **Flexible Model Sources**: 
    - HuggingFace Hub for public models
    - Cloud buckets (S3/GCS) for custom checkpoints
    - SkyPilot Volumes for fast repeated access
+
+4. **Promptfoo**: Evaluates the models and agents
+   - Uses OpenAI-compatible APIs to evaluate the models
+   - Saves the results to a JSON file
+   - Provides a web interface to view the results
+
+### Why SkyPilot?
+
+**SkyPilot automates the complex infrastructure setup** needed for large-scale model evaluation:
+- **Parallel deployment**: Launch 10+ models simultaneously in minutes, not hours
+- **Automatic networking**: Each model gets a public endpoint with zero configuration
+- **Cross-cloud orchestration**: Mix models across AWS, GCP, Azure, and Kubernetes
+
 
 ## Quick Start
 
