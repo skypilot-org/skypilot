@@ -1370,7 +1370,6 @@ class RetryingVmProvisioner(object):
             os.system(f'touch {log_path}')
         # Record provision log path on the current API request (server-side)
         try:
-            # Import lazily to avoid client-side import issues
             if annotations.is_on_api_server:
                 req_id = common_utils.get_current_request_id()
                 with requests_lib.update_request(req_id) as req:
@@ -1697,7 +1696,7 @@ class RetryingVmProvisioner(object):
                 config_dict['handle'] = handle
                 logger.info(
                     ux_utils.finishing_message(
-                        f'Cluster launched: {cluster_name!r}.', log_path))
+                        f'Cluster launched: {cluster_name!r}.', log_path, cluster_name=cluster_name))
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
@@ -1831,7 +1830,8 @@ class RetryingVmProvisioner(object):
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at='Shared connection to',
-                line_processor=log_utils.RayUpLineProcessor(log_abs_path),
+                line_processor=log_utils.RayUpLineProcessor(
+                    log_abs_path, cluster_name=cluster_handle.cluster_name),
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(
