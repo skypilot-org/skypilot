@@ -99,7 +99,11 @@ class UserSignal(enum.Enum):
 
 
 # ====== internal functions ======
-def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
+def terminate_cluster(
+        cluster_name: str,
+        max_retry: int = 6,
+        _logger: logging.Logger = logger,  # pylint: disable=invalid-name
+) -> None:
     """Terminate the cluster."""
     from sky import core  # pylint: disable=import-outside-toplevel
     retry_cnt = 0
@@ -122,18 +126,18 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
-            logger.debug(f'The cluster {cluster_name} is already down.')
+            _logger.debug(f'The cluster {cluster_name} is already down.')
             return
         except Exception as e:  # pylint: disable=broad-except
             retry_cnt += 1
             if retry_cnt >= max_retry:
                 raise RuntimeError(
                     f'Failed to terminate the cluster {cluster_name}.') from e
-            logger.error(
+            _logger.error(
                 f'Failed to terminate the cluster {cluster_name}. Retrying.'
                 f'Details: {common_utils.format_exception(e)}')
             with ux_utils.enable_traceback():
-                logger.error(f'  Traceback: {traceback.format_exc()}')
+                _logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(backoff.current_backoff())
 
 

@@ -22,6 +22,7 @@ import psutil
 # and a new job is launched with a newer runtime, the old job's termination
 # will try to import code from a different SkyPilot runtime, causing exceptions.
 # pylint: disable=unused-import
+import sky
 from sky import core
 from sky import exceptions
 from sky import sky_logging
@@ -45,9 +46,6 @@ from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    import sky
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
@@ -796,7 +794,13 @@ class Controller:
                     cluster_name = (
                         managed_job_utils.generate_managed_job_cluster_name(
                             task.name, job_id))
-                    managed_job_utils.terminate_cluster(cluster_name)
+                    managed_job_utils.terminate_cluster(cluster_name,
+                                                        _logger=job_logger)
+                    assert core.status(cluster_names=[cluster_name],
+                                       all_users=True)[0]['status'] == (
+                                           sky.ClusterStatus.STOPPED), (
+                                               f'{cluster_name} is not down')
+                    job_logger.info(f'{cluster_name} is down')
                 else:
                     cluster_name, job_id_on_pool_cluster = (
                         managed_job_state.get_pool_submit_info(job_id))
@@ -877,6 +881,8 @@ class Controller:
         # process.
         original_environ = os.environ
         os.environ = context.ContextualEnviron(original_environ)  # type: ignore
+        sys.stdout = context.Stdout()  # type: ignore
+        sys.stderr = context.Stderr()  # type: ignore
 
         # Load and apply environment variables from the job's environment file
         if env_file_path and os.path.exists(env_file_path):
@@ -942,9 +948,6 @@ class Controller:
                              f'{common_utils.format_exception(e)}')
             raise
         finally:
-            # Restore original os.environ to avoid affecting other jobs
-            os.environ = original_environ
-
             try:
                 await self._cleanup(job_id,
                                     dag_yaml=dag_yaml,
@@ -1005,6 +1008,9 @@ class Controller:
             async with self._job_tasks_lock:
                 if job_id in self.job_tasks:
                     del self.job_tasks[job_id]
+
+            # Restore original os.environ to avoid affecting other jobs
+            os.environ = original_environ
 
     async def start_job(
         self,
