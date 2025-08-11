@@ -768,7 +768,7 @@ export function ClusterTable({
                 >
                   Started{getSortDirection('time')}
                 </TableHead>
-                
+
                 <TableHead
                   className="sortable whitespace-nowrap"
                   onClick={() => requestSort('last_event')}
