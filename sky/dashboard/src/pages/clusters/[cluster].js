@@ -528,7 +528,19 @@ function ActiveTab({
                     : 'N/A'}
                 </div>
               </div>
-
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Last Event
+                </div>
+                <div className="text-base mt-1">
+                  <NonCapitalizedTooltip
+                    content={clusterData.last_event || '-'}
+                    className="text-sm text-muted-foreground"
+                  >
+                    <span>{clusterData.last_event || '-'}</span>
+                  </NonCapitalizedTooltip>
+                </div>
+              </div>
               {/* Show duration and cost for historical clusters */}
               {isHistoricalCluster ? (
                 <>
