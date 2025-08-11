@@ -6,13 +6,6 @@ models:
     # accelerators: "L4:1"  # Optional: override default from serve template
     # serve_template: "configs/templates/serve-ollama.yaml"  # Optional: use custom template for this model
     
-    
-  - name: "agent-llama"
-    source: "volume://model-checkpoints/agent-llama"
-    
-  - name: "agent-qwen"
-    source: "s3://skypilot-agent-models/qwen-agent"
-
   - name: "gemma"
     source: "hf://google/gemma-3-1b-it"
 
@@ -20,10 +13,16 @@ models:
     source: "ollama://tinyllama:1.1b"  # Ollama model ID
     serve_template: "configs/templates/serve-ollama.yaml"
 
+  # You can also use your own models. See the README for more details.
+  # - name: "agent-llama"
+  #   source: "volume://model-checkpoints/agent-llama"
+    
+  # - name: "agent-qwen"
+  #   source: "s3://skypilot-agent-models/qwen-agent"
 
 # SkyPilot deployment settings
 cluster_prefix: "eval"  # Prefix for cluster names (e.g., "eval-mistral-7b")
-eval_only: true  # Set to true to only run evaluation on existing clusters (no launching)
+eval_only: false  # Set to true to only run evaluation on existing clusters (no launching)
 cleanup_on_complete: false  # Set to false to keep clusters running after evaluation
 # default_serve_template: "configs/templates/serve-vllm.yaml"  # Default: vLLM template (uncomment to specify custom template)
 
@@ -56,7 +55,7 @@ promptfoo:
     
     - description: "Test JSON generation"
       vars:
-        message: "Generate a JSON object with name and age fields. The response should only include valid JSON, nothing else."
+        message: "Generate a JSON object with name and age fields. The response should only include valid JSON, nothing else, e.g. no markdown, no code blocks, etc."
       assert:
         - type: is-json
         - type: javascript

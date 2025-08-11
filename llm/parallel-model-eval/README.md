@@ -1,10 +1,12 @@
-# Parallel Model Evaluation with SkyPilot
+# Large-scale Parallel Model Evaluation with SkyPilot and Promptfoo
 
-**Compare multiple LLMs side-by-side in minutes** - Launch dozens of models in parallel across any cloud and evaluate them with the same test suite.
+**Compare multiple LLMs side-by-side in minutes** - Launch dozens of models in parallel across any infrastructure (clouds, Kubernetes, etc.) and evaluate them with the same test suite.
 
-![Model Comparison Dashboard](https://i.imgur.com/BskVWdn.png)
+## Model Comparison Dashboard
+![Model Comparison Dashboard](https://i.imgur.com/IuKgPTV.png)
 
-![Evaluation Results](https://i.imgur.com/ptuYADo.png)
+## Self-hosted models by SkyPilot
+![Self-hosted models by SkyPilot](https://i.imgur.com/ptuYADo.png)
 
 ## 🚀 What This Does
 
@@ -39,14 +41,14 @@ sky check
 ### 2️⃣ Run Your First Evaluation
 
 ```bash
-# Run the default evaluation with 2 small models
+# Run the default evaluation with 3 models
 python evaluate_models.py
 
 # View results in your browser
 promptfoo view
 ```
 
-That's it! You've just compared multiple models in parallel. 🎉
+That's it! You've just compared multiple models in parallel. You can find the comparison dashboard [above](#model-comparison-dashboard).
 
 ### 3️⃣ Customize for Your Use Case
 
@@ -55,6 +57,45 @@ Edit `configs/eval_config.yaml` to:
 - Customize evaluation tests
 - Change GPU types
 - Select different infrastructure
+
+### 4️⃣ Use your own models
+
+You can use your own models by adding them to the `models` section of `configs/eval_config.yaml`.
+The model checkpoints can be stored in S3, GCS, or Kubernetes volumes. You can find examples in the [model_stores/](model_stores/) directory.
+
+#### Storing your model checkpoints examples:
+
+**Store your model checkpoints to cloud buckets, e.g. S3 or GCS**
+```
+sky launch -c setup-s3 model_stores/setup-s3-model.yaml
+```
+
+**Store your model checkpoints to Kubernetes volumes**
+* Create a SkyPilot volume for storing your model checkpoints:
+```
+sky volumes apply model_stores/create-volume.yaml
+```
+* Launch a cluster with the volume:
+```
+sky launch -c setup-volume model_stores/setup-volume.yaml
+```
+
+See [model_stores](model_stores/) for more details.
+
+#### Evaluating your models
+
+To use S3 bucket or volume as model source in `configs/eval_config.yaml`, use the following format:
+```yaml
+models:
+  - name: "my-model"
+    source: "s3://my-bucket/models/my-model"
+```
+or
+```yaml
+models:
+  - name: "my-model"
+    source: "volume://my-volume/models/my-model"
+```
 
 ## 📁 What's in This Directory?
 
