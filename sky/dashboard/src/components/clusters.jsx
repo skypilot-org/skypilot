@@ -768,13 +768,6 @@ export function ClusterTable({
                 >
                   Started{getSortDirection('time')}
                 </TableHead>
-
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('last_event')}
-                >
-                  Last Event{getSortDirection('last_event')}
-                </TableHead>
                 {showHistory && (
                   <TableHead
                     className="sortable whitespace-nowrap"
@@ -799,7 +792,7 @@ export function ClusterTable({
               {loading && isInitialLoad ? (
                 <TableRow>
                   <TableCell
-                    colSpan={10}
+                    colSpan={9}
                     className="text-center py-6 text-gray-500"
                   >
                     <div className="flex justify-center items-center">
@@ -871,14 +864,6 @@ export function ClusterTable({
                       <TableCell>
                         <TimestampWithTooltip date={item.time} />
                       </TableCell>
-                      <TableCell>
-                        <NonCapitalizedTooltip
-                          content={item.last_event || '-'}
-                          className="text-sm text-muted-foreground"
-                        >
-                          <span>{item.last_event || '-'}</span>
-                        </NonCapitalizedTooltip>
-                      </TableCell>
                       {showHistory && (
                         <TableCell>{formatDuration(item.duration)}</TableCell>
                       )}
@@ -903,7 +888,7 @@ export function ClusterTable({
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={10}
+                    colSpan={9}
                     className="text-center py-6 text-gray-500"
                   >
                     {showHistory ? 'No clusters found' : 'No active clusters'}
