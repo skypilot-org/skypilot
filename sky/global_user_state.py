@@ -686,11 +686,11 @@ def add_cluster_event(cluster_name: str,
                 raise e
 
 
-def get_last_cluster_event(cluster_name: str) -> Optional[str]:
+def get_last_cluster_event(cluster_hash: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_event_table).filter_by(
-            name=cluster_name,
+            cluster_hash=cluster_hash,
             type=ClusterEventType.STATUS_CHANGE.value).order_by(
                 cluster_event_table.c.transitioned_at.desc()).first()
     if row is None:
@@ -1075,7 +1075,7 @@ def get_clusters() -> List[Dict[str, Any]]:
         user_hash = _get_user_hash_or_current_user(row.user_hash)
         user = get_user(user_hash)
         user_name = user.name if user is not None else None
-        last_event = get_last_cluster_event(row.name)
+        last_event = get_last_cluster_event(row.cluster_hash)
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
