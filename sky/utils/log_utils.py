@@ -54,7 +54,8 @@ class RayUpLineProcessor(LineProcessor):
     def __enter__(self) -> None:
         self.state = self.ProvisionStatus.LAUNCH
         self.status_display = rich_utils.safe_status(
-            ux_utils.spinner_message('Launching', self.log_path,
+            ux_utils.spinner_message('Launching',
+                                     self.log_path,
                                      cluster_name=self.cluster_name))
         self.status_display.start()
 
@@ -64,7 +65,8 @@ class RayUpLineProcessor(LineProcessor):
             logger.info('  Head VM is up.')
             self.status_display.update(
                 ux_utils.spinner_message(
-                    'Launching - Preparing SkyPilot runtime', self.log_path,
+                    'Launching - Preparing SkyPilot runtime',
+                    self.log_path,
                     cluster_name=self.cluster_name))
             self.state = self.ProvisionStatus.RUNTIME_SETUP
         if ('Pulling from' in log_line and
@@ -79,7 +81,8 @@ class RayUpLineProcessor(LineProcessor):
                 self.state == self.ProvisionStatus.PULLING_DOCKER_IMAGES):
             self.status_display.update(
                 ux_utils.spinner_message(
-                    'Launching - Preparing SkyPilot runtime', self.log_path,
+                    'Launching - Preparing SkyPilot runtime',
+                    self.log_path,
                     cluster_name=self.cluster_name))
             self.state = self.ProvisionStatus.RUNTIME_SETUP
 
