@@ -447,7 +447,7 @@ class StrategyExecutor:
                 # We retry immediately for worker pool, since no sky.launch()
                 # is called and the overhead is minimal.
                 gap_seconds = (backoff.current_backoff()
-                               if self.pool is None else 0)
+                               if self.pool is None else 1)
                 logger.info('Retrying to launch the cluster in '
                             f'{gap_seconds:.1f} seconds.')
                 time.sleep(gap_seconds)
