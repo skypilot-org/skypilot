@@ -1682,7 +1682,9 @@ class RetryingVmProvisioner(object):
                 config_dict['handle'] = handle
                 logger.info(
                     ux_utils.finishing_message(
-                        f'Cluster launched: {cluster_name!r}.', log_path, cluster_name=cluster_name))
+                        f'Cluster launched: {cluster_name!r}.',
+                        log_path,
+                        cluster_name=cluster_name))
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
