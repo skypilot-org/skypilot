@@ -1256,7 +1256,7 @@ def query_instances(
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,
-        'Failed': None,
+        'Failed': status_lib.ClusterStatus.INIT,
         'Unknown': None,
         'Succeeded': None,
         'Terminating': None,
