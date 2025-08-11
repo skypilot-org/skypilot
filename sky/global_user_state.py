@@ -1034,7 +1034,7 @@ def get_cluster_from_name(
     user_hash = _get_user_hash_or_current_user(row.user_hash)
     user = get_user(user_hash)
     user_name = user.name if user is not None else None
-    last_event = get_last_cluster_event(row.name)
+    last_event = get_last_cluster_event(row.cluster_hash)
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
@@ -1220,7 +1220,7 @@ def get_clusters_from_history(
             'workspace': workspace,
             'last_creation_yaml': row.last_creation_yaml,
             'last_creation_command': row.last_creation_command,
-            'last_event': get_last_cluster_event(row.name),
+            'last_event': get_last_cluster_event(row.cluster_hash),
         }
 
         records.append(record)
