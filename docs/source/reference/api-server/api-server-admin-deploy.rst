@@ -49,15 +49,10 @@ Install the SkyPilot Helm chart with the following command:
     NAMESPACE=skypilot
     # RELEASE_NAME is the name of the helm release, must be unique within the namespace
     RELEASE_NAME=skypilot
-    # Set up basic username/password HTTP auth, or use OAuth2 proxy
-    WEB_USERNAME=skypilot
-    WEB_PASSWORD=yourpassword
-    AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
     # Deploy the API server
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
       --namespace $NAMESPACE \
-      --create-namespace \
-      --set ingress.authCredentials=$AUTH_STRING
+      --create-namespace
 
 .. dropdown:: Flags explanation
 
@@ -67,7 +62,6 @@ Install the SkyPilot Helm chart with the following command:
     * ``--devel``: Use the latest development version of the SkyPilot helm chart. To use a specific version, pass the ``--version`` flag to the ``helm upgrade`` command (e.g., ``--version 0.1.0``).
     * ``--namespace $NAMESPACE``: Specify the namespace to deploy the API server in.
     * ``--create-namespace``: Create the namespace if it doesn't exist.
-    * :ref:`--set ingress.authCredentials=$AUTH_STRING <helm-values-ingress-authCredentials>`: Set the basic auth credentials for the API server.
 
     For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 
@@ -105,10 +99,9 @@ Our default of using a NodePort service is the recommended way to expose the API
 
         .. code-block:: console
 
-            $ HOST=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller --namespace $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-            $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
+            $ ENDPOINT=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller --namespace $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
             $ echo $ENDPOINT
-            http://skypilot:yourpassword@1.1.1.1
+            http://1.1.1.1
 
         .. tip::
 
@@ -140,10 +133,9 @@ Our default of using a NodePort service is the recommended way to expose the API
 
             $ NODE_PORT=$(kubectl get svc ${RELEASE_NAME}-ingress-controller-np --namespace $NAMESPACE -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
             $ NODE_IP=$(kubectl get nodes -o jsonpath='{ $.items[0].status.addresses[?(@.type=="ExternalIP")].address }')
-            $ HOST=${NODE_IP}:${NODE_PORT}
-            $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
+            $ ENDPOINT=${NODE_IP}:${NODE_PORT}
             $ echo $ENDPOINT
-            http://skypilot:yourpassword@1.1.1.1:30050
+            http://1.1.1.1:30050
 
         .. tip::
 
