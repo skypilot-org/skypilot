@@ -796,10 +796,11 @@ class Controller:
                             task.name, job_id))
                     managed_job_utils.terminate_cluster(cluster_name,
                                                         _logger=job_logger)
-                    assert core.status(cluster_names=[cluster_name],
-                                       all_users=True)[0]['status'] == (
-                                           sky.ClusterStatus.STOPPED), (
-                                               f'{cluster_name} is not down')
+                    status = core.status(cluster_names=[cluster_name],
+                                         all_users=True)
+                    assert (len(status) == 0 or
+                            status[0]['status'] == sky.ClusterStatus.STOPPED), (
+                                f'{cluster_name} is not down: {status}')
                     job_logger.info(f'{cluster_name} is down')
                 else:
                     cluster_name, job_id_on_pool_cluster = (
