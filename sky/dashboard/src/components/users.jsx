@@ -1140,14 +1140,8 @@ export function Users() {
           <DialogHeader>
             <DialogTitle>Rotate Token</DialogTitle>
             <DialogDescription>
-              Rotate the token &quot;{tokenToRotate?.token_name}
-              &quot;
-              {tokenToRotate?.creator_user_hash !== userRoleCache?.id &&
-              userRoleCache?.role === 'admin'
-                ? ` owned by ${tokenToRotate?.creator_name}`
-                : ''}
-              . This will generate a new token value and invalidate the current
-              one.
+              Rotate the token &quot;{tokenToRotate?.token_name}&quot;. This
+              will generate a new token and invalidate the current one.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">

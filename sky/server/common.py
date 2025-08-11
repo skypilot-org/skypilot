@@ -601,20 +601,19 @@ def _initialize_tokens():
     tokens = global_user_state.get_tokens_by_user_id(
         constants.SKYPILOT_SYSTEM_SA_ID)
     token_exists = len(tokens) > 0
-    initial_token = None
     if token_exists:
-        logger.debug(f'Initial token has been generated for '
-                     f'{constants.SKYPILOT_SYSTEM_SA_ID}, skipping generation')
-        initial_token = tokens[0]
-    else:
-        logger.info(
-            f'Creating initial token for {constants.SKYPILOT_SYSTEM_SA_ID}')
-        initial_token = _create_user_and_token(
-            creator_user_id=constants.SKYPILOT_SYSTEM_USER_ID,
-            user_id=constants.SKYPILOT_SYSTEM_SA_ID,
-            user_name=constants.SKYPILOT_SYSTEM_SA_ID,
-            expires_in_days=constants.SKYPILOT_SYSTEM_SA_TOKEN_DURATION_DAYS,
-        )
+        logger.warning(f'Initial token has been generated for '
+                       f'{constants.SKYPILOT_SYSTEM_SA_ID}, '
+                       f'skipping generation')
+        return
+
+    logger.info(f'Creating initial token for {constants.SKYPILOT_SYSTEM_SA_ID}')
+    initial_token = _create_user_and_token(
+        creator_user_id=constants.SKYPILOT_SYSTEM_USER_ID,
+        user_id=constants.SKYPILOT_SYSTEM_SA_ID,
+        user_name=constants.SKYPILOT_SYSTEM_SA_ID,
+        expires_in_days=constants.SKYPILOT_SYSTEM_SA_TOKEN_DURATION_DAYS,
+    )
 
     # Create the directory if it doesn't exist
     os.makedirs(os.path.dirname(token_path), exist_ok=True)

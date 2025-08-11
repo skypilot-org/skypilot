@@ -526,8 +526,7 @@ def test__initialize_tokens_uses_existing_system_token(tmp_path):
         common._initialize_tokens()
 
         mock_init_existing.assert_called_once()
-        assert token_path.exists()
-        assert token_path.read_text() == 'sky_existing'
+        assert not token_path.exists()
 
 
 def test__initialize_tokens_creates_new_system_token(tmp_path):
