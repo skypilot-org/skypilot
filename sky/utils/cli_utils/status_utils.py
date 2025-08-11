@@ -318,7 +318,7 @@ def _get_head_ip(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
 def _get_last_event(cluster_record: _ClusterRecord,
                     truncate: bool = True) -> str:
     del truncate
-    if cluster_record['last_event'] is None:
+    if cluster_record.get('last_event', None) is None:
         return 'No recorded events.'
     return cluster_record['last_event']
 
