@@ -126,6 +126,10 @@ models:
   - name: "my-custom-model"
     source: "s3://my-bucket/models/fine-tuned-llama"
     
+  # Example: Your model in a SkyPilot volume (fast for repeated access)
+  - name: "agent-llama"
+    source: "volume://model-checkpoints/agent-llama"
+    
   # Example: Small model with Ollama for quick testing
   - name: "tinyllama"
     source: "ollama://tinyllama:1.1b"
@@ -133,7 +137,7 @@ models:
 
 # 2. EVALUATION SETTINGS
 cluster_prefix: "eval"          # Prefix for cluster names
-cleanup_on_complete: true        # Auto-cleanup after evaluation
+cleanup_on_complete: false       # Set to false to keep clusters for debugging
 eval_only: false                 # Set to true to run evaluation on existing clusters
 
 # 3. TEST SUITE
