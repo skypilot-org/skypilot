@@ -2125,9 +2125,11 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         record['status'] = status_lib.ClusterStatus.UP
         # Add cluster event for instance status check.
         global_user_state.add_cluster_event(
-            cluster_name, status_lib.ClusterStatus.UP,
+            cluster_name,
+            status_lib.ClusterStatus.UP,
             'All nodes up + ray cluster healthy.',
-            global_user_state.ClusterEventType.STATUS_CHANGE)
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -2221,7 +2223,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
         elif some_nodes_not_stopped:
-            init_reason = 'some nodes not stopped'
+            init_reason = 'some nodes are up and some nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
@@ -2306,9 +2308,11 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
         global_user_state.add_cluster_event(
-            cluster_name, status_lib.ClusterStatus.INIT,
-            f'Cluster is abnormal because {init_reason} transitioning to INIT.',
-            global_user_state.ClusterEventType.STATUS_CHANGE)
+            cluster_name,
+            status_lib.ClusterStatus.INIT,
+            f'Cluster is abnormal because {init_reason}. transitioning to INIT.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
