@@ -1,24 +1,66 @@
 import React, { useState, useEffect } from 'react';
+import PropTypes from 'prop-types';
 import { X, Play, Sparkles } from 'lucide-react';
 import { useTour } from '@/hooks/useTour';
 import { useFirstVisit } from '@/hooks/useFirstVisit';
+import { apiClient } from '@/data/connectors/client';
 
-export function WelcomeNotification() {
+const AUTH_FIRST_VISIT_KEY = 'skypilot-dashboard-auth-first-visit';
+
+export function WelcomeNotification({ isAuthenticated }) {
   const { startTour } = useTour();
-  const { shouldShowTourPrompt, markTourCompleted } = useFirstVisit();
   const [isVisible, setIsVisible] = useState(false);
   const [isClient, setIsClient] = useState(false);
+  const [authed, setAuthed] = useState(false);
+
+  // Defer first-visit prompt until authenticated
+  const { shouldShowTourPrompt, markTourCompleted } = useFirstVisit({
+    enabled: authed,
+  });
 
   useEffect(() => {
+    let canceled = false;
+    let timerId = null;
     setIsClient(true);
-    if (shouldShowTourPrompt) {
-      // Show notification after a short delay for better UX
-      const timer = setTimeout(() => {
-        setIsVisible(true);
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [shouldShowTourPrompt]);
+
+    const decide = async () => {
+      let effectiveAuth =
+        typeof isAuthenticated === 'boolean' ? isAuthenticated : false;
+      if (typeof isAuthenticated !== 'boolean') {
+        try {
+          const res = await apiClient.get('/api/health');
+          effectiveAuth = !!(res && res.ok === true);
+        } catch (_) {
+          effectiveAuth = false;
+        }
+      }
+      if (canceled) return;
+      setAuthed(effectiveAuth);
+
+      if (effectiveAuth) {
+        // Show when either general first-visit is true or it's the first authenticated visit
+        const isFirstAuthedVisit =
+          !sessionStorage.getItem(AUTH_FIRST_VISIT_KEY);
+        const shouldShow = shouldShowTourPrompt || isFirstAuthedVisit;
+        if (shouldShow) {
+          // Mark first authenticated visit so we only show once post-auth
+          if (isFirstAuthedVisit) {
+            sessionStorage.setItem(AUTH_FIRST_VISIT_KEY, 'true');
+          }
+          timerId = setTimeout(() => {
+            if (!canceled) setIsVisible(true);
+          }, 2000);
+        }
+      }
+    };
+
+    decide();
+
+    return () => {
+      canceled = true;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [shouldShowTourPrompt, isAuthenticated]);
 
   const handleStartTour = () => {
     setIsVisible(false);
@@ -30,8 +72,7 @@ export function WelcomeNotification() {
     markTourCompleted();
   };
 
-  // Don't render on server or if not needed
-  if (!isClient || !shouldShowTourPrompt || !isVisible) {
+  if (!isClient || !authed || !isVisible) {
     return null;
   }
 
@@ -84,5 +125,9 @@ export function WelcomeNotification() {
     </div>
   );
 }
+
+WelcomeNotification.propTypes = {
+  isAuthenticated: PropTypes.bool,
+};
 
 export default WelcomeNotification;

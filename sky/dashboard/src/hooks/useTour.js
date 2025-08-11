@@ -1715,7 +1715,11 @@ export function TourProvider({ children }) {
       });
     }
 
-    if (isFirstVisit && !tourAutoStarted) {
+    const autoStart =
+      typeof window !== 'undefined' &&
+      localStorage.getItem('skypilot-dashboard-auto-tour') === 'true';
+
+    if (autoStart && isFirstVisit && !tourAutoStarted) {
       startTour();
       setTourAutoStarted(true);
     }
