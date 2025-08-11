@@ -168,6 +168,16 @@ class UploadChunkParams:
 def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
     """Uploads a chunk of a zip file to the API server."""
     upload_logger = params.upload_logger
+    handlers = upload_logger.handlers
+
+    httpx_logger = logging.getLogger('httpx')
+    httpx_logger.setLevel(logging.DEBUG)
+    httpx_logger.handlers = handlers
+
+    httpcore_logger = logging.getLogger('httpcore')
+    httpcore_logger.setLevel(logging.DEBUG)
+    httpcore_logger.handlers = handlers
+
     upload_logger.info(
         f'Uploading chunk: {params.chunk_index + 1} / {params.total_chunks}')
 
