@@ -165,9 +165,8 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem-per-cpu=1G
-#SBATCH --time=1:00:00
 
-sleep 1000000000
+sleep infinity
 """
     # with tempfile.NamedTemporaryFile(mode='w+', delete=True) as f:
     with open('./provision.sh', 'w') as f:
