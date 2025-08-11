@@ -25,7 +25,12 @@ INDENT_LAST_SYMBOL = f'{colorama.Style.DIM}└── {colorama.Style.RESET_ALL}'
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
 
-# Log hint: recommend sky logs --provision <cluster>
+# Log path hint in the spinner during launching
+# (old, kept for backward compatibility)
+_LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs: sky api logs -l '
+                  '{log_path}'
+                  f'{colorama.Style.RESET_ALL}')
+# Log hint: recommend sky logs --provision <cluster_name>
 _PROVISION_LOG_HINT = (
     f'{colorama.Style.DIM}View logs: '
     f'{BOLD}sky logs --provision {{cluster_name}}{RESET_BOLD}'
@@ -141,7 +146,7 @@ def log_path_hint(log_path: Union[str, 'pathlib.Path'],
     if log_path.startswith(constants.SKY_LOGS_DIRECTORY):
         log_path = log_path[len(constants.SKY_LOGS_DIRECTORY):]
     log_path = log_path.lstrip(os.path.sep)
-    return _LOG_PATH_HINT_LOCAL.format(log_path=log_path)
+    return _LOG_PATH_HINT.format(log_path=log_path)
 
 
 def provision_hint(cluster_name: Optional[str]) -> Optional[str]:
