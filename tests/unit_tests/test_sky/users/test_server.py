@@ -402,14 +402,16 @@ class TestUsersEndpoints:
     @mock.patch('sky.utils.common_utils.is_service_account_token_enabled')
     @mock.patch('sky.global_user_state.add_or_update_user')
     @pytest.mark.asyncio
-    async def test_user_create_user_already_exists(self, mock_add_or_update_user,
+    async def test_user_create_user_already_exists(self,
+                                                   mock_add_or_update_user,
                                                    mock_is_sa_enabled,
                                                    mock_request):
         """Test POST /users/create endpoint when user already exists."""
         # Setup
         mock_is_sa_enabled.return_value = False
         mock_add_or_update_user.return_value = False
-        mock_request.state.auth_user = models.User(id='admin_user', name='Admin')
+        mock_request.state.auth_user = models.User(id='admin_user',
+                                                   name='Admin')
         create_body = payloads.UserCreateBody(username='alice',
                                               password='pw123',
                                               role=None)
@@ -433,7 +435,8 @@ class TestUsersEndpoints:
         mock_is_sa_enabled.return_value = False
         mock_get_user_by_name.return_value = None
         mock_get_supported_roles.return_value = ['admin', 'user']
-        mock_request.state.auth_user = models.User(id='admin_user', name='Admin')
+        mock_request.state.auth_user = models.User(id='admin_user',
+                                                   name='Admin')
         create_body = payloads.UserCreateBody(username='alice',
                                               password='pw123',
                                               role='invalid')
@@ -447,12 +450,12 @@ class TestUsersEndpoints:
 
     @mock.patch('sky.utils.common_utils.is_service_account_token_enabled')
     @pytest.mark.asyncio
-    async def test_user_create_missing_username_or_password(self,
-                                                            mock_is_sa_enabled,
-                                                            mock_request):
+    async def test_user_create_missing_username_or_password(
+            self, mock_is_sa_enabled, mock_request):
         """Test POST /users/create endpoint with missing username or password."""
         mock_is_sa_enabled.return_value = False
-        mock_request.state.auth_user = models.User(id='admin_user', name='Admin')
+        mock_request.state.auth_user = models.User(id='admin_user',
+                                                   name='Admin')
 
         # Missing username
         create_body = payloads.UserCreateBody(username='',
@@ -476,7 +479,8 @@ class TestUsersEndpoints:
     @mock.patch('sky.global_user_state.delete_tokens_by_user_id')
     @mock.patch('sky.global_user_state.delete_user')
     @mock.patch('sky.users.permission.permission_service.delete_user')
-    @mock.patch('sky.utils.resource_checker.check_no_active_resources_for_users')
+    @mock.patch('sky.utils.resource_checker.check_no_active_resources_for_users'
+               )
     @pytest.mark.asyncio
     async def test_user_delete_success(self, mock_check_resources,
                                        mock_delete_user_role, mock_delete_user,
@@ -1086,14 +1090,10 @@ charlie,pw789,user
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.utils.common_utils.is_service_account_token_enabled')
     @pytest.mark.asyncio
-    async def test_user_create_service_account_success(self, mock_is_sa_enabled,
-                                                       mock_get_supported_roles,
-                                                       mock_get_default_role,
-                                                       mock_add_or_update_user,
-                                                       mock_update_role,
-                                                       mock_create_token,
-                                                       mock_add_sa_token,
-                                                       mock_request):
+    async def test_user_create_service_account_success(
+            self, mock_is_sa_enabled, mock_get_supported_roles,
+            mock_get_default_role, mock_add_or_update_user, mock_update_role,
+            mock_create_token, mock_add_sa_token, mock_request):
         mock_is_sa_enabled.return_value = True
         mock_get_supported_roles.return_value = ['admin', 'user']
         mock_get_default_role.return_value = 'user'
@@ -1198,9 +1198,11 @@ charlie,pw789,user
         assert 'Failed to create user and token' in str(exc_info.value.detail)
 
     @mock.patch('sky.global_user_state.get_user')
-    @mock.patch('sky.utils.resource_checker.check_no_active_resources_for_users')
+    @mock.patch('sky.utils.resource_checker.check_no_active_resources_for_users'
+               )
     @pytest.mark.asyncio
-    async def test_user_delete_active_resources_error(self, mock_check_resources,
+    async def test_user_delete_active_resources_error(self,
+                                                      mock_check_resources,
                                                       mock_get_user):
         """Deletion should fail with 400 when active resources exist."""
         mock_get_user.return_value = models.User(id='u', name='U')
@@ -1217,7 +1219,9 @@ charlie,pw789,user
         """user_create should return 401 when no auth user."""
         mock_is_sa_enabled.return_value = False
         mock_request.state.auth_user = None
-        body = payloads.UserCreateBody(username='alice', password='pw', role=None)
+        body = payloads.UserCreateBody(username='alice',
+                                       password='pw',
+                                       role=None)
         with pytest.raises(fastapi.HTTPException) as exc_info:
             await server.user_create(mock_request, body)
         assert exc_info.value.status_code == 401
@@ -1248,15 +1252,10 @@ charlie,pw789,user
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.utils.common_utils.is_service_account_token_enabled')
     @pytest.mark.asyncio
-    async def test_user_create_service_account_never_expire(self,
-                                                            mock_is_sa_enabled,
-                                                            mock_get_supported_roles,
-                                                            mock_get_default_role,
-                                                            mock_add_or_update_user,
-                                                            mock_update_role,
-                                                            mock_create_token,
-                                                            mock_add_sa_token,
-                                                            mock_request):
+    async def test_user_create_service_account_never_expire(
+            self, mock_is_sa_enabled, mock_get_supported_roles,
+            mock_get_default_role, mock_add_or_update_user, mock_update_role,
+            mock_create_token, mock_add_sa_token, mock_request):
         """expires_in_days=0 should be treated as never expire (None passed to token creation)."""
         mock_is_sa_enabled.return_value = True
         mock_get_supported_roles.return_value = ['user']
@@ -1283,14 +1282,13 @@ charlie,pw789,user
 
     @mock.patch('sky.global_user_state.add_or_update_user')
     @pytest.mark.asyncio
-    async def test_create_service_account_token_invalid_name(self,
-                                                             mock_add_or_update_user,
-                                                             mock_request):
+    async def test_create_service_account_token_invalid_name(
+            self, mock_add_or_update_user, mock_request):
         mock_request.state.auth_user = models.User(id='u', name='U')
         mock_add_or_update_user.return_value = True
-        body = payloads.ServiceAccountTokenCreateBody(token_name='Invalid Name!')
+        body = payloads.ServiceAccountTokenCreateBody(
+            token_name='Invalid Name!')
         with pytest.raises(fastapi.HTTPException) as exc_info:
             await server.create_service_account_token(mock_request, body)
         assert exc_info.value.status_code == 400
-        assert 'Token name must match the regex' in str(
-            exc_info.value.detail)
+        assert 'Token name must match the regex' in str(exc_info.value.detail)

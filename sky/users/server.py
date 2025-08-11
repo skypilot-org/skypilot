@@ -563,11 +563,10 @@ async def create_service_account_token(
 
     # Check if token follows a valid format
     if not re.fullmatch(constants.CLUSTER_NAME_VALID_REGEX, token_name):
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail='Token name must match the regex: '
-            f'{constants.CLUSTER_NAME_VALID_REGEX}. '
-            'Please use a different name.')
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Token name must match the regex: '
+                                    f'{constants.CLUSTER_NAME_VALID_REGEX}. '
+                                    'Please use a different name.')
 
     # Validate expiration (allow 0 as special value for "never expire")
     if (token_body.expires_in_days is not None and
