@@ -65,20 +65,20 @@ The model checkpoints can be stored in S3, GCS, or Kubernetes volumes. You can f
 
 #### Storing your model checkpoints examples:
 
-**Store your model checkpoints to cloud buckets, e.g. S3 or GCS**
-```
-sky launch -c setup-s3 model_stores/setup-s3-model.yaml
-```
+* Store your model checkpoints to cloud buckets, e.g. S3 or GCS:
+  ```
+  sky launch -c setup-s3 model_stores/setup-s3-model.yaml
+  ```
 
-**Store your model checkpoints to Kubernetes volumes**
-* Create a SkyPilot volume for storing your model checkpoints:
-```
-sky volumes apply model_stores/create-volume.yaml
-```
-* Launch a cluster with the volume:
-```
-sky launch -c setup-volume model_stores/setup-volume.yaml
-```
+* Store your model checkpoints to Kubernetes volumes:
+  * Create a SkyPilot volume for storing your model checkpoints:
+    ```
+    sky volumes apply model_stores/create-volume.yaml
+    ```
+  * Launch a cluster with the volume:
+    ```
+    sky launch -c setup-volume model_stores/setup-volume.yaml
+    ```
 
 See [model_stores](model_stores/) for more details.
 
