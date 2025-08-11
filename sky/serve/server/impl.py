@@ -187,8 +187,7 @@ def up(
         controller_log_file = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
         controller_resources = controller_utils.get_controller_resources(
-            controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-            task_resources=task.resources)
+            controller=controller, task_resources=task.resources)
         controller_job_id = None
         if serve_utils.is_consolidation_mode(pool):
             # We need a unique integer per sky.serve.up call to avoid name
@@ -224,10 +223,11 @@ def up(
         # balancer port from the controller? So we don't need to open so many
         # ports here. Or, we should have a nginx traffic control to refuse
         # any connection to the unregistered ports.
-        controller_resources = {
-            r.copy(ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
-            for r in controller_resources
-        }
+        if not pool:
+            controller_resources = {
+                r.copy(ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
+                for r in controller_resources
+            }
         controller_task.set_resources(controller_resources)
 
         # # Set service_name so the backend will know to modify default ray
