@@ -346,7 +346,7 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            if not serve_utils.is_consolidation_mode(pool):
+            if not serve_utils.is_consolidation_mode(pool) and not pool:
                 socket_endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     lb_port,
