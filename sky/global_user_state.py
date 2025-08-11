@@ -1111,6 +1111,8 @@ def get_clusters_from_history(
         days: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
+    Note that this method does not return `last_event`.
+
     Args:
         days: If specified, only include historical clusters (those not
               currently active) that were last used within the past 'days'
@@ -1206,6 +1208,7 @@ def get_clusters_from_history(
         workspace = (row.history_workspace
                      if row.history_workspace else row.workspace)
 
+        # TODO (kyuds): return last_event?
         record = {
             'name': row.name,
             'launched_at': launched_at,
