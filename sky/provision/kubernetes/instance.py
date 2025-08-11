@@ -6,6 +6,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -1272,8 +1273,11 @@ def _get_pod_termination_reason(pod: Any) -> str:
 
 
 def _analyze_pod_events(context: Optional[str], namespace: str,
-                        pod_name: str) -> None:
-    print(f'Analyzing events for pod {pod_name}')
+                        cluster_name: str, pod_name: str) -> None:
+    logger.debug(f'Analyzing events for pod {pod_name}')
+    pod_events = []
+    node_events = []
+
     pod_field_selector = (
         f'involvedObject.kind=Pod,involvedObject.name={pod_name}')
     pod_events = kubernetes.core_api(context).list_namespaced_event(
@@ -1284,18 +1288,11 @@ def _analyze_pod_events(context: Optional[str], namespace: str,
                         key=lambda event: event.metadata.creation_timestamp)
     last_scheduled_node = None
     for event in pod_events:
-        event_reason = event.reason
-        timestamp = event.metadata.creation_timestamp.strftime(
-            '%Y-%m-%d %H:%M:%S')
-        event_message = event.message
-        print('pod', event_reason, timestamp, event_message)
-        if event_reason == 'Scheduled':
+        if event.reason == 'Scheduled':
             pattern = r'Successfully assigned (\S+) to (\S+)'
-            match = re.search(pattern, event_message)
+            match = re.search(pattern, event.message)
             if match:
                 scheduled_node = match.group(2)
-                print('Scheduled node changed from '
-                      f'{last_scheduled_node} to {scheduled_node}')
                 last_scheduled_node = scheduled_node
     if last_scheduled_node is not None:
         node_field_selector = ('involvedObject.kind=Node,'
@@ -1306,12 +1303,24 @@ def _analyze_pod_events(context: Optional[str], namespace: str,
             _request_timeout=kubernetes.API_TIMEOUT).items
         node_events = sorted(
             node_events, key=lambda event: event.metadata.creation_timestamp)
-        for event in node_events:
-            event_reason = event.reason
-            timestamp = event.metadata.creation_timestamp.strftime(
-                '%Y-%m-%d %H:%M:%S')
-            event_message = event.message
-            print('node', event_reason, timestamp, event_message)
+
+    print(len(pod_events), len(node_events))
+    for event in pod_events:
+        print(event.reason, event.message)
+        global_user_state.add_cluster_event(
+            cluster_name,
+            None,
+            f'[kubernetes pod {pod_name}] {event.reason} {event.message}',
+            global_user_state.ClusterEventType.CLOUD_BACKEND_CHANGE,
+            transitioned_at=int(event.metadata.creation_timestamp.timestamp()))
+    for event in node_events:
+        print(event.reason, event.message)
+        global_user_state.add_cluster_event(
+            cluster_name,
+            None, f'[kubernetes node {last_scheduled_node}] '
+            f'{event.reason} {event.message}',
+            global_user_state.ClusterEventType.CLOUD_BACKEND_CHANGE,
+            transitioned_at=int(event.metadata.creation_timestamp.timestamp()))
 
 
 def query_instances(
@@ -1393,7 +1402,8 @@ def query_instances(
             # If the pod is not in the cluster_status, it means it's not
             # running.
             # Analyze what happened to the pod based on events.
-            _analyze_pod_events(context, namespace, target_pod_name)
+            _analyze_pod_events(context, namespace, cluster_name_on_cloud,
+                                target_pod_name)
 
     return cluster_status
 
