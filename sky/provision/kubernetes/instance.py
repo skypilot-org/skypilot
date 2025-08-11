@@ -1304,19 +1304,16 @@ def _analyze_pod_events(context: Optional[str], namespace: str,
         node_events = sorted(
             node_events, key=lambda event: event.metadata.creation_timestamp)
 
-    print(len(pod_events), len(node_events))
     for event in pod_events:
-        print(event.reason, event.message)
         global_user_state.add_cluster_event(
-            cluster_name[:-9],
+            cluster_name,
             None,
             f'[kubernetes pod {pod_name}] {event.reason} {event.message}',
             global_user_state.ClusterEventType.DEBUG,
             transitioned_at=int(event.metadata.creation_timestamp.timestamp()))
     for event in node_events:
-        print(event.reason, event.message)
         global_user_state.add_cluster_event(
-            cluster_name[:-9],
+            cluster_name,
             None, f'[kubernetes node {last_scheduled_node}] '
             f'{event.reason} {event.message}',
             global_user_state.ClusterEventType.DEBUG,

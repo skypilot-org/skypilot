@@ -675,8 +675,6 @@ def add_cluster_event(cluster_name: str,
             if last_event == reason:
                 return
         try:
-            print(cluster_hash, cluster_name, last_status, new_status, reason,
-                  transitioned_at, event_type)
             session.execute(
                 insert_func(cluster_event_table).values(
                     cluster_hash=cluster_hash,
