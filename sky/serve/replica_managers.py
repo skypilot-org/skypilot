@@ -40,7 +40,6 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import resources
     from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
@@ -984,7 +983,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 schedule_next_jobs = False
                 if info.status == serve_state.ReplicaStatus.PENDING:
                     # sky.launch not started yet
-                    if jobs_scheduler.can_provision():
+                    if controller_utils.can_provision():
                         p.start()
                         info.status_property.sky_launch_status = (
                             ProcessStatus.RUNNING)

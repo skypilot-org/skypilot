@@ -23,8 +23,10 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import state as managed_job_state
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
+from sky.serve import serve_state
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -37,8 +39,13 @@ from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import psutil
+
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
+else:
+    from sky.adaptors import common as adaptors_common
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1161,3 +1168,40 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     task.update_storage_mounts(updated_mount_storages)
     if msg:
         logger.info(ux_utils.finishing_message('Uploaded local files/folders.'))
+
+
+# ======================= Resources Management Functions =======================
+
+# Based on testing, assume a running job process uses 350MB memory. We use the
+# same estimation for service controller process.
+PROC_MEMORY_MB = 350
+# Past 2000 simultaneous jobs, we become unstable.
+# See https://github.com/skypilot-org/skypilot/issues/4649.
+MAX_JOB_LIMIT = 2000
+# Number of ongoing launches launches allowed per CPU.
+LAUNCHES_PER_CPU = 4
+
+
+def _get_job_parallelism() -> int:
+    proc_memory = PROC_MEMORY_MB * 1024 * 1024
+
+    job_limit = min(psutil.virtual_memory().total // proc_memory, MAX_JOB_LIMIT)
+
+    return max(job_limit, 1)
+
+
+def _get_launch_parallelism() -> int:
+    cpus = os.cpu_count()
+    return cpus * LAUNCHES_PER_CPU if cpus is not None else 1
+
+
+def can_provision() -> bool:
+    num_provision = (serve_state.total_number_provisioning_replicas() +
+                     managed_job_state.get_num_launching_jobs())
+    return num_provision < _get_launch_parallelism()
+
+
+def can_start_new_process() -> bool:
+    num_procs = (serve_state.get_num_services() +
+                 managed_job_state.get_num_alive_jobs())
+    return num_procs < _get_job_parallelism()

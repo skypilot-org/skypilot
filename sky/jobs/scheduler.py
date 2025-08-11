@@ -15,13 +15,14 @@ following section for more details).
 
 The scheduling logic limits #running jobs according to three limits:
 1. The number of jobs that can be launching (that is, STARTING or RECOVERING) at
-   once, based on the number of CPUs. (See _get_launch_parallelism.) This the
-   most compute-intensive part of the job lifecycle, which is why we have an
-   additional limit.
+   once, based on the number of CPUs. This the most compute-intensive part of
+   the job lifecycle, which is why we have an additional limit.
+   See sky/utils/controller_utils.py::_get_launch_parallelism.
 2. The number of jobs that can be running at any given time, based on the amount
-   of memory. (See _get_job_parallelism.) Since the job controller is doing very
-   little once a job starts (just checking its status periodically), the most
-   significant resource it consumes is memory.
+   of memory. Since the job controller is doing very little once a job starts
+   (just checking its status periodically), the most significant resource it
+   consumes is memory.
+   See sky/utils/controller_utils.py::_get_job_parallelism.
 3. The number of jobs that can be running in a pool at any given time, based on
    the number of ready workers in the pool. (See _can_start_new_job.)
 
@@ -46,26 +47,19 @@ from functools import lru_cache
 import os
 import sys
 import time
-import typing
 from typing import Optional
 
 import filelock
 
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
-from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import subprocess_utils
-
-if typing.TYPE_CHECKING:
-    import psutil
-else:
-    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
@@ -75,14 +69,6 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 # maybe_schedule_next_jobs.
 _MANAGED_JOB_SCHEDULER_LOCK = '~/.sky/locks/managed_job_scheduler.lock'
 _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
-
-# Based on testing, assume a running job uses 350MB memory.
-JOB_MEMORY_MB = 350
-# Past 2000 simultaneous jobs, we become unstable.
-# See https://github.com/skypilot-org/skypilot/issues/4649.
-MAX_JOB_LIMIT = 2000
-# Number of ongoing launches launches allowed per CPU.
-LAUNCHES_PER_CPU = 4
 
 
 @lru_cache(maxsize=1)
@@ -185,7 +171,7 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                 # an ALIVE_WAITING job, but we would be able to launch a WAITING
                 # job.
                 if current_state == state.ManagedJobScheduleState.ALIVE_WAITING:
-                    if not can_provision():
+                    if not controller_utils.can_provision():
                         # Can't schedule anything, break from scheduling loop.
                         break
                 elif current_state == state.ManagedJobScheduleState.WAITING:
@@ -324,40 +310,17 @@ def _set_alive_waiting(job_id: int) -> None:
     maybe_schedule_next_jobs(pool)
 
 
-def _get_job_parallelism() -> int:
-    job_memory = JOB_MEMORY_MB * 1024 * 1024
-
-    job_limit = min(psutil.virtual_memory().total // job_memory, MAX_JOB_LIMIT)
-
-    return max(job_limit, 1)
-
-
-def _get_launch_parallelism() -> int:
-    cpus = os.cpu_count()
-    return cpus * LAUNCHES_PER_CPU if cpus is not None else 1
-
-
-def can_provision() -> bool:
-    num_provision = (serve_state.total_number_provisioning_replicas() +
-                     state.get_num_launching_jobs())
-    return num_provision < _get_launch_parallelism()
-
-
-def can_start_new_process() -> bool:
-    num_procs = serve_state.get_num_services() + state.get_num_alive_jobs()
-    return num_procs < _get_job_parallelism()
-
-
 def _can_start_new_job(pool: Optional[str]) -> bool:
     # Check basic resource limits
-    if not (can_provision() and can_start_new_process()):
+    if not (controller_utils.can_provision() and
+            controller_utils.can_start_new_process()):
         return False
 
-    # Check if there are available replicas in the pool
+    # Check if there are available workers in the pool
     if pool is not None:
         alive_jobs_in_pool = state.get_num_alive_jobs(pool)
         if alive_jobs_in_pool >= serve_utils.num_replicas(pool):
-            logger.debug(f'No replicas available in pool {pool}')
+            logger.debug(f'No workers available in pool {pool}')
             return False
 
     return True

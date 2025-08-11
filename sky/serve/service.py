@@ -20,7 +20,6 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
-from sky.jobs import scheduler as jobs_scheduler
 from sky.serve import constants
 from sky.serve import controller
 from sky.serve import load_balancer
@@ -29,6 +28,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -215,7 +215,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         service_name, version)
 
     if not is_recovery:
-        if not jobs_scheduler.can_start_new_process():
+        if not controller_utils.can_start_new_process():
             cleanup_storage(tmp_task_yaml)
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
