@@ -223,11 +223,11 @@ models:
    mistral-7b         agent-qwen         agent-llama
         │                  │                  │
         ▼                  ▼                  ▼
-   ┌──────────┐       ┌─────────┐       ┌─────────┐
-   │ Cluster  │       │ Cluster │       │ Cluster │
-   │ • L4 GPU │       │ • L4 GPU│       │ • L4 GPU│
-   │ • vLLM   │       │ • vLLM  │       │ • Ollama│
-   └────┬─────┘       └────┬────┘       └────┬────┘
+   ┌──────────┐       ┌─────────┐       ┌───────────┐
+   │ Cluster  │       │ Cluster │       │ Cluster   │
+   │ • L4 GPU │       │ • L4 GPU│       │ • A10G GPU│
+   │ • vLLM   │       │ • vLLM  │       │ • Ollama  │
+   └────┬─────┘       └────┬────┘       └────┬──────┘
         │                  │                 │
         └──────────────────┴─────────────────┘
                            │
