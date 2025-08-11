@@ -788,9 +788,13 @@ def load_version_string(payload: str) -> str:
     return message_utils.decode_payload(payload)
 
 
-def num_replicas(service_name: str) -> int:
+def get_ready_replicas(
+        service_name: str) -> List['replica_managers.ReplicaInfo']:
     logger.info(f'Get number of replicas for pool {service_name!r}')
-    return len(serve_state.get_replica_infos(service_name))
+    return [
+        info for info in serve_state.get_replica_infos(service_name)
+        if info.status == serve_state.ReplicaStatus.READY
+    ]
 
 
 def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
@@ -815,12 +819,8 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         logger.error(f'Service {service_name!r} is not a cluster pool.')
         return None
     with filelock.FileLock(get_service_filelock_path(service_name)):
-
         logger.debug(f'Get next cluster name for pool {service_name!r}')
-        ready_replicas = [
-            info for info in serve_state.get_replica_infos(service_name)
-            if info.status == serve_state.ReplicaStatus.READY
-        ]
+        ready_replicas = get_ready_replicas(service_name)
         idle_replicas: List['replica_managers.ReplicaInfo'] = []
         for replica_info in ready_replicas:
             jobs_on_replica = managed_job_state.get_nonterminal_job_ids_by_pool(

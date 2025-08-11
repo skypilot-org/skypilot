@@ -319,7 +319,7 @@ def _can_start_new_job(pool: Optional[str]) -> bool:
     # Check if there are available workers in the pool
     if pool is not None:
         alive_jobs_in_pool = state.get_num_alive_jobs(pool)
-        if alive_jobs_in_pool >= serve_utils.num_replicas(pool):
+        if alive_jobs_in_pool >= len(serve_utils.get_ready_replicas(pool)):
             logger.debug(f'No workers available in pool {pool}')
             return False
 
