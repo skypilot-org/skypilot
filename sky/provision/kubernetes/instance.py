@@ -1308,18 +1308,18 @@ def _analyze_pod_events(context: Optional[str], namespace: str,
     for event in pod_events:
         print(event.reason, event.message)
         global_user_state.add_cluster_event(
-            cluster_name,
+            cluster_name[:-9],
             None,
             f'[kubernetes pod {pod_name}] {event.reason} {event.message}',
-            global_user_state.ClusterEventType.CLOUD_BACKEND_CHANGE,
+            global_user_state.ClusterEventType.DEBUG,
             transitioned_at=int(event.metadata.creation_timestamp.timestamp()))
     for event in node_events:
         print(event.reason, event.message)
         global_user_state.add_cluster_event(
-            cluster_name,
+            cluster_name[:-9],
             None, f'[kubernetes node {last_scheduled_node}] '
             f'{event.reason} {event.message}',
-            global_user_state.ClusterEventType.CLOUD_BACKEND_CHANGE,
+            global_user_state.ClusterEventType.DEBUG,
             transitioned_at=int(event.metadata.creation_timestamp.timestamp()))
 
 
@@ -1402,7 +1402,7 @@ def query_instances(
             # If the pod is not in the cluster_status, it means it's not
             # running.
             # Analyze what happened to the pod based on events.
-            _analyze_pod_events(context, namespace, cluster_name_on_cloud,
+            _analyze_pod_events(context, namespace, cluster_name,
                                 target_pod_name)
 
     return cluster_status

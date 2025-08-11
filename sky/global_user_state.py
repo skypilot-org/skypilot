@@ -172,9 +172,6 @@ class ClusterEventType(enum.Enum):
     STATUS_CHANGE = 'STATUS_CHANGE'
     """Used to denote events that modify cluster status."""
 
-    CLOUD_BACKEND_CHANGE = 'CLOUD_BACKEND_CHANGE'
-    """Used to denote events that are emitted from the cloud backend."""
-
 
 # Table for cluster status change events.
 # starting_status: Status of the cluster at the start of the event.
