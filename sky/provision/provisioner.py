@@ -689,7 +689,8 @@ def _post_provision_setup(
 
     logger.info(
         ux_utils.finishing_message(f'Cluster launched: {cluster_name}.',
-                                   provision_logging.config.log_path))
+                                   provision_logging.config.log_path,
+                                   cluster_name=cluster_name))
     return cluster_info
 
 
