@@ -1034,6 +1034,7 @@ def get_cluster_from_name(
     user_hash = _get_user_hash_or_current_user(row.user_hash)
     user = get_user(user_hash)
     user_name = user.name if user is not None else None
+    last_event = get_last_cluster_event(row.name)
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
@@ -1057,6 +1058,7 @@ def get_cluster_from_name(
         'last_creation_yaml': row.last_creation_yaml,
         'last_creation_command': row.last_creation_command,
         'is_managed': bool(row.is_managed),
+        'last_event': last_event,
     }
 
     return record
@@ -1108,6 +1110,8 @@ def get_clusters() -> List[Dict[str, Any]]:
 def get_clusters_from_history(
         days: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
+
+    Note that this method does not return `last_event`.
 
     Args:
         days: If specified, only include historical clusters (those not
@@ -1204,6 +1208,7 @@ def get_clusters_from_history(
         workspace = (row.history_workspace
                      if row.history_workspace else row.workspace)
 
+        # TODO (kyuds): return last_event?
         record = {
             'name': row.name,
             'launched_at': launched_at,
