@@ -109,24 +109,83 @@ def get_field_info(model_class: Type) -> Dict[str, Dict[str, Any]]:
     return field_info
 
 
-def compare_field_types(type1: Any, type2: Any) -> bool:
-    """Compare two type annotations for compatibility."""
-    # Handle Optional types
-    # For Optional[Union[typea, typeb]], we need to compare the union types
-    # in set to avoid order dependency.
-    if get_origin(type1) is Union and type(None) in get_args(type1):
-        type1 = set(arg for arg in get_args(type1) if arg is not type(None))
-    if get_origin(type2) is Union and type(None) in get_args(type2):
-        type2 = set(arg for arg in get_args(type2) if arg is not type(None))
+def compare_field_types(master_type: Any, current_type: Any) -> bool:
+    """Compare two type annotations for compatibility.
 
-    # Handle List types
-    if get_origin(type1) is list:
-        type1 = get_args(type1)[0]
-    if get_origin(type2) is list:
-        type2 = get_args(type2)[0]
+    Args:
+        master_type: The type annotation from the master branch.
+        current_type: The type annotation from the current branch.
 
-    # Compare the base types
-    return type1 == type2
+    Returns:
+        True if the types are compatible, False otherwise.
+
+    Rules:
+    - Base types must match after unwrapping Optional and List element types.
+    - Changing a field from required to Optional (master: T -> current: Optional[T]) is allowed.
+    - Changing a field from Optional to required (master: Optional[T] -> current: T) is NOT allowed.
+    - Keeping both required or both Optional is allowed if base types match.
+    - For Optional[Union[A, B]] (and similar), compare union members as sets to be order-insensitive.
+    """
+
+    def is_optional(t: Any) -> bool:
+        return type(None) in get_args(t)
+
+    def strip_optional(t: Any) -> Any:
+        """Remove None from a Union while preserving all other members.
+        If not a Union-with-None, returns t unchanged.
+        """
+        if is_optional(t):
+            non_none = tuple(
+                arg for arg in get_args(t) if arg is not type(None))
+            # If only one non-None member, return it directly
+            if len(non_none) == 1:
+                return non_none[0]
+            # Otherwise, return a synthetic union marker we'll normalize later
+            return ('UNION', non_none)
+        return t
+
+    def is_union_wo_none(t: Any) -> bool:
+        # t can be a typing.Union or our synthetic ('UNION', (...)) marker
+        if isinstance(t, tuple) and len(t) == 2 and t[0] == 'UNION':
+            return True
+        return get_origin(t) is Union and type(None) not in get_args(t)
+
+    def iter_union_members(t: Any):
+        if isinstance(t, tuple) and len(t) == 2 and t[0] == 'UNION':
+            return t[1]
+        return get_args(t)
+
+    def normalize_atomic(t: Any) -> Any:
+        # Normalize list element type
+        if get_origin(t) is list:
+            args = get_args(t)
+            elem = normalize_atomic(args[0] if args else Any)
+            return ('list', elem)
+        return t
+
+    def normalize_no_none(t: Any) -> Any:
+        """Normalize a type after removing Optional[None].
+        - For unions (without None), return ('union', frozenset(normalized_members)).
+        - For single types, return normalized atomic representation.
+        """
+        t = strip_optional(t)
+        if is_union_wo_none(t):
+            members = iter_union_members(t)
+            normalized_members = frozenset(normalize_atomic(m) for m in members)
+            return ('union', normalized_members)
+        return normalize_atomic(t)
+
+    master_optional = is_optional(master_type)
+    current_optional = is_optional(current_type)
+
+    # Optional -> required is breaking
+    if master_optional and not current_optional:
+        return False
+
+    n1 = normalize_no_none(master_type)
+    n2 = normalize_no_none(current_type)
+
+    return n1 == n2
 
 
 def generate_default_value(field_type: Any) -> Any:
