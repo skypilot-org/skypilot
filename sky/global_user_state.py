@@ -643,7 +643,8 @@ def add_or_update_cluster(cluster_name: str,
 @_init_db
 def add_cluster_event(cluster_name: str,
                       new_status: Optional[status_lib.ClusterStatus],
-                      reason: str, event_type: ClusterEventType) -> None:
+                      reason: str, event_type: ClusterEventType,
+                      nop_if_no_state_change: bool = False) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     if cluster_hash is None:
@@ -664,7 +665,8 @@ def add_cluster_event(cluster_name: str,
         cluster_row = session.query(cluster_table).filter_by(name=cluster_name)
         last_status = cluster_row.first(
         ).status if cluster_row and cluster_row.first() is not None else None
-
+        if nop_if_no_state_change and last_status == new_status.value:
+            return
         try:
             session.execute(
                 insert_func(cluster_event_table).values(
