@@ -117,7 +117,7 @@ async def user_create(
         raise fastapi.HTTPException(status_code=400,
                                     detail='Username is required')
     # Check if username follows a valid format
-    if not re.match(constants.CLUSTER_NAME_VALID_REGEX, username):
+    if not re.fullmatch(constants.CLUSTER_NAME_VALID_REGEX, username):
         raise fastapi.HTTPException(status_code=400,
                                     detail='Username must match the regex: '
                                     f'{constants.CLUSTER_NAME_VALID_REGEX}. '
@@ -562,11 +562,12 @@ async def create_service_account_token(
     token_name = token_body.token_name.strip()
 
     # Check if token follows a valid format
-    if not re.match(constants.CLUSTER_NAME_VALID_REGEX, token_name):
+    if not re.fullmatch(constants.CLUSTER_NAME_VALID_REGEX, token_name):
         raise fastapi.HTTPException(
             status_code=400,
-            detail='Token name must contain only letters, numbers, and '
-            'underscores. Please use a different name.')
+            detail='Token name must match the regex: '
+            f'{constants.CLUSTER_NAME_VALID_REGEX}. '
+            'Please use a different name.')
 
     # Validate expiration (allow 0 as special value for "never expire")
     if (token_body.expires_in_days is not None and
