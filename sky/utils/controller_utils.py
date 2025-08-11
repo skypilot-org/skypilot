@@ -30,6 +30,7 @@ from sky.serve import serve_state
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -1182,14 +1183,14 @@ MAX_JOB_LIMIT = 2000
 LAUNCHES_PER_CPU = 4
 
 
+@annotations.lru_cache(scope='request')
 def _get_job_parallelism() -> int:
     proc_memory = PROC_MEMORY_MB * 1024 * 1024
-
     job_limit = min(psutil.virtual_memory().total // proc_memory, MAX_JOB_LIMIT)
-
     return max(job_limit, 1)
 
 
+@annotations.lru_cache(scope='request')
 def _get_launch_parallelism() -> int:
     cpus = os.cpu_count()
     return cpus * LAUNCHES_PER_CPU if cpus is not None else 1

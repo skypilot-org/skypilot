@@ -57,14 +57,6 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-
-@annotations.lru_cache(scope='request')
-def get_num_service_threshold():
-    """Get number of services threshold, calculating it only when needed."""
-    system_memory_gb = psutil.virtual_memory().total // (1024**3)
-    return system_memory_gb // constants.CONTROLLER_MEMORY_USAGE_GB
-
-
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 # NOTE(dev): We assume log are print with the hint 'sky api logs -l'. Be careful
