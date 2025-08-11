@@ -302,7 +302,8 @@ def query_instances(
         'failed': status_lib.ClusterStatus.INIT,
         'terminated': None,
     }
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst_id, inst in instances.items():
         if inst['status'] not in status_map:
             with ux_utils.print_exception_no_traceback():

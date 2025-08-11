@@ -2,7 +2,7 @@
 import copy
 import json
 import time
-from typing import Any, Callable, Dict, List, Optional, Union, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
 from sky import sky_logging
@@ -1248,7 +1248,7 @@ def get_cluster_info(
         provider_config=provider_config)
 
 
-def _get_pod_termination_reason(pod: Any) -> List[str]:
+def _get_pod_termination_reason(pod: Any) -> str:
     reasons = []
     if pod.status.container_statuses:
         for container_status in pod.status.container_statuses:
@@ -1320,7 +1320,8 @@ def query_instances(
                 f'status: {common_utils.format_exception(e)}')
 
     # Check if the pods are running or pending
-    cluster_status = {}
+    cluster_status: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                                    Optional[str]]] = {}
     for pod in pods:
         phase = pod.status.phase
         pod_status = status_map[phase]

@@ -4,7 +4,7 @@ import copy
 from multiprocessing import pool
 import re
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Type, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
 
 from sky import sky_logging
 from sky.adaptors import gcp
@@ -84,7 +84,8 @@ def query_instances(
     )
 
     raw_statuses = {}
-    statuses = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst_id, instance in instances.items():
         raw_status = instance[handler.STATUS_FIELD]
         raw_statuses[inst_id] = raw_status

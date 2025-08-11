@@ -319,7 +319,8 @@ def query_instances(
         # No instances found: return empty dict to indicate fully deleted
         return {}
 
-    statuses: Dict[str, Optional['status_lib.ClusterStatus']] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for instance_id, instance in instances.items():
         try:
             raw_status = instance.get('status', 'unknown').lower()

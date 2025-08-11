@@ -2015,8 +2015,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
 
     node_statuses = _query_cluster_status_via_cloud_api(handle)
 
-    all_nodes_up = (all(
-        status[0] == status_lib.ClusterStatus.UP for status in node_statuses) and
+    all_nodes_up = (all(status[0] == status_lib.ClusterStatus.UP
+                        for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
 
     def get_node_counts_from_ray_status(
@@ -2211,12 +2211,13 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     #  (2) Otherwise, we will reset the autostop setting, unless the cluster is
     #      autostopping/autodowning.
     some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
-    some_nodes_not_stopped = any(
-        status[0] != status_lib.ClusterStatus.STOPPED for status in node_statuses)
+    some_nodes_not_stopped = any(status[0] != status_lib.ClusterStatus.STOPPED
+                                 for status in node_statuses)
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
 
     if is_abnormal:
-        status_reason = ', '.join([status[1] for status in node_statuses if status[1] is not None])
+        status_reason = ', '.join(
+            [status[1] for status in node_statuses if status[1] is not None])
 
         if some_nodes_terminated:
             init_reason = f'one or more nodes terminated ({status_reason})'

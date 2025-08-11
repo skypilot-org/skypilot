@@ -240,7 +240,8 @@ def query_instances(
         'unhealthy': status_lib.ClusterStatus.INIT,
         'terminating': None,
     }
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for instance_id, instance in instances.items():
         status = status_map.get(instance['status'])
         if non_terminated_only and status is None:

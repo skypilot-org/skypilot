@@ -608,7 +608,8 @@ def query_instances(
         'shutting-down': None,
         'terminated': None,
     }
-    statuses = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst in instances:
         status = status_map[inst.state['Name']]
         if non_terminated_only and status is None:

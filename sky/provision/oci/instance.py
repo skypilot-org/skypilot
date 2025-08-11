@@ -47,7 +47,8 @@ def query_instances(
     region = provider_config['region']
 
     status_map = oci_utils.oci_config.STATE_MAPPING_OCI_TO_SKY
-    statuses: Dict[str, Optional['status_lib.ClusterStatus']] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
     instances = _get_filtered_nodes(region, filters)

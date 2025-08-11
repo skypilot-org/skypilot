@@ -231,7 +231,8 @@ def query_instances(
         'STOPPED': status_lib.ClusterStatus.STOPPED,
         'RUNNING': status_lib.ClusterStatus.UP,
     }
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst_id, inst in instances.items():
         status = status_map[inst['status']]
         if non_terminated_only and status is None:

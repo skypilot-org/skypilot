@@ -413,7 +413,8 @@ def query_instances(
         'suspended': None,
     }
 
-    status = {}
+    status: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                            Optional[str]]] = {}
     for inst in instances:
         stat = status_map[inst.runtime.powerState]
         if non_terminated_only and stat is None:

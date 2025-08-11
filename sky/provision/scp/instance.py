@@ -447,7 +447,8 @@ def query_instances(
         'TERMINATED': None,
     }
 
-    statuses = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for instance in instances:
         status = status_map[instance['virtualServerState']]
         if non_terminated_only and status is None:
