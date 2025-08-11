@@ -1810,6 +1810,7 @@ def _query_cluster_status_via_cloud_api(
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider.
     """
+    cluster_name = handle.cluster_name
     cluster_name_on_cloud = handle.cluster_name_on_cloud
     cluster_name_in_hint = common_utils.cluster_name_in_hint(
         handle.cluster_name, cluster_name_on_cloud)
@@ -1827,7 +1828,8 @@ def _query_cluster_status_via_cloud_api(
         cloud_name = repr(handle.launched_resources.cloud)
         try:
             node_status_dict = provision_lib.query_instances(
-                cloud_name, cluster_name_on_cloud, provider_config)
+                cloud_name, cluster_name, cluster_name_on_cloud,
+                provider_config)
             logger.debug(f'Querying {cloud_name} cluster '
                          f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
@@ -2151,6 +2153,11 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
         record['status'] = status_lib.ClusterStatus.UP
+        # Add cluster event for instance status check.
+        global_user_state.add_cluster_event(
+            cluster_name, status_lib.ClusterStatus.UP,
+            'All nodes up + ray cluster healthy.',
+            global_user_state.ClusterEventType.STATUS_CHANGE)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -2235,9 +2242,16 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     #      regardless of the ray cluster's health.
     #  (2) Otherwise, we will reset the autostop setting, unless the cluster is
     #      autostopping/autodowning.
-    is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or any(
-        status != status_lib.ClusterStatus.STOPPED for status in node_statuses))
+    some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
+    some_nodes_not_stopped = any(
+        status != status_lib.ClusterStatus.STOPPED for status in node_statuses)
+    is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
+
     if is_abnormal:
+        if some_nodes_terminated:
+            init_reason = 'one or more nodes terminated'
+        elif some_nodes_not_stopped:
+            init_reason = 'some nodes not stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
@@ -2321,6 +2335,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # represent that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
+        global_user_state.add_cluster_event(
+            cluster_name, status_lib.ClusterStatus.INIT,
+            f'Cluster is abnormal because {init_reason} transitioning to INIT.',
+            global_user_state.ClusterEventType.STATUS_CHANGE)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -2331,6 +2349,9 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     # STOPPED.
     backend = backends.CloudVmRayBackend()
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
+    global_user_state.add_cluster_event(
+        cluster_name, None, 'All nodes stopped, terminating cluster.',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 

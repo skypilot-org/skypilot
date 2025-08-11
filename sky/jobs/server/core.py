@@ -561,6 +561,10 @@ def _maybe_restart_controller(
                                  'controller'))
     with skypilot_config.local_active_workspace_ctx(
             skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+        global_user_state.add_cluster_event(
+            jobs_controller_type.value.cluster_name,
+            status_lib.ClusterStatus.INIT, 'Jobs controller restarted.',
+            global_user_state.ClusterEventType.STATUS_CHANGE)
         handle = core.start(
             cluster_name=jobs_controller_type.value.cluster_name)
 

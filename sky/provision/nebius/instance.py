@@ -247,11 +247,13 @@ def get_cluster_info(
 
 
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(provider_config['region'],
                                   cluster_name_on_cloud, None)
