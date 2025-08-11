@@ -62,6 +62,18 @@ class TestBearerTokenMiddleware:
         assert response.status_code == 200
 
     @pytest.mark.asyncio
+    async def test_invalid_bearer_authorization_bypass(self, middleware,
+                                                       mock_call_next):
+        """Test that non-Bearer authorization headers bypass the middleware."""
+        request = mock.Mock(spec=fastapi.Request)
+        request.headers = {'authorization': 'BasicdXNlcjpwYXNz'}  # Basic auth
+
+        response = await middleware.dispatch(request, mock_call_next)
+
+        # Should call next middleware without processing
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
     async def test_service_accounts_disabled(self, middleware, mock_request,
                                              mock_call_next):
         """Test middleware when service accounts are disabled."""
@@ -232,6 +244,38 @@ class TestBearerTokenMiddleware:
 
             assert response.status_code == 401
             assert "Service account user no longer exists" in response.body.decode(
+            )
+
+    @pytest.mark.asyncio
+    async def test_token_no_longer_exists(self, middleware, mock_call_next):
+        """Test middleware when service account token no longer exists."""
+        request = mock.Mock(spec=fastapi.Request)
+        request.headers = {'authorization': 'Bearer sky_valid_token'}
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123'
+        }
+
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_user') as mock_get_user, \
+                mock.patch('sky.server.server.global_user_state.get_service_account_token') as mock_get_service_account_token:
+
+            mock_token_service.verify_token.return_value = mock_payload
+            mock_get_user.return_value = mock_user_info
+            mock_get_service_account_token.return_value = None  # Token no longer exists
+
+            response = await middleware.dispatch(request, mock_call_next)
+
+            assert response.status_code == 401
+            assert "Service account token no longer exists" in response.body.decode(
             )
 
     @pytest.mark.asyncio

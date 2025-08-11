@@ -350,3 +350,212 @@ def test_cookies_set_with_file(monkeypatch):
     assert found_cookie_jar['test-cookie-2'] == expected_cookie.value
 
     temp_cookie_dir.cleanup()
+
+
+def test__create_token_persists_and_returns():
+    """_create_token should call TokenService and persist metadata."""
+    from sky.server import common as common_mod
+
+    initial_token = {
+        'token_id': 'tok_1',
+        'token_hash': 'hash_abc',
+        'token': 'sky_testtoken',
+        'expires_at': 1234567890,
+    }
+
+    with mock.patch('sky.server.common.token_lib.TokenService') as MockSvc, \
+            mock.patch('sky.server.common.global_user_state') as mock_state:
+        MockSvc.return_value.create_token.return_value = initial_token
+
+        result = common_mod._create_token(
+            creator_user_id='creator_u',
+            service_account_user_id='sa_u',
+            token_name='my-sa',
+            expires_in_days=30,
+        )
+
+        # Returns the token dict
+        assert result == initial_token
+        # TokenService.create_token called with args
+        MockSvc.return_value.create_token.assert_called_once_with(
+            creator_user_id='creator_u',
+            service_account_user_id='sa_u',
+            token_name='my-sa',
+            expires_in_days=30,
+        )
+        # Metadata persisted to global_user_state
+        mock_state.add_service_account_token.assert_called_once_with(
+            token_id='tok_1',
+            token_name='my-sa',
+            token_hash='hash_abc',
+            creator_user_hash='creator_u',
+            service_account_user_id='sa_u',
+            expires_at=1234567890,
+        )
+
+
+def test__create_user_and_token_creates_user_and_role():
+    """_create_user_and_token should create token, user, and grant ADMIN."""
+    from sky.server import common as common_mod
+    from sky.skylet import constants
+
+    token_dict = {
+        'token_id': 'tok_x',
+        'token_hash': 'hash_x',
+        'token': 'sky_x',
+        'expires_at': 2222,
+    }
+
+    with mock.patch('sky.server.common._create_token') as mock_create_token, \
+            mock.patch('sky.server.common.global_user_state') as mock_state, \
+            mock.patch('sky.server.common.permission_service') as mock_perm:
+        mock_create_token.return_value = token_dict
+
+        result = common_mod._create_user_and_token(
+            user_id='sa-user-1',
+            user_name='sa-name',
+            creator_user_id=constants.SKYPILOT_SYSTEM_USER_ID,
+            expires_in_days=constants.SKYPILOT_SYSTEM_SA_TOKEN_DURATION_DAYS,
+        )
+
+        assert result == token_dict
+        mock_create_token.assert_called_once_with(
+            creator_user_id=constants.SKYPILOT_SYSTEM_USER_ID,
+            service_account_user_id='sa-user-1',
+            token_name='sa-name',
+            expires_in_days=constants.SKYPILOT_SYSTEM_SA_TOKEN_DURATION_DAYS,
+        )
+        # User should be created and stored; verify fields
+        assert mock_state.add_or_update_user.call_count == 1
+        args, kwargs = mock_state.add_or_update_user.call_args
+        created_user = args[0]
+        assert created_user.id == 'sa-user-1'
+        assert created_user.name == 'sa-name'
+        assert kwargs.get('allow_duplicate_name') is False
+        # Role should be ADMIN
+        mock_perm.update_role.assert_called_once()
+        role_args, _ = mock_perm.update_role.call_args
+        assert role_args[0] == 'sa-user-1'
+        # Role name value is checked via value string 'admin'
+        assert isinstance(role_args[1], str) and role_args[1].lower() == 'admin'
+
+
+def test__initialize_token_for_existing_users_oauth2_enabled():
+    """When OAuth2 proxy enabled, do nothing."""
+    with mock.patch('sky.server.common.auth_utils.is_oauth2_proxy_enabled',
+                    return_value=True), \
+            mock.patch('sky.server.common.global_user_state') as mock_state, \
+            mock.patch('sky.server.common._create_token') as mock_create_token:
+        common._initialize_token_for_existing_users()
+        mock_state.get_all_users.assert_not_called()
+        mock_create_token.assert_not_called()
+
+
+def test__initialize_token_for_existing_users_creates_missing_tokens():
+    """Create tokens only for users without any token."""
+    user_with_token = mock.Mock()
+    user_with_token.id = 'u1'
+    user_with_token.name = 'name1'
+    user_without_token = mock.Mock()
+    user_without_token.id = 'u2'
+    user_without_token.name = 'name2'
+
+    def get_tokens_side_effect(user_id):
+        return [{'token_id': 'existing'}] if user_id == 'u1' else []
+
+    with mock.patch('sky.server.common.auth_utils.is_oauth2_proxy_enabled',
+                    return_value=False), \
+            mock.patch('sky.server.common.global_user_state.get_all_users',
+                       return_value=[user_with_token, user_without_token]), \
+            mock.patch('sky.server.common.global_user_state.get_tokens_by_user_id',
+                       side_effect=get_tokens_side_effect) as mock_get_tokens, \
+            mock.patch('sky.server.common._create_token') as mock_create_token:
+        common._initialize_token_for_existing_users()
+
+        # get_tokens called for both users
+        assert mock_get_tokens.call_count == 2
+        # create_token only called for the user without tokens
+        args, kwargs = mock_create_token.call_args
+        assert kwargs['service_account_user_id'] == 'u2'
+        assert kwargs['token_name'] == 'name2'
+
+
+def test__initialize_tokens_disabled_noop(tmp_path):
+    """If service account tokens disabled, function should return early."""
+    with mock.patch('sky.server.common.common_utils.is_service_account_token_enabled',
+                    return_value=False), \
+            mock.patch('sky.server.common._initialize_token_for_existing_users') as mock_init_existing:
+        common._initialize_tokens()
+        mock_init_existing.assert_not_called()
+
+
+def test__initialize_tokens_existing_file_skip(tmp_path):
+    """If token file exists and non-empty, skip initialization."""
+    token_path = tmp_path / 'sa' / 'token.txt'
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text('already_there')
+
+    with mock.patch('sky.server.common.common_utils.is_service_account_token_enabled',
+                    return_value=True), \
+            mock.patch('sky.server.common._initialize_token_for_existing_users') as mock_init_existing, \
+            mock.patch('sky.server.common.constants') as mock_constants:
+        mock_constants.SKYPILOT_SYSTEM_SA_TOKEN_PATH = str(token_path)
+        common._initialize_tokens()
+        mock_init_existing.assert_not_called()
+        assert token_path.read_text() == 'already_there'
+
+
+def test__initialize_tokens_uses_existing_system_token(tmp_path):
+    """If system SA token exists in DB, use it and write to file."""
+    token_path = tmp_path / 'sa' / 'token.txt'
+    existing_token = {
+        'token': 'sky_existing',
+        'token_id': 'id1',
+        'expires_at': 1
+    }
+
+    with mock.patch('sky.server.common.common_utils.is_service_account_token_enabled',
+                    return_value=True), \
+            mock.patch('sky.server.common._initialize_token_for_existing_users') as mock_init_existing, \
+            mock.patch('sky.server.common.global_user_state.get_tokens_by_user_id',
+                       return_value=[existing_token]), \
+            mock.patch('sky.server.common.constants') as mock_constants:
+        mock_constants.SKYPILOT_SYSTEM_SA_TOKEN_PATH = str(token_path)
+        # IDs used inside implementation
+        mock_constants.SKYPILOT_SYSTEM_SA_ID = 'sa-system'
+        common._initialize_tokens()
+
+        mock_init_existing.assert_called_once()
+        assert token_path.exists()
+        assert token_path.read_text() == 'sky_existing'
+
+
+def test__initialize_tokens_creates_new_system_token(tmp_path):
+    """If no system SA token exists, create a new one and write to file."""
+    token_path = tmp_path / 'sa' / 'token.txt'
+    new_token = {'token': 'sky_new', 'token_id': 'id2', 'expires_at': 2}
+
+    with mock.patch('sky.server.common.common_utils.is_service_account_token_enabled',
+                    return_value=True), \
+            mock.patch('sky.server.common._initialize_token_for_existing_users') as mock_init_existing, \
+            mock.patch('sky.server.common.global_user_state.get_tokens_by_user_id',
+                       return_value=[]), \
+            mock.patch('sky.server.common._create_user_and_token',
+                       return_value=new_token) as mock_create_user_token, \
+            mock.patch('sky.server.common.constants') as mock_constants:
+        mock_constants.SKYPILOT_SYSTEM_SA_TOKEN_PATH = str(token_path)
+        mock_constants.SKYPILOT_SYSTEM_USER_ID = 'sys'
+        mock_constants.SKYPILOT_SYSTEM_SA_ID = 'sa-system'
+        mock_constants.SKYPILOT_SYSTEM_SA_TOKEN_DURATION_DAYS = 30
+
+        common._initialize_tokens()
+
+        mock_init_existing.assert_called_once()
+        mock_create_user_token.assert_called_once_with(
+            creator_user_id='sys',
+            user_id='sa-system',
+            user_name='sa-system',
+            expires_in_days=30,
+        )
+        assert token_path.exists()
+        assert token_path.read_text() == 'sky_new'
