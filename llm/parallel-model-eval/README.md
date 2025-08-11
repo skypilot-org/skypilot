@@ -219,8 +219,8 @@ models:
                            │
         ┌──────────────────┼──────────────────┐
         ▼                  ▼                  ▼
-   HuggingFace       Cloud Bucket   Kubernetes Volume
-   mistral-7b         agent-qwen       agent-llama
+   HuggingFace       Cloud Bucket        Ollama repo
+   mistral-7b         agent-qwen         agent-llama
         │                  │                  │
         ▼                  ▼                  ▼
    ┌──────────┐       ┌─────────┐       ┌─────────┐
