@@ -185,7 +185,7 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                 # an ALIVE_WAITING job, but we would be able to launch a WAITING
                 # job.
                 if current_state == state.ManagedJobScheduleState.ALIVE_WAITING:
-                    if not can_provision(pool=True):
+                    if not can_provision():
                         # Can't schedule anything, break from scheduling loop.
                         break
                 elif current_state == state.ManagedJobScheduleState.WAITING:
@@ -337,17 +337,20 @@ def _get_launch_parallelism() -> int:
     return cpus * LAUNCHES_PER_CPU if cpus is not None else 1
 
 
-def can_provision(pool: bool) -> bool:
-    num_provision = (serve_state.total_number_provisioning_replicas(pool=pool) +
+def can_provision() -> bool:
+    num_provision = (serve_state.total_number_provisioning_replicas() +
                      state.get_num_launching_jobs())
     return num_provision < _get_launch_parallelism()
 
 
-def _can_start_new_job(pool: Optional[str]) -> bool:
-    alive_jobs = serve_state.get_num_services() + state.get_num_alive_jobs()
+def can_start_new_process() -> bool:
+    num_procs = serve_state.get_num_services() + state.get_num_alive_jobs()
+    return num_procs < _get_job_parallelism()
 
+
+def _can_start_new_job(pool: Optional[str]) -> bool:
     # Check basic resource limits
-    if not (can_provision(pool=True) and alive_jobs < _get_job_parallelism()):
+    if not (can_provision() and can_start_new_process()):
         return False
 
     # Check if there are available replicas in the pool

@@ -984,7 +984,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 schedule_next_jobs = False
                 if info.status == serve_state.ReplicaStatus.PENDING:
                     # sky.launch not started yet
-                    if jobs_scheduler.can_provision(pool=self._is_pool):
+                    if jobs_scheduler.can_provision():
                         p.start()
                         info.status_property.sky_launch_status = (
                             ProcessStatus.RUNNING)

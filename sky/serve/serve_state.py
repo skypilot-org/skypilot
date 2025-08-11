@@ -656,30 +656,12 @@ def get_replica_infos(
 
 
 @init_db
-def total_number_provisioning_replicas(pool: Optional[bool] = None) -> int:
-    """Returns the total number of provisioning replicas.
-
-    Args:
-        pool: If True, only count replicas from services with pool=1.
-              If False, only count replicas from services with pool=0.
-              If None, count all replicas regardless of pool status.
-    """
+def total_number_provisioning_replicas() -> int:
+    """Returns the total number of provisioning replicas."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if pool is None:
-            # Original behavior: get all replicas
-            rows = session.execute(
-                sqlalchemy.select(replicas_table.c.replica_info)).fetchall()
-        else:
-            # Filter by pool status by joining with services table
-            query = sqlalchemy.select(
-                replicas_table.c.replica_info).select_from(
-                    replicas_table.join(
-                        services_table, replicas_table.c.service_name ==
-                        services_table.c.name)).where(
-                            services_table.c.pool == int(pool))
-            rows = session.execute(query).fetchall()
-
+        rows = session.execute(sqlalchemy.select(
+            replicas_table.c.replica_info)).fetchall()
     provisioning_count = 0
     for row in rows:
         replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])

@@ -20,6 +20,7 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
+from sky.jobs import scheduler as jobs_scheduler
 from sky.serve import constants
 from sky.serve import controller
 from sky.serve import load_balancer
@@ -214,11 +215,11 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         service_name, version)
 
     if not is_recovery:
-        if (serve_state.get_num_services() >=
-                serve_utils.get_num_service_threshold()):
+        if not jobs_scheduler.can_start_new_process():
             cleanup_storage(tmp_task_yaml)
             with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Max number of services reached.')
+                raise RuntimeError(
+                    constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR)
         success = serve_state.add_service(
             service_name,
             controller_job_id=job_id,

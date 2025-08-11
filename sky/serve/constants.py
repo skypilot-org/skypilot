@@ -115,3 +115,6 @@ TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
 
 # Dummy run command for cluster pool.
 POOL_DUMMY_RUN_COMMAND = 'echo "setup done"'
+
+# Error message for max number of services reached.
+MAX_NUMBER_OF_SERVICES_REACHED_ERROR = 'Max number of services reached.'

@@ -1040,11 +1040,16 @@ def wait_service_registration(service_name: str, job_id: int,
             lb_port = record['load_balancer_port']
             if lb_port is not None:
                 return message_utils.encode_payload(lb_port)
-        elif len(serve_state.get_services()) >= get_num_service_threshold():
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Max number of services reached. '
-                                   'To spin up more services, please '
-                                   'tear down some existing services.')
+        else:
+            controller_log_path = os.path.expanduser(
+                generate_remote_controller_log_file_name(service_name))
+            with open(controller_log_path, 'r', encoding='utf-8') as f:
+                log_content = f.read()
+            if constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR in log_content:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError('Max number of services reached. '
+                                       'To spin up more services, please '
+                                       'tear down some existing services.')
         elapsed = time.time() - start_time
         if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
             # Print the controller log to help user debug.
