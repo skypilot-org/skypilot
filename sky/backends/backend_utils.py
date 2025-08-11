@@ -2223,7 +2223,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
         elif some_nodes_not_stopped:
-            init_reason = 'some nodes not stopped'
+            init_reason = 'some nodes are up and some nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
@@ -2310,7 +2310,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         global_user_state.add_cluster_event(
             cluster_name,
             status_lib.ClusterStatus.INIT,
-            f'Cluster is abnormal because {init_reason} transitioning to INIT.',
+            f'Cluster is abnormal because {init_reason}. transitioning to INIT.',
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
         global_user_state.add_or_update_cluster(cluster_name,
