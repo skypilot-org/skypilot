@@ -1773,7 +1773,7 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
-) -> List[status_lib.ClusterStatus]:
+) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
     """Returns the status of the cluster.
 
     Raises:
@@ -2016,7 +2016,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     node_statuses = _query_cluster_status_via_cloud_api(handle)
 
     all_nodes_up = (all(
-        status == status_lib.ClusterStatus.UP for status in node_statuses) and
+        status[0] == status_lib.ClusterStatus.UP for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
 
     def get_node_counts_from_ray_status(
@@ -2212,14 +2212,16 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     #      autostopping/autodowning.
     some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
     some_nodes_not_stopped = any(
-        status != status_lib.ClusterStatus.STOPPED for status in node_statuses)
+        status[0] != status_lib.ClusterStatus.STOPPED for status in node_statuses)
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
 
     if is_abnormal:
+        status_reason = ', '.join([status[1] for status in node_statuses if status[1] is not None])
+
         if some_nodes_terminated:
-            init_reason = 'one or more nodes terminated'
+            init_reason = f'one or more nodes terminated ({status_reason})'
         elif some_nodes_not_stopped:
-            init_reason = 'some nodes not stopped'
+            init_reason = f'some nodes not stopped ({status_reason})'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
@@ -2305,7 +2307,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
         global_user_state.add_cluster_event(
             cluster_name, status_lib.ClusterStatus.INIT,
-            f'Cluster is abnormal because {init_reason} transitioning to INIT.',
+            f'Cluster is abnormal because {init_reason}. Transitioned to INIT.',
             global_user_state.ClusterEventType.STATUS_CHANGE)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,

@@ -2,7 +2,7 @@
 import copy
 import json
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union, Tuple
 
 from sky import exceptions
 from sky import sky_logging
@@ -1248,11 +1248,33 @@ def get_cluster_info(
         provider_config=provider_config)
 
 
+def _get_pod_termination_reason(pod: Any) -> List[str]:
+    reasons = []
+    if pod.status.container_statuses:
+        for container_status in pod.status.container_statuses:
+            terminated = container_status.state.terminated
+            if terminated:
+                exit_code = terminated.exit_code
+                reason = terminated.reason
+                if exit_code == 0:
+                    # skip exit 0 (non-failed) just for sanity
+                    continue
+                if reason is None:
+                    # just in-case reason is None, have default for debugging
+                    reason = f'exit({exit_code})'
+                reasons.append(reason)
+            # TODO (kyuds): should we query last_state as well?
+
+    # Normally we will have a single container per pod for skypilot
+    # but doing this just in-case there are multiple containers.
+    return ' | '.join(reasons)
+
+
 def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,
@@ -1300,10 +1322,16 @@ def query_instances(
     # Check if the pods are running or pending
     cluster_status = {}
     for pod in pods:
-        pod_status = status_map[pod.status.phase]
+        phase = pod.status.phase
+        pod_status = status_map[phase]
         if non_terminated_only and pod_status is None:
             continue
-        cluster_status[pod.metadata.name] = pod_status
+        reason = None
+        if phase == 'Failed':
+            reason = _get_pod_termination_reason(pod)
+            logger.info(f'Pod Status Reason(s): {reason}')
+        pod_name = pod.metadata.name
+        cluster_status[pod_name] = (pod_status, f'{pod_name}: {reason}')
     return cluster_status
 
 

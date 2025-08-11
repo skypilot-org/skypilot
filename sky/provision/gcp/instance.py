@@ -4,7 +4,7 @@ import copy
 from multiprocessing import pool
 import re
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Type
+from typing import Any, Callable, Dict, Iterable, List, Optional, Type, Tuple
 
 from sky import sky_logging
 from sky.adaptors import gcp
@@ -61,7 +61,7 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     zone = provider_config['availability_zone']
@@ -98,7 +98,7 @@ def query_instances(
             status = None
         if non_terminated_only and status is None:
             continue
-        statuses[inst_id] = status
+        statuses[inst_id] = (status, None)
 
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     if handler == instance_utils.GCPTPUVMInstance:

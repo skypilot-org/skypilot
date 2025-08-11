@@ -955,7 +955,7 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, cluster_name_on_cloud
 
@@ -972,8 +972,8 @@ def query_instances(
 
         if status is None and non_terminated_only:
             return
-        statuses[node.name] = (None if status is None else
-                               status.to_cluster_status())
+        statuses[node.name] = ((None if status is None else
+                               status.to_cluster_status()), None)
 
     with pool.ThreadPool() as p:
         p.starmap(_fetch_and_map_status,

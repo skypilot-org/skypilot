@@ -4,7 +4,7 @@ import logging
 import random
 import string
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky.clouds.utils import scp_utils
 from sky.provision import common
@@ -430,7 +430,7 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
 
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
@@ -452,7 +452,7 @@ def query_instances(
         status = status_map[instance['virtualServerState']]
         if non_terminated_only and status is None:
             continue
-        statuses[instance['virtualServerId']] = status
+        statuses[instance['virtualServerId']] = (status, None)
     return statuses
 
 

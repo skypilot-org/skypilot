@@ -1,7 +1,7 @@
 """DigitalOcean instance provisioning."""
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 from sky import sky_logging
@@ -245,7 +245,7 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
     # terminated instances are not retrieved by the
     # API making `non_terminated_only` argument moot.
@@ -263,7 +263,7 @@ def query_instances(
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
     for instance_meta in instances.values():
         status = status_map[instance_meta['status']]
-        statuses[instance_meta['name']] = status
+        statuses[instance_meta['name']] = (status, None)
     return statuses
 
 
