@@ -1328,6 +1328,7 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
 
 
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True
