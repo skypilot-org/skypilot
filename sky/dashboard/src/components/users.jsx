@@ -599,7 +599,7 @@ export function Users() {
             </div>
           )}
           {activeMainTab === 'users' &&
-            basicAuthEnabled &&
+            (basicAuthEnabled || serviceAccountTokenEnabled) &&
             userRoleCache?.role === 'admin' && (
               <button
                 onClick={async () => {
