@@ -2266,6 +2266,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
+        self.is_grpc_enabled = True
         self.skylet_ssh_tunnel: Optional[SSHTunnelInfo] = None
 
     def __repr__(self):
@@ -2283,6 +2284,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
                 f'\n\tssh_user={self.ssh_user},'
+                f'\n\tis_grpc_enabled={self.is_grpc_enabled},'
                 f'\n\tskylet_ssh_tunnel={self.skylet_ssh_tunnel}')
 
     def get_cluster_name(self):
@@ -2765,6 +2767,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 state['_cluster_yaml'] = None
 
         if version < 11:
+            state['is_grpc_enabled'] = False
             state['skylet_ssh_tunnel'] = None
 
         self.__dict__.update(state)
@@ -4831,25 +4834,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
-            request = autostopv1_pb2.SetAutostopRequest(
-                idle_minutes=idle_minutes_to_autostop,
-                backend=self.NAME,
-                wait_for=wait_for.to_protobuf()
-                if wait_for else autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
-                down=down,
-            )
-            try:
+            if handle.is_grpc_enabled:
+                request = autostopv1_pb2.SetAutostopRequest(
+                    idle_minutes=idle_minutes_to_autostop,
+                    backend=self.NAME,
+                    wait_for=wait_for.to_protobuf() if wait_for is not None else
+                    autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
+                    down=down,
+                )
                 backend_utils.invoke_skylet_with_retries(
                     handle, lambda: SkyletClient(handle.get_grpc_channel()).
                     set_autostop(request))
-            except Exception:  # pylint: disable=broad-except
-                # Fallback to legacy execution if gRPC fails.
-                # This can happen if the remote cluster is running an old
-                # version of skylet.
+            else:
                 logger.info(
-                    'set_autostop failed for cluster %s; '
-                    'falling back to legacy remote execution.',
-                    handle.cluster_name)
+                    'Using legacy remote execution for set_autostop on '
+                    'cluster %s.', handle.cluster_name)
                 code = autostop_lib.AutostopCodeGen.set_autostop(
                     idle_minutes_to_autostop, self.NAME, wait_for, down)
                 returncode, _, stderr = self.run_on_head(
@@ -4883,17 +4882,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # The head node of the cluster is not UP or in an abnormal state.
             # We cannot check if the cluster is autostopping.
             return False
-        try:
+        if handle.is_grpc_enabled:
             request = autostopv1_pb2.IsAutostoppingRequest()
             response = backend_utils.invoke_skylet_with_retries(
                 handle, lambda: SkyletClient(handle.get_grpc_channel()).
                 is_autostopping(request))
             return response.is_autostopping
-        except Exception:  # pylint: disable=broad-except
-            # Fallback to legacy execution if gRPC fails.
+        else:
             logger.info(
-                'is_autostopping failed for cluster %s; '
-                'falling back to legacy remote execution.', handle.cluster_name)
+                'Using legacy remote execution for is_autostopping on '
+                'cluster %s.', handle.cluster_name)
             code = autostop_lib.AutostopCodeGen.is_autostopping()
             returncode, stdout, stderr = self.run_on_head(
                 handle, code, require_outputs=True, stream_logs=stream_logs)
