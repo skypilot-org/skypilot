@@ -6,6 +6,7 @@ Concepts:
 - Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
+import asyncio
 import enum
 import functools
 import json
@@ -50,6 +51,9 @@ _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
+
+# TODO (lloyd-brown): This is a temporary value for testing.
+DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24
 
 Base = declarative.declarative_base()
 
@@ -730,6 +734,33 @@ def get_last_cluster_event(cluster_hash: str,
         return None
     return row.reason
 
+def cleanup_cluster_events_with_retention(retention_hours: float) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(cluster_event_table).filter(
+            cluster_event_table.c.transitioned_at <
+            time.time() - retention_hours * 3600).delete()
+        session.commit()
+
+async def cluster_event_retention_daemon():
+    """Garbage collect cluster events periodically."""
+    while True:
+        logger.info('Running cluster event retention daemon...')
+        # Use the latest config.
+        skypilot_config.reload_config()
+        retention_hours = skypilot_config.get_nested(
+            ('api_server', 'cluster_event_retention_hours'),
+            DEFAULT_CLUSTER_EVENT_RETENTION_HOURS)
+        try:
+            if retention_hours >= 0:
+                cleanup_cluster_events_with_retention(retention_hours)
+        except asyncio.CancelledError:
+            logger.info('Cluster event retention daemon cancelled')
+            break
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error running cluster event retention daemon: {e}')
+
+        await asyncio.sleep(max(retention_hours, 3600))
 
 def get_cluster_events(cluster_name: Optional[str], cluster_hash: Optional[str],
                        event_type: ClusterEventType) -> List[str]:
