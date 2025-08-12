@@ -681,7 +681,7 @@ def add_cluster_event(cluster_name: str,
         if nop_if_duplicate:
             last_event = get_last_cluster_event(cluster_hash,
                                                 event_type=event_type)
-            if duplicate_regex is not None:
+            if duplicate_regex is not None and last_event is not None:
                 if re.search(duplicate_regex, last_event):
                     return
             elif last_event == reason:

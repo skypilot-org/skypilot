@@ -2227,9 +2227,9 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             [status[1] for status in node_statuses if status[1] is not None])
 
         if some_nodes_terminated:
-            init_reason = f'one or more nodes terminated'
+            init_reason = 'one or more nodes terminated'
         elif some_nodes_not_stopped:
-            init_reason = f'some nodes are up and some nodes are stopped'
+            init_reason = 'some nodes are up and some nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
