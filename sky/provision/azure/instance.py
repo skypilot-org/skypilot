@@ -952,13 +952,11 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
 
 @common_utils.retry
 def query_instances(
-    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
     assert provider_config is not None, cluster_name_on_cloud
 
     subscription_id = provider_config['subscription_id']
