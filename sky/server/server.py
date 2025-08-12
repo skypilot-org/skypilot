@@ -1768,7 +1768,9 @@ async def setup_vscode_connection(cluster_name: str, request: fastapi.Request) -
             'cluster_name': cluster_name,
             'tunnel_id': tunnel.tunnel_id,
             'local_port': tunnel.local_port,
-            'url': f'/api/vscode/{cluster_name}/',
+            'url': f'/api/vscode/{cluster_name}/',  # Proxy URL with WebSocket support
+            'direct_url': f'http://localhost:{tunnel.local_port}',  # Direct tunnel URL for reference
+            'proxy_url': f'/api/vscode/{cluster_name}/',  # Same as url for compatibility
             'message': 'VSCode connection ready'
         }
         
@@ -1836,20 +1838,20 @@ async def close_vscode_connection(cluster_name: str) -> Dict[str, Any]:
 
 @app.get('/api/vscode/{cluster_name}/')
 @app.get('/api/vscode/{cluster_name}/{path:path}')
-async def vscode_proxy(
+async def vscode_http_proxy(
     request: fastapi.Request,
     cluster_name: str, 
     path: str = ""
 ) -> fastapi.responses.Response:
-    """Proxy requests to code-server running on the cluster.
+    """Proxy HTTP requests to code-server running on the cluster.
     
-    This endpoint acts as a reverse proxy, forwarding all requests to the
+    This endpoint acts as a reverse proxy, forwarding HTTP requests to the
     code-server instance running on the specified cluster through an SSH tunnel.
     
     Args:
+        request: The incoming FastAPI HTTP request
         cluster_name: Name of the cluster running code-server
         path: Path within the code-server application
-        request: The incoming FastAPI request
         
     Returns:
         Response from the code-server instance
@@ -1873,12 +1875,14 @@ async def vscode_proxy(
                        f'Please set up the connection first using POST /api/vscode/{cluster_name}/setup'
             )
     
+    # Note: WebSocket connections are now handled by dedicated @app.websocket routes
+    
     # Build target URL
     target_url = f"http://127.0.0.1:{tunnel.local_port}/{path}"
     if request.url.query:
         target_url += f"?{request.url.query}"
     
-    # Forward the request
+    # Forward the HTTP request
     try:
         async with httpx.AsyncClient() as client:
             # Prepare headers (exclude host header to avoid conflicts)
@@ -1930,11 +1934,104 @@ async def vscode_proxy(
                    f'The tunnel may be down or code-server may not be running.'
         )
     except Exception as e:
-        logger.error(f'Error proxying request to VSCode: {e}')
+        logger.error(f'Error proxying HTTP request to VSCode: {e}')
         raise fastapi.HTTPException(
             status_code=500,
             detail=f'Proxy error: {str(e)}'
         )
+
+
+
+
+
+
+
+
+@app.websocket('/api/vscode/{cluster_name}/{path:path}')
+async def vscode_websocket_handler(websocket: fastapi.WebSocket, cluster_name: str, path: str):
+    """Handle WebSocket connections for code-server."""
+    await handle_vscode_websocket(websocket, cluster_name, path)
+
+
+@app.websocket('/api/vscode/{cluster_name}/')
+async def vscode_websocket_root_handler(websocket: fastapi.WebSocket, cluster_name: str):
+    """Handle WebSocket connections for code-server root."""
+    await handle_vscode_websocket(websocket, cluster_name, "")
+
+
+async def handle_vscode_websocket(websocket: fastapi.WebSocket, cluster_name: str, path: str):
+    """Handle WebSocket proxy for code-server."""
+    import websockets
+    import asyncio
+    from sky.server.vscode_tunnel_manager import get_tunnel_manager
+    
+    # Get tunnel information
+    tunnel_manager = get_tunnel_manager()
+    tunnel = tunnel_manager.get_tunnel(cluster_name)
+    
+    if tunnel is None:
+        await websocket.close(code=1011, reason="Tunnel not available")
+        return
+    
+    await websocket.accept()
+    
+    # Build target WebSocket URL
+    if path and not path.startswith('/'):
+        path = '/' + path
+    
+    target_ws_url = f"ws://127.0.0.1:{tunnel.local_port}{path}"
+    
+    # Add query parameters if present
+    query_params = dict(websocket.query_params)
+    if query_params:
+        query_string = '&'.join([f"{k}={v}" for k, v in query_params.items()])
+        target_ws_url += f"?{query_string}"
+    
+    logger.info(f"WebSocket proxy: {cluster_name} -> {target_ws_url}")
+    
+    try:
+        # Connect to code-server WebSocket
+        async with websockets.connect(target_ws_url) as target_ws:
+            # Create bidirectional forwarding
+            async def forward_client_to_server():
+                try:
+                    while True:
+                        message = await websocket.receive()
+                        if message.get("type") == "websocket.disconnect":
+                            break
+                        elif "text" in message:
+                            await target_ws.send(message["text"])
+                        elif "bytes" in message:
+                            await target_ws.send(message["bytes"])
+                except Exception as e:
+                    logger.debug(f"Client->Server forwarding ended: {e}")
+            
+            async def forward_server_to_client():
+                try:
+                    async for message in target_ws:
+                        if isinstance(message, str):
+                            await websocket.send_text(message)
+                        else:
+                            await websocket.send_bytes(message)
+                except Exception as e:
+                    logger.debug(f"Server->Client forwarding ended: {e}")
+            
+            # Run both directions concurrently
+            await asyncio.gather(
+                forward_client_to_server(),
+                forward_server_to_client(),
+                return_exceptions=True
+            )
+    
+    except websockets.exceptions.ConnectionClosed:
+        logger.info(f"WebSocket connection closed for {cluster_name}")
+    except Exception as e:
+        logger.error(f"WebSocket proxy error for {cluster_name}: {e}")
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
 
 
 @app.get('/dashboard/{full_path:path}')
