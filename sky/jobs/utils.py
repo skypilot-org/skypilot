@@ -1701,7 +1701,7 @@ class ManagedJobCodeGen:
             if managed_job_version >= 8:
                 from sky.serve import serve_state
                 pool_hash = None
-                if {pool!r} is not None:
+                if {pool!r} != None:
                     pool_hash = serve_state.get_service_hash({pool!r})
                 set_job_info_kwargs['pool'] = {pool!r}
                 set_job_info_kwargs['pool_hash'] = pool_hash
