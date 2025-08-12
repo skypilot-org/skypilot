@@ -90,17 +90,18 @@ local_ray = [
     'ray[default] >= 2.2.0, != 2.6.0',
 ]
 
+# See requirements-dev.txt for the version of grpc and protobuf
+# used to generate the code during development.
 remote = [
-    # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L251-L252
-    # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard
-    # fails to start when ray start is called (#2054).
-    # Tracking issue: https://github.com/ray-project/ray/issues/30984
-    'grpcio >= 1.32.0, != 1.48.0; python_version < \'3.10\'',
-    'grpcio >= 1.42.0, != 1.48.0; python_version >= \'3.10\'',
-    # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
-    'protobuf >= 3.15.3, != 3.19.5',
+    # The grpc version at runtime has to be newer than the version
+    # used to generate the code.
+    'grpcio>=1.63.0',
+    # >= 5.26.1 because the runtime version can't be older than the version
+    # used to generate the code.
+    # < 7.0.0 because code generated for a major version V will be supported by
+    # protobuf runtimes of version V and V+1.
+    # https://protobuf.dev/support/cross-version-runtime-guarantee
+    'protobuf >= 5.26.1, < 7.0.0',
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the

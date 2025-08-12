@@ -49,11 +49,13 @@ YAPF_FLAGS=(
 YAPF_EXCLUDES=(
     '--exclude' 'build/**'
     '--exclude' 'sky/skylet/providers/ibm/**'
+    '--exclude' 'sky/schemas/generated/**'
 )
 
 ISORT_YAPF_EXCLUDES=(
     '--sg' 'build/**'
     '--sg' 'sky/skylet/providers/ibm/**'
+    '--sg' 'sky/schemas/generated/**'
 )
 
 BLACK_INCLUDES=(

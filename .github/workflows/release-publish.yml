@@ -112,10 +112,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GH_PAT_FOR_RELEASE }}
 
       - name: Create and push tag
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
         run: |
           VERSION="${{ needs.extract-version.outputs.version }}"
           git config --global user.name "GitHub Action"
