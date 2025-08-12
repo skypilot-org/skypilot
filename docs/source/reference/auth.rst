@@ -13,7 +13,7 @@ SkyPilot API server supports three authentication methods:
 .. TODO(aylei): replace basic auth with proxy auth for clarity after we support service account token based authentication to be used along.
 
 - **Basic auth in ingress**: Use an admin-configured username and password to authenticate.
-- **Token-based basic auth**: Use a token to authenticate.
+- **Service account token**: Use a JWT (JSON Web Token) to authenticate.
 - **SSO (recommended)**: Use an auth proxy (e.g.,
   `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__) to
   authenticate. For example, Okta, Google Workspace, or other SSO providers are supported.
@@ -21,11 +21,11 @@ SkyPilot API server supports three authentication methods:
 Comparison of the three methods:
 
 .. csv-table::
-    :header: "", "Basic Auth in ingress", "Token-based basic auth", "SSO (recommended)"
+    :header: "", "Basic Auth in ingress", "Service account token", "SSO (recommended)"
     :widths: 20, 20, 30, 30
     :align: left
 
-    "User identity", "Client's ``whoami`` + hash of MAC address", "Users created by the ``Admin`` user", "User email (e.g., ``who@skypilot.co``), read from ``X-Auth-Request-Email``"
+    "User identity", "Client's ``whoami`` + hash of MAC address", "Users or service accounts created by the ``Admin`` role", "User email (e.g., ``who@skypilot.co``), read from ``X-Auth-Request-Email``"
     "SkyPilot RBAC", "Not supported", "Supported", "Supported"
     "Setup", "Can be enabled during deployment with Helm", "Automatically enabled", "Bring your Okta, Google Workspace, or other SSO provider"
 
@@ -54,7 +54,6 @@ Example deployment command:
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
       --namespace $NAMESPACE \
       --create-namespace \
-      --set auth.serviceAccount.enabled=false \
       --set ingress.authCredentials=$AUTH_STRING
 
 Example login command:
@@ -63,14 +62,18 @@ Example login command:
 
     $ sky api login -e http://username:password@<SKYPILOT_API_SERVER_ENDPOINT>
 
-.. _api-server-token-based-basic-auth:
+.. _api-server-users-service-accounts-with-tokens:
 
-Token-based basic auth
-----------------------
+Users and service accounts with tokens
+--------------------------------------
 
-Token-based basic auth will be enabled by default if you use the :ref:`helm chart<sky-api-server-deploy>` to deploy the API server. With token-based auth, after the installation, a default token with `Admin` role will be created and saved to a secret named ``$RELEASE_NAME-initial-sa-token`` in the namespace where the API server is deployed. You can use this token to connect to the API server and then create new users. When an user is created, a token will be created automatically with specified role and expiration time, and the user can login the API server with the token.
+Users and service accounts with tokens will be enabled by default if you use the :ref:`helm chart<sky-api-server-deploy>` to deploy the API server.
 
-.. _api-server-token-based-basic-auth-create-users:
+After the installation, a default token with `Admin` role will be created and saved to a secret named ``$RELEASE_NAME-initial-sa-token`` in the namespace where the API server is deployed. You can use this token to connect to the API server and then create new users.
+
+When an user is created, a token will be created automatically with specified role and expiration time, and the user can login the API server with the token.
+
+.. _api-server-users-service-accounts-with-tokens-create-users:
 
 Create users
 ~~~~~~~~~~~~
@@ -404,7 +407,40 @@ Optional: Service accounts
 
 You can also use service accounts to access SkyPilot API server programmatically without browser authentication, which is good for CI/CD pipelines, Airflow integration, etc.
 
-Refer to :ref:`creating token based users <api-server-token-based-basic-auth-create-users>` for how to create and use the service account tokens.
+.. _service-accounts-create:
+
+Creating service accounts
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Navigate to **Users > Service Accounts** in the SkyPilot dashboard
+2. Click **Create Service Account** and provide:
+
+   * **Token Name**: Descriptive name (e.g., "pipeline")
+   * **Expiration**: Optional (defaults to 30 days)
+
+3. **Save the token immediately** - it won't be shown again
+4. Assign appropriate role (admin/user)
+
+.. image:: ../images/client-server/service-account.png
+    :alt: Service account
+    :align: center
+    :width: 90%
+
+Accessing the API server
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Authenticate with the service account token:
+
+.. code-block:: console
+
+    $ sky api login -e <ENDPOINT> --token <SERVICE_ACCOUNT_TOKEN>
+
+Or, use the ``SKYPILOT_SERVICE_ACCOUNT_TOKEN`` environment variable:
+
+.. code-block:: console
+
+    $ export SKYPILOT_SERVICE_ACCOUNT_TOKEN=<SERVICE_ACCOUNT_TOKEN>
+    $ sky api info
 
 Example: GitHub actions (CI/CD)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -475,7 +511,7 @@ SkyPilot provides basic RBAC (role-based access control) support. Two roles are 
 - **User**: Use SkyPilot as usual to launch and manage resources (clusters, jobs, etc.).
 - **Admin**: Manage SkyPilot API server settings, users, and workspaces.
 
-RBAC support is enabled when :ref:`SSO authentication <api-server-oauth>` or :ref:`token-based basic auth <api-server-token-based-basic-auth>` is used (not when using :ref:`basic auth in ingress <api-server-basic-auth>`).
+RBAC support is enabled when :ref:`SSO authentication <api-server-oauth>` or :ref:`service account token <api-server-users-service-accounts-with-tokens>` is used (not when using :ref:`basic auth in ingress <api-server-basic-auth>`).
 
 Config :ref:`config-yaml-rbac-default-role` determines whether a new
 SkyPilot user is created with the ``user`` or ``admin`` role. By default, it is

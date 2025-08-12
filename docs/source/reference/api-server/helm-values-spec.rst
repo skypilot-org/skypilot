@@ -89,7 +89,8 @@ Below is the available helm value keys and the default value of each key:
       :ref:`cookie-expire <helm-values-auth-oauth-cookie-expire>`: null
     :ref:`serviceAccount <helm-values-auth-serviceAccount>`:
       :ref:`enabled <helm-values-auth-serviceAccount-enabled>`: null
-    :ref:`disableAnonymousAccess <helm-values-auth-disableAnonymousAccess>`: true
+    :ref:`anonymous <helm-values-auth-anonymous>`:
+      :ref:`enabled <helm-values-auth-anonymous-enabled>`: false
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
@@ -924,19 +925,28 @@ Default: ``null``
       enabled: true
 
 
-.. _helm-values-auth-disableAnonymousAccess:
+.. _helm-values-auth-anonymous:
 
-``auth.disableAnonymousAccess``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+``auth.anonymous``
+^^^^^^^^^^^^^^^^^^^
 
-Disable anonymous access to the API server.
+Anonymous access to the API server.
 
-Default: ``true``
+
+.. _helm-values-auth-anonymous-enabled:
+
+``auth.anonymous.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable/disable anonymous access to the API server.
+
+Default: ``false``
 
 .. code-block:: yaml
 
   auth:
-    disableAnonymousAccess: true
+    anonymous:
+      enabled: false
 
 .. _helm-values-storage:
 

@@ -47,7 +47,7 @@ Upgrade the API server:
 
 .. code-block:: bash
 
-    # --reuse-values is critical to keep the values set in the previous installation steps.
+    # --reset-then-reuse-values is critical to keep the values set in the previous installation steps.
     helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reset-then-reuse-values \
       --set apiService.image=${IMAGE_REPO}:${VERSION}
 
@@ -57,24 +57,27 @@ When the API server is being upgraded, the SkyPilot CLI and Python SDK will auto
 
     Starting with SkyPilot v0.10.2, token-based basic authentication is enabled by default for the API server.
 
-    - If you previously configured :ref:`basic auth in ingress <api-server-basic-auth>` and want to keep using ingress-managed basic auth after the upgrade, disable the built-in token auth:
+    - If you previously configured :ref:`basic auth in ingress <api-server-basic-auth>` and want to keep using ingress-managed basic auth after the upgrade:
 
       .. code-block:: bash
 
-          helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reset-then-reuse-values \
-            --set apiService.image=${IMAGE_REPO}:${VERSION} \
-            --set auth.serviceAccount.enabled=false
+          helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+            --reset-then-reuse-values \
+            --set apiService.image=${IMAGE_REPO}:${VERSION}
 
-    - If you want to migrate from ingress-managed basic auth to the new :ref:`token-based basic auth <api-server-token-based-basic-auth>`, clear the ingress credentials and enable the token auth:
+    - If you want to migrate from ingress-managed basic auth to the new :ref:`token-based basic auth <api-server-users-service-accounts-with-tokens>`, clear the ingress credentials and enable the token auth:
 
       .. code-block:: bash
 
-          helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reset-then-reuse-values \
+          helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+            --reset-then-reuse-values \
             --set apiService.image=${IMAGE_REPO}:${VERSION} \
             --set auth.serviceAccount.enabled=true \
             --set ingress.authCredentials=''
       
-      After the upgrade, a initial token with `Admin` role will be created and saved to a secret named ``$RELEASE_NAME-initial-sa-token`` in the namespace where the API server is deployed. You can use this token to connect to the API server and then create new users. In addition, a default token will be created for the existing users, however, the tokens are not exposed to the users, so the ``Admin`` user needs to login the API server with the initial token to rotate the tokens for the existing users.
+      After the upgrade, an initial token with `Admin` role will be created and saved to a secret named ``$RELEASE_NAME-initial-sa-token`` in the namespace where the API server is deployed. You can use this token to connect to the API server and then create new users.
+
+      In addition, a default token will be created for the existing users, however, the tokens are not exposed to the users, so the ``Admin`` user needs to login the API server with the initial token to rotate the tokens for the existing users.
 
 Optionally, you can watch the upgrade progress with:
 
