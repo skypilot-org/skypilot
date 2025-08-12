@@ -697,25 +697,23 @@ export function Users() {
         </div>
 
         {/* Create Service Account Button for Service Accounts Tab - only show for admin and when enabled */}
-        {activeMainTab === 'service-accounts' &&
-          serviceAccountTokenEnabled &&
-          userRoleCache?.role === 'admin' && (
-            <button
-              onClick={() => {
-                checkPermissionAndAct(
-                  'cannot create service account tokens',
-                  () => {
-                    setShowCreateDialog(true);
-                  }
-                );
-              }}
-              className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
-              title="Create Service Account"
-            >
-              <PlusIcon className="h-4 w-4 mr-2" />
-              Create Service Account
-            </button>
-          )}
+        {activeMainTab === 'service-accounts' && serviceAccountTokenEnabled && (
+          <button
+            onClick={() => {
+              checkPermissionAndAct(
+                'cannot create service account tokens',
+                () => {
+                  setShowCreateDialog(true);
+                }
+              );
+            }}
+            className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
+            title="Create Service Account"
+          >
+            <PlusIcon className="h-4 w-4 mr-2" />
+            Create Service Account
+          </button>
+        )}
       </div>
 
       {/* Error/Success messages positioned at top right, below navigation bar */}
@@ -2174,14 +2172,7 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setRotatedTokenInDialog(data.token);
-
-        // Refresh both service account tokens and user data
-        if (activeMainTab === 'service-accounts') {
-          await fetchTokensAndCounts();
-        } else {
-          // Refresh user data when rotating user tokens
-          handleRefresh();
-        }
+        await fetchTokensAndCounts();
       } else {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to rotate token');
@@ -2246,10 +2237,7 @@ function ServiceAccountTokensView({
                   <TableHead>Created</TableHead>
                   <TableHead>Last used</TableHead>
                   <TableHead>Expires</TableHead>
-                  {/* Actions column - only show for admin */}
-                  {userRoleCache?.role === 'admin' && (
-                    <TableHead>Actions</TableHead>
-                  )}
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -2376,10 +2364,11 @@ function ServiceAccountTokensView({
                         />
                       )}
                     </TableCell>
-                    {/* Actions cell - only show for admin */}
-                    {userRoleCache?.role === 'admin' && (
-                      <TableCell>
-                        <div className="flex items-center space-x-2">
+                    <TableCell>
+                      <div className="flex items-center space-x-2">
+                        {/* Show rotate button only if user owns the token or is admin */}
+                        {(userRoleCache?.role === 'admin' ||
+                          token.creator_user_hash === userRoleCache?.id) && (
                           <CustomTooltip
                             content={`Rotate token`}
                             className="capitalize text-sm text-muted-foreground"
@@ -2399,6 +2388,10 @@ function ServiceAccountTokensView({
                               <RotateCwIcon className="h-4 w-4" />
                             </button>
                           </CustomTooltip>
+                        )}
+                        {/* Show delete button only if user owns the token or is admin */}
+                        {(userRoleCache?.role === 'admin' ||
+                          token.creator_user_hash === userRoleCache?.id) && (
                           <Tooltip
                             content={`Delete ${token.token_name}`}
                             className="capitalize text-sm text-muted-foreground"
@@ -2418,9 +2411,9 @@ function ServiceAccountTokensView({
                               <Trash2Icon className="h-4 w-4" />
                             </button>
                           </Tooltip>
-                        </div>
-                      </TableCell>
-                    )}
+                        )}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -2627,9 +2620,9 @@ function ServiceAccountTokensView({
       >
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Rotate Token</DialogTitle>
+            <DialogTitle>Rotate Service Account Token</DialogTitle>
             <DialogDescription>
-              Rotate the token &quot;{tokenToRotate?.token_name}
+              Rotate the service account token &quot;{tokenToRotate?.token_name}
               &quot;
               {tokenToRotate?.creator_user_hash !== userRoleCache?.id &&
               userRoleCache?.role === 'admin'
@@ -2646,7 +2639,8 @@ function ServiceAccountTokensView({
                 <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                   <div className="flex items-center mb-3">
                     <h4 className="text-sm font-medium text-green-900">
-                      🔄 Token rotated successfully - save this new token now!
+                      🔄 Service account token rotated successfully - save this
+                      new token now!
                     </h4>
                     <CustomTooltip
                       content={copySuccess ? 'Copied!' : 'Copy token'}

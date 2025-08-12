@@ -61,6 +61,10 @@ async def users() -> List[UserInfo]:
     all_users = []
     user_list = global_user_state.get_all_users()
     for user in user_list:
+        # Filter out service accounts - they have IDs starting with "sa-"
+        if user.is_service_account():
+            continue
+
         user_roles = permission.permission_service.get_user_roles(user.id)
         tokens = global_user_state.get_tokens_by_user_id(user.id)
         token = None
@@ -512,6 +516,11 @@ async def get_service_account_tokens(
 
     result = []
     for token in tokens:
+        # Filter out users
+        sa_user_id = token['service_account_user_id']
+        if not sa_user_id.lower().startswith('sa-'):
+            continue
+
         token_info = {
             'token_id': token['token_id'],
             'token_name': token['token_name'],
