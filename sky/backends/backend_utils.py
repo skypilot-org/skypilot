@@ -1775,7 +1775,7 @@ def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
     """Returns the status of the cluster as a list of tuples corresponding
-    to the ClusterStatus of the node and an optional reason string.
+    to the node status and an optional reason string for said status.
 
     Raises:
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
