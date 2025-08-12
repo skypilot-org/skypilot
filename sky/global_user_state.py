@@ -645,16 +645,13 @@ def add_cluster_event(cluster_name: str,
                       new_status: Optional[status_lib.ClusterStatus],
                       reason: str,
                       event_type: ClusterEventType,
-                      nop_if_duplicate: bool = False,
-                      transitioned_at: Optional[int] = None) -> None:
+                      nop_if_duplicate: bool = False) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     if cluster_hash is None:
         logger.debug(f'Hash for cluster {cluster_name} not found. '
                      'Skipping event.')
         return
-    if transitioned_at is None:
-        transitioned_at = int(time.time())
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
@@ -682,7 +679,7 @@ def add_cluster_event(cluster_name: str,
                     starting_status=last_status,
                     ending_status=new_status.value if new_status else None,
                     reason=reason,
-                    transitioned_at=transitioned_at,
+                    transitioned_at=int(time.time()),
                     type=event_type.value,
                 ))
             session.commit()
