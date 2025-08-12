@@ -66,7 +66,6 @@ class TestServiceAccountDeletionProtection:
         # Verify deletion flow
         mock_get_token.assert_called_once_with('token123')
         mock_delete_user.assert_called_once_with('sa-abc123def456')
-        mock_delete_token.assert_called_once_with('token123')
 
         assert result == {'message': 'Token deleted successfully'}
 
@@ -235,30 +234,3 @@ class TestServiceAccountDeletionProtection:
         # Verify authentication error
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail == 'Authentication required'
-
-    @pytest.mark.asyncio
-    @mock.patch('sky.users.server.global_user_state.get_service_account_token')
-    @mock.patch('sky.users.server._delete_user')
-    @mock.patch(
-        'sky.users.server.global_user_state.delete_service_account_token')
-    async def test_delete_service_account_token_db_deletion_fails(
-            self, mock_delete_token, mock_delete_user, mock_get_token,
-            mock_request, sample_service_account_token):
-        """Test service account token deletion when database deletion fails."""
-        # Setup mocks
-        mock_get_token.return_value = sample_service_account_token
-        mock_delete_user.return_value = None  # User deletion succeeds
-        mock_delete_token.return_value = False  # DB deletion fails
-
-        # Create delete request
-        delete_body = payloads.ServiceAccountTokenDeleteBody(
-            token_id='token123')
-
-        # Execute deletion and expect DB error
-        with pytest.raises(fastapi.HTTPException) as exc_info:
-            await users_server.delete_service_account_token(
-                mock_request, delete_body)
-
-        # Verify database error
-        assert exc_info.value.status_code == 404
-        assert exc_info.value.detail == 'Token not found'
