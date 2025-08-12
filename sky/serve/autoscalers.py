@@ -662,7 +662,7 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
                 num_replicas_to_scale_down, replica_infos)
 
         # Create a list of (replica_info, target_qps) tuples
-        replica_qps_pairs = []
+        replica_qps_pairs: List['replica_managers.ReplicaInfo', float] = []
 
         for info in replica_infos:
             if info.version != self.latest_version or info.is_terminal:
