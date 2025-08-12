@@ -18,6 +18,7 @@ from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
+from sky.utils.db import db_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -1285,7 +1286,8 @@ def _analyze_pod_events(context: Optional[str], namespace: str,
         field_selector=pod_field_selector,
         _request_timeout=kubernetes.API_TIMEOUT).items
     pod_events = sorted(pod_events,
-                        key=lambda event: event.metadata.creation_timestamp)
+                        key=lambda event: event.metadata.creation_timestamp,
+                        reverse=True)
     last_scheduled_node = None
     for event in pod_events:
         if event.reason == 'Scheduled':
@@ -1302,22 +1304,37 @@ def _analyze_pod_events(context: Optional[str], namespace: str,
             field_selector=node_field_selector,
             _request_timeout=kubernetes.API_TIMEOUT).items
         node_events = sorted(
-            node_events, key=lambda event: event.metadata.creation_timestamp)
-
+            node_events,
+            key=lambda event: event.metadata.creation_timestamp,
+            reverse=True)
     for event in pod_events:
-        global_user_state.add_cluster_event(
-            cluster_name,
-            None,
-            f'[kubernetes pod {pod_name}] {event.reason} {event.message}',
-            global_user_state.ClusterEventType.DEBUG,
-            transitioned_at=int(event.metadata.creation_timestamp.timestamp()))
+        try:
+            # Try inserting the latest events first. If the event is a
+            # duplicate, it means the event (and any previous events) have
+            # already been inserted - so break out of the loop.
+            global_user_state.add_cluster_event(
+                cluster_name,
+                None,
+                f'[kubernetes pod {pod_name}] {event.reason} {event.message}',
+                global_user_state.ClusterEventType.DEBUG,
+                transitioned_at=int(event.metadata.creation_timestamp.timestamp()),
+                expose_duplicate_error=True)
+        except db_utils.UniqueConstraintViolationError:
+            break
     for event in node_events:
-        global_user_state.add_cluster_event(
+        try:
+            # Try inserting the latest events first. If the event is a
+            # duplicate, it means the event (and any previous events) have
+            # already been inserted - so break out of the loop.
+            global_user_state.add_cluster_event(
             cluster_name,
             None, f'[kubernetes node {last_scheduled_node}] '
             f'{event.reason} {event.message}',
             global_user_state.ClusterEventType.DEBUG,
-            transitioned_at=int(event.metadata.creation_timestamp.timestamp()))
+            transitioned_at=int(event.metadata.creation_timestamp.timestamp()),
+            expose_duplicate_error=True)
+        except db_utils.UniqueConstraintViolationError:
+            break
 
 
 def query_instances(
