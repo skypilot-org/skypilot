@@ -731,8 +731,7 @@ def get_last_cluster_event(cluster_hash: str,
     return row.reason
 
 
-def get_cluster_events(cluster_name: Optional[str],
-                       cluster_hash: Optional[str],
+def get_cluster_events(cluster_name: Optional[str], cluster_hash: Optional[str],
                        event_type: ClusterEventType) -> List[str]:
     """Returns the cluster events for the cluster.
 
@@ -759,6 +758,7 @@ def get_cluster_events(cluster_name: Optional[str],
             cluster_hash=cluster_hash, type=event_type.value).order_by(
                 cluster_event_table.c.transitioned_at.asc()).all()
     return [row.reason for row in rows]
+
 
 def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
     """Returns the user hash or the current user hash, if user_hash is None.

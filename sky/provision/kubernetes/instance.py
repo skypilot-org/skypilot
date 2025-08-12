@@ -1352,7 +1352,6 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
         # return. Return None.
         return None
 
-
     # Analyze the events for failure
     failure_reason = None
     failure_decisiveness = 0
@@ -1376,7 +1375,7 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
         elif event.startswith('TaintManagerEviction '):
             # usually the event message for TaintManagerEviction is not useful
             # so we record a more generic message.
-            _record_failure_reason(f'pod was evicted by taint manager', 2)
+            _record_failure_reason('pod was evicted by taint manager', 2)
         elif event.startswith('DeletingNode '):
             _record_failure_reason(event[len('DeletingNode '):], 3)
     return failure_reason
