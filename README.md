@@ -213,5 +213,5 @@ We welcome all contributions to the project! See [CONTRIBUTING](CONTRIBUTING.md)
 
 
 <a href="https://github.com/skypilot-org/skypilot/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=skypilot-org/skypilot&max=200" />
+  <img src="https://contrib.rocks/image?repo=skypilot-org/skypilot&max=200&anon=1" />
 </a>
