@@ -82,7 +82,6 @@ _set_http_proxy_env_vars()
 # pylint: disable=wrong-import-position
 from sky import backends
 from sky import clouds
-from sky import jobs as managed_jobs
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
 from sky.admin_policy import UserRequest
