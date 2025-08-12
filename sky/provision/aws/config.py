@@ -107,8 +107,7 @@ def bootstrap_instances(
         if expected_sg_name != aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
             # Ensure the default security group is created.
             _configure_security_group(ec2, vpc_id,
-                                      aws_cloud.DEFAULT_SECURITY_GROUP_NAME,
-                                      extended_ip_rules)
+                                      aws_cloud.DEFAULT_SECURITY_GROUP_NAME, [])
         end_time = time.time()
         elapsed = end_time - start_time
         logger.info(
