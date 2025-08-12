@@ -6,7 +6,7 @@ import enum
 import math
 import time
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Union, Tuple
 
 from sky import sky_logging
 from sky.serve import constants
@@ -662,10 +662,12 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
                 num_replicas_to_scale_down, replica_infos)
 
         # Create a list of (replica_info, target_qps) tuples
-        replica_qps_pairs: List['replica_managers.ReplicaInfo', float] = []
+        replica_qps_pairs: List[Tuple['replica_managers.ReplicaInfo', float]] = []
 
         for info in replica_infos:
-            if info.version != self.latest_version or info.is_terminal:
+            # Include old-version replicas as well so they also get a target_qps
+            # assigned. Skip terminal replicas only.
+            if info.is_terminal:
                 continue
 
             # Find matching replica in _replica_info to get GPU type
