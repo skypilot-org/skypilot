@@ -613,11 +613,12 @@ class Kubernetes(clouds.Cloud):
                 resources.network_tier == resources_utils.NetworkTier.BEST):
 
             # Update image id
-            network_image_id = network_type.get_image_id()
-            if network_image_id:
-                image_id = network_image_id
-                if image_id.startswith('docker:'):
-                    image_id = image_id[len('docker:'):]
+            if image_id is None:
+                network_image_id = network_type.get_image_id()
+                if network_image_id:
+                    image_id = network_image_id
+                    if image_id.startswith('docker:'):
+                        image_id = image_id[len('docker:'):]
 
             # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
             unsupported_features = self._unsupported_features_for_resources(
