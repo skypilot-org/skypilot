@@ -2318,7 +2318,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         global_user_state.add_cluster_event(
             cluster_name,
             status_lib.ClusterStatus.INIT,
-            f'Cluster is abnormal because {init_reason}. Transitioning to INIT.',
+            f'Cluster is abnormal because {init_reason}. Transitioned to INIT.',
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
         global_user_state.add_or_update_cluster(cluster_name,
