@@ -1370,8 +1370,7 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
             event = event.split(']')[1].strip()
         elif event.startswith('[kubernetes node'):
             event = event.split(']')[1].strip()
-        # Order these by "decisiveness" of the message -
-        # the last one that matches is the most important.
+
         if event.startswith('NodeNotReady '):
             _record_failure_reason(event[len('NodeNotReady '):], 1)
         elif event.startswith('TaintManagerEviction '):
