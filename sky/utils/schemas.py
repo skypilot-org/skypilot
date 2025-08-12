@@ -6,6 +6,7 @@ https://json-schema.org/
 import enum
 from typing import Any, Dict, List, Tuple
 
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import kubernetes_enums
 
@@ -65,6 +66,11 @@ _AUTOSTOP_SCHEMA = {
                 'down': {
                     'type': 'boolean',
                 },
+                'wait_for': {
+                    'type': 'string',
+                    'case_insensitive_enum':
+                        autostop_lib.AutostopWaitFor.supported_modes(),
+                }
             },
         },
     ],
@@ -1136,6 +1142,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
+    from sky.server import daemons
 
     resources_schema = {
         k: v
@@ -1197,6 +1204,9 @@ def get_config_schema():
                 },
                 'disk_encrypted': {
                     'type': 'boolean',
+                },
+                'ssh_user': {
+                    'type': 'string',
                 },
                 'security_group_name':
                     (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
@@ -1479,6 +1489,27 @@ def get_config_schema():
         }
     }
 
+    daemon_config = {
+        'type': 'object',
+        'required': [],
+        'properties': {
+            'log_level': {
+                'type': 'string',
+                'case_insensitive_enum': ['DEBUG', 'INFO', 'WARNING'],
+            },
+        }
+    }
+
+    daemon_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {}
+    }
+
+    for daemon in daemons.INTERNAL_REQUEST_DAEMONS:
+        daemon_schema['properties'][daemon.id] = daemon_config
+
     api_server = {
         'type': 'object',
         'required': [],
@@ -1724,6 +1755,7 @@ def get_config_schema():
             'provision': provision_configs,
             'rbac': rbac_schema,
             'logs': logs_schema,
+            'daemons': daemon_schema,
             **cloud_configs,
         },
     }

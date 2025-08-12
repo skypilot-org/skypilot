@@ -141,7 +141,7 @@ def _validate_consolidation_mode_config(
         if global_user_state.get_cluster_from_name(controller_cn) is not None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InconsistentConsolidationModeError(
-                    f'{colorama.Fore.RED}Consolidation mode is '
+                    f'{colorama.Fore.RED}Consolidation mode for jobs is '
                     f'enabled, but the controller cluster '
                     f'{controller_cn} is still running. Please '
                     'terminate the controller cluster first.'
@@ -179,7 +179,11 @@ def _validate_consolidation_mode_config(
 def is_consolidation_mode() -> bool:
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-    _validate_consolidation_mode_config(consolidation_mode)
+    # We should only do this check on API server, as the controller will not
+    # have related config and will always seemingly disabled for consolidation
+    # mode. Check #6611 for more details.
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        _validate_consolidation_mode_config(consolidation_mode)
     return consolidation_mode
 
 
@@ -189,7 +193,8 @@ def ha_recovery_for_consolidation_mode():
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
     runner = command_runner.LocalProcessCommandRunner()
-    with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH, 'w',
+    with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('jobs_'),
+              'w',
               encoding='utf-8') as f:
         start = time.time()
         f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
@@ -315,6 +320,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         This function should not throw any exception. If it fails, it will
         capture the error message, and log/return it.
         """
+        managed_job_state.remove_ha_recovery_script(job_id)
         error_msg = None
         tasks = managed_job_state.get_managed_jobs(job_id)
         for task in tasks:
@@ -331,6 +337,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             if handle is not None:
                 try:
                     if pool is None:
+                        global_user_state.add_cluster_event(
+                            cluster_name, None, 'Cluster was cleaned up.',
+                            global_user_state.ClusterEventType.STATUS_CHANGE)
                         terminate_cluster(cluster_name)
                 except Exception as e:  # pylint: disable=broad-except
                     error_msg = (

@@ -16,6 +16,7 @@ import uvicorn
 from uvicorn.supervisors import multiprocess
 
 from sky import sky_logging
+from sky.server import daemons
 from sky.server import state
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
@@ -120,7 +121,7 @@ class Server(uvicorn.Server):
             # Proactively cancel internal requests and logs requests since
             # they can run for infinite time.
             internal_request_ids = [
-                d.id for d in requests_lib.INTERNAL_REQUEST_DAEMONS
+                d.id for d in daemons.INTERNAL_REQUEST_DAEMONS
             ]
             if time.time() - start_time > _WAIT_REQUESTS_TIMEOUT_SECONDS:
                 logger.warning('Timeout waiting for on-going requests to '

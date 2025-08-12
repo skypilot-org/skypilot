@@ -33,6 +33,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.server import common
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.usage import usage_lib
@@ -312,6 +313,7 @@ class StartBody(RequestBody):
     """The request body for the start endpoint."""
     cluster_name: str
     idle_minutes_to_autostop: Optional[int] = None
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     retry_until_up: bool = False
     down: bool = False
     force: bool = False
@@ -321,6 +323,7 @@ class AutostopBody(RequestBody):
     """The request body for the autostop endpoint."""
     cluster_name: str
     idle_minutes: int
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
 
 
@@ -702,6 +705,25 @@ class JobsPoolDownBody(RequestBody):
 class JobsPoolStatusBody(RequestBody):
     """The request body for the jobs pool status endpoint."""
     pool_names: Optional[Union[str, List[str]]]
+
+
+class JobsPoolLogsBody(RequestBody):
+    """The request body for the jobs pool logs endpoint."""
+    pool_name: str
+    target: Union[str, serve.ServiceComponent]
+    worker_id: Optional[int] = None
+    follow: bool = True
+    tail: Optional[int] = None
+
+
+class JobsPoolDownloadLogsBody(RequestBody):
+    """The request body for the jobs pool download logs endpoint."""
+    pool_name: str
+    local_dir: str
+    targets: Optional[Union[str, serve.ServiceComponent,
+                            List[Union[str, serve.ServiceComponent]]]]
+    worker_ids: Optional[List[int]] = None
+    tail: Optional[int] = None
 
 
 class UploadZipFileResponse(pydantic.BaseModel):

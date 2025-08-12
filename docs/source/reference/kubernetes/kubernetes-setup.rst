@@ -406,6 +406,50 @@ Examples:
                        path: /path/on/host/nvme
                        type: Directory
 
+    .. tab-item:: PersistentVolumeClaim
+      :name: kubernetes-volumes-pvc
+
+      You can mount an existing `PersistentVolumeClaim <https://kubernetes.io/docs/concepts/storage/persistent-volumes/>`_ to SkyPilot pods. This is useful for accessing persistent storage that survives pod restarts.
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/storage/hello.txt
+             ls -la /mnt/storage
+
+           config:
+             kubernetes:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/storage
+                           name: persistent-storage
+                   volumes:
+                     - name: persistent-storage
+                       persistentVolumeClaim:
+                         claimName: my-storage-pvc
+
+      **Global configuration:**
+
+      .. code-block:: yaml
+
+           # ~/.sky/config.yaml
+           kubernetes:
+             pod_config:
+               spec:
+                 containers:
+                   - volumeMounts:
+                       - mountPath: /mnt/storage
+                         name: persistent-storage
+                 volumes:
+                   - name: persistent-storage
+                     persistentVolumeClaim:
+                       claimName: my-storage-pvc
+
     .. tab-item:: Nebius shared filesystem
       :name: kubernetes-volumes-nebius-shared-filesystem
 

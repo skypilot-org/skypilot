@@ -96,8 +96,12 @@ class ServiceUpdateEvent(SkyletEvent):
     """
     EVENT_INTERVAL_SECONDS = 300
 
+    def __init__(self, pool: bool) -> None:
+        super().__init__()
+        self._pool = pool
+
     def _run(self):
-        serve_utils.update_service_status()
+        serve_utils.update_service_status(self._pool)
 
 
 class UsageHeartbeatReportEvent(SkyletEvent):
@@ -137,23 +141,37 @@ class AutostopEvent(SkyletEvent):
             logger.debug('autostop_config not set. Skipped.')
             return
 
-        if (job_lib.is_cluster_idle() and
-                not managed_job_state.get_num_alive_jobs()):
-            idle_minutes = (time.time() -
-                            autostop_lib.get_last_active_time()) // 60
+        ignore_idle_check = (
+            autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE)
+        is_idle = True
+        if not ignore_idle_check:
+            if not job_lib.is_cluster_idle(
+            ) or managed_job_state.get_num_alive_jobs() or (
+                    autostop_config.wait_for
+                    == autostop_lib.AutostopWaitFor.JOBS_AND_SSH and
+                    autostop_lib.has_active_ssh_sessions()):
+                is_idle = False
+
+        if ignore_idle_check or is_idle:
+            minutes_since_last_active = (
+                time.time() - autostop_lib.get_last_active_time()) // 60
             logger.debug(
-                f'Idle minutes: {idle_minutes}, '
-                f'AutoStop config: {autostop_config.autostop_idle_minutes}')
+                f'Minutes since last active: {minutes_since_last_active}, '
+                f'AutoStop idle minutes: '
+                f'{autostop_config.autostop_idle_minutes}, '
+                f'Wait for: {autostop_config.wait_for.value}')
         else:
             autostop_lib.set_last_active_time_to_now()
-            idle_minutes = -1
-            logger.debug(
-                'Not idle. Reset idle minutes.'
-                f'AutoStop config: {autostop_config.autostop_idle_minutes}')
-        if idle_minutes >= autostop_config.autostop_idle_minutes:
+            minutes_since_last_active = -1
+            logger.debug('Not idle. Reset idle minutes. '
+                         f'AutoStop idle minutes: '
+                         f'{autostop_config.autostop_idle_minutes}, '
+                         f'Wait for: {autostop_config.wait_for.value}')
+        if minutes_since_last_active >= autostop_config.autostop_idle_minutes:
             logger.info(
-                f'{idle_minutes} idle minutes reached; threshold: '
-                f'{autostop_config.autostop_idle_minutes} minutes. Stopping.')
+                f'{minutes_since_last_active} minute(s) since last active; '
+                f'threshold: {autostop_config.autostop_idle_minutes} minutes. '
+                f'Stopping.')
             self._stop_cluster(autostop_config)
 
     def _stop_cluster(self, autostop_config):

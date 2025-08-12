@@ -2,6 +2,7 @@
 import base64
 import collections
 import dataclasses
+import datetime
 import enum
 import os
 import pathlib
@@ -19,6 +20,7 @@ import uuid
 
 import colorama
 import filelock
+import yaml
 
 from sky import backends
 from sky import exceptions
@@ -33,7 +35,9 @@ from sky.serve import spot_placer
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import annotations
+from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
@@ -63,13 +67,12 @@ def get_num_service_threshold():
 
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
-# NOTE(dev): We assume log paths are either in ~/sky_logs/... or ~/.sky/...
-# and always appear after a space. Be careful when changing UX as this
-# assumption is used to expand some log files while ignoring others.
-_SKYPILOT_LOG_DIRS = r'~/(sky_logs|\.sky)'
-_SKYPILOT_PROVISION_LOG_PATTERN = (
-    fr'.* ({_SKYPILOT_LOG_DIRS}/.*provision\.log)')
-_SKYPILOT_LOG_PATTERN = fr'.* ({_SKYPILOT_LOG_DIRS}/.*\.log)'
+# NOTE(dev): We assume log are print with the hint 'sky api logs -l'. Be careful
+# when changing UX as this assumption is used to expand some log files while
+# ignoring others.
+_SKYPILOT_LOG_HINT = r'.*sky api logs -l'
+_SKYPILOT_PROVISION_LOG_PATTERN = (fr'{_SKYPILOT_LOG_HINT} (.*/provision\.log)')
+_SKYPILOT_LOG_PATTERN = fr'{_SKYPILOT_LOG_HINT} (.*\.log)'
 
 # TODO(tian): Find all existing replica id and print here.
 _FAILED_TO_FIND_REPLICA_MSG = (
@@ -257,12 +260,108 @@ def get_service_filelock_path(pool: str) -> str:
     return str(path)
 
 
+def _validate_consolidation_mode_config(current_is_consolidation_mode: bool,
+                                        pool: bool) -> None:
+    """Validate the consolidation mode config."""
+    # Check whether the consolidation mode config is changed.
+    controller = controller_utils.get_controller_for_pool(pool).value
+    if current_is_consolidation_mode:
+        controller_cn = controller.cluster_name
+        if global_user_state.get_cluster_from_name(controller_cn) is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.InconsistentConsolidationModeError(
+                    f'{colorama.Fore.RED}Consolidation mode for '
+                    f'{controller.controller_type} is enabled, but the '
+                    f'controller cluster {controller_cn} is still running. '
+                    'Please terminate the controller cluster first.'
+                    f'{colorama.Style.RESET_ALL}')
+    else:
+        noun = 'pool' if pool else 'service'
+        all_services = [
+            svc for svc in serve_state.get_services() if svc['pool'] == pool
+        ]
+        if all_services:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.InconsistentConsolidationModeError(
+                    f'{colorama.Fore.RED}Consolidation mode for '
+                    f'{controller.controller_type} is disabled, but there are '
+                    f'still {len(all_services)} {noun}s running. Please '
+                    f'terminate those {noun}s first.{colorama.Style.RESET_ALL}')
+
+
 @annotations.lru_cache(scope='request', maxsize=1)
-def is_consolidation_mode() -> bool:
+def is_consolidation_mode(pool: bool = False) -> bool:
+    # Use jobs config for pool consolidation mode.
+    controller = controller_utils.get_controller_for_pool(pool).value
     consolidation_mode = skypilot_config.get_nested(
-        ('serve', 'controller', 'consolidation_mode'), default_value=False)
-    # _check_consolidation_mode_consistency(consolidation_mode)
+        (controller.controller_type, 'controller', 'consolidation_mode'),
+        default_value=False)
+    # We should only do this check on API server, as the controller will not
+    # have related config and will always seemingly disabled for consolidation
+    # mode. Check #6611 for more details.
+    if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        _validate_consolidation_mode_config(consolidation_mode, pool)
     return consolidation_mode
+
+
+def ha_recovery_for_consolidation_mode(pool: bool):
+    """Recovery logic for HA mode."""
+    # No setup recovery is needed in consolidation mode, as the API server
+    # already has all runtime installed. Directly start jobs recovery here.
+    # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
+    runner = command_runner.LocalProcessCommandRunner()
+    noun = 'pool' if pool else 'serve'
+    capnoun = noun.capitalize()
+    prefix = f'{noun}_'
+    with open(skylet_constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(prefix),
+              'w',
+              encoding='utf-8') as f:
+        start = time.time()
+        f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
+        for service_name in serve_state.get_glob_service_names(None):
+            svc = _get_service_status(service_name,
+                                      pool=pool,
+                                      with_replica_info=False)
+            if svc is None:
+                continue
+            controller_pid = svc['controller_pid']
+            if controller_pid is not None:
+                try:
+                    if _controller_process_alive(controller_pid, service_name):
+                        f.write(f'Controller pid {controller_pid} for '
+                                f'{noun} {service_name} is still running. '
+                                'Skipping recovery.\n')
+                        continue
+                except Exception:  # pylint: disable=broad-except
+                    # _controller_process_alive may raise if psutil fails; we
+                    # should not crash the recovery logic because of this.
+                    f.write('Error checking controller pid '
+                            f'{controller_pid} for {noun} {service_name}\n')
+
+            script = serve_state.get_ha_recovery_script(service_name)
+            if script is None:
+                f.write(f'{capnoun} {service_name}\'s recovery script does '
+                        'not exist. Skipping recovery.\n')
+                continue
+            rc, out, err = runner.run(script, require_outputs=True)
+            if rc:
+                f.write(f'Recovery script returned {rc}. '
+                        f'Output: {out}\nError: {err}\n')
+            f.write(f'{capnoun} {service_name} completed recovery at '
+                    f'{datetime.datetime.now()}\n')
+        f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
+        f.write(f'Total recovery time: {time.time() - start} seconds\n')
+
+
+def _controller_process_alive(pid: int, service_name: str) -> bool:
+    """Check if the controller process is alive."""
+    try:
+        process = psutil.Process(pid)
+        cmd_str = ' '.join(process.cmdline())
+        return process.is_running(
+        ) and f'--service-name {service_name}' in cmd_str
+    except psutil.NoSuchProcess:
+        return False
 
 
 def validate_service_task(task: 'sky.Task', pool: bool) -> None:
@@ -425,6 +524,8 @@ def generate_remote_tls_certfile_name(service_name: str) -> str:
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
+    # NOTE(dev): This format is used in sky/serve/service.py::_cleanup, for
+    # checking replica cluster existence. Be careful when changing it.
     return f'{service_name}-{replica_id}'
 
 
@@ -460,22 +561,53 @@ def set_service_status_and_active_versions_from_replica(
         active_versions=active_versions)
 
 
-def update_service_status() -> None:
-    if is_consolidation_mode():
-        # TODO(tian): PID-based tracking.
-        return
-    services = serve_state.get_services()
-    for record in services:
-        if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
+def update_service_status(pool: bool) -> None:
+    noun = 'pool' if pool else 'serve'
+    capnoun = noun.capitalize()
+    service_names = serve_state.get_glob_service_names(None)
+    for service_name in service_names:
+        record = _get_service_status(service_name,
+                                     pool=pool,
+                                     with_replica_info=False)
+        if record is None:
+            continue
+        service_status = record['status']
+        if service_status == serve_state.ServiceStatus.SHUTTING_DOWN:
             # Skip services that is shutting down.
             continue
-        controller_job_id = record['controller_job_id']
-        assert controller_job_id is not None
-        controller_status = job_lib.get_status(controller_job_id)
-        if controller_status is None or controller_status.is_terminal():
-            # If controller job is not running, set it as controller failed.
-            serve_state.set_service_status_and_active_versions(
-                record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
+
+        logger.info(f'Update {noun} status for {service_name!r} '
+                    f'with status {service_status}')
+
+        controller_pid = record['controller_pid']
+        if controller_pid is None:
+            logger.info(f'{capnoun} {service_name!r} controller pid is None. '
+                        f'Unexpected status {service_status}. Set to failure.')
+        elif controller_pid < 0:
+            # Backwards compatibility: this service was submitted when ray was
+            # still used for controller process management. We set the
+            # value_to_replace_existing_entries to -1 to indicate historical
+            # services.
+            # TODO(tian): Remove before 0.13.0.
+            controller_job_id = record['controller_job_id']
+            assert controller_job_id is not None
+            controller_status = job_lib.get_status(controller_job_id)
+            if (controller_status is not None and
+                    not controller_status.is_terminal()):
+                continue
+            logger.info(f'Updating {noun} {service_name!r} in old version. '
+                        f'SkyPilot job status: {controller_status}. '
+                        'Set to failure.')
+        else:
+            if _controller_process_alive(controller_pid, service_name):
+                # The controller is still running.
+                continue
+            logger.info(f'{capnoun} {service_name!r} controller pid '
+                        f'{controller_pid} is not alive. Set to failure.')
+
+        # If controller job is not running, set it as controller failed.
+        serve_state.set_service_status_and_active_versions(
+            service_name, serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
 def update_service_encoded(service_name: str, version: int, mode: str,
@@ -572,12 +704,18 @@ def _get_service_status(
     if record['pool']:
         latest_yaml_path = generate_task_yaml_file_name(service_name,
                                                         record['version'])
-        original_config = common_utils.read_yaml(latest_yaml_path)
-        original_config.pop('run', None)
-        svc: Dict[str, Any] = original_config.pop('service')
-        if svc is not None:
-            svc.pop('pool', None)
-            original_config['pool'] = svc
+        raw_yaml_config = common_utils.read_yaml(latest_yaml_path)
+        original_config = raw_yaml_config.get('_user_specified_yaml')
+        if original_config is None:
+            # Fall back to old display format.
+            original_config = raw_yaml_config
+            original_config.pop('run', None)
+            svc: Dict[str, Any] = original_config.pop('service')
+            if svc is not None:
+                svc.pop('pool', None)  # Remove pool from service config
+                original_config['pool'] = svc  # Add pool to root config
+        else:
+            original_config = yaml.safe_load(original_config)
         record['pool_yaml'] = common_utils.dump_yaml_str(original_config)
 
     record['target_num_replicas'] = 0
@@ -754,9 +892,11 @@ def _terminate_failed_services(
     shutil.rmtree(service_dir)
     serve_state.remove_service(service_name)
     serve_state.delete_all_versions(service_name)
+    serve_state.remove_ha_recovery_script(service_name)
 
     if not remaining_replica_clusters:
         return None
+    # TODO(tian): Try to terminate those replica clusters.
     remaining_identity = ', '.join(remaining_replica_clusters)
     return (f'{colorama.Fore.YELLOW}terminate service {service_name!r} with '
             f'failed status ({service_status}). This may indicate a resource '
@@ -845,7 +985,8 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
     return '\n'.join(messages)
 
 
-def wait_service_registration(service_name: str, job_id: int) -> str:
+def wait_service_registration(service_name: str, job_id: int,
+                              pool: bool) -> str:
     """Util function to call at the end of `sky.serve.up()`.
 
     This function will:
@@ -860,9 +1001,11 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
     """
     start_time = time.time()
     setup_completed = False
+    noun = 'pool' if pool else 'service'
     while True:
-        # TODO(tian): PID-based tracking.
-        if not is_consolidation_mode():
+        # Only do this check for non-consolidation mode as consolidation mode
+        # has no setup process.
+        if not is_consolidation_mode(pool):
             job_status = job_lib.get_status(job_id)
             if job_status is None or job_status < job_lib.JobStatus.RUNNING:
                 # Wait for the controller process to finish setting up. It
@@ -872,7 +1015,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                     with ux_utils.print_exception_no_traceback():
                         raise RuntimeError(
                             f'Failed to start the controller process for '
-                            f'the service {service_name!r} within '
+                            f'the {noun} {service_name!r} within '
                             f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS}'
                             f' seconds.')
                 # No need to check the service status as the controller process
@@ -880,22 +1023,26 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                 time.sleep(1)
                 continue
 
-            if not setup_completed:
-                setup_completed = True
-                # Reset the start time to wait for the service to be registered.
-                start_time = time.time()
+        if not setup_completed:
+            setup_completed = True
+            # Reset the start time to wait for the service to be registered.
+            start_time = time.time()
 
-        record = serve_state.get_service_from_name(service_name)
+        record = _get_service_status(service_name,
+                                     pool=pool,
+                                     with_replica_info=False)
         if record is not None:
-            # TODO(tian): PID-based tracking.
-            if (not is_consolidation_mode() and
-                    job_id != record['controller_job_id']):
+            if job_id != record['controller_job_id']:
+                if pool:
+                    command_to_run = 'sky jobs pool apply --pool'
+                else:
+                    command_to_run = 'sky serve update'
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'The service {service_name!r} is already running. '
-                        'Please specify a different name for your service. '
-                        'To update an existing service, run: sky serve update '
-                        f'{service_name} <new-service-yaml>')
+                        f'The {noun} {service_name!r} is already running. '
+                        f'Please specify a different name for your {noun}. '
+                        f'To update an existing {noun}, run: {command_to_run}'
+                        f' {service_name} <new-{noun}-yaml>')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
                 return message_utils.encode_payload(lb_port)
@@ -924,12 +1071,16 @@ def load_service_initialization_result(payload: str) -> int:
     return message_utils.decode_payload(payload)
 
 
-def check_service_status_healthy(service_name: str) -> Optional[str]:
-    service_record = serve_state.get_service_from_name(service_name)
+def _check_service_status_healthy(service_name: str,
+                                  pool: bool) -> Optional[str]:
+    service_record = _get_service_status(service_name,
+                                         pool,
+                                         with_replica_info=False)
+    capnoun = 'Service' if not pool else 'Pool'
     if service_record is None:
-        return f'Service {service_name!r} does not exist.'
+        return f'{capnoun} {service_name!r} does not exist.'
     if service_record['status'] == serve_state.ServiceStatus.CONTROLLER_INIT:
-        return (f'Service {service_name!r} is still initializing its '
+        return (f'{capnoun} {service_name!r} is still initializing its '
                 'controller. Please try again later.')
     return None
 
@@ -968,7 +1119,10 @@ def _process_line(line: str,
     log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
 
     if provision_log_prompt is not None:
-        nested_log_path = os.path.expanduser(provision_log_prompt.group(1))
+        log_path = provision_log_prompt.group(1)
+        nested_log_path = pathlib.Path(
+            skylet_constants.SKY_LOGS_DIRECTORY).expanduser().joinpath(
+                log_path).resolve()
 
         try:
             with open(nested_log_path, 'r', newline='', encoding='utf-8') as f:
@@ -1060,12 +1214,14 @@ def _capped_follow_logs_with_provision_expanding(
 
 
 def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
-                        tail: Optional[int]) -> str:
-    msg = check_service_status_healthy(service_name)
+                        tail: Optional[int], pool: bool) -> str:
+    msg = _check_service_status_healthy(service_name, pool=pool)
     if msg is not None:
         return msg
+    repnoun = 'worker' if pool else 'replica'
+    caprepnoun = repnoun.capitalize()
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
-          f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
+          f'of {repnoun} {replica_id}.{colorama.Style.RESET_ALL}')
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
     if os.path.exists(log_file_name):
         if tail is not None:
@@ -1082,7 +1238,7 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
     launch_log_file_name = generate_replica_launch_log_file_name(
         service_name, replica_id)
     if not os.path.exists(launch_log_file_name):
-        return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
+        return (f'{colorama.Fore.RED}{caprepnoun} {replica_id} doesn\'t exist.'
                 f'{colorama.Style.RESET_ALL}')
 
     replica_cluster_name = generate_replica_cluster_name(
@@ -1132,6 +1288,10 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
                 print(line, end='', flush=True)
         return ''
 
+    # For pools, we don't stream the job logs as the run section is ignored.
+    if pool:
+        return ''
+
     backend = backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
@@ -1146,13 +1306,13 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
 
     # Notify user here to make sure user won't think the log is finished.
     print(f'{colorama.Fore.YELLOW}Start streaming logs for task job '
-          f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
+          f'of {repnoun} {replica_id}...{colorama.Style.RESET_ALL}')
 
     # Always tail the latest logs, which represent user setup & run.
     if tail is None:
         returncode = backend.tail_logs(handle, job_id=None, follow=follow)
         if returncode != 0:
-            return (f'{colorama.Fore.RED}Failed to stream logs for replica '
+            return (f'{colorama.Fore.RED}Failed to stream logs for {repnoun} '
                     f'{replica_id}.{colorama.Style.RESET_ALL}')
     elif not follow and tail > 0:
         final = backend.tail_logs(handle,
@@ -1179,8 +1339,9 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
 
 
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
-                              follow: bool, tail: Optional[int]) -> str:
-    msg = check_service_status_healthy(service_name)
+                              follow: bool, tail: Optional[int],
+                              pool: bool) -> str:
+    msg = _check_service_status_healthy(service_name, pool)
     if msg is not None:
         return msg
     if stream_controller:
@@ -1189,7 +1350,9 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
         log_file = generate_remote_load_balancer_log_file_name(service_name)
 
     def _service_is_terminal() -> bool:
-        record = serve_state.get_service_from_name(service_name)
+        record = _get_service_status(service_name,
+                                     pool,
+                                     with_replica_info=False)
         if record is None:
             return True
         return record['status'] in serve_state.ServiceStatus.failed_statuses()
@@ -1420,30 +1583,36 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def wait_service_registration(cls, service_name: str, job_id: int) -> str:
+    def wait_service_registration(cls, service_name: str, job_id: int,
+                                  pool: bool) -> str:
         code = [
+            f'kwargs={{}} if serve_version < 4 else {{"pool": {pool}}}',
             'msg = serve_utils.wait_service_registration('
-            f'{service_name!r}, {job_id})', 'print(msg, end="", flush=True)'
+            f'{service_name!r}, {job_id}, **kwargs)',
+            'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,
-                            follow: bool, tail: Optional[int]) -> str:
+                            follow: bool, tail: Optional[int],
+                            pool: bool) -> str:
         code = [
+            f'kwargs={{}} if serve_version < 5 else {{"pool": {pool}}}',
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow}, tail={tail})',
-            'print(msg, flush=True)'
+            f'{service_name!r}, {replica_id!r}, follow={follow}, tail={tail}, '
+            '**kwargs)', 'print(msg, flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
     def stream_serve_process_logs(cls, service_name: str,
                                   stream_controller: bool, follow: bool,
-                                  tail: Optional[int]) -> str:
+                                  tail: Optional[int], pool: bool) -> str:
         code = [
+            f'kwargs={{}} if serve_version < 5 else {{"pool": {pool}}}',
             f'msg = serve_utils.stream_serve_process_logs({service_name!r}, '
-            f'{stream_controller}, follow={follow}, tail={tail})',
+            f'{stream_controller}, follow={follow}, tail={tail}, **kwargs)',
             'print(msg, flush=True)'
         ]
         return cls._build(code)

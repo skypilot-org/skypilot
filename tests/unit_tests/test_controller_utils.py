@@ -8,6 +8,7 @@ import sky
 from sky import clouds
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import controller_utils
 from sky.utils import registry

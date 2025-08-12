@@ -2032,9 +2032,7 @@ class KubernetesInstanceType:
             accelerator_type = match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = int(accelerator_count)
-                # This is to revert the accelerator types with spaces back to
-                # the original format.
-                accelerator_type = str(accelerator_type).replace('_', ' ')
+                accelerator_type = str(accelerator_type)
             else:
                 accelerator_count = None
                 accelerator_type = None
@@ -2047,7 +2045,7 @@ class KubernetesInstanceType:
             accelerator_type = prev_match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = int(accelerator_count)
-                accelerator_type = str(accelerator_type).replace('_', ' ')
+                accelerator_type = str(accelerator_type)
             else:
                 accelerator_count = None
                 accelerator_type = None
@@ -2642,6 +2640,7 @@ def combine_pod_config_fields(
 
 
 def combine_metadata_fields(cluster_yaml_path: str,
+                            cluster_config_overrides: Dict[str, Any],
                             context: Optional[str] = None) -> None:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
     fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
@@ -2652,11 +2651,24 @@ def combine_metadata_fields(cluster_yaml_path: str,
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
+
+    # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
         region=context,
         keys=('custom_metadata',),
         default_value={})
+
+    # Get custom_metadata from task-level config overrides
+    override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=cluster_config_overrides,
+        cloud='kubernetes',
+        region=context,
+        keys=('custom_metadata',),
+        default_value={})
+
+    # Merge task-level overrides with global config
+    config_utils.merge_k8s_configs(custom_metadata, override_custom_metadata)
 
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
@@ -2679,17 +2691,33 @@ def combine_metadata_fields(cluster_yaml_path: str,
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 
 
-def merge_custom_metadata(original_metadata: Dict[str, Any],
-                          context: Optional[str] = None) -> None:
+def merge_custom_metadata(
+        original_metadata: Dict[str, Any],
+        context: Optional[str] = None,
+        cluster_config_overrides: Optional[Dict[str, Any]] = None) -> None:
     """Merges original metadata with custom_metadata from config
 
     Merge is done in-place, so return is not required
     """
+    # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
         region=context,
         keys=('custom_metadata',),
         default_value={})
+
+    # Get custom_metadata from task-level config overrides if available
+    if cluster_config_overrides is not None:
+        override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+            dict_config=cluster_config_overrides,
+            cloud='kubernetes',
+            region=context,
+            keys=('custom_metadata',),
+            default_value={})
+        # Merge task-level overrides with global config
+        config_utils.merge_k8s_configs(custom_metadata,
+                                       override_custom_metadata)
+
     config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 
@@ -2968,6 +2996,13 @@ def get_kubernetes_node_info(
                 # Get all the pods running on the node
                 if (pod.spec.node_name == node.metadata.name and
                         pod.status.phase in ['Running', 'Pending']):
+                    # Skip pods that should not count against GPU count
+                    if should_exclude_pod_from_gpu_allocation(pod):
+                        logger.debug(
+                            f'Excluding low priority pod '
+                            f'{pod.metadata.name} from GPU allocation '
+                            f'calculations on node {node.metadata.name}')
+                        continue
                     # Iterate over all the containers in the pod and sum the
                     # GPU requests
                     for container in pod.spec.containers:
@@ -3566,3 +3601,24 @@ def delete_k8s_resource_with_retry(delete_func: Callable, resource_type: str,
                 time.sleep(retry_delay)
             else:
                 raise
+
+
+def should_exclude_pod_from_gpu_allocation(pod) -> bool:
+    """Check if a pod should be excluded from GPU count calculations.
+
+    Some cloud providers run low priority test/verification pods that request
+    GPUs but should not count against real GPU availability since they are
+    designed to be evicted when higher priority workloads need resources.
+
+    Args:
+        pod: Kubernetes pod object
+
+    Returns:
+        bool: True if the pod should be excluded from GPU count calculations.
+    """
+    # CoreWeave HPC verification pods - identified by namespace
+    if (hasattr(pod.metadata, 'namespace') and
+            pod.metadata.namespace == 'cw-hpc-verification'):
+        return True
+
+    return False

@@ -1,7 +1,7 @@
 """Paperspace instance provisioning."""
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
@@ -280,7 +280,7 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
     del non_terminated_only
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
@@ -297,10 +297,11 @@ def query_instances(
         'ready': status_lib.ClusterStatus.UP,
         'off': status_lib.ClusterStatus.STOPPED,
     }
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst_id, inst in instances.items():
         status = status_map[inst['state']]
-        statuses[inst_id] = status
+        statuses[inst_id] = (status, None)
     return statuses
 
 

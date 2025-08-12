@@ -96,3 +96,46 @@ false
 {{- define "skypilot.apiArgs" -}}
 --deploy{{ if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }} --enable-basic-auth{{ end }}
 {{- end -}}
+
+{{- define "skypilot.oauth2ProxyURL" -}}
+http://{{ .Release.Name }}-oauth2-proxy:4180
+{{- end -}}
+
+{{- define "skypilot.serviceAccountAuthEnabled" -}}
+{{- if ne .Values.auth.serviceAccount.enabled nil -}}
+{{- .Values.auth.serviceAccount.enabled -}}
+{{- else -}}
+{{- .Values.apiService.enableServiceAccounts -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "skypilot.ingressBasicAuthEnabled" -}}
+{{- if and .Values.ingress.enabled (or .Values.ingress.authSecret .Values.ingress.authCredentials) -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{- define "skypilot.ingressOAuthEnabled" -}}
+{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{/* Validate the oauth config */}}
+{{- define "skypilot.validateOAuthConfig" -}}
+{{- $authOAuthEnabled := .Values.auth.oauth.enabled -}}
+{{- $ingressBasicAuthEnabled := include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" -}}
+{{- $ingressOAuthEnabled := include "skypilot.ingressOAuthEnabled" . | trim | eq "true" -}}
+
+{{- if and $authOAuthEnabled $ingressBasicAuthEnabled -}}
+  {{- fail "Error\nauth.oauth.enabled cannot be used together with ingress basic authentication (ingress.authSecret or ingress.authCredentials). These authentication methods are mutually exclusive. Please:\n1. Disable auth.oauth.enabled, OR\n2. Remove ingress.authSecret and ingress.authCredentials\nThen try again." -}}
+{{- end -}}
+
+{{- if and $authOAuthEnabled $ingressOAuthEnabled -}}
+  {{- fail "Error\nauth.oauth.enabled cannot be used together with ingress OAuth2 proxy authentication (ingress.oauth2-proxy.enabled). These authentication methods are mutually exclusive. Please:\n1. Disable auth.oauth.enabled, OR\n2. Set ingress.oauth2-proxy.enabled to false\nThen try again." -}}
+{{- end -}}
+{{- end -}}

@@ -1,7 +1,7 @@
 """Implementation of SDK for SkyServe."""
 import json
 import typing
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import click
 
@@ -12,6 +12,8 @@ from sky.utils import admin_policy_utils
 from sky.utils import dag_utils
 
 if typing.TYPE_CHECKING:
+    import io
+
     import sky
     from sky.serve import serve_utils
 
@@ -23,7 +25,7 @@ def up(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[Tuple[str, str]]:
     assert not pool, 'Command `up` is not supported for pool.'
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -67,7 +69,7 @@ def update(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     assert not pool, 'Command `update` is not supported for pool.'
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -110,7 +112,7 @@ def apply(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     assert pool, 'Command `apply` is only supported for pool.'
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -151,7 +153,7 @@ def down(
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False,
     pool: bool = False,
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     if pool:
         body = payloads.JobsPoolDownBody(
             pool_names=service_names,
@@ -175,7 +177,7 @@ def down(
 def status(
     service_names: Optional[Union[str, List[str]]],
     pool: bool = False,
-) -> server_common.RequestId:
+) -> server_common.RequestId[List[Dict[str, Any]]]:
     if pool:
         body = payloads.JobsPoolStatusBody(pool_names=service_names)
     else:
@@ -186,3 +188,88 @@ def status(
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     return server_common.get_request_id(response)
+
+
+def tail_logs(service_name: str,
+              target: Union[str, 'serve_utils.ServiceComponent'],
+              replica_id: Optional[int] = None,
+              follow: bool = True,
+              output_stream: Optional['io.TextIOBase'] = None,
+              tail: Optional[int] = None,
+              pool: bool = False) -> None:
+    # Avoid circular import.
+    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+
+    if pool:
+        body = payloads.JobsPoolLogsBody(
+            pool_name=service_name,
+            target=target,
+            worker_id=replica_id,
+            follow=follow,
+            tail=tail,
+        )
+    else:
+        body = payloads.ServeLogsBody(
+            service_name=service_name,
+            target=target,
+            replica_id=replica_id,
+            follow=follow,
+            tail=tail,
+        )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/pool_logs' if pool else '/serve/logs',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None),
+        stream=True)
+    request_id: server_common.RequestId[None] = server_common.get_request_id(
+        response)
+    return sdk.stream_response(request_id=request_id,
+                               response=response,
+                               output_stream=output_stream,
+                               resumable=True)
+
+
+def sync_down_logs(service_name: str,
+                   local_dir: str,
+                   *,
+                   targets: Optional[Union[
+                       str, 'serve_utils.ServiceComponent',
+                       Sequence[Union[str,
+                                      'serve_utils.ServiceComponent']]]] = None,
+                   replica_ids: Optional[List[int]] = None,
+                   tail: Optional[int] = None,
+                   pool: bool = False) -> None:
+    # Avoid circular import.
+    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+
+    if pool:
+        body = payloads.JobsPoolDownloadLogsBody(
+            pool_name=service_name,
+            local_dir=local_dir,
+            targets=targets,
+            worker_ids=replica_ids,
+            tail=tail,
+        )
+    else:
+        body = payloads.ServeDownloadLogsBody(
+            service_name=service_name,
+            # No need to set here, since the server will override it
+            # to a directory on the API server.
+            local_dir=local_dir,
+            targets=targets,
+            replica_ids=replica_ids,
+            tail=tail,
+        )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/pool_sync-down-logs' if pool else '/serve/sync-down-logs',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    request_id: server_common.RequestId[str] = server_common.get_request_id(
+        response)
+    remote_dir = sdk.stream_and_get(request_id)
+
+    # Download from API server paths to the client's local_dir
+    client_common.download_logs_from_api_server([remote_dir], remote_dir,
+                                                local_dir)

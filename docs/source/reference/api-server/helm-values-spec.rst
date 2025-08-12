@@ -54,7 +54,6 @@ Below is the available helm value keys and the default value of each key:
     :ref:`config <helm-values-apiService-config>`: null
     :ref:`dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>`: null
     :ref:`dbConnectionString <helm-values-apiService-dbConnectionString>`: null
-    :ref:`enableServiceAccounts <helm-values-apiService-enableServiceAccounts>`: true
     :ref:`sshNodePools <helm-values-apiService-sshNodePools>`: null
     :ref:`sshKeySecret <helm-values-apiService-sshKeySecret>`: null
     :ref:`skipResourceCheck <helm-values-apiService-skipResourceCheck>`: false
@@ -74,6 +73,22 @@ Below is the available helm value keys and the default value of each key:
     :ref:`extraEnvs <helm-values-apiService-extraEnvs>`: null
     :ref:`extraVolumes <helm-values-apiService-extraVolumes>`: null
     :ref:`extraVolumeMounts <helm-values-apiService-extraVolumeMounts>`: null
+  
+  :ref:`auth <helm-values-auth>`:
+    :ref:`oauth <helm-values-auth-oauth>`:
+      :ref:`enabled <helm-values-auth-oauth-enabled>`: false
+      :ref:`oidc-issuer-url <helm-values-auth-oauth-oidc-issuer-url>`: null
+      :ref:`client-id <helm-values-auth-oauth-client-id>`: ""
+      :ref:`client-secret <helm-values-auth-oauth-client-secret>`: ""
+      :ref:`client-details-from-secret <helm-values-auth-oauth-client-details-from-secret>`: ""
+      :ref:`email-domain <helm-values-auth-oauth-email-domain>`: "*"
+      :ref:`session-store-type <helm-values-auth-oauth-session-store-type>`: "redis"
+      :ref:`redis-url <helm-values-auth-oauth-redis-url>`: null
+      :ref:`redis-secret <helm-values-auth-oauth-redis-secret>`: null
+      :ref:`cookie-refresh <helm-values-auth-oauth-cookie-refresh>`: null
+      :ref:`cookie-expire <helm-values-auth-oauth-cookie-expire>`: null
+    :ref:`serviceAccount <helm-values-auth-serviceAccount>`:
+      :ref:`enabled <helm-values-auth-serviceAccount-enabled>`: null
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
@@ -87,7 +102,7 @@ Below is the available helm value keys and the default value of each key:
   :ref:`ingress <helm-values-ingress>`:
     :ref:`enabled <helm-values-ingress-enabled>`: true
     :ref:`authSecret <helm-values-ingress-authSecret>`: null
-    :ref:`authCredentials <helm-values-ingress-authCredentials>`: "username:$apr1$encrypted_password"
+    :ref:`authCredentials <helm-values-ingress-authCredentials>`: null
     :ref:`host <helm-values-ingress-host>`: null
     :ref:`path <helm-values-ingress-path>`: '/'
     :ref:`ingressClassName <helm-values-ingress-ingressClassName>`: nginx
@@ -95,14 +110,13 @@ Below is the available helm value keys and the default value of each key:
     :ref:`httpNodePort <helm-values-ingress-httpNodePort>`: 30050
     :ref:`httpsNodePort <helm-values-ingress-httpsNodePort>`: 30051
     :ref:`annotations <helm-values-ingress-annotations>`: null
+    # Deprecated: use auth.oauth instead.
     :ref:`oauth2-proxy <helm-values-ingress-oauth2-proxy>`:
       :ref:`enabled <helm-values-ingress-oauth2-proxy-enabled>`: false
-      # Required when enabled:
       :ref:`oidc-issuer-url <helm-values-ingress-oauth2-proxy-oidc-issuer-url>`: null
       :ref:`client-id <helm-values-ingress-oauth2-proxy-client-id>`: ""
       :ref:`client-secret <helm-values-ingress-oauth2-proxy-client-secret>`: ""
       :ref:`client-details-from-secret <helm-values-ingress-oauth2-proxy-client-details-from-secret>`: ""
-      # Optional settings:
       :ref:`image <helm-values-ingress-oauth2-proxy-image>`: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
       :ref:`use-https <helm-values-ingress-oauth2-proxy-use-https>`: false
       :ref:`email-domain <helm-values-ingress-oauth2-proxy-email-domain>`: "*"
@@ -451,6 +465,8 @@ Default: ``null``
 
 Enable service accounts in the API server.
 
+Deprecated: use :ref:`auth.serviceAccount.enabled <helm-values-auth-serviceAccount-enabled>` instead.
+
 Default: ``true``
 
 
@@ -675,6 +691,238 @@ Default: ``null``
         mountPath: /my-path
         subPath: my-file
 
+
+.. _helm-values-auth:
+
+``auth``
+~~~~~~~~
+
+:ref:`Authentication configuration <api-server-auth>` for the API server.
+
+
+.. _helm-values-auth-oauth:
+
+``auth.oauth``
+^^^^^^^^^^^^^^
+
+OAuth2 Proxy based authentication configuration for the API server.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      enabled: false
+      oidc-issuer-url: null
+      client-id: ""
+      client-secret: ""
+      client-details-from-secret: ""
+      email-domain: "*"
+      session-store-type: "redis"
+      redis-url: null
+      cookie-refresh: null
+      cookie-expire: null
+
+.. _helm-values-auth-oauth-enabled:
+
+``auth.oauth.enabled``
+''''''''''''''''''''''
+
+Enable/disable OAuth2 Proxy based authentication on the API server. This is mutually exclusive with authentications on ingress, including :ref:`basic auth <helm-values-ingress-authCredentials>` and :ref:`OAuth2 Proxy on ingress <helm-values-ingress-oauth2-proxy>`.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      enabled: true
+
+.. _helm-values-auth-oauth-oidc-issuer-url:
+
+``auth.oauth.oidc-issuer-url``
+''''''''''''''''''''''''''''''
+
+The URL of the OIDC issuer (e.g., your Okta domain). Required when oauth is enabled.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      oidc-issuer-url: "https://mycompany.okta.com"
+
+.. _helm-values-auth-oauth-client-id:
+
+``auth.oauth.client-id``
+''''''''''''''''''''''''
+
+The OAuth client ID from your OIDC provider (e.g., Okta). Required when oauth is enabled.
+
+Default: ``""``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      client-id: "0abc123def456"
+
+.. _helm-values-auth-oauth-client-secret:
+
+``auth.oauth.client-secret``
+''''''''''''''''''''''''''''
+
+The OAuth client secret from your OIDC provider (e.g., Okta). Required when oauth is enabled.
+
+Default: ``""``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      client-secret: "abcdef123456"
+
+.. _helm-values-auth-oauth-client-details-from-secret:
+
+``auth.oauth.client-details-from-secret``
+''''''''''''''''''''''''''''''''''''''''''
+
+Alternative way to get both client ID and client secret from a Kubernetes secret. If set to a secret name, both ``client-id`` and ``client-secret`` values above are ignored. The secret must contain keys named either ``client-id`` and ``client-secret`` OR ``client_id`` and ``client_secret``. Both dash and underscore formats are supported for compatibility with different secret managers (e.g., HashiCorp Vault requires underscore format due to key naming constraints).
+
+Default: ``""``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      client-details-from-secret: "oauth-client-credentials"
+
+.. _helm-values-auth-oauth-email-domain:
+
+``auth.oauth.email-domain``
+'''''''''''''''''''''''''''
+
+Email domains to allow for authentication. Use ``"*"`` to allow all email domains.
+
+Default: ``"*"``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      email-domain: "mycompany.com"
+
+.. _helm-values-auth-oauth-session-store-type:
+
+``auth.oauth.session-store-type``
+'''''''''''''''''''''''''''''''''
+
+Session storage type for OAuth2 Proxy. Can be set to ``"cookie"`` or ``"redis"``. Using Redis as a session store results in smaller cookies and better performance for large-scale deployments.
+
+Default: ``"redis"``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      session-store-type: "redis"
+
+.. _helm-values-auth-oauth-redis-url:
+
+``auth.oauth.redis-url``
+''''''''''''''''''''''''
+
+URL to connect to an external Redis instance for session storage. If set to ``null`` and ``session-store-type`` is ``"redis"``, a Redis instance will be automatically deployed. Format: ``redis://host[:port][/db-number]``
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      redis-url: "redis://redis-host:6379/0"
+
+
+.. _helm-values-auth-oauth-redis-secret:
+
+``auth.oauth.redis-secret``
+''''''''''''''''''''''''''''
+
+Alternative way to specify Redis connection URL using a Kubernetes secret. The secret must contain a key named ``redis_url`` with the Redis connection URL in the format ``redis://host[:port][/db-number]``.
+
+This field is mutually exclusive with :ref:`redis-url <helm-values-auth-oauth-redis-url>`.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      redis-secret: "my-redis-credentials"
+
+.. _helm-values-auth-oauth-cookie-refresh:
+
+``auth.oauth.cookie-refresh``
+'''''''''''''''''''''''''''''
+
+Duration in seconds after which to refresh the access token. This should typically be set to the access token lifespan minus 1 minute. If not set, tokens will not be refreshed automatically.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      cookie-refresh: 3540  # 59 minutes (for a 60-minute access token)
+
+.. _helm-values-auth-oauth-cookie-expire:
+
+``auth.oauth.cookie-expire``
+''''''''''''''''''''''''''''
+
+Expiration time for cookies in seconds. Should match the refresh token lifespan from your OIDC provider.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      cookie-expire: 86400  # 24 hours
+
+.. _helm-values-auth-serviceAccount:
+
+``auth.serviceAccount``
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Service account token based authentication configuration for the API server.
+
+.. code-block:: yaml
+
+  auth:
+    serviceAccount:
+      enabled: null
+
+.. _helm-values-auth-serviceAccount-enabled:
+
+``auth.serviceAccount.enabled``
+'''''''''''''''''''''''''''''''
+
+Enable service account tokens for automated API access. If enabled, users can create bearer tokens to bypass SSO authentication for automated systems.
+
+JWT secrets are automatically stored in the database for persistence across restarts. This setting defaults to the value of :ref:`.apiService.enableServiceAccounts <helm-values-apiService-enableServiceAccounts>` (which is ``true`` by default) for backward compatibility. Setting this field will override the default value.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    serviceAccount:
+      enabled: true
+
+
 .. _helm-values-storage:
 
 ``storage``
@@ -822,7 +1070,7 @@ Basic auth credentials in the format ``username:encrypted_password``. Used only 
 
 One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set, unless ``ingress.oauth2-proxy.enabled`` is ``true``.
 
-Default: ``"username:$apr1$encrypted_password"``
+Default: ``null``
 
 .. code-block:: yaml
 
@@ -933,9 +1181,9 @@ Default: ``null``
 ``ingress.oauth2-proxy``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Configuration for the OAuth2 Proxy authentication for the API server. This enables SSO providers like Okta.
+Configuration for the OAuth2 Proxy authentication for the API server.
 
-If enabled, ``ingress.authSecret`` and ``ingress.authCredentials`` are ignored.
+Deprecated: use :ref:`auth.oauth <helm-values-auth-oauth>` instead.
 
 Default: see the yaml below.
 
