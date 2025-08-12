@@ -1730,6 +1730,213 @@ async def complete_volume_name(incomplete: str,) -> List[str]:
     return global_user_state.get_volume_names_start_with(incomplete)
 
 
+# VSCode integration endpoints
+@app.post('/api/vscode/{cluster_name}/setup')
+async def setup_vscode_connection(cluster_name: str, request: fastapi.Request) -> Dict[str, Any]:
+    """Set up VSCode connection for a cluster.
+    
+    This endpoint:
+    1. Installs code-server on the cluster if not already installed
+    2. Starts code-server on the cluster
+    3. Creates an SSH tunnel to the cluster
+    
+    Args:
+        cluster_name: Name of the cluster to connect to
+        
+    Returns:
+        Dict with tunnel information and success status
+        
+    Raises:
+        HTTPException: If setup fails
+    """
+    from sky.server.vscode_tunnel_manager import get_tunnel_manager
+    
+    logger.info(f'Setting up VSCode connection for cluster: {cluster_name}')
+    
+    try:
+        tunnel_manager = get_tunnel_manager()
+        tunnel = await tunnel_manager.setup_vscode_connection(cluster_name)
+        
+        if tunnel is None:
+            raise fastapi.HTTPException(
+                status_code=500,
+                detail=f'Failed to setup VSCode connection for cluster: {cluster_name}'
+            )
+        
+        return {
+            'success': True,
+            'cluster_name': cluster_name,
+            'tunnel_id': tunnel.tunnel_id,
+            'local_port': tunnel.local_port,
+            'url': f'/api/vscode/{cluster_name}/',
+            'message': 'VSCode connection ready'
+        }
+        
+    except Exception as e:
+        logger.error(f'Error setting up VSCode connection: {e}')
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=f'Failed to setup VSCode connection: {str(e)}'
+        )
+
+
+@app.get('/api/vscode/{cluster_name}/status')
+async def get_vscode_status(cluster_name: str) -> Dict[str, Any]:
+    """Get the status of VSCode connection for a cluster.
+    
+    Args:
+        cluster_name: Name of the cluster
+        
+    Returns:
+        Dict with connection status and tunnel info
+    """
+    from sky.server.vscode_tunnel_manager import get_tunnel_manager
+    
+    tunnel_manager = get_tunnel_manager()
+    tunnel = tunnel_manager.get_tunnel(cluster_name)
+    
+    if tunnel:
+        return {
+            'connected': True,
+            'cluster_name': cluster_name,
+            'tunnel_id': tunnel.tunnel_id,
+            'local_port': tunnel.local_port,
+            'url': f'/api/vscode/{cluster_name}/',
+            'created_at': tunnel.created_at
+        }
+    else:
+        return {
+            'connected': False,
+            'cluster_name': cluster_name,
+            'message': 'No active VSCode connection'
+        }
+
+
+@app.delete('/api/vscode/{cluster_name}')
+async def close_vscode_connection(cluster_name: str) -> Dict[str, Any]:
+    """Close VSCode connection for a cluster.
+    
+    Args:
+        cluster_name: Name of the cluster
+        
+    Returns:
+        Dict with operation status
+    """
+    from sky.server.vscode_tunnel_manager import get_tunnel_manager
+    
+    tunnel_manager = get_tunnel_manager()
+    success = tunnel_manager.close_tunnel(cluster_name)
+    
+    return {
+        'success': success,
+        'cluster_name': cluster_name,
+        'message': 'Connection closed' if success else 'No connection found'
+    }
+
+
+@app.get('/api/vscode/{cluster_name}/')
+@app.get('/api/vscode/{cluster_name}/{path:path}')
+async def vscode_proxy(
+    request: fastapi.Request,
+    cluster_name: str, 
+    path: str = ""
+) -> fastapi.responses.Response:
+    """Proxy requests to code-server running on the cluster.
+    
+    This endpoint acts as a reverse proxy, forwarding all requests to the
+    code-server instance running on the specified cluster through an SSH tunnel.
+    
+    Args:
+        cluster_name: Name of the cluster running code-server
+        path: Path within the code-server application
+        request: The incoming FastAPI request
+        
+    Returns:
+        Response from the code-server instance
+        
+    Raises:
+        HTTPException: If tunnel is not available or proxy fails
+    """
+    import httpx
+    from sky.server.vscode_tunnel_manager import get_tunnel_manager
+    
+    tunnel_manager = get_tunnel_manager()
+    tunnel = tunnel_manager.get_tunnel(cluster_name)
+    
+    if tunnel is None:
+        # Try to set up the connection automatically
+        tunnel = await tunnel_manager.setup_vscode_connection(cluster_name)
+        if tunnel is None:
+            raise fastapi.HTTPException(
+                status_code=503,
+                detail=f'VSCode connection not available for cluster: {cluster_name}. '
+                       f'Please set up the connection first using POST /api/vscode/{cluster_name}/setup'
+            )
+    
+    # Build target URL
+    target_url = f"http://127.0.0.1:{tunnel.local_port}/{path}"
+    if request.url.query:
+        target_url += f"?{request.url.query}"
+    
+    # Forward the request
+    try:
+        async with httpx.AsyncClient() as client:
+            # Prepare headers (exclude host header to avoid conflicts)
+            headers = dict(request.headers)
+            headers.pop('host', None)
+            
+            # Handle different HTTP methods
+            if request.method == 'GET':
+                response = await client.get(target_url, headers=headers)
+            elif request.method == 'POST':
+                body = await request.body()
+                response = await client.post(target_url, headers=headers, content=body)
+            elif request.method == 'PUT':
+                body = await request.body()
+                response = await client.put(target_url, headers=headers, content=body)
+            elif request.method == 'DELETE':
+                response = await client.delete(target_url, headers=headers)
+            elif request.method == 'PATCH':
+                body = await request.body()
+                response = await client.patch(target_url, headers=headers, content=body)
+            elif request.method == 'OPTIONS':
+                response = await client.options(target_url, headers=headers)
+            elif request.method == 'HEAD':
+                response = await client.head(target_url, headers=headers)
+            else:
+                raise fastapi.HTTPException(
+                    status_code=405,
+                    detail=f'Method {request.method} not supported'
+                )
+            
+            # Prepare response headers (exclude certain headers that should not be forwarded)
+            response_headers = dict(response.headers)
+            excluded_headers = {'content-encoding', 'content-length', 'transfer-encoding', 'connection'}
+            for header in excluded_headers:
+                response_headers.pop(header, None)
+            
+            # Return the response
+            return fastapi.responses.Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=response_headers,
+                media_type=response.headers.get('content-type')
+            )
+            
+    except httpx.ConnectError:
+        raise fastapi.HTTPException(
+            status_code=503,
+            detail=f'Cannot connect to code-server on cluster: {cluster_name}. '
+                   f'The tunnel may be down or code-server may not be running.'
+        )
+    except Exception as e:
+        logger.error(f'Error proxying request to VSCode: {e}')
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=f'Proxy error: {str(e)}'
+        )
+
+
 @app.get('/dashboard/{full_path:path}')
 async def serve_dashboard(full_path: str):
     """Serves the Next.js dashboard application.
@@ -1827,6 +2034,15 @@ if __name__ == '__main__':
         raise
     finally:
         logger.info('Shutting down SkyPilot API server...')
+
+        # Cleanup VSCode tunnels
+        try:
+            from sky.server.vscode_tunnel_manager import get_tunnel_manager
+            tunnel_manager = get_tunnel_manager()
+            tunnel_manager.shutdown()
+            logger.info('VSCode tunnel manager shutdown complete')
+        except Exception as e:
+            logger.error(f'Error shutting down VSCode tunnel manager: {e}')
 
         for gt in global_tasks:
             gt.cancel()

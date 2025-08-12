@@ -991,9 +991,17 @@ export function ClusterTable({
   );
 }
 
-export const handleVSCodeConnection = (cluster, onOpenVSCodeModal) => {
-  if (onOpenVSCodeModal) {
-    onOpenVSCodeModal(cluster);
+export const handleVSCodeConnection = async (cluster, onOpenVSCodeModal) => {
+  try {
+    // Try direct connection first
+    const { openVSCode } = await import('@/data/connectors/vscode');
+    await openVSCode(cluster.cluster || cluster.name || cluster);
+  } catch (error) {
+    console.error('Direct VSCode connection failed, falling back to modal:', error);
+    // Fallback to modal if direct connection fails
+    if (onOpenVSCodeModal) {
+      onOpenVSCodeModal(cluster);
+    }
   }
 };
 
@@ -1031,13 +1039,13 @@ export function Status2Actions({
   const actions = enabledActions(status);
   const isMobile = useMobile();
 
-  const handleActionClick = (actionName) => {
+  const handleActionClick = async (actionName) => {
     switch (actionName) {
       case 'connect':
         handleConnect(cluster, onOpenSSHModal);
         break;
       case 'VSCode':
-        handleVSCodeConnection(cluster, onOpenVSCodeModal);
+        await handleVSCodeConnection(cluster, onOpenVSCodeModal);
         break;
       default:
         return;
