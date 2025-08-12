@@ -169,6 +169,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
         'region': 'fake-region',
         'image_id': 'fake-image',
         'disk_encrypted': False,
+        'ssh_user': 'ubuntu',
         'disk_tier': 'gp3',
         'disk_throughput': 218,
         'disk_iops': 3500,
@@ -218,6 +219,58 @@ def test_aws_make_deploy_variables(*mocks) -> None:
                                             zones,
                                             num_nodes=1,
                                             dryrun=True)
+    assert config == expected_config, ('unexpected resource '
+                                       'variables generated')
+
+
+@mock.patch('sky.catalog.instance_type_exists', return_value=True)
+@mock.patch('sky.catalog.get_accelerators_from_instance_type',
+            return_value={'fake-acc': 2})
+@mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+@mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
+def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_aws_config_ssh_user.yaml'
+    importlib.reload(skypilot_config)
+
+    cloud = clouds.AWS()
+    cluster_name = resources_utils.ClusterName(display_name='display',
+                                               name_on_cloud='cloud')
+    region = clouds.Region(name='fake-region')
+    zones = [clouds.Zone(name='fake-zone')]
+    resource = Resources(cloud=cloud, instance_type='fake-type: 3')
+    config = resource.make_deploy_variables(cluster_name,
+                                            region,
+                                            zones,
+                                            num_nodes=1,
+                                            dryrun=True)
+
+    expected_config_base = {
+        'instance_type': resource.instance_type,
+        'custom_resources': '{"fake-acc":2}',
+        'use_spot': False,
+        'region': 'fake-region',
+        'image_id': 'fake-image',
+        'disk_encrypted': False,
+        'ssh_user': 'test-user',
+        'disk_tier': 'gp3',
+        'disk_throughput': 218,
+        'disk_iops': 3500,
+        'docker_image': None,
+        'docker_container_name': 'sky_container',
+        'docker_login_config': None,
+        'docker_run_options': [],
+        'initial_setup_commands': [],
+        'zones': 'fake-zone'
+    }
+
+    # test using defaults
+    expected_config = expected_config_base.copy()
+    expected_config.update({
+        'security_group': 'fake-default-sg',
+        'security_group_managed_by_skypilot': 'true'
+    })
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')
 
