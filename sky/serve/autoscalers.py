@@ -470,6 +470,8 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
         self.request_timestamps: List[float] = []
         # Store replica information for instance-aware autoscaling
         self._replica_info: List[Dict[str, Any]] = []
+        # Warn once if instance-aware scale-down by QPS is unavailable
+        self._warned_non_instance_aware_scale_down: bool = False
 
     def _calculate_target_num_replicas(self) -> int:
         if self.target_qps_per_replica is None:
@@ -650,6 +652,12 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
         """
         if not isinstance(self.target_qps_per_replica, dict):
             # Fallback to original logic if not instance-aware
+            if not self._warned_non_instance_aware_scale_down: # warn once
+                logger.warning(
+                    'Instance-aware scale-down by QPS is disabled because '
+                    'target_qps_per_replica is not a dict; falling back to '
+                    'nonterminal-replica selection.')
+                self._warned_non_instance_aware_scale_down = True
             return _select_nonterminal_replicas_to_scale_down(
                 num_replicas_to_scale_down, replica_infos)
 
