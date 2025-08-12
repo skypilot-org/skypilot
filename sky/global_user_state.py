@@ -645,7 +645,19 @@ def add_cluster_event(cluster_name: str,
                       new_status: Optional[status_lib.ClusterStatus],
                       reason: str,
                       event_type: ClusterEventType,
-                      nop_if_duplicate: bool = False) -> None:
+                      nop_if_duplicate: bool = False,
+                      duplicate_regex: Optional[str] = None) -> None:
+    """Add a cluster event.
+
+    Args:
+        cluster_name: Name of the cluster.
+        new_status: New status of the cluster.
+        reason: Reason for the event.
+        event_type: Type of the event.
+        nop_if_duplicate: If True, do not add the event if it is a duplicate.
+        duplicate_regex: If provided, do not add the event if it matches the
+            regex. Only used if nop_if_duplicate is True.
+    """
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     if cluster_hash is None:
@@ -669,7 +681,10 @@ def add_cluster_event(cluster_name: str,
         if nop_if_duplicate:
             last_event = get_last_cluster_event(cluster_hash,
                                                 event_type=event_type)
-            if last_event == reason:
+            if duplicate_regex is not None:
+                if re.search(duplicate_regex, last_event):
+                    return
+            elif last_event == reason:
                 return
         try:
             session.execute(

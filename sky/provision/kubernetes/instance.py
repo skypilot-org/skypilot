@@ -1286,6 +1286,8 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
     last_scheduled_node = None
 
     check_node_events = False
+
+    reason_to_return = None
     for event in pod_events:
         if event.reason == 'Scheduled':
             pattern = r'Successfully assigned (\S+) to (\S+)'
@@ -1297,6 +1299,12 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
             # The pod may have been evicted due to underlying
             # node failure. Check node events.
             check_node_events = True
+            reason_to_return = 'pod was evicted by taint manager'
+        if event.reason == 'NodeNotReady':
+            # The pod may have been evicted due to underlying
+            # node failure. Check node events.
+            check_node_events = True
+            reason_to_return = 'underlying node is not ready'
 
     if check_node_events and last_scheduled_node is not None:
         node_field_selector = ('involvedObject.kind=Node,'
@@ -1311,10 +1319,12 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
             reverse=True)
         for event in node_events:
             if event.reason == 'DeletingNode':
-                return (f'Underlying node {last_scheduled_node} '
-                        f'is deleted due to kubernetes event: {event.message}')
+                # override the reason_to_return with a more direct reason.
+                reason_to_return = (f'Underlying node {last_scheduled_node} '
+                                    f'is deleted due to kubernetes event: '
+                                    f'{event.message}')
 
-    return None
+    return reason_to_return
 
 
 def query_instances(

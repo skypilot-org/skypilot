@@ -2227,9 +2227,9 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             [status[1] for status in node_statuses if status[1] is not None])
 
         if some_nodes_terminated:
-            init_reason = f'one or more nodes terminated ({status_reason})'
+            init_reason = f'one or more nodes terminated'
         elif some_nodes_not_stopped:
-            init_reason = f'some nodes are up and some nodes are stopped ({status_reason})'
+            init_reason = f'some nodes are up and some nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
@@ -2313,12 +2313,19 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # represent that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
+        init_reason_regex = None
+        if not status_reason:
+            # If there is not a status reason, don't re-add the event if there
+            # is already an event with the same reason which may have a
+            # status reason.
+            init_reason_regex = f'^Cluster is abnormal because {init_reason} .*'
         global_user_state.add_cluster_event(
             cluster_name,
             status_lib.ClusterStatus.INIT,
-            f'Cluster is abnormal because {init_reason}. Transitioned to INIT.',
+            f'Cluster is abnormal because {init_reason} ({status_reason}). Transitioned to INIT.',
             global_user_state.ClusterEventType.STATUS_CHANGE,
-            nop_if_duplicate=True)
+            nop_if_duplicate=True,
+            duplicate_regex=init_reason_regex)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
