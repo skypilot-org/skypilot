@@ -443,7 +443,7 @@ CATALOG_SCHEMA_VERSION = 'v7'
 CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
-              'paperspace', 'do', 'nebius', 'ssh', 'hyperbolic')
+              'paperspace', 'do', 'nebius', 'ssh', 'hyperbolic', 'seeweb')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.
