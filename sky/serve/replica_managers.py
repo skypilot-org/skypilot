@@ -1033,8 +1033,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
                 if schedule_next_jobs and self._is_pool:
-                    jobs_scheduler.maybe_schedule_next_jobs(
-                        pool=self._service_name)
+                    jobs_scheduler.maybe_schedule_next_jobs()
                 if error_in_sky_launch:
                     # Teardown after update replica info since
                     # _terminate_replica will update the replica info too.
