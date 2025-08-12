@@ -732,7 +732,8 @@ class Rclone:
                     """)
             elif self is Rclone.RcloneStores.NEBIUS:
                 nebius_session = nebius.session()
-                nebius_credentials = nebius.get_nebius_credentials(nebius_session)
+                nebius_credentials = nebius.get_nebius_credentials(
+                    nebius_session)
                 access_key_id = nebius_credentials.access_key
                 secret_access_key = nebius_credentials.secret_key
                 config = textwrap.dedent(f"""\
