@@ -178,28 +178,59 @@ The outputs will show ``Hello, SkyPilot!`` and the list of installed Conda envir
 Execute a task on an existing cluster
 =====================================
 
-Once you have an existing cluster, use :code:`sky exec` to execute a task on it:
+Instead of launching a new cluster every time, we can execute tasks on an existing cluster:
 
-.. code-block:: console
+.. tab-set::
 
-  $ sky exec mycluster hello_sky.yaml
+  .. tab-item:: CLI
+    :sync: cli
 
-The ``sky exec`` command is more lightweight; it
+    Using :code:`sky exec`:
+
+    .. code-block:: console
+
+      $ sky exec mycluster hello_sky.yaml
+
+    .. tip::
+
+      Bash commands are also supported, such as:
+
+      .. code-block:: console
+
+        $ sky exec mycluster python train_cpu.py
+        $ sky exec mycluster --gpus=A100:8 python train_gpu.py
+
+      For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``ssh`` instead (see below) to avoid job submission overheads.
+
+  .. tab-item:: Python
+    :sync: python
+
+    Using Python:
+
+    .. code-block:: python
+
+      import sky
+      import sys
+
+      # Super simple task to run on a SkyPilot cluster.
+      task = sky.Task(run='echo "Hello, SkyPilot!"')
+
+      # Execute the task. Remember we launched `mycluster` before?
+      request_id = sky.exec(task, cluster_name='mycluster')
+
+      # (Optional) stream the logs from the task to the console.
+      job_id, handle = sky.stream_and_get(request_id)
+      cluster_name = handle.get_cluster_name()
+      returncode = sky.tail_logs(cluster_name, job_id, follow=True)
+
+      sys.exit(returncode)
+
+The executing tasks on an existing cluster is more lightweight; it
 
 - syncs up the :code:`workdir` (so that the task may use updated code); and
 - executes the :code:`run` commands.
 
 Provisioning and ``setup`` commands are skipped.
-
-Bash commands are also supported, such as:
-
-.. code-block:: console
-
-  $ sky exec mycluster python train_cpu.py
-  $ sky exec mycluster --gpus=A100:8 python train_gpu.py
-
-For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``ssh`` instead (see below) to avoid job submission overheads.
-
 
 View all clusters
 =================
@@ -296,17 +327,59 @@ For uploading files to the cluster, see :ref:`Syncing Code and Artifacts <sync-c
 Stop/terminate a cluster
 =========================
 
-When you are done, stop the cluster with :code:`sky stop`:
+When you are done, stop the cluster:
 
-.. code-block:: console
+.. tab-set::
 
-  $ sky stop mycluster
+  .. tab-item:: CLI
+    :sync: cli
 
-To terminate a cluster instead, run :code:`sky down`:
+    Using :code:`sky stop`:
 
-.. code-block:: console
+    .. code-block:: console
 
-  $ sky down mycluster
+      $ sky stop mycluster
+
+  .. tab-item:: Python
+    :sync: python
+
+    Using python:
+
+    .. code-block:: python
+
+      import sky
+
+      request_id = sky.stop('mycluster')
+
+      # (Optional) Wait for `sky stop` to finish.
+      sky.stream_and_get(request_id)
+
+Otherwise, terminate the cluster:
+
+.. tab-set::
+
+  .. tab-item:: CLI
+    :sync: cli
+
+    Using :code:`sky down`:
+
+    .. code-block:: console
+
+      $ sky down mycluster
+  
+  .. tab-item:: Python
+    :sync: python
+
+    Using python:
+
+    .. code-block:: python
+
+      import sky
+
+      request_id = sky.down('mycluster')
+
+      # (Optional) Wait for `sky down` to finish.
+      sky.stream_and_get(request_id)
 
 .. note::
 
@@ -318,7 +391,7 @@ To terminate a cluster instead, run :code:`sky down`:
     stops), and any data on the attached disks will be lost.  Terminated
     clusters cannot be restarted.
 
-Find more commands that manage the lifecycle of clusters in the :ref:`CLI reference <cli>`.
+Find more commands that manage the lifecycle of clusters in the :ref:`CLI reference <cli>` and :ref:`SDK reference <pythonapi>`.
 
 Scaling out
 =========================
@@ -326,13 +399,38 @@ Scaling out
 So far, we have used SkyPilot's CLI to submit work to and interact with a single cluster.
 When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use** :ref:`managed jobs <managed-jobs>` **to run on auto-managed clusters**, or even spot instances.
 
+.. tab-set::
+
+  .. tab-item:: CLI
+    :sync: cli
+
+    Using :code:`sky jobs launch`:
+
+    .. code-block:: console
+
+      $ for i in $(seq 100) # launch 100 jobs
+          do sky jobs launch --use-spot --detach-run --async --yes -n hello-$i hello_sky.yaml
+        done
+
+  .. tab-item:: Python
+    :sync: python
+
+    Using python:
+
+    .. code-block:: python
+
+      import sky
+
+      for i in range(100):
+          resource = sky.Resources(use_spot=True)
+          task = sky.Task(resources=resource, run='echo "Hello, SkyPilot!"')
+          sky.managed_jobs.launch(task, name=f'hello-{i}')
+
+After you launch the jobs, open the SkyPilot dashboard and check job status(es) in the Jobs tab.
+
 .. code-block:: console
 
-  $ for i in $(seq 100) # launch 100 jobs
-      do sky jobs launch --use-spot --detach-run --async --yes -n hello-$i hello_sky.yaml
-    done
-  ...
-  $ sky dashboard # check the jobs status in Jobs tab
+  $ sky dashboard # check the job status in Jobs tab.
 
 
 .. image:: ../images/managed-jobs-dashboard.png
