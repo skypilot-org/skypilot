@@ -1,6 +1,7 @@
 """LoadBalancer: Distribute any incoming request to all ready replicas."""
 import asyncio
 import logging
+import os
 import threading
 import traceback
 from typing import Dict, List, Optional, Union
@@ -274,7 +275,8 @@ class SkyServeLoadBalancer:
         protocol = 'https' if self._tls_credential is not None else 'http'
 
         logger.info('SkyServe Load Balancer started on '
-                    f'{protocol}://0.0.0.0:{self._load_balancer_port}')
+                    f'{protocol}://0.0.0.0:{self._load_balancer_port}. '
+                    f'PID: {os.getpid()}')
 
         uvicorn.run(self._app,
                     host='0.0.0.0',

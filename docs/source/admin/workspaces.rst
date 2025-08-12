@@ -237,4 +237,4 @@ Currently, all users in an organization are allowed to use any configured
 workspace. Users can flexibly switch to a different workspace as shown above.
 
 SkyPilot supports using Okta, Google Workspace, or other SSO providers to
-authenticate users. See :ref:`here <api-server-auth-proxy>`.
+authenticate users. See :ref:`here <api-server-oauth>`.

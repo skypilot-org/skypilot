@@ -156,6 +156,45 @@ tests:
           content:
             name: SKYPILOT_DB_CONNECTION_URI
 
+  - it: should enable service accounts when auth.serviceAccount.enabled is explicitly true
+    set:
+      auth.serviceAccount.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+            value: "true"
+
+  - it: should disable service accounts when auth.serviceAccount.enabled is explicitly false
+    set:
+      auth.serviceAccount.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+
+  - it: should respect auth.serviceAccount.enabled over apiService.enableServiceAccounts
+    set:
+      auth.serviceAccount.enabled: false
+      apiService.enableServiceAccounts: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+
+  - it: should fallback to apiService.enableServiceAccounts when auth.serviceAccount.enabled is null
+    set:
+      auth.serviceAccount.enabled: null
+      apiService.enableServiceAccounts: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+
   - it: should mount r2 credentials correctly when r2Credentials is enabled
     set:
       r2Credentials.enabled: true

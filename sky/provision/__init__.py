@@ -76,10 +76,11 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional['status_lib.ClusterStatus']]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Query instances.
 
-    Returns a dictionary of instance IDs and status.
+    Returns a dictionary of instance IDs and a tuple of (status, reason for
+    being in status if any).
 
     A None status means the instance is marked as "terminated"
     or "terminating".

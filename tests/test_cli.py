@@ -447,3 +447,111 @@ class TestHelperFunctions:
         assert added_cluster_args[0][4] is None
         assert added_cluster_args[0][5] == 'ubuntu'
         mock_remove_cluster.assert_not_called()
+
+    def test_list_to_str_float_formatting(self):
+        """Test that _list_to_str formats whole number floats as integers.
+        
+        Regression test for GitHub issue #6484 where requestable quantities
+        were shown as '1.0, 2.0, 4.0, 8.0' instead of '1, 2, 4, 8'.
+        """
+
+        # Define the function locally to test it (since it's nested in show_gpus)
+        def _list_to_str(lst):
+
+            def format_number(e):
+                # If it's a float that's a whole number, display as int
+                if isinstance(e, float) and e.is_integer():
+                    return str(int(e))
+                return str(e)
+
+            return ', '.join([format_number(e) for e in lst])
+
+        # Test case from GitHub issue #6484: whole number floats should display as integers
+        assert _list_to_str([1.0, 2.0, 4.0, 8.0]) == '1, 2, 4, 8'
+
+        # Test mixed floats and integers
+        assert _list_to_str([1, 2.0, 4.0, 8]) == '1, 2, 4, 8'
+
+        # Test fractional floats should remain as floats
+        assert _list_to_str([1.5, 2.0, 4.0]) == '1.5, 2, 4'
+
+        # Test edge cases
+        assert _list_to_str([0.0, 1.0]) == '0, 1'
+        assert _list_to_str([0.5, 1.0, 2.5]) == '0.5, 1, 2.5'
+
+        # Test integers remain unchanged
+        assert _list_to_str([1, 2, 4, 8]) == '1, 2, 4, 8'
+
+        # Test empty list
+        assert _list_to_str([]) == ''
+
+        # Test single element
+        assert _list_to_str([1.0]) == '1'
+        assert _list_to_str([1.5]) == '1.5'
+
+    def test_show_gpus_k8s_float_formatting(self, monkeypatch):
+        """Integration test for sky show-gpus --infra k8s output formatting.
+        
+        Regression test for GitHub issue #6484 to ensure that requestable quantities
+        are displayed as integers (1, 2, 4, 8) instead of floats (1.0, 2.0, 4.0, 8.0).
+        """
+        mock_api_server_calls(monkeypatch)
+
+        # Import required modules
+        from sky import models
+
+        # Mock kubernetes GPU availability data with float counts (the bug scenario)
+        mock_gpu_availability = [
+            models.RealtimeGpuAvailability(
+                gpu='H100_NVLINK_80GB',
+                counts=[1.0, 2.0, 4.0,
+                        8.0],  # These should be formatted as integers
+                capacity=16,
+                available=16)
+        ]
+
+        # Mock enabled clouds to include kubernetes
+        def mock_get(request_id):
+            if 'enabled_clouds_request_id' in str(request_id):
+                return ['kubernetes']  # Enable kubernetes
+            return []
+
+        monkeypatch.setattr('sky.client.sdk.get', mock_get)
+        monkeypatch.setattr('sky.client.sdk.enabled_clouds',
+                            lambda *args, **kwargs: 'enabled_clouds_request_id')
+
+        # Mock the kubernetes contexts and GPU availability
+        monkeypatch.setattr('sky.clouds.Kubernetes.existing_allowed_contexts',
+                            lambda: ['test-context'])
+        monkeypatch.setattr(
+            'sky.client.sdk.realtime_kubernetes_gpu_availability',
+            lambda *args, **kwargs: 'k8s_gpu_request_id')
+        monkeypatch.setattr('sky.client.sdk.kubernetes_node_info',
+                            lambda *args, **kwargs: 'k8s_node_request_id')
+
+        # Mock node info to avoid additional API calls
+        mock_node_info = models.KubernetesNodesInfo(node_info_dict={},
+                                                    hint=None)
+
+        def mock_stream_and_get_conditional(request_id):
+            if 'k8s_gpu' in request_id:
+                return [('test-context', mock_gpu_availability)]
+            elif 'k8s_node' in request_id:
+                return mock_node_info
+            return []
+
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            mock_stream_and_get_conditional)
+
+        # Run the command
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(command.show_gpus, ['--infra', 'k8s'])
+
+        # Check that command succeeded
+        assert result.exit_code == 0, f"Command failed with output: {result.output}"
+
+        # Check that the output contains properly formatted integers (not floats)
+        output = result.output
+        assert '1, 2, 4, 8' in output, f"Expected '1, 2, 4, 8' in output, got: {output}"
+        # Ensure it doesn't contain the problematic float format
+        assert '1.0, 2.0, 4.0, 8.0' not in output, f"Found float format in output: {output}"

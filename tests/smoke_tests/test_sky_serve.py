@@ -393,7 +393,7 @@ def test_skyserve_spot_recovery():
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
 @pytest.mark.no_do
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
@@ -422,7 +422,7 @@ def test_skyserve_dynamic_ondemand_fallback():
         'test-skyserve-dynamic-ondemand-fallback',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            f'sky serve up -n {name} --infra gcp {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
+            f'sky serve up -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
             f'sleep 40',
             # 2 on-demand (provisioning) + 2 Spot (provisioning).
             f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s";'
@@ -892,7 +892,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
 @pytest.mark.no_do  # Spot instances not on DO
 @pytest.mark.no_vast  # Vast doesn't support opening ports
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
@@ -1024,6 +1024,7 @@ def test_skyserve_failures(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.resource_heavy
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_https(generic_cloud: str):
     """Test skyserve with https"""

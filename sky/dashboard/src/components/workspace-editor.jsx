@@ -94,7 +94,25 @@ const WorkspaceConfigDescription = ({
 
     const cloudName =
       CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] || cloud.toUpperCase();
-    const isActuallyEnabled = enabledCloudsSet.has(cloudName?.toLowerCase());
+
+    // Check if cloud is enabled - handle both exact matches and expanded cloud names
+    // (e.g., 'kubernetes' should match both 'kubernetes' and 'kubernetes/context-name')
+    const cloudLower = cloudName?.toLowerCase();
+    const isActuallyEnabled =
+      enabledCloudsSet.has(cloudLower) ||
+      Array.from(enabledCloudsSet).some((enabledCloud) =>
+        enabledCloud.startsWith(cloudLower + '/')
+      );
+
+    // For Kubernetes, get the specific contexts that are enabled
+    const getEnabledKubernetesContexts = () => {
+      if (cloud.toLowerCase() === 'kubernetes') {
+        return Array.from(enabledCloudsSet)
+          .filter((enabledCloud) => enabledCloud.startsWith(cloudLower + '/'))
+          .map((k8sCloud) => k8sCloud.split('/')[1]); // Extract context name
+      }
+      return [];
+    };
 
     if (cloudConfig?.disabled === true) {
       disabledClouds.push(cloudName);
@@ -104,6 +122,11 @@ const WorkspaceConfigDescription = ({
         detail = ` (Project ID: ${cloudConfig.project_id})`;
       } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) {
         detail = ` (Region: ${cloudConfig.region})`;
+      } else if (cloud.toLowerCase() === 'kubernetes') {
+        const enabledContexts = getEnabledKubernetesContexts();
+        if (enabledContexts.length > 0) {
+          detail = ` (Contexts: ${enabledContexts.join(', ')})`;
+        }
       }
 
       if (isActuallyEnabled) {
@@ -126,9 +149,19 @@ const WorkspaceConfigDescription = ({
       }
     } else {
       if (isActuallyEnabled) {
+        // For Kubernetes with no specific config, still show available contexts
+        let defaultDetail = '';
+        if (cloud.toLowerCase() === 'kubernetes') {
+          const enabledContexts = getEnabledKubernetesContexts();
+          if (enabledContexts.length > 0) {
+            defaultDetail = ` (Contexts: ${enabledContexts.join(', ')})`;
+          }
+        }
+
         enabledDescriptions.push(
           <span key={`${cloud}-default-enabled`} className="block">
-            {cloudName} is enabled (using default settings).
+            {cloudName}
+            {defaultDetail} is enabled (using default settings).
           </span>
         );
       } else {

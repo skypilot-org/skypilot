@@ -261,6 +261,9 @@ class StrategyExecutor:
         if self.cluster_name is None:
             return
         if self.pool is None:
+            global_user_state.add_cluster_event(
+                self.cluster_name, None, 'Cluster was cleaned up.',
+                global_user_state.ClusterEventType.STATUS_CHANGE)
             managed_job_utils.terminate_cluster(self.cluster_name)
 
     def _launch(self,

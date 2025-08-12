@@ -126,6 +126,86 @@
                 }
             }
         },
+        "auth": {
+            "type": [
+                "object",
+                "null"
+            ],
+            "properties": {
+                "oauth": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "client-details-from-secret": {
+                            "type": "string"
+                        },
+                        "client-id": {
+                            "type": "string"
+                        },
+                        "client-secret": {
+                            "type": "string"
+                        },
+                        "cookie-expire": {
+                            "type": [
+                                "string",
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "cookie-refresh": {
+                            "type": [
+                                "string",
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "email-domain": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "oidc-issuer-url": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "redis-secret": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "redis-url": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "session-store-type": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "serviceAccount": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "enabled": {
+                            "type": [
+                                "boolean",
+                                "null"
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "awsCredentials": {
             "type": "object",
             "properties": {
@@ -324,7 +404,10 @@
                     ]
                 },
                 "authCredentials": {
-                    "type": "string"
+                    "type": [
+                        "string",
+                        "null"
+                    ]
                 },
                 "authSecret": {
                     "type": [
