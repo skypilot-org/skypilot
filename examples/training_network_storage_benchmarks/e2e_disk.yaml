@@ -1,7 +1,10 @@
+# sky launch e2e_disk.yaml -c e2e_disk --env HF_TOKEN="YOUR TOKEN"
+
 envs:
   S3_BUCKET: nebius://henry-test  # S3 bucket for checkpoints
   S3_BUCKET2: nebius://henry-test-et  # S3 bucket for checkpoints
   HF_TOKEN:  # Add your HuggingFace token if needed
+  MODEL_ID: openai/gpt-oss-120b  # Default model ID
 
 resources:
   cpus: 32+
@@ -54,27 +57,9 @@ run: |
   MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
   NP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
 
-  python /e2e/download.py --model_id openai/gpt-oss-120b --dataset_name "HuggingFaceH4/Multilingual-Thinking" --num_proc -1 --dirs /tmp/checkpoint /mnt/data /checkpoints_s3 /checkpoints_s3_mount_cached
+  python /e2e/download.py --model_id ${MODEL_ID} --dataset_name "HuggingFaceH4/Multilingual-Thinking" --num_proc -1 --dirs /tmp/checkpoint /mnt/data /checkpoints_s3 /checkpoints_s3_mount_cached
 
-  # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /tmp/checkpoint
-  # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /mnt/data/
-  # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /checkpoints_s3
-  # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /checkpoints_s3_mount_cached
-
-  # accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --model_id openai/gpt-oss-120b --enable_profiling --per_device_train_batch_size 4 --enable_profiling --dirs /tmp/checkpoint
-  # cp /tmp/trace_* /tmp/checkpoint/checkpoints
-  # accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --model_id openai/gpt-oss-120b --enable_profiling --per_device_train_batch_size 4 --enable_profiling --dirs /mnt/data/
-  # cp /tmp/trace_* /mnt/data/checkpoint/checkpoints
-  # accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --model_id openai/gpt-oss-120b --enable_profiling --per_device_train_batch_size 4 --enable_profiling --dirs /checkpoints_s3
-  # cp /tmp/trace_* /checkpoints_s3/checkpoints
-  # accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --model_id openai/gpt-oss-120b --enable_profiling --per_device_train_batch_size 4 --enable_profiling --dirs /checkpoints_s3_mount_cached
-  # cp /tmp/trace_* /checkpoints_s3_mount_cached/checkpoints
-
-  accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --model_id openai/gpt-oss-120b --per_device_train_batch_size 4 --skip_training --dirs /tmp/checkpoint
-  cp /tmp/trace_* /tmp/checkpoint/checkpoints
-  accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --model_id openai/gpt-oss-120b --per_device_train_batch_size 4 --skip_training --dirs /mnt/data/
-  cp /tmp/trace_* /mnt/data/checkpoint/checkpoints
-  accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --model_id openai/gpt-oss-120b --per_device_train_batch_size 4 --skip_training --dirs /checkpoints_s3
-  cp /tmp/trace_* /checkpoints_s3/checkpoints
-  accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/train.py --num_proc 32 --model_id openai/gpt-oss-120b --per_device_train_batch_size 4 --skip_training --dirs /checkpoints_s3_mount_cached
-  cp /tmp/trace_* /checkpoints_s3_mount_cached/checkpoints
+  accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/e2e_disk.py --num_proc 32 --model_id ${MODEL_ID} --per_device_train_batch_size 4 --skip_training --dirs /tmp/checkpoint
+  accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/e2e_disk.py --num_proc 32 --model_id ${MODEL_ID} --per_device_train_batch_size 4 --skip_training --dirs /mnt/data/
+  accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/e2e_disk.py --num_proc 32 --model_id ${MODEL_ID} --per_device_train_batch_size 4 --skip_training --dirs /checkpoints_s3
+  accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR --main_process_port 29500 /e2e/e2e_disk.py --num_proc 32 --model_id ${MODEL_ID} --per_device_train_batch_size 4 --skip_training --dirs /checkpoints_s3_mount_cached

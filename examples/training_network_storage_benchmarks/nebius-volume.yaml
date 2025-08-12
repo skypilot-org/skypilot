@@ -1,0 +1,8 @@
+# nebius-volume.yaml
+name: nebius-pvc
+type: k8s-pvc
+infra: k8s
+size: 1Gi
+config:
+  storage_class_name: csi-mounted-fs-path-sc
+  access_mode: ReadWriteMany
