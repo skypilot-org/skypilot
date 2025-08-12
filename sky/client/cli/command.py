@@ -1128,11 +1128,15 @@ def launch(
             raise ValueError(f'{backend_name} backend is not supported.')
 
     if task.service is not None:
+        noun = 'pool' if task.service.pool else 'service'
+        capnoun = noun.capitalize()
+        sysname = 'Jobs Worker Pool' if task.service.pool else 'SkyServe'
+        cmd = 'sky jobs pool apply' if task.service.pool else 'sky serve up'
         logger.info(
-            f'{colorama.Fore.YELLOW}Service section will be ignored when using '
-            f'`sky launch`. {colorama.Style.RESET_ALL}\n{colorama.Fore.YELLOW}'
-            'To spin up a service, use SkyServe CLI: '
-            f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}sky serve up'
+            f'{colorama.Fore.YELLOW}{capnoun} section will be ignored when '
+            f'using `sky launch`. {colorama.Style.RESET_ALL}\n'
+            f'{colorama.Fore.YELLOW}To spin up a {noun}, use {sysname} CLI: '
+            f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}{cmd}'
             f'{colorama.Style.RESET_ALL}')
 
     request_id = sdk.launch(
