@@ -183,7 +183,7 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy,
         """Set replica information including accelerator types."""
         with self.lock:
             self.replica_info = {info['url']: info for info in replica_info}
-            logger.info(f'Set replica info: {self.replica_info}')
+            logger.debug('Set replica info: %s', self.replica_info)
 
     def set_target_qps_per_accelerator(
             self, target_qps_per_accelerator: Dict[str, float]) -> None:
@@ -205,11 +205,10 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy,
         # Load is normalized by target QPS
         normalized_load = current_load / target_qps
 
-        logger.info(f'InstanceAwareLeastLoadPolicy: Replica {replica_url} - '
-                    f'GPU type: {accelerator_type}, '
-                    f'current load: {current_load}, '
-                    f'target QPS: {target_qps}, '
-                    f'normalized load: {normalized_load}')
+        logger.debug('InstanceAwareLeastLoadPolicy: Replica %s - GPU type: %s, '
+                     'current load: %s, target QPS: %s, normalized load: %s',
+                     replica_url, accelerator_type, current_load, target_qps,
+                     normalized_load)
 
         return normalized_load
 
@@ -246,8 +245,8 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy,
 
             # Select replica with minimum normalized load
             selected_replica = min(replica_loads, key=lambda x: x[1])[0]
-            logger.info(f'Available replicas and loads: {replica_loads}')
-            logger.info(f'Selected replica: {selected_replica}')
+            logger.debug('Available replicas and loads: %s', replica_loads)
+            logger.debug('Selected replica: %s', selected_replica)
             return selected_replica
 
     def pre_execute_hook(self, replica_url: str,
