@@ -731,6 +731,35 @@ def get_last_cluster_event(cluster_hash: str,
     return row.reason
 
 
+def get_cluster_events(cluster_name: Optional[str],
+                       cluster_hash: Optional[str],
+                       event_type: ClusterEventType) -> List[str]:
+    """Returns the cluster events for the cluster.
+
+    Args:
+        cluster_name: Name of the cluster. Cannot be specified if cluster_hash
+            is specified.
+        cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
+            is specified.
+        event_type: Type of the event.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+
+    if cluster_name is not None and cluster_hash is not None:
+        raise ValueError('Cannot specify both cluster_name and cluster_hash')
+    if cluster_name is None and cluster_hash is None:
+        raise ValueError('Must specify either cluster_name or cluster_hash')
+    if cluster_name is not None:
+        cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+        if cluster_hash is None:
+            raise ValueError(f'Hash for cluster {cluster_name} not found.')
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(cluster_event_table).filter_by(
+            cluster_hash=cluster_hash, type=event_type.value).order_by(
+                cluster_event_table.c.transitioned_at.asc()).all()
+    return [row.reason for row in rows]
+
 def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
     """Returns the user hash or the current user hash, if user_hash is None.
 

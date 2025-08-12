@@ -1288,9 +1288,6 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
         # latest event appears first
         reverse=True)
     last_scheduled_node = None
-
-    check_node_events = False
-
     insert_new_pod_event = True
     new_event_inserted = False
     for event in pod_events:
@@ -1301,10 +1298,10 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                 scheduled_node = match.group(2)
                 last_scheduled_node = scheduled_node
         if insert_new_pod_event:
+            # Try inserting the latest events first. If the event is a
+            # duplicate, it means the event (and any previous events) have
+            # already been inserted - so do not insert further events.
             try:
-                # Try inserting the latest events first. If the event is a
-                # duplicate, it means the event (and any previous events) have
-                # already been inserted - so do not insert further events.
                 global_user_state.add_cluster_event(
                     cluster_name,
                     None, f'[kubernetes pod {pod_name}] '
@@ -1314,14 +1311,11 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                         event.metadata.creation_timestamp.timestamp()),
                     expose_duplicate_error=True)
             except db_utils.UniqueConstraintViolationError:
-                logger.info(f'Skipping pod event insertion for pod {pod_name} '
-                            f'due to duplicate event: {event.reason} '
-                            f'{event.message}')
                 insert_new_pod_event = False
             else:
                 new_event_inserted = True
 
-    if check_node_events and last_scheduled_node is not None:
+    if last_scheduled_node is not None:
         node_field_selector = ('involvedObject.kind=Node,'
                                f'involvedObject.name={last_scheduled_node}')
         node_events = kubernetes.core_api(context).list_namespaced_event(
@@ -1336,6 +1330,9 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
         insert_new_node_event = True
         for event in node_events:
             if insert_new_node_event:
+                # Try inserting the latest events first. If the event is a
+                # duplicate, it means the event (and any previous events) have
+                # already been inserted - so do not insert further events.
                 try:
                     global_user_state.add_cluster_event(
                         cluster_name,
@@ -1346,10 +1343,6 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                             event.metadata.creation_timestamp.timestamp()),
                         expose_duplicate_error=True)
                 except db_utils.UniqueConstraintViolationError:
-                    logger.info(f'Skipping node event insertion for node '
-                                f'{last_scheduled_node} '
-                                f'due to duplicate event: {event.reason} '
-                                f'{event.message}')
                     insert_new_node_event = False
                 else:
                     new_event_inserted = True
@@ -1359,7 +1352,26 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
         # return. Return None.
         return None
 
-    return 'hello'
+
+    # Analyze the events for failure
+    cluster_events = global_user_state.get_cluster_events(
+        cluster_name, None, global_user_state.ClusterEventType.DEBUG)
+    for event in cluster_events:
+        if event.startswith(f'[kubernetes pod {pod_name}] '):
+            event = event[len(f'[kubernetes pod {pod_name}] '):]
+        elif event.startswith(f'[kubernetes node {last_scheduled_node}] '):
+            event = event[len(f'[kubernetes node {last_scheduled_node}] '):]
+
+        # Order these by "decisiveness" of the message -
+        # the first one that matches is the most important.
+        if event.startswith('DeletingNode '):
+            return event[len('DeletingNode '):]
+        if event.startswith('TaintManagerEviction '):
+            return event[len('TaintManagerEviction '):]
+        if event.startswith('NodeNotReady '):
+            return event[len('NodeNotReady '):]
+
+    return None
 
 
 def query_instances(
