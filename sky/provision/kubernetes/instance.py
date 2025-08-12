@@ -1263,7 +1263,7 @@ def _get_pod_termination_reason(pod: Any) -> str:
                     # just in-case reason is None, have default for debugging
                     reason = f'exit({exit_code})'
                 reasons.append(reason)
-            # TODO (kyuds): should we query last_state as well?
+            # TODO (kyuds): later, if needed, query `last_state` too.
 
     # Normally we will have a single container per pod for skypilot
     # but doing this just in-case there are multiple containers.
