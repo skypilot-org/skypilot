@@ -1366,22 +1366,20 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
     cluster_events = global_user_state.get_cluster_events(
         cluster_name, None, global_user_state.ClusterEventType.DEBUG)
     for event in cluster_events:
-        if event.startswith(f'[kubernetes pod {pod_name}] '):
-            event = event[len(f'[kubernetes pod {pod_name}] '):]
-        elif event.startswith(f'[kubernetes node {last_scheduled_node}] '):
-            event = event[len(f'[kubernetes node {last_scheduled_node}] '):]
-
+        if event.startswith('[kubernetes pod'):
+            event = event.split(']')[1].strip()
+        elif event.startswith('[kubernetes node'):
+            event = event.split(']')[1].strip()
         # Order these by "decisiveness" of the message -
         # the last one that matches is the most important.
         if event.startswith('NodeNotReady '):
             _record_failure_reason(event[len('NodeNotReady '):], 1)
-        if event.startswith('TaintManagerEviction '):
+        elif event.startswith('TaintManagerEviction '):
             # usually the event message for TaintManagerEviction is not useful
             # so we record a more generic message.
             _record_failure_reason(f'pod was evicted by taint manager', 2)
-        if event.startswith('DeletingNode '):
+        elif event.startswith('DeletingNode '):
             _record_failure_reason(event[len('DeletingNode '):], 3)
-
     return failure_reason
 
 
