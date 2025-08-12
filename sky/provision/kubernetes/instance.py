@@ -6,6 +6,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -25,6 +26,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils.db import db_utils
 
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
@@ -1272,7 +1274,7 @@ def _get_pod_termination_reason(pod: Any) -> str:
 
 
 def _get_pod_missing_reason(context: Optional[str], namespace: str,
-                            pod_name: str) -> Optional[str]:
+                            cluster_name: str, pod_name: str) -> Optional[str]:
     logger.debug(f'Analyzing events for pod {pod_name}')
     pod_field_selector = (
         f'involvedObject.kind=Pod,involvedObject.name={pod_name}')
@@ -1280,14 +1282,17 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
         namespace,
         field_selector=pod_field_selector,
         _request_timeout=kubernetes.API_TIMEOUT).items
-    pod_events = sorted(pod_events,
-                        key=lambda event: event.metadata.creation_timestamp,
-                        reverse=True)
+    pod_events = sorted(
+        pod_events,
+        key=lambda event: event.metadata.creation_timestamp,
+        # latest event appears first
+        reverse=True)
     last_scheduled_node = None
 
     check_node_events = False
 
-    reason_to_return = None
+    insert_new_pod_event = True
+    new_event_inserted = False
     for event in pod_events:
         if event.reason == 'Scheduled':
             pattern = r'Successfully assigned (\S+) to (\S+)'
@@ -1295,16 +1300,26 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
             if match:
                 scheduled_node = match.group(2)
                 last_scheduled_node = scheduled_node
-        if event.reason == 'TaintManagerEviction':
-            # The pod may have been evicted due to underlying
-            # node failure. Check node events.
-            check_node_events = True
-            reason_to_return = 'pod was evicted by taint manager'
-        if event.reason == 'NodeNotReady':
-            # The pod may have been evicted due to underlying
-            # node failure. Check node events.
-            check_node_events = True
-            reason_to_return = 'underlying node is not ready'
+        if insert_new_pod_event:
+            try:
+                # Try inserting the latest events first. If the event is a
+                # duplicate, it means the event (and any previous events) have
+                # already been inserted - so do not insert further events.
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    None, f'[kubernetes pod {pod_name}] '
+                    f'{event.reason} {event.message}',
+                    global_user_state.ClusterEventType.DEBUG,
+                    transitioned_at=int(
+                        event.metadata.creation_timestamp.timestamp()),
+                    expose_duplicate_error=True)
+            except db_utils.UniqueConstraintViolationError:
+                logger.info(f'Skipping pod event insertion for pod {pod_name} '
+                            f'due to duplicate event: {event.reason} '
+                            f'{event.message}')
+                insert_new_pod_event = False
+            else:
+                new_event_inserted = True
 
     if check_node_events and last_scheduled_node is not None:
         node_field_selector = ('involvedObject.kind=Node,'
@@ -1316,15 +1331,35 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
         node_events = sorted(
             node_events,
             key=lambda event: event.metadata.creation_timestamp,
+            # latest event appears first
             reverse=True)
+        insert_new_node_event = True
         for event in node_events:
-            if event.reason == 'DeletingNode':
-                # override the reason_to_return with a more direct reason.
-                reason_to_return = (f'Underlying node {last_scheduled_node} '
-                                    f'is deleted due to kubernetes event: '
-                                    f'{event.message}')
+            if insert_new_node_event:
+                try:
+                    global_user_state.add_cluster_event(
+                        cluster_name,
+                        None, f'[kubernetes node {last_scheduled_node}] '
+                        f'{event.reason} {event.message}',
+                        global_user_state.ClusterEventType.DEBUG,
+                        transitioned_at=int(
+                            event.metadata.creation_timestamp.timestamp()),
+                        expose_duplicate_error=True)
+                except db_utils.UniqueConstraintViolationError:
+                    logger.info(f'Skipping node event insertion for node '
+                                f'{last_scheduled_node} '
+                                f'due to duplicate event: {event.reason} '
+                                f'{event.message}')
+                    insert_new_node_event = False
+                else:
+                    new_event_inserted = True
 
-    return reason_to_return
+    if not new_event_inserted:
+        # If new event is not inserted, there is no useful information to
+        # return. Return None.
+        return None
+
+    return 'hello'
 
 
 def query_instances(
@@ -1333,7 +1368,6 @@ def query_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
-    del cluster_name  # unused
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,
@@ -1408,7 +1442,7 @@ def query_instances(
             # If the pod is not in the cluster_status, it means it's not
             # running.
             # Analyze what happened to the pod based on events.
-            reason = _get_pod_missing_reason(context, namespace,
+            reason = _get_pod_missing_reason(context, namespace, cluster_name,
                                              target_pod_name)
             reason = (f'{target_pod_name}: {reason}'
                       if reason is not None else None)

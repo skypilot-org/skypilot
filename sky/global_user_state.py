@@ -646,7 +646,9 @@ def add_cluster_event(cluster_name: str,
                       reason: str,
                       event_type: ClusterEventType,
                       nop_if_duplicate: bool = False,
-                      duplicate_regex: Optional[str] = None) -> None:
+                      duplicate_regex: Optional[str] = None,
+                      expose_duplicate_error: bool = False,
+                      transitioned_at: Optional[int] = None) -> None:
     """Add a cluster event.
 
     Args:
@@ -657,6 +659,9 @@ def add_cluster_event(cluster_name: str,
         nop_if_duplicate: If True, do not add the event if it is a duplicate.
         duplicate_regex: If provided, do not add the event if it matches the
             regex. Only used if nop_if_duplicate is True.
+        expose_duplicate_error: If True, raise an error if the event is a
+            duplicate. Only used if nop_if_duplicate is True.
+        transitioned_at: If provided, use this timestamp for the event.
     """
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
@@ -664,6 +669,8 @@ def add_cluster_event(cluster_name: str,
         logger.debug(f'Hash for cluster {cluster_name} not found. '
                      'Skipping event.')
         return
+    if transitioned_at is None:
+        transitioned_at = int(time.time())
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
@@ -694,15 +701,20 @@ def add_cluster_event(cluster_name: str,
                     starting_status=last_status,
                     ending_status=new_status.value if new_status else None,
                     reason=reason,
-                    transitioned_at=int(time.time()),
+                    transitioned_at=transitioned_at,
                     type=event_type.value,
                 ))
             session.commit()
         except sqlalchemy.exc.IntegrityError as e:
             if 'UNIQUE constraint failed' in str(e):
                 # This can happen if the cluster event is added twice.
-                # We can ignore this error.
-                pass
+                # We can ignore this error unless the caller requests
+                # to expose the error.
+                if expose_duplicate_error:
+                    raise db_utils.UniqueConstraintViolationError(
+                        value=reason, message=str(e))
+                else:
+                    pass
             else:
                 raise e
 
