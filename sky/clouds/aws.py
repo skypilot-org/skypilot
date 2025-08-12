@@ -471,9 +471,7 @@ class AWS(clouds.Cloud):
             cloud='aws',
             region=region_name,
             keys=('ssh_user',),
-            default_value=None)
-        if not ssh_user:
-            ssh_user = DEFAULT_SSH_USER
+            default_value=DEFAULT_SSH_USER)
 
         disk_encrypted = skypilot_config.get_effective_region_config(
             cloud='aws',
