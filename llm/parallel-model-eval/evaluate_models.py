@@ -52,12 +52,17 @@ def prepare_model_task(model: Dict,
 
     # Override resources only if explicitly specified in model config
     # The template already has default resources loaded
-    if 'accelerators' in model:
-        # Update each resource in the set with the new accelerators
+    if 'accelerators' in model or 'infra' in model:
+        # Update each resource in the set with the new configuration
         updated_resources = []
         for resource in task.resources:
-            updated_resources.append(
-                resource.copy(accelerators=model['accelerators']))
+            resource_updates = {}
+            if 'accelerators' in model:
+                resource_updates['accelerators'] = model['accelerators']
+            if 'infra' in model:
+                # infra can be a string (cloud name) or dict with more options
+                resource_updates['infra'] = model['infra']
+            updated_resources.append(resource.copy(**resource_updates))
         task.set_resources(updated_resources)
 
     # Set file mounts if needed

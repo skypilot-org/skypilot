@@ -128,6 +128,7 @@ models:
     
   # Example: Your model in a SkyPilot volume (fast for repeated access)
   - name: "agent-llama"
+    infra: k8s # Specify Kubernetes as the infrastructure
     source: "volume://model-checkpoints/agent-llama"
     
   # Example: Small model with Ollama for quick testing

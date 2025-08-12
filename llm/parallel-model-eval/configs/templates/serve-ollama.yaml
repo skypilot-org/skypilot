@@ -6,6 +6,7 @@ envs:
   API_TOKEN: default-token
 
 resources:
+  # infra: aws  # Optional: specify cloud provider (aws, gcp, azure, etc.)
   accelerators: L4:1
   ports: 8000
 
