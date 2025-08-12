@@ -646,7 +646,6 @@ def add_cluster_event(cluster_name: str,
                       reason: str,
                       event_type: ClusterEventType,
                       nop_if_duplicate: bool = False,
-                      expose_duplicate_error: bool = False,
                       transitioned_at: Optional[int] = None) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
@@ -690,13 +689,8 @@ def add_cluster_event(cluster_name: str,
         except sqlalchemy.exc.IntegrityError as e:
             if 'UNIQUE constraint failed' in str(e):
                 # This can happen if the cluster event is added twice.
-                # We can ignore this error unless the caller requests
-                # to expose the error.
-                if expose_duplicate_error:
-                    raise db_utils.UniqueConstraintViolationError(
-                        value=reason, message=str(e))
-                else:
-                    pass
+                # We can ignore this error.
+                pass
             else:
                 raise e
 
