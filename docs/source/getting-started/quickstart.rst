@@ -420,11 +420,12 @@ When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use**
     .. code-block:: python
 
       import sky
+      from sky import jobs as managed_jobs
 
       for i in range(100):
           resource = sky.Resources(use_spot=True)
           task = sky.Task(resources=resource, run='echo "Hello, SkyPilot!"')
-          sky.managed_jobs.launch(task, name=f'hello-{i}')
+          managed_jobs.launch(task, name=f'hello-{i}')
 
 After you launch the jobs, open the SkyPilot dashboard and check job status(es) in the Jobs tab.
 
