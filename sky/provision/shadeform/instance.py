@@ -2,16 +2,15 @@
 import time
 from typing import Any, Dict, List, Optional
 
+import requests
+
 from sky import sky_logging
 from sky.provision import common
 from sky.provision.shadeform import shadeform_utils
-from sky.utils import common_utils
-from sky.utils import resources_utils
 from sky.utils import status_lib
-from sky.utils import ux_utils
 
 POLL_INTERVAL = 10
-INSTANCE_READY_TIMEOUT = 600  # 10 minutes
+INSTANCE_READY_TIMEOUT = 3600  # 10 minutes
 
 logger = sky_logging.init_logger(__name__)
 
@@ -41,7 +40,7 @@ def _get_cluster_instances(cluster_name_on_cloud: str) -> Dict[str, Any]:
                 cluster_instances[instance['id']] = instance
 
         return cluster_instances
-    except Exception as e:
+    except (ValueError, KeyError, requests.exceptions.RequestException) as e:
         logger.warning(f'Failed to get instances: {e}')
         return {}
 
@@ -70,9 +69,8 @@ def _wait_for_instances_ready(cluster_name_on_cloud: str,
                     instance.get('ssh_port') is not None):
                 ready_count += 1
 
-        logger.info(
-            f'Waiting for instances to be ready: ({ready_count}/{expected_count})'
-        )
+        logger.info(f'Waiting for instances to be ready: '
+                    f'({ready_count}/{expected_count})')
 
         if ready_count >= expected_count:
             return True
@@ -82,25 +80,13 @@ def _wait_for_instances_ready(cluster_name_on_cloud: str,
     return False
 
 
-def bootstrap_instances(
-        region: str, cluster_name: str,
-        config: common.ProvisionConfig) -> common.ProvisionConfig:
-    """Bootstrap instances for Shadeform.
-
-    This function prepares the configuration for instance creation.
-    For Shadeform, we don't need to do much bootstrapping since the
-    API handles most of the setup.
-    """
-    # No special bootstrapping needed for Shadeform
-    return config
-
-
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster."""
-    logger.info(
-        f'Running instances for cluster {cluster_name_on_cloud} in region {region}'
-    )
+    logger.info(f'Running instances for cluster {cluster_name_on_cloud} '
+                f'in region {region}')
+    logger.debug(f'DEBUG: region type={type(region)}, value={region!r}')
+    logger.debug(f'DEBUG: config node_config={config.node_config}')
 
     # Check existing instances
     existing_instances = _get_cluster_instances(cluster_name_on_cloud)
@@ -122,9 +108,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         if head_instance_id is None:
             raise RuntimeError(
                 f'Cluster {cluster_name_on_cloud} has no head node')
-        logger.info(
-            f'Cluster already has {current_count} instances, no need to start more'
-        )
+        logger.info(f'Cluster already has {current_count} instances, '
+                    f'no need to start more')
         return common.ProvisionRecord(
             provider_name='shadeform',
             cluster_name=cluster_name_on_cloud,
@@ -138,22 +123,23 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     to_create = target_count - current_count
     created_instance_ids = []
 
-    for i in range(to_create):
+    for _ in range(to_create):
         node_type = 'head' if head_instance_id is None else 'worker'
         instance_name = f'{cluster_name_on_cloud}-{node_type}'
 
         # Extract configuration from node_config
         node_config = config.node_config
-        instance_type = node_config['instance_type']
-        cloud = node_config['cloud']
+        instance_type_split = node_config['InstanceType'].split('_')
+        instance_type = '_'.join(instance_type_split[1:])
+        cloud = instance_type_split[0]
+        ssh_key_id = config.authentication_config.get('ssh_key_id')
 
         create_config = {
             'cloud': cloud,
             'region': region,
             'shade_instance_type': instance_type,
-            'shade_cloud': node_config.get('shade_cloud', True),
             'name': instance_name,
-            'os': node_config.get('os', 'ubuntu22.04_cuda12.2_shade_os'),
+            'ssh_key_id': ssh_key_id
         }
 
         try:
@@ -173,7 +159,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             for iid in created_instance_ids:
                 try:
                     shadeform_utils.delete_instance(iid)
-                except Exception as cleanup_e:
+                except requests.exceptions.RequestException as cleanup_e:
                     logger.warning(
                         f'Failed to cleanup instance {iid}: {cleanup_e}')
             raise
@@ -181,7 +167,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     # Wait for all instances to be ready
     logger.info('Waiting for instances to become ready...')
     if not _wait_for_instances_ready(cluster_name_on_cloud, target_count):
-        raise RuntimeError(f'Timed out waiting for instances to be ready')
+        raise RuntimeError('Timed out waiting for instances to be ready')
 
     assert head_instance_id is not None, 'head_instance_id should not be None'
 
@@ -197,15 +183,16 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
     """Wait for instances to reach the specified state."""
+    del region, cluster_name_on_cloud, state  # unused
     # For Shadeform, instances are ready when they reach 'active' status
     # This is already handled in run_instances
-    pass
 
 
 def stop_instances(cluster_name_on_cloud: str,
                    provider_config: Optional[Dict[str, Any]] = None,
                    worker_only: bool = False) -> None:
     """Stop instances (not supported by Shadeform)."""
+    del cluster_name_on_cloud, provider_config, worker_only  # unused
     raise NotImplementedError(
         'Stopping instances is not supported by Shadeform')
 
@@ -214,6 +201,7 @@ def terminate_instances(cluster_name_on_cloud: str,
                         provider_config: Optional[Dict[str, Any]] = None,
                         worker_only: bool = False) -> None:
     """Terminate instances."""
+    del provider_config  # unused
     logger.info(f'Terminating instances for cluster {cluster_name_on_cloud}')
 
     instances = _get_cluster_instances(cluster_name_on_cloud)
@@ -236,7 +224,7 @@ def terminate_instances(cluster_name_on_cloud: str,
             logger.info(
                 f'Terminating instance {instance_id} ({instance.get("name")})')
             shadeform_utils.delete_instance(instance_id)
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             logger.warning(f'Failed to terminate instance {instance_id}: {e}')
 
 
@@ -245,6 +233,7 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """Get cluster information."""
+    del region, provider_config  # unused
     instances = _get_cluster_instances(cluster_name_on_cloud)
 
     if not instances:
@@ -283,6 +272,7 @@ def query_instances(
         non_terminated_only: bool = True
 ) -> Dict[str, status_lib.ClusterStatus]:
     """Query the status of instances."""
+    del provider_config  # unused
     instances = _get_cluster_instances(cluster_name_on_cloud)
 
     if not instances:
@@ -294,7 +284,8 @@ def query_instances(
         sky_status = SHADEFORM_STATUS_MAP.get(shadeform_status,
                                               status_lib.ClusterStatus.INIT)
 
-        if non_terminated_only and sky_status == status_lib.ClusterStatus.STOPPED:
+        if (non_terminated_only and
+                sky_status == status_lib.ClusterStatus.STOPPED):
             continue
 
         status_map[instance_id] = sky_status
@@ -306,6 +297,7 @@ def open_ports(cluster_name_on_cloud: str,
                ports: List[str],
                provider_config: Optional[Dict[str, Any]] = None) -> None:
     """Open ports (not supported by Shadeform)."""
+    del cluster_name_on_cloud, ports, provider_config  # unused
     logger.warning('Opening ports dynamically is not supported by Shadeform')
 
 
@@ -313,4 +305,5 @@ def cleanup_ports(cluster_name_on_cloud: str,
                   ports: List[str],
                   provider_config: Optional[Dict[str, Any]] = None) -> None:
     """Cleanup ports (not supported by Shadeform)."""
-    pass  # Nothing to cleanup since we don't support dynamic port opening
+    del cluster_name_on_cloud, ports, provider_config  # unused
+    # Nothing to cleanup since we don't support dynamic port opening

@@ -1,11 +1,13 @@
 """ Shadeform Cloud. """
 
+import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
 from sky.adaptors import common as adaptors_common
+from sky.catalog import shadeform_catalog
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import status_lib
@@ -24,14 +26,6 @@ _CREDENTIAL_FILES = [
 # Default cloud to use for Shadeform API
 _DEFAULT_CLOUD = 'datacrunch'
 
-# Supported regions for datacrunch
-_DATACRUNCH_REGIONS = [
-    'helsinki-finland-1',
-    'helsinki-finland-2',
-    'helsinki-finland-5',
-    'reykjanesbaer-iceland-1',
-]
-
 
 @registry.CLOUD_REGISTRY.register
 class Shadeform(clouds.Cloud):
@@ -44,28 +38,38 @@ class Shadeform(clouds.Cloud):
 
     _REPR = 'Shadeform'
 
-    # Shadeform doesn't have explicit cluster name limits, but let's be conservative
+    # Shadeform doesn't have explicit cluster name limits, but conservative
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
 
     # Features not currently supported by Shadeform
+    # yapf: disable
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.STOP: 'Stopping instances is not supported on Shadeform yet.',
+        clouds.CloudImplementationFeatures.STOP:
+            'Stopping instances not supported on Shadeform.',
         clouds.CloudImplementationFeatures.MULTI_NODE:
-            ('Multi-node clusters are not supported yet on Shadeform, as the '
-             'interconnection among nodes requires special networking setup.'),
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are not supported on Shadeform.',
-        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: 'Custom disk tiers are not supported on Shadeform.',
-        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER: 'Custom network tiers are not supported on Shadeform.',
+            'Multi-node clusters not supported on Shadeform.',
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
+            'Spot instances not supported on Shadeform.',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            'Custom disk tiers not supported on Shadeform.',
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            'Custom network tiers not supported on Shadeform.',
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
-            ('Object storage mounting is not supported on Shadeform. '
-             'Use `mode: COPY` to copy data to local disk instead.'),
-        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: 'Host controllers are not supported on Shadeform.',
-        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS: 'High availability controllers are not supported on Shadeform.',
-        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: 'Disk cloning is not supported on Shadeform.',
-        clouds.CloudImplementationFeatures.IMAGE_ID: 'Custom image IDs are not supported on Shadeform.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Docker images are not supported on Shadeform yet.',
-        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK: 'Custom multiple network interfaces are not supported on Shadeform.',
+            'Object storage mounting not supported on Shadeform.',
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
+            'Host controllers not supported on Shadeform.',
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            'High availability controllers not supported.',
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            'Disk cloning not supported on Shadeform.',
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            'Custom image IDs not supported on Shadeform.',
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            'Docker images not supported on Shadeform yet.',
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            'Custom multiple network interfaces not supported.',
     }
+    # yapf: enable
 
     _regions: List[clouds.Region] = []
 
@@ -91,21 +95,17 @@ class Shadeform(clouds.Cloud):
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         """Get regions that offer the requested instance type."""
-        del accelerators  # unused
         if use_spot:
             return []  # No spot support
 
-        regions = catalog.get_region_zones_for_instance_type(
-            instance_type, use_spot, 'shadeform')
+        # IMPORTANT: instance_type here is the specific Shadeform instance type
+        # (like 'massedcompute_A6000_base'), NOT the accelerator name
+        # We only return regions where this exact instance type exists
+        regions = shadeform_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot)
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
-
-        if zone is not None:
-            for r in regions:
-                assert r.zones is not None, r
-                r.set_zones([z for z in r.zones if z.name == zone])
-            regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
@@ -126,10 +126,8 @@ class Shadeform(clouds.Cloud):
         regions = cls.regions_with_offering(instance_type, accelerators,
                                             use_spot, region, None)
         for r in regions:
-            assert r.zones is not None, r
-            for zone in r.zones:
-                if zone.name == region:
-                    yield None
+            assert r.zones is None, r
+            yield r.zones
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
@@ -186,7 +184,7 @@ class Shadeform(clouds.Cloud):
                                      zone: Optional[str] = None) -> float:
         """Get hourly cost for instance type."""
         if use_spot:
-            raise ValueError("Spot instances are not supported on Shadeform")
+            raise ValueError('Spot instances are not supported on Shadeform')
         return catalog.get_hourly_cost(instance_type,
                                        use_spot=use_spot,
                                        region=region,
@@ -200,38 +198,33 @@ class Shadeform(clouds.Cloud):
                                     zone: Optional[str] = None) -> float:
         """Get hourly cost for accelerators."""
         if use_spot:
-            raise ValueError("Spot instances are not supported on Shadeform")
+            raise ValueError('Spot instances are not supported on Shadeform')
 
         # Find instance type that matches the accelerator requirements
         assert len(accelerators) == 1, accelerators
         acc_name, acc_count = list(accelerators.items())[0]
 
-        instance_types, _ = catalog.get_instance_type_for_accelerator(
-            acc_name,
-            acc_count,
-            use_spot=use_spot,
-            region=region,
-            zone=zone,
-            clouds='shadeform')
+        # Use Shadeform-specific catalog instead of global catalog
+        instance_types, _ = shadeform_catalog.get_instance_type_for_accelerator(
+            acc_name, acc_count, use_spot=use_spot, region=region, zone=zone)
 
         if not instance_types:
-            raise ValueError(f"No instance type found for {accelerators}")
+            raise ValueError(f'No instance type found for {accelerators}')
 
         # Return cost of the cheapest instance type
         costs = []
         for instance_type in instance_types:
             try:
-                cost = catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='shadeform')
+                cost = shadeform_catalog.get_hourly_cost(instance_type,
+                                                         use_spot=use_spot,
+                                                         region=region,
+                                                         zone=zone)
                 costs.append(cost)
             except ValueError:
                 continue
 
         if not costs:
-            raise ValueError(f"No pricing found for {accelerators}")
+            raise ValueError(f'No pricing found for {accelerators}')
 
         return min(costs)
 
@@ -266,7 +259,6 @@ class Shadeform(clouds.Cloud):
         feasible_resources = self.get_feasible_launchable_resources(r,
                                                                     num_nodes=1)
         instance_type = feasible_resources.resources_list[0].instance_type
-
         return {
             'instance_type': instance_type,
             'region': region.name,
@@ -291,15 +283,13 @@ class Shadeform(clouds.Cloud):
         """Check if Shadeform credentials are properly configured."""
         del cloud_capability  # unused for Shadeform
         try:
-            import os
             api_key_path = os.path.expanduser('~/.shadeform/api_key')
             if not os.path.exists(api_key_path):
-                return False, (
-                    f'Shadeform API key not found. Please save your API key to {api_key_path}'
-                )
+                return False, (f'Shadeform API key not found. '
+                               f'Please save your API key to {api_key_path}')
 
             # Try to read the API key
-            with open(api_key_path, 'r') as f:
+            with open(api_key_path, 'r', encoding='utf-8') as f:
                 api_key = f.read().strip()
 
             if not api_key:
@@ -307,7 +297,7 @@ class Shadeform(clouds.Cloud):
 
             return True, None
 
-        except Exception as e:
+        except (OSError, IOError) as e:
             return False, f'Error checking Shadeform credentials: {str(e)}'
 
     def get_feasible_launchable_resources(
@@ -320,14 +310,95 @@ class Shadeform(clouds.Cloud):
             return resources_utils.FeasibleResources(
                 [], [], 'Spot instances are not supported on Shadeform.')
 
-        # For simplicity, return the resources as-is if valid
-        # In a full implementation, this would validate against available instance types
-        fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
+            # Instance type is already specified, validate it
+            assert resources.is_launchable(), resources
             fuzzy_candidate_list = [resources.instance_type]
+            return resources_utils.FeasibleResources([resources],
+                                                     fuzzy_candidate_list, None)
 
-        return resources_utils.FeasibleResources([resources],
-                                                 fuzzy_candidate_list, None)
+        # Map accelerators to instance types
+        def _make_resources(instance_type_list):
+            resource_list = []
+            for instance_type in instance_type_list:
+                r = resources.copy(
+                    cloud=Shadeform(),
+                    instance_type=instance_type,
+                    accelerators=resources.
+                    accelerators,  # Keep original accelerators
+                    cpus=None,
+                    memory=None,
+                )
+                resource_list.append(r)
+            return resource_list
+
+        # Handle accelerator requests
+        accelerators = resources.accelerators
+        if accelerators is not None:
+            # Get catalog data once outside loop to avoid closure capture
+            # pylint: disable=protected-access
+            catalog_data = shadeform_catalog._get_df()
+
+            # Get the first accelerator type and count
+            for accelerator_name, accelerator_count in accelerators.items():
+                # Get instance types that provide this accelerator
+                func = shadeform_catalog.get_instance_type_for_accelerator
+                instance_types, errors = func(accelerator_name,
+                                              accelerator_count,
+                                              use_spot=resources.use_spot)
+
+                if instance_types:
+                    # Create separate resource objects for each instance type
+                    # This is crucial: each resource will only be considered
+                    # for regions
+                    # where its specific instance type is available
+                    all_resources = []
+                    all_candidate_names = []
+
+                    # Sort by availability and price for better selection order
+                    def get_sort_key(instance_type):
+                        matching_rows = catalog_data[
+                            catalog_data['InstanceType'] == instance_type]
+                        if matching_rows.empty:
+                            return (0, float('inf'))
+                        region_count = len(matching_rows)
+                        avg_price = matching_rows['Price'].mean()
+                        return (region_count, -avg_price)
+
+                    sorted_instance_types = sorted(instance_types,
+                                                   key=get_sort_key,
+                                                   reverse=True)
+
+                    # Create one resource per instance type
+                    for instance_type in sorted_instance_types:
+                        resource = resources.copy(
+                            cloud=Shadeform(),
+                            instance_type=instance_type,
+                            accelerators=resources.accelerators,
+                            cpus=None,
+                            memory=None,
+                        )
+                        all_resources.append(resource)
+                        all_candidate_names.append(instance_type)
+
+                    return resources_utils.FeasibleResources(
+                        all_resources, all_candidate_names, None)
+                else:
+                    error_msg = (f'No instances available for accelerator '
+                                 f'{accelerator_name}')
+                    if errors:
+                        error_msg += f': {"; ".join(errors)}'
+                    return resources_utils.FeasibleResources([], [], error_msg)
+
+            # If accelerator not found in mapping, return error
+            return resources_utils.FeasibleResources(
+                [], [],
+                f'Accelerator {list(accelerators.keys())[0]} not supported.')
+
+        # No accelerators specified, return a default instance type
+        default_instance_type = 'datacrunch_V100'
+        return resources_utils.FeasibleResources(
+            _make_resources([default_instance_type]), [], None)
 
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -343,6 +414,6 @@ class Shadeform(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List[status_lib.ClusterStatus]:
         """Query cluster status."""
-        # This will be implemented in the provisioner
-        raise NotImplementedError(
-            "Status querying will be handled by the provisioner")
+        # For validation purposes, return empty list (no existing clusters)
+        # Actual status querying is handled by the provisioner
+        return []

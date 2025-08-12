@@ -240,7 +240,6 @@ def make_authenticated_request(method: str,
     """
     url, kwargs = _prepare_authenticated_request_params(path, server_url,
                                                         **kwargs)
-
     # Make the request
     if retry:
         return rest.request(method, url, **kwargs)

@@ -42,6 +42,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
 from sky.adaptors import runpod
+from sky.adaptors import shadeform as shadeform_adaptor
 from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -602,41 +603,22 @@ def setup_shadeform_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     Note: This assumes there is a Shadeform Python SDK available.
     If no official SDK exists, this function would need to use direct API calls.
     """
-    from sky.adaptors import shadeform as shadeform_adaptor
 
     _, public_key_path = get_or_generate_keys()
+    ssh_key_id = None
 
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
 
     try:
-        # Use the Shadeform SDK through the adaptor
-        shadeform_client = shadeform_adaptor.shadeform()
+        # Add SSH key to Shadeform using our utility functions
+        ssh_key_id = shadeform_adaptor.add_ssh_key_to_shadeform(public_key)
 
-        # This would depend on the actual Shadeform SDK API
-        # The following is pseudocode that would need to be adapted
-        # to the actual Shadeform Python SDK methods:
-
-        # existing_keys = shadeform_client.list_ssh_keys()
-        # key_exists = any(key.public_key == public_key for key in existing_keys)
-        #
-        # if not key_exists:
-        #     import socket
-        #     hostname = socket.gethostname()
-        #     key_name = f'skypilot-{hostname}-{common_utils.get_user_hash()[:8]}'
-        #     shadeform_client.add_ssh_key(name=key_name, public_key=public_key)
-        #     logger.info(f'Added SSH key to Shadeform: {key_name}')
-
-        # For now, since we don't have the actual SDK, we'll just configure SSH
-        logger.info(
-            'Shadeform authentication setup would use official SDK here')
-
-    except ImportError:
-        # If no Shadeform SDK is available, we could fall back to direct API calls
-        # or raise an error asking user to install the SDK
+    except ImportError as e:
+        # If required dependencies are missing
         logger.warning(
-            'Shadeform SDK not available. You may need to manually configure '
-            'SSH keys in your Shadeform account.')
+            f'Failed to add Shadeform SSH key due to missing dependencies: '
+            f'{e}. Manually configure SSH keys in your Shadeform account.')
 
     except Exception as e:
         logger.warning(f'Failed to set up Shadeform authentication: {e}')
@@ -645,6 +627,10 @@ def setup_shadeform_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             f'Please ensure your Shadeform credentials are configured: {e}'
         ) from e
 
+    if ssh_key_id is None:
+        raise Exception('Failed to add SSH key to Shadeform')
+
     # Configure SSH info in the config
     config['auth']['ssh_public_key'] = public_key_path
+    config['auth']['ssh_key_id'] = ssh_key_id
     return configure_ssh_info(config)

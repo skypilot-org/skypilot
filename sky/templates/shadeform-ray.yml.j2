@@ -1,126 +1,68 @@
-# Configuration for Shadeform cluster provisioning
 cluster_name: {{cluster_name_on_cloud}}
 
-# The minimum number of workers nodes to launch in addition to the head node.
-# This number should be >= 0.
-min_workers: {{num_nodes - 1}}
+# The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
-
-# The autoscaler will scale up the cluster faster with higher upscaling speed.
-# E.g., if the task requires adding more nodes then autoscaler will gradually
-# scale up the cluster in chunks of upscaling_speed*currently_running_nodes.
-# This number should be > 0.
-upscaling_speed: 1.0
-
+upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
-# Cloud-specific configuration
 provider:
-    type: external
-    module: sky.provision.shadeform
+  type: external
+  module: sky.provision.shadeform
+  region: "{{region}}"
+  disable_launch_config_check: true
 
-# How Ray will authenticate with newly launched nodes.
 auth:
-    ssh_user: {{ssh_user}}
-{% if ssh_private_key is not none %}
-    ssh_private_key: {{ssh_private_key}}
-{% endif %}
-
-# Provider-specific config for the head node, e.g. instance type.
-head_node_type: ray.head.default
-
-# Provider-specific config for worker nodes, e.g. instance type.
-worker_node_type: ray.worker.default
+  ssh_user: shadeform
+  ssh_private_key: {{ssh_private_key}}
+  ssh_key_id: {{ssh_key_id}}
 
 available_node_types:
-    ray.head.default:
-        resources: {}
-        node_config:
-            # Shadeform-specific configuration
-            instance_type: {{instance_type}}
-            region: {{region}}
-            cloud: {{cloud}}
-            shade_cloud: true  # Use Shade Cloud for simplicity
-            # Instance name will be set by the provisioner
-            name: "{{cluster_name_on_cloud}}-head"
-            # Default to Ubuntu 22.04 with CUDA
-            os: "ubuntu22.04_cuda12.2_shade_os"
+  ray_head_default:
+    resources: {}
+    node_config:
+      InstanceType: {{instance_type}}
+      PublicKey: |-
+        skypilot:ssh_public_key_content
 
-    ray.worker.default:
-        resources: {}
-        node_config:
-            # Shadeform-specific configuration
-            instance_type: {{instance_type}}
-            region: {{region}}
-            cloud: {{cloud}}
-            shade_cloud: true  # Use Shade Cloud for simplicity
-            # Instance name will be set by the provisioner
-            name: "{{cluster_name_on_cloud}}-worker"
-            # Default to Ubuntu 22.04 with CUDA
-            os: "ubuntu22.04_cuda12.2_shade_os"
+head_node_type: ray_head_default
 
-# List of shell commands to run to set up nodes.
-# NOTE: these run before any setup_commands in a sky task.
-setup_commands:
-    # Install SkyPilot dependencies
-    - pip3 install packaging
-    - pip3 install --upgrade awscli
-    # Create local directories that should exist
-    - mkdir -p ~/sky_workdir
-    - mkdir -p ~/.sky
-    # Mount credentials if they exist
-{% for src, dst in credentials_mounts.items() %}
-    - mkdir -p {{(dst | dirname)}}
-    # Only mount if source exists
-    - '[ -f {{src}} ] && cp {{src}} {{dst}} || true'
-{% endfor %}
-
-# Custom commands that will be run on the head node after common setup.
-head_setup_commands:
-    # Install Ray if not already installed
-    - which ray >/dev/null 2>&1 || pip3 install -U ray[default]==2.9.3
-    # Start Ray head node
-    - ray stop || true
-    - ulimit -c unlimited && ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --disable-usage-stats
-
-# Custom commands that will be run on worker nodes after common setup.
-worker_setup_commands:
-    # Install Ray if not already installed
-    - which ray >/dev/null 2>&1 || pip3 install -U ray[default]==2.9.3
-
-# Command to start ray on the head node. You don't need to change this.
-# Note webui-host is set to 0.0.0.0 so that SkyPilot can port-forward the
-# Ray dashboard to the user's local machine.
-head_start_ray_commands:
-    - ray stop || true
-    - ulimit -c unlimited && ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --disable-usage-stats --dashboard-host 0.0.0.0
-
-# Command to start ray on worker nodes. You don't need to change this.
-worker_start_ray_commands:
-    - ray stop || true
-    - ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --disable-usage-stats
-
-# Files and directories to copy/mount from the local machine.
+# Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
-{% for src, dst in file_mounts.items() %}
-  "{{dst}}": "{{src}}",
-{% endfor %}
-{% if credentials_mounts is defined %}
-{% for src, dst in credentials_mounts.items() %}
-  "{{dst}}": "{{src}}",
-{% endfor %}
-{% endif %}
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{%- endfor %}
 }
 
 rsync_exclude: []
 
 initialization_commands: []
 
-# Idle timeout. This is the maximum time in seconds that a worker node
-# can be idle before it gets removed from the cluster.
-max_workers_idle_timeout: 300
+# List of shell commands to run to set up nodes.
+# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
+# connection, which is expensive. Try your best to co-locate commands into fewer
+# items!
+#
+# Increment the following for catching performance bugs easier:
+#   current num items (num SSH connections): 1
+setup_commands:
+  # Create ~/.ssh/config file in case the file does not exist in the image.
+  # Line 'rm ..': there is another installation of pip.
+  # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
+  # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
+  # Line 'mkdir -p ..': disable host key check
+  # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  - {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
+    mkdir -p ~/.ssh; touch ~/.ssh/config; which patch > /dev/null || sudo apt install -y patch;
+    {{ conda_installation_commands }}
+    {{ ray_skypilot_installation_commands }}
+    sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
+    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
+    {{ ssh_max_sessions_config }}
 
-# SkyPilot metadata
-cluster_synced_files: []
-
-docker: {}
+# Command to start ray clusters are now placed in `sky.provision.instance_setup`.
+# We do not need to list it here anymore.

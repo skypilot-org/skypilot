@@ -150,7 +150,7 @@ if os.path.exists(readme_filepath):
 
 atexit.register(revert_commit_hash)
 replace_commit_hash()
-
+print("HERE")
 setuptools.setup(
     # NOTE: this affects the package.whl wheel name. When changing this (if
     # ever), you must grep for '.whl' and change all corresponding wheel paths
