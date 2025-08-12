@@ -527,6 +527,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 to_start_count,
                 associate_public_ip_address=(
                     not config.provider_config['use_internal_ips']))
+
+            # Ensure the default security group is created.
+            if _get_sg_from_name(ec2,
+                                 aws_cloud.DEFAULT_SECURITY_GROUP_NAME) is None:
+                ec2.create_security_group(
+                    GroupName=aws_cloud.DEFAULT_SECURITY_GROUP_NAME,
+                    Description='Default security group for SkyPilot clusters')
+
             created_instances.extend(created_remaining_instances)
         created_instances.sort(key=lambda x: x.id)
 
@@ -704,7 +712,15 @@ def terminate_instances(
                 thread_pool.map(modify_instance_sg, instances)
                 thread_pool.close()
                 thread_pool.join()
-    instances.terminate()
+
+            instances.terminate()
+        else:
+            # The default SG is not created, we must block on instance
+            # termination.
+            instances.terminate()
+            for instance in instances:
+                instance.wait_until_terminated()
+
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
     #  trigger the termination process (via http call) and then return.
