@@ -1,4 +1,4 @@
-name: protobuf-check
+name: compile-protos-check
 
 on:
   # Trigger the workflow on push or pull request,
@@ -45,7 +45,7 @@ jobs:
     - name: Check for diff
       run: |
         if ! git diff --quiet sky/schemas/generated/; then
-          echo "Protobuf generated files are out of date!"
+          echo "Protobuf generated files are out of date."
           echo "Please regenerate them by running:"
           echo "python -m grpc_tools.protoc \\"
           echo "  --proto_path=sky/schemas/generated=sky/schemas/proto \\"
