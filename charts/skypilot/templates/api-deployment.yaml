@@ -79,7 +79,7 @@ spec:
         - name: SKYPILOT_ENABLE_SERVICE_ACCOUNTS
           value: "true"
         {{- end }}
-        {{- if and (include "skypilot.ingressBasicAuthEnabled" . | trim | ne "true") .Values.auth.disableAnonymousAccess }}
+        {{- if and (include "skypilot.ingressBasicAuthEnabled" . | trim | ne "true") (not .Values.auth.anonymous.enabled) }}
         - name: SKYPILOT_DISABLE_ANONYMOUS_ACCESS
           value: "true"
         {{- end }}

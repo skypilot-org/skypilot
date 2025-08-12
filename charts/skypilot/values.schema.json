@@ -132,8 +132,13 @@
                 "null"
             ],
             "properties": {
-                "disableAnonymousAccess": {
-                    "type": "boolean"
+                "anonymous": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
                 },
                 "oauth": {
                     "type": [

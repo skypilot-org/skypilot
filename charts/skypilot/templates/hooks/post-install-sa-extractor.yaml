@@ -86,13 +86,13 @@ spec:
           echo "Extracting service account token from pod..."
           
           # Check if file exists
-          if ! kubectl exec "$POD_NAME" -n "$NAMESPACE" -- test -f /root/.sky/initial_system_sa_token; then
-            echo "Token file /root/.sky/initial_system_sa_token not found in pod"
+          if ! kubectl exec "$POD_NAME" -n "$NAMESPACE" -- test -f /root/.sky/api_server/initial_system_sa_token; then
+            echo "Token file /root/.sky/api_server/initial_system_sa_token not found in pod"
             exit 1
           fi
           
           # Extract token content
-          TOKEN_CONTENT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- cat /root/.sky/initial_system_sa_token)
+          TOKEN_CONTENT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- cat /root/.sky/api_server/initial_system_sa_token)
           
           if [ -z "$TOKEN_CONTENT" ]; then
             echo "Token file is empty"

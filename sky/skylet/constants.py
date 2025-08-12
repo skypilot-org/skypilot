@@ -451,7 +451,7 @@ ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
 SKYPILOT_SYSTEM_USER_ID = 'skypilot-system'
 SKYPILOT_SYSTEM_SA_ID = 'sa-skypilot-system'
 SKYPILOT_SYSTEM_SA_TOKEN_DURATION_DAYS = 30
-SKYPILOT_SYSTEM_SA_TOKEN_PATH = '~/.sky/initial_system_sa_token'
+SKYPILOT_SYSTEM_SA_TOKEN_PATH = '~/.sky/api_server/initial_system_sa_token'
 
 # The directory to store the logging configuration.
 LOGGING_CONFIG_DIR = '~/.sky/logging'
