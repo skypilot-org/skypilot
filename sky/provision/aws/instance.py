@@ -10,7 +10,7 @@ from multiprocessing import pool
 import re
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from sky import sky_logging
 from sky.adaptors import aws
@@ -585,11 +585,13 @@ def _filter_instances(ec2: 'mypy_boto3_ec2.ServiceResource',
 # stop() and terminate() for example already implicitly assume non-terminated.
 @common_utils.retry
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
@@ -608,12 +610,13 @@ def query_instances(
         'shutting-down': None,
         'terminated': None,
     }
-    statuses = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst in instances:
         status = status_map[inst.state['Name']]
         if non_terminated_only and status is None:
             continue
-        statuses[inst.id] = status
+        statuses[inst.id] = (status, None)
     return statuses
 
 
