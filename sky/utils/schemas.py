@@ -1536,7 +1536,7 @@ def get_config_schema():
                 'type': 'integer',
             },
             'cluster_event_retention_hours': {
-                'type': 'integer',
+                'type': 'number',
             },
         }
     }

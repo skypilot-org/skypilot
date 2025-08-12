@@ -52,8 +52,7 @@ _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
-# TODO (lloyd-brown): This is a temporary value for testing.
-DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24
+DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24.0
 
 Base = declarative.declarative_base()
 
@@ -734,13 +733,15 @@ def get_last_cluster_event(cluster_hash: str,
         return None
     return row.reason
 
+
 def cleanup_cluster_events_with_retention(retention_hours: float) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(cluster_event_table).filter(
-            cluster_event_table.c.transitioned_at <
-            time.time() - retention_hours * 3600).delete()
+            cluster_event_table.c.transitioned_at < time.time() -
+            retention_hours * 3600).delete()
         session.commit()
+
 
 async def cluster_event_retention_daemon():
     """Garbage collect cluster events periodically."""
@@ -760,7 +761,9 @@ async def cluster_event_retention_daemon():
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error running cluster event retention daemon: {e}')
 
-        await asyncio.sleep(max(retention_hours, 3600))
+        # Run daemon at most once every hour to avoid too frequent cleanup.
+        await asyncio.sleep(max(retention_hours * 3600, 3600))
+
 
 def get_cluster_events(cluster_name: Optional[str], cluster_hash: Optional[str],
                        event_type: ClusterEventType) -> List[str]:

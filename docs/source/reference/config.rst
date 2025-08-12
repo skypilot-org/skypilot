@@ -226,7 +226,7 @@ Retention period for finished requests in hours (optional). Set to a negative va
 
 Requests GC will remove request entries in `sky api status`, i.e., the logs and status of the requests. All the launched resources (clusters/jobs) will still be correctly running.
 
-Default: ``24`` (1 day).
+Default: ``24.0`` (1 day).
 
 Example:
 

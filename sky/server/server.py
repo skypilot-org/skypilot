@@ -1816,7 +1816,8 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(requests_lib.requests_gc_daemon()))
         global_tasks.append(
-            background.create_task(global_user_state.cluster_event_retention_daemon()))
+            background.create_task(
+                global_user_state.cluster_event_retention_daemon()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)
