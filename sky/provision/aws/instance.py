@@ -684,19 +684,27 @@ def terminate_instances(
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
-    instances_list = list(instances)
+    if (sg_name != aws_cloud.DEFAULT_SECURITY_GROUP_NAME and
+            managed_by_skypilot):
+        # If the SG is not default and managed by SkyPilot then we have
+        # created a new SG for this cluster. Blocking on instance termination
+        # is too slow. So we modify the instances to use the default SG and then
+        # terminate them asynchronously.
+        default_sg = _get_sg_from_name(ec2,
+                                       aws_cloud.DEFAULT_SECURITY_GROUP_NAME)
+        if default_sg is not None:
+            # Make this multithreaded: modify all instances' SGs in parallel.
+            def modify_instance_sg(instance):
+                instance.modify_attribute(Groups=[default_sg.id])
+                logger.debug(
+                    f'Instance {instance.id} modified to use default SG:'
+                    f'{default_sg.id} for quick deletion.')
+
+            with pool.ThreadPool() as thread_pool:
+                thread_pool.map(modify_instance_sg, instances)
+                thread_pool.close()
+                thread_pool.join()
     instances.terminate()
-    if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
-            not managed_by_skypilot):
-        # Using default AWS SG or user specified security group. We don't need
-        # to wait for the termination of the instances, as we do not need to
-        # delete the SG.
-        return
-    # If ports are specified, we need to delete the newly created Security
-    # Group. Here we wait for all instances to be terminated, since the
-    # Security Group dependent on them.
-    for instance in instances_list:
-        instance.wait_until_terminated()
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
     #  trigger the termination process (via http call) and then return.
