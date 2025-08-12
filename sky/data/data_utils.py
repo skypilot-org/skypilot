@@ -734,31 +734,19 @@ class Rclone:
                 nebius_session = nebius.session()
                 nebius_credentials = nebius.get_nebius_credentials(
                     nebius_session)
-<<<<<<< HEAD
-=======
                 # Get endpoint URL from the client
                 client = nebius.client('s3')
                 endpoint_url = client.meta.endpoint_url
->>>>>>> master
                 access_key_id = nebius_credentials.access_key
                 secret_access_key = nebius_credentials.secret_key
                 config = textwrap.dedent(f"""\
                     [{rclone_profile_name}]
                     type = s3
-<<<<<<< HEAD
-                    provider = Nebius
-                    access_key_id = {access_key_id}
-                    secret_access_key = {secret_access_key}
-                    region = eu-north1
-                    acl = private
-                    endpoint = https://storage.eu-north1.nebius.cloud:443
-=======
                     provider = Other
                     access_key_id = {access_key_id}
                     secret_access_key = {secret_access_key}
                     endpoint = {endpoint_url}
                     acl = private
->>>>>>> master
                     """)
             else:
                 with ux_utils.print_exception_no_traceback():
