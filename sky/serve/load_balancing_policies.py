@@ -201,6 +201,12 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy,
 
         # Get target QPS for this accelerator type with flexible matching
         target_qps = self._get_target_qps_for_accelerator(accelerator_type)
+        if target_qps <= 0:
+            logger.warning(
+                'Non-positive target QPS (%s) for accelerator type %s; '
+                'using default value 1.0 to avoid division by zero.',
+                target_qps, accelerator_type)
+            target_qps = 1.0
 
         # Load is normalized by target QPS
         normalized_load = current_load / target_qps

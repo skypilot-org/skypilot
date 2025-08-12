@@ -670,7 +670,7 @@ def get_service_schema():
                         'anyOf': [
                             {
                                 'type': 'number',
-                                'minimum': 0,
+                                'exclusiveMinimum': 0,
                             },
                             {
                                 'type': 'object',
@@ -679,7 +679,7 @@ def get_service_schema():
                                     # "H100:1", "A100:1", "H100", "A100"
                                     '^[A-Z0-9]+(?::[0-9]+)?$': {
                                         'type': 'number',
-                                        'minimum': 0,
+                                        'exclusiveMinimum': 0,
                                     }
                                 },
                                 'additionalProperties': False,
