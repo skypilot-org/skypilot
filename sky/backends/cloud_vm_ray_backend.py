@@ -1368,16 +1368,7 @@ class RetryingVmProvisioner(object):
         if not dryrun:
             os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
             os.system(f'touch {log_path}')
-        # Record provision log path on the current API request (server-side)
-        try:
-            if annotations.is_on_api_server:
-                req_id = common_utils.get_current_request_id()
-                with requests_lib.update_request(req_id) as req:
-                    if req is not None:
-                        req.provision_log_path = log_abs_path
-        except Exception:  # pylint: disable=broad-except
-            # Best-effort: failure to persist should not affect launching
-            pass
+
         rich_utils.force_update_status(
             ux_utils.spinner_message('Launching',
                                      log_path,
@@ -1551,6 +1542,7 @@ class RetryingVmProvisioner(object):
                 requested_resources=requested_resources,
                 ready=False,
                 is_managed=self._is_managed,
+                provision_log_path=log_abs_path,
             )
 
             # Add cluster event for actual provisioning start.
@@ -2196,14 +2188,6 @@ class RetryingVmProvisioner(object):
                 'Trying other potential resources.')
             logger.warning(f'\n{retry_message}')
             log_path = os.path.join(self.log_dir, 'provision.log')
-            try:
-                if annotations.is_on_api_server:
-                    req_id = common_utils.get_current_request_id()
-                    with requests_lib.update_request(req_id) as req:
-                        if req is not None:
-                            req.provision_log_path = os.path.abspath(log_path)
-            except Exception:  # pylint: disable=broad-except
-                pass
             rich_utils.force_update_status(
                 ux_utils.spinner_message('Looking for resources', log_path))
             # Set to None so that sky.optimize() will assign a new one

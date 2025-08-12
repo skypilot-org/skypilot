@@ -102,6 +102,7 @@ cluster_table = sqlalchemy.Table(
                       sqlalchemy.Text,
                       server_default=None),
     sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
+    sqlalchemy.Column('provision_log_path', sqlalchemy.Text, server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -161,6 +162,7 @@ cluster_history_table = sqlalchemy.Table(
                       sqlalchemy.Text,
                       server_default=None),
     sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('provision_log_path', sqlalchemy.Text, server_default=None),
 )
 
 
@@ -458,7 +460,8 @@ def add_or_update_cluster(cluster_name: str,
                           is_launch: bool = True,
                           config_hash: Optional[str] = None,
                           task_config: Optional[Dict[str, Any]] = None,
-                          is_managed: bool = False):
+                          is_managed: bool = False,
+                          provision_log_path: Optional[str] = None):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -473,6 +476,7 @@ def add_or_update_cluster(cluster_name: str,
         task_config: The config of the task being launched.
         is_managed: Whether the cluster is launched by the
             controller.
+        provision_log_path: Absolute path to provision.log, if available.
     """
     assert _SQLALCHEMY_ENGINE is not None
     # FIXME: launched_at will be changed when `sky launch -c` is called.
@@ -555,6 +559,10 @@ def add_or_update_cluster(cluster_name: str,
                                       if task_config else None,
                 'last_creation_command': last_use,
             })
+        if provision_log_path is not None:
+            conditional_values.update({
+                'provision_log_path': provision_log_path,
+            })
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
@@ -618,6 +626,7 @@ def add_or_update_cluster(cluster_name: str,
             usage_intervals=pickle.dumps(usage_intervals),
             user_hash=user_hash,
             workspace=history_workspace,
+            provision_log_path=provision_log_path,
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -633,6 +642,7 @@ def add_or_update_cluster(cluster_name: str,
                     pickle.dumps(usage_intervals),
                 cluster_history_table.c.user_hash: history_hash,
                 cluster_history_table.c.workspace: history_workspace,
+                cluster_history_table.c.provision_log_path: provision_log_path,
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -914,6 +924,57 @@ def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
         return None
     return json.loads(row.metadata)
 
+
+@_init_db
+def get_cluster_provision_log_path(cluster_name: str) -> Optional[str]:
+    """Returns provision_log_path from clusters table, if recorded."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+    if row is None:
+        return None
+    return getattr(row, 'provision_log_path', None)
+
+
+@_init_db
+def get_cluster_history_provision_log_path(
+        cluster_name: str) -> Optional[str]:
+    """Returns provision_log_path from cluster_history for this name.
+
+    If the cluster currently exists, we use its hash. Otherwise, we look up
+    historical rows by name and choose the most recent one based on
+    usage_intervals.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Try current cluster first (fast path)
+        cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+        if cluster_hash is not None:
+            row = session.query(cluster_history_table).filter_by(
+                cluster_hash=cluster_hash).first()
+            if row is not None:
+                return getattr(row, 'provision_log_path', None)
+
+        # Fallback: search history by name and pick the latest by usage_intervals
+        rows = session.query(cluster_history_table).filter_by(
+            name=cluster_name).all()
+        if not rows:
+            return None
+
+        def latest_timestamp(usages_bin) -> int:
+            try:
+                intervals = pickle.loads(usages_bin)
+                # intervals: List[Tuple[int, Optional[int]]]
+                if not intervals:
+                    return -1
+                _, end = intervals[-1]
+                return end if end is not None else int(time.time())
+            except Exception:  # pylint: disable=broad-except
+                return -1
+
+        latest_row = max(rows,
+                         key=lambda r: latest_timestamp(r.usage_intervals))
+        return getattr(latest_row, 'provision_log_path', None)
 
 @_init_db
 def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:

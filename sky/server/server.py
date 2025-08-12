@@ -1289,30 +1289,18 @@ async def provision_logs(cluster_body: payloads.ClusterNameBody,
                          follow: bool = True,
                          tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
-    # Only consider requests for this cluster and launch request names.
-    reqs = requests_lib.get_request_tasks(
-        cluster_names=[cluster_body.cluster_name],
-        include_request_names=['sky.launch'])
-    if not reqs:
-        raise fastapi.HTTPException(
-            status_code=404,
-            detail=f'No launch commands found for cluster '
-            f'{cluster_body.cluster_name!r}.')
-
-    # Grab the first request that has a recorded provision log path.
-    log_path_str = None
-    for r in reqs:
-        log_path = getattr(r, 'provision_log_path', None)
-        if log_path:
-            log_path_str = log_path
-            break
-
+    # Prefer clusters table first, then cluster_history as fallback.
+    log_path_str = global_user_state.get_cluster_provision_log_path(
+        cluster_body.cluster_name)
+    if not log_path_str:
+        log_path_str = global_user_state.get_cluster_history_provision_log_path(
+            cluster_body.cluster_name)
     if not log_path_str:
         raise fastapi.HTTPException(
             status_code=404,
             detail=(
-                'No launch requests for this cluster have a recorded provision '
-                'log path. Please relaunch with a newer server version.'))
+                'Provision log path is not recorded for this cluster. '
+                'Please relaunch to generate provisioning logs.'))
 
     log_path = pathlib.Path(log_path_str).expanduser().resolve()
     if not log_path.exists():
