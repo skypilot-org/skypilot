@@ -1,10 +1,12 @@
 """Kubernetes instance provisioning."""
 import copy
 import json
+import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -24,6 +26,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils.db import db_utils
 
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
@@ -1270,7 +1273,116 @@ def _get_pod_termination_reason(pod: Any) -> str:
     return ' | '.join(reasons)
 
 
+def _get_pod_missing_reason(context: Optional[str], namespace: str,
+                            cluster_name: str, pod_name: str) -> Optional[str]:
+    logger.debug(f'Analyzing events for pod {pod_name}')
+    pod_field_selector = (
+        f'involvedObject.kind=Pod,involvedObject.name={pod_name}')
+    pod_events = kubernetes.core_api(context).list_namespaced_event(
+        namespace,
+        field_selector=pod_field_selector,
+        _request_timeout=kubernetes.API_TIMEOUT).items
+    pod_events = sorted(
+        pod_events,
+        key=lambda event: event.metadata.creation_timestamp,
+        # latest event appears first
+        reverse=True)
+    last_scheduled_node = None
+    insert_new_pod_event = True
+    new_event_inserted = False
+    for event in pod_events:
+        if event.reason == 'Scheduled':
+            pattern = r'Successfully assigned (\S+) to (\S+)'
+            match = re.search(pattern, event.message)
+            if match:
+                scheduled_node = match.group(2)
+                last_scheduled_node = scheduled_node
+        if insert_new_pod_event:
+            # Try inserting the latest events first. If the event is a
+            # duplicate, it means the event (and any previous events) have
+            # already been inserted - so do not insert further events.
+            try:
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    None, f'[kubernetes pod {pod_name}] '
+                    f'{event.reason} {event.message}',
+                    global_user_state.ClusterEventType.DEBUG,
+                    transitioned_at=int(
+                        event.metadata.creation_timestamp.timestamp()),
+                    expose_duplicate_error=True)
+            except db_utils.UniqueConstraintViolationError:
+                insert_new_pod_event = False
+            else:
+                new_event_inserted = True
+
+    if last_scheduled_node is not None:
+        node_field_selector = ('involvedObject.kind=Node,'
+                               f'involvedObject.name={last_scheduled_node}')
+        node_events = kubernetes.core_api(context).list_namespaced_event(
+            namespace,
+            field_selector=node_field_selector,
+            _request_timeout=kubernetes.API_TIMEOUT).items
+        node_events = sorted(
+            node_events,
+            key=lambda event: event.metadata.creation_timestamp,
+            # latest event appears first
+            reverse=True)
+        insert_new_node_event = True
+        for event in node_events:
+            if insert_new_node_event:
+                # Try inserting the latest events first. If the event is a
+                # duplicate, it means the event (and any previous events) have
+                # already been inserted - so do not insert further events.
+                try:
+                    global_user_state.add_cluster_event(
+                        cluster_name,
+                        None, f'[kubernetes node {last_scheduled_node}] '
+                        f'{event.reason} {event.message}',
+                        global_user_state.ClusterEventType.DEBUG,
+                        transitioned_at=int(
+                            event.metadata.creation_timestamp.timestamp()),
+                        expose_duplicate_error=True)
+                except db_utils.UniqueConstraintViolationError:
+                    insert_new_node_event = False
+                else:
+                    new_event_inserted = True
+
+    if not new_event_inserted:
+        # If new event is not inserted, there is no useful information to
+        # return. Return None.
+        return None
+
+    # Analyze the events for failure
+    failure_reason = None
+    failure_decisiveness = 0
+
+    def _record_failure_reason(reason: str, decisiveness: int):
+        nonlocal failure_reason, failure_decisiveness
+        if decisiveness > failure_decisiveness:
+            failure_reason = reason
+            failure_decisiveness = decisiveness
+
+    cluster_events = global_user_state.get_cluster_events(
+        cluster_name, None, global_user_state.ClusterEventType.DEBUG)
+    for event in cluster_events:
+        if event.startswith('[kubernetes pod'):
+            event = event.split(']')[1].strip()
+        elif event.startswith('[kubernetes node'):
+            event = event.split(']')[1].strip()
+
+        if event.startswith('NodeNotReady '):
+            _record_failure_reason(event[len('NodeNotReady '):], 1)
+        elif event.startswith('TaintManagerEviction '):
+            # usually the event message for TaintManagerEviction is not useful
+            # so we record a more generic message.
+            _record_failure_reason('pod was evicted by taint manager', 2)
+        elif event.startswith('DeletingNode '):
+            _record_failure_reason(event[len('DeletingNode '):], 3)
+    return failure_reason
+
+
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True
@@ -1334,6 +1446,27 @@ def query_instances(
         pod_name = pod.metadata.name
         reason = f'{pod_name}: {reason}' if reason is not None else None
         cluster_status[pod_name] = (pod_status, reason)
+
+    # Find the list of pod names that should be there
+    # from k8s services. Filter duplicates as -ssh service
+    # creates a duplicate entry.
+    target_pod_names = list(
+        set([
+            service['spec']['selector']['component']
+            for service in provider_config.get('services', [])
+        ]))
+
+    for target_pod_name in target_pod_names:
+        if target_pod_name not in cluster_status:
+            # If the pod is not in the cluster_status, it means it's not
+            # running.
+            # Analyze what happened to the pod based on events.
+            reason = _get_pod_missing_reason(context, namespace, cluster_name,
+                                             target_pod_name)
+            reason = (f'{target_pod_name}: {reason}'
+                      if reason is not None else None)
+            cluster_status[target_pod_name] = (None, reason)
+
     return cluster_status
 
 

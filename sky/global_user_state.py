@@ -645,13 +645,32 @@ def add_cluster_event(cluster_name: str,
                       new_status: Optional[status_lib.ClusterStatus],
                       reason: str,
                       event_type: ClusterEventType,
-                      nop_if_duplicate: bool = False) -> None:
+                      nop_if_duplicate: bool = False,
+                      duplicate_regex: Optional[str] = None,
+                      expose_duplicate_error: bool = False,
+                      transitioned_at: Optional[int] = None) -> None:
+    """Add a cluster event.
+
+    Args:
+        cluster_name: Name of the cluster.
+        new_status: New status of the cluster.
+        reason: Reason for the event.
+        event_type: Type of the event.
+        nop_if_duplicate: If True, do not add the event if it is a duplicate.
+        duplicate_regex: If provided, do not add the event if it matches the
+            regex. Only used if nop_if_duplicate is True.
+        expose_duplicate_error: If True, raise an error if the event is a
+            duplicate. Only used if nop_if_duplicate is True.
+        transitioned_at: If provided, use this timestamp for the event.
+    """
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     if cluster_hash is None:
         logger.debug(f'Hash for cluster {cluster_name} not found. '
                      'Skipping event.')
         return
+    if transitioned_at is None:
+        transitioned_at = int(time.time())
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
@@ -669,7 +688,10 @@ def add_cluster_event(cluster_name: str,
         if nop_if_duplicate:
             last_event = get_last_cluster_event(cluster_hash,
                                                 event_type=event_type)
-            if last_event == reason:
+            if duplicate_regex is not None and last_event is not None:
+                if re.search(duplicate_regex, last_event):
+                    return
+            elif last_event == reason:
                 return
         try:
             session.execute(
@@ -679,15 +701,20 @@ def add_cluster_event(cluster_name: str,
                     starting_status=last_status,
                     ending_status=new_status.value if new_status else None,
                     reason=reason,
-                    transitioned_at=int(time.time()),
+                    transitioned_at=transitioned_at,
                     type=event_type.value,
                 ))
             session.commit()
         except sqlalchemy.exc.IntegrityError as e:
             if 'UNIQUE constraint failed' in str(e):
                 # This can happen if the cluster event is added twice.
-                # We can ignore this error.
-                pass
+                # We can ignore this error unless the caller requests
+                # to expose the error.
+                if expose_duplicate_error:
+                    raise db_utils.UniqueConstraintViolationError(
+                        value=reason, message=str(e))
+                else:
+                    pass
             else:
                 raise e
 
@@ -702,6 +729,35 @@ def get_last_cluster_event(cluster_hash: str,
     if row is None:
         return None
     return row.reason
+
+
+def get_cluster_events(cluster_name: Optional[str], cluster_hash: Optional[str],
+                       event_type: ClusterEventType) -> List[str]:
+    """Returns the cluster events for the cluster.
+
+    Args:
+        cluster_name: Name of the cluster. Cannot be specified if cluster_hash
+            is specified.
+        cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
+            is specified.
+        event_type: Type of the event.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+
+    if cluster_name is not None and cluster_hash is not None:
+        raise ValueError('Cannot specify both cluster_name and cluster_hash')
+    if cluster_name is None and cluster_hash is None:
+        raise ValueError('Must specify either cluster_name or cluster_hash')
+    if cluster_name is not None:
+        cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+        if cluster_hash is None:
+            raise ValueError(f'Hash for cluster {cluster_name} not found.')
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(cluster_event_table).filter_by(
+            cluster_hash=cluster_hash, type=event_type.value).order_by(
+                cluster_event_table.c.transitioned_at.asc()).all()
+    return [row.reason for row in rows]
 
 
 def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
