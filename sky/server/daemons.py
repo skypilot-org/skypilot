@@ -1,5 +1,4 @@
 """Internal server daemons that run in the background."""
-from asyncio import locks
 import dataclasses
 import os
 import time
@@ -12,6 +11,7 @@ from sky.server import state
 from sky.utils import common
 from sky.utils import env_options
 from sky.utils import ux_utils
+from sky.utils import locks
 
 logger = sky_logging.init_logger(__name__)
 

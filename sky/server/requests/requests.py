@@ -419,8 +419,8 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # is not critical and is likely to be enabled by other processes.
 
     migration_utils.safe_alembic_upgrade(
-        engine, migration_utils.GLOBAL_USER_STATE_DB_NAME,
-        migration_utils.GLOBAL_USER_STATE_VERSION)
+        engine, migration_utils.REQUESTS_DB_NAME,
+        migration_utils.REQUESTS_VERSION)
 
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:

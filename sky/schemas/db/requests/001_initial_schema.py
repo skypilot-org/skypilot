@@ -36,7 +36,7 @@ def upgrade():
             requests.REQUEST_TABLE,
             requests.COL_SHOULD_RETRY,
             sa.Boolean(),
-            server_default=False)
+            server_default='FALSE')
         db_utils.add_column_to_table_alembic(
             requests.REQUEST_TABLE,
             requests.COL_FINISHED_AT,
