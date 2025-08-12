@@ -279,6 +279,35 @@ class PermissionService:
                      f'workspace={workspace_name}, result={result}')
         return result
 
+    def check_service_account_token_permission(self, user_id: str,
+                                               token_owner_id: str,
+                                               action: str) -> bool:
+        """Check service account token permission.
+
+        This method checks if a user has permission to perform an action on
+        a service account token owned by another user.
+
+        Args:
+            user_id: The ID of the user requesting the action
+            token_owner_id: The ID of the user who owns the token
+            action: The action being performed (e.g., 'delete', 'view')
+
+        Returns:
+            True if the user has permission, False otherwise
+        """
+        del action
+        # Users can always manage their own tokens
+        if user_id == token_owner_id:
+            return True
+
+        # Check if user has admin role (admins can manage any token)
+        user_roles = self.get_user_roles(user_id)
+        if rbac.RoleName.ADMIN.value in user_roles:
+            return True
+
+        # Regular users cannot manage tokens owned by others
+        return False
+
     def add_workspace_policy(self, workspace_name: str,
                              users: List[str]) -> None:
         """Add workspace policy.

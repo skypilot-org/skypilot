@@ -656,16 +656,18 @@ async def delete_service_account_token(
     if token_info is None:
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
+    # Check permissions using Casbin policy system
+    if not permission.permission_service.check_service_account_token_permission(
+            auth_user.id, token_info['creator_user_hash'], 'delete'):
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail='You can only delete your own tokens. Only admins can '
+            'delete tokens owned by other users.')
+
     # Try to delete the service account user first to make sure there is no
     # active resources owned by the service account.
     service_account_user_id = token_info['service_account_user_id']
     _delete_user(service_account_user_id)
-
-    # Delete the token
-    deleted = global_user_state.delete_service_account_token(
-        token_body.token_id)
-    if not deleted:
-        raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
     return {'message': 'Token deleted successfully'}
 
@@ -684,6 +686,15 @@ async def get_service_account_role(
     token_info = global_user_state.get_service_account_token(role_body.token_id)
     if token_info is None:
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
+
+    # Check permissions - only creator or admin can view roles
+    if not permission.permission_service.check_service_account_token_permission(
+            auth_user.id, token_info['creator_user_hash'], 'view'):
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail='You can only view roles for your own service accounts. '
+            'Only admins can view roles for service accounts owned by other '
+            'users.')
 
     # Get service account roles
     service_account_user_id = token_info['service_account_user_id']
@@ -712,6 +723,15 @@ async def update_service_account_role(
     token_info = global_user_state.get_service_account_token(role_body.token_id)
     if token_info is None:
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
+
+    # Check permissions - only creator or admin can update roles
+    if not permission.permission_service.check_service_account_token_permission(
+            auth_user.id, token_info['creator_user_hash'], 'update'):
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail='You can only update roles for your own service accounts. '
+            'Only admins can update roles for service accounts owned by other '
+            'users.')
 
     try:
         # Update service account role
@@ -750,6 +770,14 @@ async def rotate_service_account_token(
         token_body.token_id)
     if token_info is None:
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
+
+    # Check permissions - same as delete permission (only creator or admin)
+    if not permission.permission_service.check_service_account_token_permission(
+            auth_user.id, token_info['creator_user_hash'], 'delete'):
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail='You can only rotate your own tokens. Only admins can '
+            'rotate tokens owned by other users.')
 
     # Validate expiration if provided (allow 0 as special value for "never
     # expire")

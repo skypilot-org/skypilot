@@ -45,22 +45,6 @@ _DEFAULT_USER_BLOCKLIST = [
         'path': '/users/export',
         'method': 'GET'
     },
-    {
-        'path': '/users/service-account-tokens',
-        'method': 'POST'
-    },
-    {
-        'path': '/users/service-account-tokens/delete',
-        'method': 'POST'
-    },
-    {
-        'path': '/users/service-account-tokens/update-role',
-        'method': 'POST'
-    },
-    {
-        'path': '/users/service-account-tokens/rotate',
-        'method': 'POST'
-    },
 ]
 
 
