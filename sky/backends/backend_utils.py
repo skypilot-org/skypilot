@@ -1780,6 +1780,7 @@ def _query_cluster_status_via_cloud_api(
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider.
     """
+    cluster_name = handle.cluster_name
     cluster_name_on_cloud = handle.cluster_name_on_cloud
     cluster_name_in_hint = common_utils.cluster_name_in_hint(
         handle.cluster_name, cluster_name_on_cloud)
@@ -1797,7 +1798,8 @@ def _query_cluster_status_via_cloud_api(
         cloud_name = repr(handle.launched_resources.cloud)
         try:
             node_status_dict = provision_lib.query_instances(
-                cloud_name, cluster_name_on_cloud, provider_config)
+                cloud_name, cluster_name, cluster_name_on_cloud,
+                provider_config)
             logger.debug(f'Querying {cloud_name} cluster '
                          f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
@@ -2123,9 +2125,11 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         record['status'] = status_lib.ClusterStatus.UP
         # Add cluster event for instance status check.
         global_user_state.add_cluster_event(
-            cluster_name, status_lib.ClusterStatus.UP,
+            cluster_name,
+            status_lib.ClusterStatus.UP,
             'All nodes up + ray cluster healthy.',
-            global_user_state.ClusterEventType.STATUS_CHANGE)
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -2222,7 +2226,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         if some_nodes_terminated:
             init_reason = f'one or more nodes terminated ({status_reason})'
         elif some_nodes_not_stopped:
-            init_reason = f'some nodes not stopped ({status_reason})'
+            init_reason = f'some nodes are up and some nodes are stopped ({status_reason})'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
@@ -2307,9 +2311,11 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
         global_user_state.add_cluster_event(
-            cluster_name, status_lib.ClusterStatus.INIT,
-            f'Cluster is abnormal because {init_reason}. Transitioned to INIT.',
-            global_user_state.ClusterEventType.STATUS_CHANGE)
+            cluster_name,
+            status_lib.ClusterStatus.INIT,
+            f'Cluster is abnormal because {init_reason}. Transitioning to INIT.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,

@@ -643,7 +643,9 @@ def add_or_update_cluster(cluster_name: str,
 @_init_db
 def add_cluster_event(cluster_name: str,
                       new_status: Optional[status_lib.ClusterStatus],
-                      reason: str, event_type: ClusterEventType) -> None:
+                      reason: str,
+                      event_type: ClusterEventType,
+                      nop_if_duplicate: bool = False) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     if cluster_hash is None:
@@ -664,7 +666,11 @@ def add_cluster_event(cluster_name: str,
         cluster_row = session.query(cluster_table).filter_by(name=cluster_name)
         last_status = cluster_row.first(
         ).status if cluster_row and cluster_row.first() is not None else None
-
+        if nop_if_duplicate:
+            last_event = get_last_cluster_event(cluster_hash,
+                                                event_type=event_type)
+            if last_event == reason:
+                return
         try:
             session.execute(
                 insert_func(cluster_event_table).values(
@@ -686,12 +692,12 @@ def add_cluster_event(cluster_name: str,
                 raise e
 
 
-def get_last_cluster_event(cluster_name: str) -> Optional[str]:
+def get_last_cluster_event(cluster_hash: str,
+                           event_type: ClusterEventType) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_event_table).filter_by(
-            name=cluster_name,
-            type=ClusterEventType.STATUS_CHANGE.value).order_by(
+            cluster_hash=cluster_hash, type=event_type.value).order_by(
                 cluster_event_table.c.transitioned_at.desc()).first()
     if row is None:
         return None
@@ -748,6 +754,8 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
 
         if terminate:
             session.query(cluster_table).filter_by(name=cluster_name).delete()
+            session.query(cluster_event_table).filter_by(
+                cluster_hash=cluster_hash).delete()
         else:
             handle = get_handle_from_cluster_name(cluster_name)
             if handle is None:
@@ -1034,7 +1042,8 @@ def get_cluster_from_name(
     user_hash = _get_user_hash_or_current_user(row.user_hash)
     user = get_user(user_hash)
     user_name = user.name if user is not None else None
-    last_event = get_last_cluster_event(row.name)
+    last_event = get_last_cluster_event(
+        row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
@@ -1075,7 +1084,8 @@ def get_clusters() -> List[Dict[str, Any]]:
         user_hash = _get_user_hash_or_current_user(row.user_hash)
         user = get_user(user_hash)
         user_name = user.name if user is not None else None
-        last_event = get_last_cluster_event(row.name)
+        last_event = get_last_cluster_event(
+            row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
@@ -1110,8 +1120,6 @@ def get_clusters() -> List[Dict[str, Any]]:
 def get_clusters_from_history(
         days: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
-
-    Note that this method does not return `last_event`.
 
     Args:
         days: If specified, only include historical clusters (those not
@@ -1208,7 +1216,6 @@ def get_clusters_from_history(
         workspace = (row.history_workspace
                      if row.history_workspace else row.workspace)
 
-        # TODO (kyuds): return last_event?
         record = {
             'name': row.name,
             'launched_at': launched_at,
@@ -1223,6 +1230,8 @@ def get_clusters_from_history(
             'workspace': workspace,
             'last_creation_yaml': row.last_creation_yaml,
             'last_creation_command': row.last_creation_command,
+            'last_event': get_last_cluster_event(
+                row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE),
         }
 
         records.append(record)

@@ -1271,10 +1271,12 @@ def _get_pod_termination_reason(pod: Any) -> str:
 
 
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
+    del cluster_name  # unused
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,
