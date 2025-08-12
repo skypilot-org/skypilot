@@ -168,6 +168,7 @@ def launch(cluster_name_on_cloud: str,
            user_data: str,
            associate_public_ip_address: bool,
            filesystems: List[Dict[str, Any]],
+           use_spot: bool = False,
            network_tier: Optional[resources_utils.NetworkTier] = None) -> str:
     # Each node must have a unique name to avoid conflicts between
     # multiple worker VMs. To ensure uniqueness,a UUID is appended
@@ -281,7 +282,14 @@ def launch(cluster_name_on_cloud: str,
                     public_ip_address=nebius.compute().PublicIPAddress()
                     if associate_public_ip_address else None,
                 )
-            ]))).wait()
+            ],
+            recovery_policy=nebius.compute().InstanceRecoveryPolicy.FAIL
+            if use_spot else None,
+            preemptible=nebius.compute().PreemptibleSpec(
+                priority=1,
+                on_preemption=nebius.compute(
+                ).PreemptibleSpec.PreemptionPolicy.STOP) if use_spot else None,
+        ))).wait()
     instance_id = ''
     retry_count = 0
     while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_READY:

@@ -1450,14 +1450,18 @@ export function GPUs() {
 
   const fetchData = React.useCallback(
     async (options = { showLoadingIndicators: true }) => {
-      if (options.showLoadingIndicators) {
+      const { showLoadingIndicators = true, forceRefresh = false } = options;
+      if (showLoadingIndicators) {
         setKubeLoading(true);
         setCloudLoading(true);
       }
 
       try {
         // Use the shared getInfraData function
-        const infraData = await dashboardCache.get(getInfraData);
+        // If forceRefresh is true, call getInfraData directly to bypass cache
+        const infraData = forceRefresh
+          ? await getInfraData(true)
+          : await dashboardCache.get(getInfraData);
 
         const { gpuData, cloudData } = infraData || {};
 
@@ -1525,13 +1529,13 @@ export function GPUs() {
       } finally {
         // Always clear loading states when showLoadingIndicators is true
         // This prevents infinite loading state
-        if (options.showLoadingIndicators) {
+        if (showLoadingIndicators) {
           setKubeLoading(false);
           setCloudLoading(false);
         }
 
         // Set isInitialLoad to false only after the first fetch cycle initiated with showLoadingIndicators:true
-        if (isInitialLoad && options.showLoadingIndicators) {
+        if (isInitialLoad && showLoadingIndicators) {
           setIsInitialLoad(false);
         }
       }
@@ -1659,9 +1663,29 @@ export function GPUs() {
     dashboardCache.invalidate(getInfraData);
 
     if (refreshDataRef.current) {
-      refreshDataRef.current({ showLoadingIndicators: true });
+      refreshDataRef.current({
+        showLoadingIndicators: true,
+        forceRefresh: true, // Force refresh to run sky check
+      });
     }
   };
+
+  // Effect for keyboard shortcut (Cmd+R / Ctrl+R) to force refresh
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      // Check for Cmd+R (Mac) or Ctrl+R (Windows/Linux)
+      if ((event.metaKey || event.ctrlKey) && event.key === 'r') {
+        event.preventDefault(); // Prevent browser refresh
+        handleRefresh(); // Trigger our force refresh
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   // Calculate summary data
   const totalGpuTypes = (allGPUs || []).length;

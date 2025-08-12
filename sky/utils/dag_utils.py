@@ -148,7 +148,7 @@ def load_chain_dag_from_yaml_str(
 
 
 def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag,
-                               redact_secrets: bool = False) -> str:
+                               use_user_specified_yaml: bool = False) -> str:
     """Dumps a chain DAG to a YAML string.
 
     Args:
@@ -161,7 +161,9 @@ def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag,
     assert dag.is_chain(), dag
     configs = [{'name': dag.name}]
     for task in dag.tasks:
-        configs.append(task.to_yaml_config(redact_secrets=redact_secrets))
+        configs.append(
+            task.to_yaml_config(
+                use_user_specified_yaml=use_user_specified_yaml))
     return common_utils.dump_yaml_str(configs)
 
 

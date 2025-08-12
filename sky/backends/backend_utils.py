@@ -36,7 +36,9 @@ from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -119,6 +121,7 @@ CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 _CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
+WORKSPACE_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -921,7 +924,10 @@ def write_cluster_config(
             cluster_config_overrides=cluster_config_overrides,
             cloud=cloud,
             context=region.name)
-        kubernetes_utils.combine_metadata_fields(tmp_yaml_path, region.name)
+        kubernetes_utils.combine_metadata_fields(
+            tmp_yaml_path,
+            cluster_config_overrides=cluster_config_overrides,
+            context=region.name)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
@@ -1767,8 +1773,9 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
-) -> List[status_lib.ClusterStatus]:
-    """Returns the status of the cluster.
+) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
+    """Returns the status of the cluster as a list of tuples corresponding
+    to the node status and an optional reason string for said status.
 
     Raises:
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
@@ -1807,9 +1814,13 @@ def _query_cluster_status_via_cloud_api(
         region = provider_config.get('region') or provider_config.get(
             'location')
         zone = ray_config['provider'].get('availability_zone')
+        # TODO (kyuds): refactor cloud.query_status api to include reason.
+        # Currently not refactoring as this API is actually supposed to be
+        # deprecated soon.
         node_statuses = cloud.query_status(
             cluster_name_on_cloud,
             tag_filter_for_cluster(cluster_name_on_cloud), region, zone)
+        node_statuses = [(status, None) for status in node_statuses]
     return node_statuses
 
 
@@ -2009,8 +2020,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
 
     node_statuses = _query_cluster_status_via_cloud_api(handle)
 
-    all_nodes_up = (all(
-        status == status_lib.ClusterStatus.UP for status in node_statuses) and
+    all_nodes_up = (all(status[0] == status_lib.ClusterStatus.UP
+                        for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
 
     def get_node_counts_from_ray_status(
@@ -2115,6 +2126,13 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
         record['status'] = status_lib.ClusterStatus.UP
+        # Add cluster event for instance status check.
+        global_user_state.add_cluster_event(
+            cluster_name,
+            status_lib.ClusterStatus.UP,
+            'All nodes up + ray cluster healthy.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -2199,9 +2217,19 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     #      regardless of the ray cluster's health.
     #  (2) Otherwise, we will reset the autostop setting, unless the cluster is
     #      autostopping/autodowning.
-    is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or any(
-        status != status_lib.ClusterStatus.STOPPED for status in node_statuses))
+    some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
+    some_nodes_not_stopped = any(status[0] != status_lib.ClusterStatus.STOPPED
+                                 for status in node_statuses)
+    is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
+
     if is_abnormal:
+        status_reason = ', '.join(
+            [status[1] for status in node_statuses if status[1] is not None])
+
+        if some_nodes_terminated:
+            init_reason = f'one or more nodes terminated ({status_reason})'
+        elif some_nodes_not_stopped:
+            init_reason = f'some nodes are up and some nodes are stopped ({status_reason})'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
@@ -2237,7 +2265,11 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                     success = True
                     reset_local_autostop = True
                     try:
-                        backend.set_autostop(handle, -1, stream_logs=False)
+                        backend.set_autostop(
+                            handle,
+                            -1,
+                            autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                            stream_logs=False)
                     except exceptions.CommandError as e:
                         success = False
                         if e.returncode == 255:
@@ -2281,6 +2313,12 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # represent that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
+        global_user_state.add_cluster_event(
+            cluster_name,
+            status_lib.ClusterStatus.INIT,
+            f'Cluster is abnormal because {init_reason}. Transitioned to INIT.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -2291,6 +2329,9 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     # STOPPED.
     backend = backends.CloudVmRayBackend()
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
+    global_user_state.add_cluster_event(
+        cluster_name, None, 'All nodes stopped, terminating cluster.',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
@@ -2625,7 +2666,9 @@ def is_controller_accessible(
           failed to be connected.
     """
     if (managed_job_utils.is_consolidation_mode() and
-            controller == controller_utils.Controllers.JOBS_CONTROLLER):
+            controller == controller_utils.Controllers.JOBS_CONTROLLER
+       ) or (serve_utils.is_consolidation_mode() and
+             controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER):
         cn = 'local-controller-consolidation'
         return backends.LocalResourcesHandle(
             cluster_name=cn,
@@ -2749,6 +2792,9 @@ def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _include_is_managed: bool = False,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
 
@@ -2769,6 +2815,8 @@ def get_clusters(
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
+        _include_is_managed: Whether to force include clusters created by the
+            controller.
 
     Returns:
         A list of cluster records. If the cluster does not exist or has been
@@ -2776,6 +2824,13 @@ def get_clusters(
     """
     records = global_user_state.get_clusters()
     current_user = common_utils.get_current_user()
+
+    # Filter out clusters created by the controller.
+    if (not env_options.Options.SHOW_DEBUG_INFO.get() and
+            not _include_is_managed):
+        records = [
+            record for record in records if not record.get('is_managed', False)
+        ]
 
     # Filter by user if requested
     if not all_users:
@@ -3210,7 +3265,8 @@ def get_endpoints(cluster: str,
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
     cluster_records = get_clusters(refresh=common.StatusRefreshMode.NONE,
-                                   cluster_names=[cluster])
+                                   cluster_names=[cluster],
+                                   _include_is_managed=True)
     if not cluster_records:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
@@ -3300,3 +3356,8 @@ def cluster_status_lock_id(cluster_name: str) -> str:
 def cluster_file_mounts_lock_id(cluster_name: str) -> str:
     """Get the lock ID for cluster file mounts operations."""
     return f'{cluster_name}_file_mounts'
+
+
+def workspace_lock_id(workspace_name: str) -> str:
+    """Get the lock ID for workspace operations."""
+    return f'{workspace_name}_workspace'

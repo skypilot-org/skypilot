@@ -33,6 +33,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.server import common
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.usage import usage_lib
@@ -312,6 +313,7 @@ class StartBody(RequestBody):
     """The request body for the start endpoint."""
     cluster_name: str
     idle_minutes_to_autostop: Optional[int] = None
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     retry_until_up: bool = False
     down: bool = False
     force: bool = False
@@ -321,6 +323,7 @@ class AutostopBody(RequestBody):
     """The request body for the autostop endpoint."""
     cluster_name: str
     idle_minutes: int
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
 
 
@@ -478,6 +481,8 @@ class JobsLaunchBody(RequestBody):
     """The request body for the jobs launch endpoint."""
     task: str
     name: Optional[str]
+    pool: Optional[str] = None
+    num_jobs: Optional[int] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -500,6 +505,7 @@ class JobsCancelBody(RequestBody):
     job_ids: Optional[List[int]] = None
     all: bool = False
     all_users: bool = False
+    pool: Optional[str] = None
 
 
 class JobsLogsBody(RequestBody):
@@ -669,6 +675,55 @@ class JobsDownloadLogsBody(RequestBody):
     refresh: bool = False
     controller: bool = False
     local_dir: str = constants.SKY_LOGS_DIRECTORY
+
+
+class JobsPoolApplyBody(RequestBody):
+    """The request body for the jobs pool apply endpoint."""
+    task: str
+    pool_name: str
+    mode: serve.UpdateMode
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        dag = common.process_mounts_in_task_on_api_server(self.task,
+                                                          self.env_vars,
+                                                          workdir_only=False)
+        assert len(
+            dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                              'a pool.', dag)
+        kwargs['task'] = dag.tasks[0]
+        return kwargs
+
+
+class JobsPoolDownBody(RequestBody):
+    """The request body for the jobs pool down endpoint."""
+    pool_names: Optional[Union[str, List[str]]]
+    all: bool = False
+    purge: bool = False
+
+
+class JobsPoolStatusBody(RequestBody):
+    """The request body for the jobs pool status endpoint."""
+    pool_names: Optional[Union[str, List[str]]]
+
+
+class JobsPoolLogsBody(RequestBody):
+    """The request body for the jobs pool logs endpoint."""
+    pool_name: str
+    target: Union[str, serve.ServiceComponent]
+    worker_id: Optional[int] = None
+    follow: bool = True
+    tail: Optional[int] = None
+
+
+class JobsPoolDownloadLogsBody(RequestBody):
+    """The request body for the jobs pool download logs endpoint."""
+    pool_name: str
+    local_dir: str
+    targets: Optional[Union[str, serve.ServiceComponent,
+                            List[Union[str, serve.ServiceComponent]]]]
+    worker_ids: Optional[List[int]] = None
+    tail: Optional[int] = None
 
 
 class UploadZipFileResponse(pydantic.BaseModel):

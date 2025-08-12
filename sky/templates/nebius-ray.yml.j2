@@ -46,6 +46,7 @@ available_node_types:
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}
       DiskSize: {{disk_size}}
+      use_spot: {{ use_spot }}
       network_tier: {{network_tier}}
       filesystems:
         {%- for fs in filesystems %}

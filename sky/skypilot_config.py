@@ -495,6 +495,12 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
     try:
         config_dict = common_utils.read_yaml(config_path)
         config = config_utils.Config.from_dict(config_dict)
+        # pop the db url from the config, and set it to the env var.
+        # this is to avoid db url (considered a sensitive value)
+        # being printed with the rest of the config.
+        db_url = config.pop_nested(('db',), None)
+        if db_url:
+            os.environ[constants.ENV_VAR_DB_CONNECTION_URI] = db_url
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
             logger.debug(f'Config loaded from {config_path}:\n'
                          f'{common_utils.dump_yaml_str(dict(config))}')
@@ -556,26 +562,21 @@ def _reload_config_as_server() -> None:
     _set_loaded_config_path(None)
 
     server_config_path = _resolve_server_config_path()
-    db_url_from_env = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     server_config = _get_config_from_path(server_config_path)
-    if db_url_from_env:
-        server_config.set_nested(('db',), db_url_from_env)
-
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-        logger.debug(f'server config: \n'
-                     f'{common_utils.dump_yaml_str(dict(server_config))}')
-
-    db_url = server_config.get_nested(('db',), None)
-    if db_url and len(server_config.keys()) > 1:
-        raise ValueError(
-            'if db config is specified, no other config is allowed')
+    # Get the db url from the env var. _get_config_from_path should have moved
+    # the db url specified in config file to the env var.
+    db_url = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
 
     if db_url:
+        if len(server_config.keys()) > 1:
+            raise ValueError(
+                'If db config is specified, no other config is allowed')
+        logger.debug('retrieving config from database')
         with _DB_USE_LOCK:
             sqlalchemy_engine = sqlalchemy.create_engine(db_url,
                                                          poolclass=NullPool)
-            db_utils.add_tables_to_db_sqlalchemy(Base.metadata,
-                                                 sqlalchemy_engine)
+            db_utils.add_all_tables_to_db_sqlalchemy(Base.metadata,
+                                                     sqlalchemy_engine)
 
             def _get_config_yaml_from_db(
                     key: str) -> Optional[config_utils.Config]:
@@ -591,14 +592,13 @@ def _reload_config_as_server() -> None:
 
             db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
             if db_config:
-                if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-                    logger.debug(
-                        f'Config loaded from db:\n'
-                        f'{common_utils.dump_yaml_str(dict(db_config))}')
                 server_config = overlay_skypilot_config(server_config,
                                                         db_config)
             # Close the engine to avoid connection leaks
             sqlalchemy_engine.dispose()
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'server config: \n'
+                     f'{common_utils.dump_yaml_str(dict(server_config))}')
     _set_loaded_config(server_config)
     _set_loaded_config_path(server_config_path)
 
@@ -681,6 +681,10 @@ def override_skypilot_config(
 
     disallowed_diff_keys = []
     for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
+        if key == ('db',):
+            # since db key is popped out of server config, the key is expected
+            # to be different between client and server.
+            continue
         value = override_configs.pop_nested(key, default_value=None)
         if (value is not None and
                 value != original_config.get_nested(key, default_value=None)):
@@ -855,21 +859,20 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
 
     db_updated = False
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        existing_db_url = get_nested(('db',), None)
+        existing_db_url = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
+        new_db_url = config.pop_nested(('db',), None)
+        if new_db_url and new_db_url != existing_db_url:
+            raise ValueError('Cannot change db url while server is running')
         if existing_db_url:
-            new_db_url = config.get_nested(('db',), None)
-            if new_db_url and new_db_url != existing_db_url:
-                raise ValueError('Cannot change db url while server is running')
             with _DB_USE_LOCK:
                 sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
                                                              poolclass=NullPool)
-                db_utils.add_tables_to_db_sqlalchemy(Base.metadata,
-                                                     sqlalchemy_engine)
+                db_utils.add_all_tables_to_db_sqlalchemy(
+                    Base.metadata, sqlalchemy_engine)
 
                 def _set_config_yaml_to_db(key: str,
                                            config: config_utils.Config):
                     assert sqlalchemy_engine is not None
-                    config.pop_nested(('db',), None)
                     config_str = common_utils.dump_yaml_str(dict(config))
                     with orm.Session(sqlalchemy_engine) as session:
                         if (sqlalchemy_engine.dialect.name ==

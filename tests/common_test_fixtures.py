@@ -274,6 +274,10 @@ def mock_job_table_one_job(monkeypatch):
             'task_name': 'test_task',
             'job_duration': 20,
             'priority': constants.DEFAULT_PRIORITY,
+            'pool': None,
+            'current_cluster_name': None,
+            'job_id_on_pool_cluster': None,
+            'pool_hash': None,
         }
         return 0, message_utils.encode_payload([job_data]), ''
 

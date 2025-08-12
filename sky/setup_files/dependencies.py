@@ -69,6 +69,7 @@ install_requires = [
     'gitpython',
     'types-paramiko',
     'alembic',
+    'aiohttp',
 ]
 
 server_dependencies = [
@@ -76,6 +77,7 @@ server_dependencies = [
     'sqlalchemy_adapter',
     'passlib',
     'pyjwt',
+    'aiohttp',
 ]
 
 local_ray = [
@@ -177,7 +179,7 @@ extras_require: Dict[str, List[str]] = {
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
     'nebius': [
-        'nebius>=0.2.37',
+        'nebius>=0.2.47',
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'server': server_dependencies,

@@ -175,6 +175,14 @@ class Autoscaler:
         """Collect request information from aggregator for autoscaling."""
         raise NotImplementedError
 
+    def info(self) -> Dict[str, Any]:
+        """Get information about the autoscaler."""
+        return {
+            'target_num_replicas': self.target_num_replicas,
+            'min_replicas': self.min_replicas,
+            'max_replicas': self.max_replicas,
+        }
+
     def _generate_scaling_decisions(
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],

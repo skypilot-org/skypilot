@@ -109,9 +109,8 @@ def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
     return jobs
 
 
-@register_decoders('serve.status')
-def decode_serve_status(return_value: List[dict]) -> List[Dict[str, Any]]:
-    service_statuses = return_value
+def _decode_serve_status(
+        service_statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for service_status in service_statuses:
         service_status['status'] = serve_state.ServiceStatus(
             service_status['status'])
@@ -120,6 +119,16 @@ def decode_serve_status(return_value: List[dict]) -> List[Dict[str, Any]]:
                 replica_info['status'])
             replica_info['handle'] = decode_and_unpickle(replica_info['handle'])
     return service_statuses
+
+
+@register_decoders('serve.status')
+def decode_serve_status(return_value: List[dict]) -> List[Dict[str, Any]]:
+    return _decode_serve_status(return_value)
+
+
+@register_decoders('jobs.pool_status')
+def decode_jobs_pool_status(return_value: List[dict]) -> List[Dict[str, Any]]:
+    return _decode_serve_status(return_value)
 
 
 @register_decoders('cost_report')

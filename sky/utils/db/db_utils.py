@@ -87,7 +87,7 @@ def add_column_to_table(
     conn.commit()
 
 
-def add_tables_to_db_sqlalchemy(
+def add_all_tables_to_db_sqlalchemy(
     metadata: sqlalchemy.MetaData,
     engine: sqlalchemy.Engine,
 ):
@@ -101,6 +101,27 @@ def add_tables_to_db_sqlalchemy(
                 pass
             else:
                 raise
+
+
+def add_table_to_db_sqlalchemy(
+    metadata: sqlalchemy.MetaData,
+    engine: sqlalchemy.Engine,
+    table_name: str,
+):
+    """Add a specific table to the database."""
+    try:
+        table = metadata.tables[table_name]
+    except KeyError as e:
+        raise e
+
+    try:
+        table.create(bind=engine, checkfirst=True)
+    except (sqlalchemy_exc.OperationalError,
+            sqlalchemy_exc.ProgrammingError) as e:
+        if 'already exists' in str(e):
+            pass
+        else:
+            raise
 
 
 def add_column_to_table_sqlalchemy(
@@ -201,6 +222,37 @@ def add_column_to_table_alembic(
     except sqlalchemy_exc.OperationalError as e:
         if 'duplicate column name' in str(e).lower():
             pass  # Column already exists, that's fine
+        else:
+            raise
+
+
+def drop_column_from_table_alembic(
+    table_name: str,
+    column_name: str,
+):
+    """Drop a column from a table using Alembic operations.
+
+    Args:
+        table_name: Name of the table to drop column from.
+        column_name: Name of the column to drop.
+    """
+    from alembic import op  # pylint: disable=import-outside-toplevel
+
+    # Check if column exists before trying to drop it
+    bind = op.get_bind()
+    inspector = sqlalchemy.inspect(bind)
+    columns = [col['name'] for col in inspector.get_columns(table_name)]
+
+    if column_name not in columns:
+        # Column doesn't exist; nothing to do
+        return
+
+    try:
+        op.drop_column(table_name, column_name)
+    except (sqlalchemy_exc.ProgrammingError,
+            sqlalchemy_exc.OperationalError) as e:
+        if 'does not exist' in str(e).lower():
+            pass  # Already dropped
         else:
             raise
 
