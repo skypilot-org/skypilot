@@ -21,6 +21,10 @@ export function isServiceAccount(userHash) {
  * @returns {string} - The appropriate URL path for the user
  */
 export function getUserLink(userHash) {
+  // Service accounts should link to the service accounts tab
+  if (isServiceAccount(userHash)) {
+    return '/users?tab=service-accounts';
+  }
   // Regular users link to the main users page
   return '/users';
 }
