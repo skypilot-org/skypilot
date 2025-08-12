@@ -1882,6 +1882,8 @@ async def vscode_http_proxy(
     if request.url.query:
         target_url += f"?{request.url.query}"
     
+    logger.info(f"Proxying HTTP request to: {target_url}")
+    
     # Forward the HTTP request
     try:
         async with httpx.AsyncClient() as client:
@@ -1934,7 +1936,9 @@ async def vscode_http_proxy(
                    f'The tunnel may be down or code-server may not be running.'
         )
     except Exception as e:
+        import traceback
         logger.error(f'Error proxying HTTP request to VSCode: {e}')
+        logger.error(f'Full traceback: {traceback.format_exc()}')
         raise fastapi.HTTPException(
             status_code=500,
             detail=f'Proxy error: {str(e)}'
