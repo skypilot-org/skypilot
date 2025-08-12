@@ -15,6 +15,7 @@ import filelock
 
 from sky import authentication
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -122,7 +123,16 @@ def _cleanup(service_name: str) -> bool:
     replica_infos = serve_state.get_replica_infos(service_name)
     info2proc: Dict[replica_managers.ReplicaInfo,
                     multiprocessing.Process] = dict()
+    # NOTE(dev): This relies on `sky/serve/serve_utils.py::
+    # generate_replica_cluster_name`. Change it if you change the function.
+    existing_cluster_names = global_user_state.get_cluster_names_start_with(
+        service_name)
     for info in replica_infos:
+        if info.cluster_name not in existing_cluster_names:
+            logger.info(f'Cluster {info.cluster_name} for replica '
+                        f'{info.replica_id} not found. Might be a failed '
+                        'cluster. Skipping.')
+            continue
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(info.cluster_name,))
         p.start()

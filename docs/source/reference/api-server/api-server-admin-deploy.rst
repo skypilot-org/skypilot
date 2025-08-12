@@ -92,9 +92,7 @@ The API server above is deployed with a basic auth provided by Nginx. To use adv
 Step 2: Get the API server URL
 ------------------------------
 
-Once the API server is deployed, we can fetch the API server URL. We use nginx ingress to expose the API server.
-
-Our default of using a NodePort service is the recommended way to expose the API server because some cloud load balancers (e.g., GKE) do not work with websocket connections, which are required for our Kubernetes SSH tunneling.
+Once the API server is deployed, we can fetch the API server URL. The chart uses nginx ingress to expose the API server and exposes the ingress to internet using a LoadBalancer service by default. If you are using a Kubernetes cluster without LoadBalancer support, you can use the NodePort option below instead.
 
 .. tab-set::
 

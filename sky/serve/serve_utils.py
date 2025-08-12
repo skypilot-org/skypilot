@@ -516,6 +516,8 @@ def generate_remote_tls_certfile_name(service_name: str) -> str:
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
+    # NOTE(dev): This format is used in sky/serve/service.py::_cleanup, for
+    # checking replica cluster existence. Be careful when changing it.
     return f'{service_name}-{replica_id}'
 
 
