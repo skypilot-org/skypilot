@@ -58,6 +58,10 @@ HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
 # and store all data that needs to be persisted in future.
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
 
+# Image IDs for high performance networking cluster types
+COREWEAVE_NCCL_IMAGE = 'ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.27.7-1-13b2c72'
+NEBIUS_NCCL_IMAGE = 'docker:cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.23.4-ubu22.04-cu12.4'
+
 
 class KubernetesHighPerformanceNetworkType(enum.Enum):
     """Enum for different Kubernetes cluster types with high performance
@@ -129,6 +133,13 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
         """Check if this cluster type requires TCPXO daemon."""
         return self == KubernetesHighPerformanceNetworkType.GCP_TCPXO
 
+    def get_image_id(self) -> Optional[str]:
+        if self == KubernetesHighPerformanceNetworkType.COREWEAVE:
+            return COREWEAVE_NCCL_IMAGE
+        elif self == KubernetesHighPerformanceNetworkType.NEBIUS:
+            return NEBIUS_NCCL_IMAGE
+        else:
+            return None
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
@@ -565,6 +576,9 @@ class GKELabelFormatter(GPULabelFormatter):
             elif acc == 'H200-141GB':
                 return 'H200'
             return acc
+        elif value == 'H100_NVLINK_80GB':
+            # Coreweave uses this format
+            return 'H100'
         elif is_tpu_on_gke(value):
             return value
         elif value == '':
