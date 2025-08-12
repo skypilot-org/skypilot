@@ -720,8 +720,16 @@ Then set the endpoint URL and S3 addressing style:
 
 .. code-block:: shell
 
-  aws configure set endpoint_url https://cwlota.com --profile coreweave
+  # For external access (outside CoreWeave CKS clusters)
+  aws configure set endpoint_url https://cwobject.com --profile coreweave
   aws configure set s3.addressing_style virtual --profile coreweave
+
+.. note::
+
+  **Endpoint selection**: 
+  
+  - Use ``https://cwobject.com`` for external access (outside CoreWeave infrastructure)
+  - Use ``http://cwlota.com`` only if running inside CoreWeave CKS clusters (LOTA endpoint only supports HTTP, not HTTPS)
 
 To obtain your CoreWeave Object Storage credentials:
 

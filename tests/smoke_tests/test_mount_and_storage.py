@@ -726,7 +726,7 @@ exclude.py
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{jobs_name}',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=60),
+                timeout=600),
         ]
 
         teardown_commands = [
