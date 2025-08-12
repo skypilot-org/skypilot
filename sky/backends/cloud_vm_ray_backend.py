@@ -4665,8 +4665,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     non_terminated_only=False)
 
                 unexpected_node_state: Optional[Tuple[str, str]] = None
-                for node_id, node_status in node_status_dict.items():
-                    logger.debug(f'{node_id} status: {node_status}')
+                for node_id, node_status_tuple in node_status_dict.items():
+                    node_status, reason = node_status_tuple
+                    reason = '' if reason is None else f' ({reason})'
+                    logger.debug(f'{node_id} status: {node_status}{reason}')
                     # FIXME(cooperc): Some clouds (e.g. GCP) do not distinguish
                     # between "stopping/stopped" and "terminating/terminated",
                     # so we allow for either status instead of casing on
