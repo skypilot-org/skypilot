@@ -2315,9 +2315,12 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
         init_reason_regex = None
         if not status_reason:
-            # If there is not a status reason, don't re-add the event if there
-            # is already an event with the same reason which may have a
-            # status reason.
+            # If there is not a status reason, don't re-add (and overwrite) the
+            # event if there is already an event with the same reason which may
+            # have a status reason.
+            # Some status reason clears after a certain time (e.g. k8s events
+            # are only stored for an hour by default), so it is possible that
+            # the previous event has a status reason, but now it does not.
             init_reason_regex = f'^Cluster is abnormal because {init_reason} .*'
         global_user_state.add_cluster_event(
             cluster_name,
