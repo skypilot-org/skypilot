@@ -13,6 +13,7 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
+import filelock
 import requests
 
 import sky
@@ -866,8 +867,9 @@ class SkyPilotReplicaManager(ReplicaManager):
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             replica_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                                 'replica_jobs')
-            job_log_file_name = (controller_utils.download_and_stream_job_log(
-                backend, handle, replica_job_logs_dir))
+            job_ids = ['1'] if self._is_pool else None
+            job_log_file_name = controller_utils.download_and_stream_job_log(
+                backend, handle, replica_job_logs_dir, job_ids)
             if job_log_file_name is not None:
                 logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
                 with open(log_file_name, 'a',
@@ -975,7 +977,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         # To avoid `dictionary changed size during iteration` error.
         launch_process_pool_snapshot = list(self._launch_process_pool.items())
         for replica_id, p in launch_process_pool_snapshot:
-            if not p.is_alive():
+            if p.is_alive():
+                continue
+            with filelock.FileLock(controller_utils.get_resources_lock_path()):
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
                 assert info is not None, replica_id
@@ -1037,6 +1041,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._terminate_replica(replica_id,
                                             sync_down_logs=True,
                                             replica_drain_delay_seconds=0)
+            # Try schedule next job after acquiring the lock.
+            jobs_scheduler.maybe_schedule_next_jobs()
         down_process_pool_snapshot = list(self._down_process_pool.items())
         for replica_id, p in down_process_pool_snapshot:
             if not p.is_alive():

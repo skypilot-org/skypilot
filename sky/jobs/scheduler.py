@@ -43,7 +43,6 @@ Nomenclature:
 
 from argparse import ArgumentParser
 import contextlib
-from functools import lru_cache
 import os
 import sys
 import time
@@ -63,20 +62,7 @@ from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
-# The _MANAGED_JOB_SCHEDULER_LOCK should be held whenever we are checking the
-# parallelism control or updating the schedule_state of any job.
-# Any code that takes this lock must conclude by calling
-# maybe_schedule_next_jobs.
-_MANAGED_JOB_SCHEDULER_LOCK = '~/.sky/locks/managed_job_scheduler.lock'
 _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
-
-
-@lru_cache(maxsize=1)
-def _get_lock_path() -> str:
-    # TODO(tian): Per pool lock.
-    path = os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    return path
 
 
 def _start_controller(job_id: int, dag_yaml_path: str, env_file_path: str,
@@ -150,7 +136,8 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
         # parallelism control. If we cannot obtain the lock, exit immediately.
         # The current lock holder is expected to launch any jobs it can before
         # releasing the lock.
-        with filelock.FileLock(_get_lock_path(), blocking=False):
+        with filelock.FileLock(controller_utils.get_resources_lock_path(),
+                               blocking=False):
             while True:
                 maybe_next_job = state.get_waiting_job(pool)
                 if maybe_next_job is None:
@@ -221,7 +208,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
-    with filelock.FileLock(_get_lock_path()):
+    with filelock.FileLock(controller_utils.get_resources_lock_path()):
         is_resume = state.scheduler_set_waiting(job_id, dag_yaml_path,
                                                 original_user_yaml_path,
                                                 env_file_path,
@@ -273,11 +260,11 @@ def scheduled_launch(job_id: int):
     except exceptions.NoClusterLaunchedError:
         # NoClusterLaunchedError is indicates that the job is in retry backoff.
         # We should transition to ALIVE_BACKOFF instead of ALIVE.
-        with filelock.FileLock(_get_lock_path()):
+        with filelock.FileLock(controller_utils.get_resources_lock_path()):
             state.scheduler_set_alive_backoff(job_id)
         raise
     else:
-        with filelock.FileLock(_get_lock_path()):
+        with filelock.FileLock(controller_utils.get_resources_lock_path()):
             state.scheduler_set_alive(job_id)
     finally:
         maybe_schedule_next_jobs(pool)
@@ -297,14 +284,14 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
         return
     pool = state.get_pool_from_job_id(job_id)
 
-    with filelock.FileLock(_get_lock_path()):
+    with filelock.FileLock(controller_utils.get_resources_lock_path()):
         state.scheduler_set_done(job_id, idempotent)
     maybe_schedule_next_jobs(pool)
 
 
 def _set_alive_waiting(job_id: int) -> None:
     """Should use wait_until_launch_okay() to transition to this state."""
-    with filelock.FileLock(_get_lock_path()):
+    with filelock.FileLock(controller_utils.get_resources_lock_path()):
         state.scheduler_set_alive_waiting(job_id)
     pool = state.get_pool_from_job_id(job_id)
     maybe_schedule_next_jobs(pool)
@@ -320,7 +307,7 @@ def _can_start_new_job(pool: Optional[str]) -> bool:
     if pool is not None:
         alive_jobs_in_pool = state.get_num_alive_jobs(pool)
         if alive_jobs_in_pool >= len(serve_utils.get_ready_replicas(pool)):
-            logger.debug(f'No workers available in pool {pool}')
+            logger.debug(f'No READY workers available in pool {pool}')
             return False
 
     return True

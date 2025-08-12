@@ -1182,6 +1182,18 @@ MAX_JOB_LIMIT = 2000
 # Number of ongoing launches launches allowed per CPU.
 LAUNCHES_PER_CPU = 4
 
+# The _RESOURCES_LOCK should be held whenever we are checking the parallelism
+# control or updating the schedule_state of any job or service. Any code that
+# takes this lock must conclude by calling maybe_schedule_next_jobs.
+_RESOURCES_LOCK = '~/.sky/locks/controller_resources.lock'
+
+
+@annotations.lru_cache(scope='global', maxsize=1)
+def get_resources_lock_path() -> str:
+    path = os.path.expanduser(_RESOURCES_LOCK)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
 
 @annotations.lru_cache(scope='request')
 def _get_job_parallelism() -> int:
