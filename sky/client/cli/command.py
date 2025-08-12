@@ -6069,8 +6069,11 @@ def api_logs(request_id: Optional[str], server_logs: bool,
     if request_id is not None and log_path is not None:
         raise click.BadParameter(
             'Only one of request ID and log path can be provided.')
-    sdk.stream_and_get(server_common.RequestId[None](request_id), log_path,
-                       tail)
+    # Only wrap request_id when it is provided; otherwise pass None so the
+    # server accepts log_path-only streaming.
+    req_id = (server_common.RequestId[None](request_id)
+              if request_id is not None else None)
+    sdk.stream_and_get(req_id, log_path, tail, follow=follow)
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)

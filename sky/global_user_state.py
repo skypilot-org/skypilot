@@ -6,6 +6,7 @@ Concepts:
 - Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
+import enum
 import functools
 import json
 import os
@@ -160,6 +161,33 @@ cluster_history_table = sqlalchemy.Table(
                       sqlalchemy.Text,
                       server_default=None),
     sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
+)
+
+
+class ClusterEventType(enum.Enum):
+    """Type of cluster event."""
+    DEBUG = 'DEBUG'
+    """Used to denote events that are not related to cluster status."""
+
+    STATUS_CHANGE = 'STATUS_CHANGE'
+    """Used to denote events that modify cluster status."""
+
+
+# Table for cluster status change events.
+# starting_status: Status of the cluster at the start of the event.
+# ending_status: Status of the cluster at the end of the event.
+# reason: Reason for the transition.
+# transitioned_at: Timestamp of the transition.
+cluster_event_table = sqlalchemy.Table(
+    'cluster_events',
+    Base.metadata,
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('name', sqlalchemy.Text),
+    sqlalchemy.Column('starting_status', sqlalchemy.Text),
+    sqlalchemy.Column('ending_status', sqlalchemy.Text),
+    sqlalchemy.Column('reason', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('type', sqlalchemy.Text),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -612,6 +640,70 @@ def add_or_update_cluster(cluster_name: str,
         session.commit()
 
 
+@_init_db
+def add_cluster_event(cluster_name: str,
+                      new_status: Optional[status_lib.ClusterStatus],
+                      reason: str,
+                      event_type: ClusterEventType,
+                      nop_if_duplicate: bool = False) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+    if cluster_hash is None:
+        logger.debug(f'Hash for cluster {cluster_name} not found. '
+                     'Skipping event.')
+        return
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            session.rollback()
+            raise ValueError('Unsupported database dialect')
+
+        cluster_row = session.query(cluster_table).filter_by(name=cluster_name)
+        last_status = cluster_row.first(
+        ).status if cluster_row and cluster_row.first() is not None else None
+        if nop_if_duplicate:
+            last_event = get_last_cluster_event(cluster_hash,
+                                                event_type=event_type)
+            if last_event == reason:
+                return
+        try:
+            session.execute(
+                insert_func(cluster_event_table).values(
+                    cluster_hash=cluster_hash,
+                    name=cluster_name,
+                    starting_status=last_status,
+                    ending_status=new_status.value if new_status else None,
+                    reason=reason,
+                    transitioned_at=int(time.time()),
+                    type=event_type.value,
+                ))
+            session.commit()
+        except sqlalchemy.exc.IntegrityError as e:
+            if 'UNIQUE constraint failed' in str(e):
+                # This can happen if the cluster event is added twice.
+                # We can ignore this error.
+                pass
+            else:
+                raise e
+
+
+def get_last_cluster_event(cluster_hash: str,
+                           event_type: ClusterEventType) -> Optional[str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(cluster_event_table).filter_by(
+            cluster_hash=cluster_hash, type=event_type.value).order_by(
+                cluster_event_table.c.transitioned_at.desc()).first()
+    if row is None:
+        return None
+    return row.reason
+
+
 def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
     """Returns the user hash or the current user hash, if user_hash is None.
 
@@ -662,6 +754,8 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
 
         if terminate:
             session.query(cluster_table).filter_by(name=cluster_name).delete()
+            session.query(cluster_event_table).filter_by(
+                cluster_hash=cluster_hash).delete()
         else:
             handle = get_handle_from_cluster_name(cluster_name)
             if handle is None:
@@ -948,6 +1042,8 @@ def get_cluster_from_name(
     user_hash = _get_user_hash_or_current_user(row.user_hash)
     user = get_user(user_hash)
     user_name = user.name if user is not None else None
+    last_event = get_last_cluster_event(
+        row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
@@ -971,6 +1067,7 @@ def get_cluster_from_name(
         'last_creation_yaml': row.last_creation_yaml,
         'last_creation_command': row.last_creation_command,
         'is_managed': bool(row.is_managed),
+        'last_event': last_event,
     }
 
     return record
@@ -987,6 +1084,8 @@ def get_clusters() -> List[Dict[str, Any]]:
         user_hash = _get_user_hash_or_current_user(row.user_hash)
         user = get_user(user_hash)
         user_name = user.name if user is not None else None
+        last_event = get_last_cluster_event(
+            row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
@@ -1010,6 +1109,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'last_creation_yaml': row.last_creation_yaml,
             'last_creation_command': row.last_creation_command,
             'is_managed': bool(row.is_managed),
+            'last_event': last_event,
         }
 
         records.append(record)
@@ -1130,6 +1230,8 @@ def get_clusters_from_history(
             'workspace': workspace,
             'last_creation_yaml': row.last_creation_yaml,
             'last_creation_command': row.last_creation_command,
+            'last_event': get_last_cluster_event(
+                row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE),
         }
 
         records.append(record)

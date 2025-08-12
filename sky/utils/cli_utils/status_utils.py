@@ -81,6 +81,7 @@ def show_status_table(cluster_records: List[_ClusterRecord],
                          _get_command,
                          truncate=not show_all,
                          show_by_default=False),
+            StatusColumn('LAST_EVENT', _get_last_event, show_by_default=False),
         ]
 
     columns = []
@@ -312,6 +313,14 @@ def _get_head_ip(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
     if handle.head_ip is None:
         return '-'
     return handle.head_ip
+
+
+def _get_last_event(cluster_record: _ClusterRecord,
+                    truncate: bool = True) -> str:
+    del truncate
+    if cluster_record.get('last_event', None) is None:
+        return 'No recorded events.'
+    return cluster_record['last_event']
 
 
 def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
