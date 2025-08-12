@@ -4660,7 +4660,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 logger.debug(f'instance statuses attempt {attempts + 1}')
                 node_status_dict = provision_lib.query_instances(
                     repr(cloud),
-                    handle.cluster_name,
                     cluster_name_on_cloud,
                     config['provider'],
                     non_terminated_only=False)

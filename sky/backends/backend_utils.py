@@ -1843,7 +1843,6 @@ def _query_cluster_status_via_cloud_api(
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider.
     """
-    cluster_name = handle.cluster_name
     cluster_name_on_cloud = handle.cluster_name_on_cloud
     cluster_name_in_hint = common_utils.cluster_name_in_hint(
         handle.cluster_name, cluster_name_on_cloud)
@@ -1861,8 +1860,7 @@ def _query_cluster_status_via_cloud_api(
         cloud_name = repr(handle.launched_resources.cloud)
         try:
             node_status_dict = provision_lib.query_instances(
-                cloud_name, cluster_name, cluster_name_on_cloud,
-                provider_config)
+                cloud_name, cluster_name_on_cloud, provider_config)
             logger.debug(f'Querying {cloud_name} cluster '
                          f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')

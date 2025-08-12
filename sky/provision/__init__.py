@@ -74,7 +74,6 @@ def _route_to_cloud_impl(func):
 @_route_to_cloud_impl
 def query_instances(
     provider_name: str,
-    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,

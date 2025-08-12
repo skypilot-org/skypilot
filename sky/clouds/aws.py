@@ -1080,7 +1080,7 @@ class AWS(clouds.Cloud):
 
         image_name = f'skypilot-{cluster_name.display_name}-{int(time.time())}'
 
-        status = provision_lib.query_instances('AWS', cluster_name.display_name,
+        status = provision_lib.query_instances('AWS',
                                                cluster_name.name_on_cloud,
                                                {'region': region})
         instance_ids = list(status.keys())
