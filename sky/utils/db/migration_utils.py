@@ -19,12 +19,16 @@ logger = sky_logging.init_logger(__name__)
 DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
-GLOBAL_USER_STATE_VERSION = '001'
+GLOBAL_USER_STATE_VERSION = '005'
 GLOBAL_USER_STATE_LOCK_PATH = '~/.sky/locks/.state_db.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '002'
+SPOT_JOBS_VERSION = '003'
 SPOT_JOBS_LOCK_PATH = '~/.sky/locks/.spot_jobs_db.lock'
+
+SERVE_DB_NAME = 'serve_db'
+SERVE_VERSION = '001'
+SERVE_LOCK_PATH = '~/.sky/locks/.serve_db.lock'
 
 
 def get_engine(db_name: str):

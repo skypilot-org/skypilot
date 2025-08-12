@@ -141,7 +141,7 @@ def _validate_consolidation_mode_config(
         if global_user_state.get_cluster_from_name(controller_cn) is not None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InconsistentConsolidationModeError(
-                    f'{colorama.Fore.RED}Consolidation mode is '
+                    f'{colorama.Fore.RED}Consolidation mode for jobs is '
                     f'enabled, but the controller cluster '
                     f'{controller_cn} is still running. Please '
                     'terminate the controller cluster first.'
@@ -179,7 +179,11 @@ def _validate_consolidation_mode_config(
 def is_consolidation_mode() -> bool:
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-    _validate_consolidation_mode_config(consolidation_mode)
+    # We should only do this check on API server, as the controller will not
+    # have related config and will always seemingly disabled for consolidation
+    # mode. Check #6611 for more details.
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        _validate_consolidation_mode_config(consolidation_mode)
     return consolidation_mode
 
 
@@ -333,6 +337,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             if handle is not None:
                 try:
                     if pool is None:
+                        global_user_state.add_cluster_event(
+                            cluster_name, None, 'Cluster was cleaned up.',
+                            global_user_state.ClusterEventType.STATUS_CHANGE)
                         terminate_cluster(cluster_name)
                 except Exception as e:  # pylint: disable=broad-except
                     error_msg = (

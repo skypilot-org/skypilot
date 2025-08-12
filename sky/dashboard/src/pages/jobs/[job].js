@@ -3,7 +3,7 @@ import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
-import { useSingleManagedJob } from '@/data/connectors/jobs';
+import { useSingleManagedJob, getPoolStatus } from '@/data/connectors/jobs';
 import Link from 'next/link';
 import {
   RotateCwIcon,
@@ -15,6 +15,7 @@ import {
 import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
+  renderPoolLink,
 } from '@/components/utils';
 import { LogFilter, formatLogs, stripAnsiCodes } from '@/components/utils';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
@@ -25,12 +26,14 @@ import { NonCapitalizedTooltip } from '@/components/utils';
 import { formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
+import dashboardCache from '@/lib/cache';
 
 function JobDetails() {
   const router = useRouter();
   const { job: jobId, tab } = router.query;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { jobData, loading } = useSingleManagedJob(jobId, refreshTrigger);
+  const [poolsData, setPoolsData] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
@@ -47,6 +50,20 @@ function JobDetails() {
       setIsInitialLoad(false);
     }
   }, [loading, isInitialLoad]);
+
+  // Fetch pools data for hash comparison
+  useEffect(() => {
+    async function fetchPoolsData() {
+      try {
+        const poolsResponse = await dashboardCache.get(getPoolStatus, [{}]);
+        setPoolsData(poolsResponse.pools || []);
+      } catch (error) {
+        console.error('Error fetching pools data:', error);
+        setPoolsData([]);
+      }
+    }
+    fetchPoolsData();
+  }, []);
 
   // Function to scroll to a specific section
   const scrollToSection = (sectionId) => {
@@ -216,6 +233,7 @@ function JobDetails() {
                     isLoadingLogs={isLoadingLogs}
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={0}
+                    poolsData={poolsData}
                   />
                 </div>
               </Card>
@@ -256,6 +274,7 @@ function JobDetails() {
                     isLoadingLogs={isLoadingLogs}
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={refreshLogsFlag}
+                    poolsData={poolsData}
                   />
                 </div>
               </Card>
@@ -296,6 +315,7 @@ function JobDetails() {
                     isLoadingLogs={isLoadingLogs}
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={refreshControllerLogsFlag}
+                    poolsData={poolsData}
                   />
                 </div>
               </Card>
@@ -319,6 +339,7 @@ function JobDetailsContent({
   isLoadingLogs,
   isLoadingControllerLogs,
   refreshFlag,
+  poolsData,
 }) {
   // Change from array to string for better performance
   const [logs, setLogs] = useState('');
@@ -1088,6 +1109,13 @@ function JobDetailsContent({
           ) : (
             <span className="text-gray-400">-</span>
           )}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-gray-600 font-medium text-base">Worker Pool</div>
+        <div className="text-base mt-1">
+          {renderPoolLink(jobData.pool, jobData.pool_hash, poolsData)}
         </div>
       </div>
 
