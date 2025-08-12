@@ -187,6 +187,9 @@ def _validate_consolidation_mode_config(
 # Use LRU Cache so that the check is only done once.
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
+    if os.environ.get(constants.ENV_VAR_IS_JOB_CONTROLLER) is not None:
+        return True
+
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
     # We should only do this check on API server, as the controller will not

@@ -301,7 +301,9 @@ def is_consolidation_mode(pool: bool = False) -> bool:
     # mode. Check #6611 for more details.
     if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         _validate_consolidation_mode_config(consolidation_mode, pool)
-    return consolidation_mode
+        return consolidation_mode
+    else:
+        return True
 
 
 def ha_recovery_for_consolidation_mode(pool: bool):

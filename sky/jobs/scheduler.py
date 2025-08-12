@@ -122,6 +122,7 @@ def start_controller() -> None:
 
     This requires that the env file is already set up.
     """
+    os.environ[constants.ENV_VAR_IS_JOB_CONTROLLER] = 'true'
     logs_dir = os.path.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)

@@ -41,6 +41,7 @@ from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
@@ -870,20 +871,17 @@ class Controller:
                            job_id: int,
                            dag_yaml: str,
                            job_logger: logging.Logger,
+                           log_file: str,
                            env_file_path: Optional[str] = None,
                            pool: Optional[str] = None):
         """Background task that runs the job loop."""
-        # Initialize context for this job to provide environment isolation
-        context.initialize()
-
         # Replace os.environ with ContextualEnviron to enable per-job
         # environment isolation. This allows each job to have its own
         # environment variables without affecting other jobs or the main
         # process.
-        original_environ = os.environ
-        os.environ = context.ContextualEnviron(original_environ)  # type: ignore
-        sys.stdout = context.Stdout()  # type: ignore
-        sys.stderr = context.Stderr()  # type: ignore
+        context.initialize()
+        ctx = context.get()
+        ctx.redirect_log(log_file)  # type: ignore
 
         # Load and apply environment variables from the job's environment file
         if env_file_path and os.path.exists(env_file_path):
@@ -1010,9 +1008,6 @@ class Controller:
                 if job_id in self.job_tasks:
                     del self.job_tasks[job_id]
 
-            # Restore original os.environ to avoid affecting other jobs
-            os.environ = original_environ
-
     async def start_job(
         self,
         job_id: int,
@@ -1051,9 +1046,11 @@ class Controller:
         job_logger.info(f'Starting job {job_id} with dag_yaml={dag_yaml}, '
                         f'env_file_path={env_file_path}')
 
+        async with self._job_tasks_lock:
+            self.starting.add(job_id)
         await create_background_task(
-            self.run_job_loop(job_id, dag_yaml, job_logger, env_file_path,
-                              pool))
+            self.run_job_loop(job_id, dag_yaml, job_logger, log_file,
+                              env_file_path, pool))
 
         job_logger.info(f'Job {job_id} started successfully')
 
@@ -1155,6 +1152,8 @@ class Controller:
 
 
 async def main():
+    context_utils.hijack_sys_attrs()
+
     controller = Controller()
 
     # Will happen multiple times, who cares though
