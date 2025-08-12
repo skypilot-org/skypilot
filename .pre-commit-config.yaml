@@ -21,10 +21,7 @@ repos:
     # First isort command
     -   id: isort
         name: isort (general)
-        args:
-          - "--sg=build/**"  # Matches "${ISORT_YAPF_EXCLUDES[@]}"
-          - "--sg=sky/skylet/providers/ibm/**"
-          - "--sg=sky/schemas/generated/**"
+        exclude: "(build/.*|sky/skylet/providers/ibm/.*|sky/schemas/generated/.*)"  # Matches "${ISORT_YAPF_EXCLUDES[@]}"
     # Second isort command
     -   id: isort
         name: isort (IBM specific)
