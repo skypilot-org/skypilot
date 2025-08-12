@@ -324,6 +324,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 status_code=401,
                 content={'detail': 'Service account authentication disabled'})
 
+        now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+
         try:
             # Import here to avoid circular imports
             # pylint: disable=import-outside-toplevel
@@ -344,6 +346,12 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             user_id = payload.get('sub')
             user_name = payload.get('name')
             token_id = payload.get('token_id')
+            expires_at = payload.get('exp')
+            if expires_at and now > expires_at:
+                logger.warning(f'Service account token {token_id} has expired')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={'detail': 'Service account token has expired'})
 
             if not user_id or not token_id:
                 logger.warning(
@@ -370,6 +378,16 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     status_code=401,
                     content={
                         'detail': 'Service account token no longer exists'
+                    })
+
+            token_hash = hashlib.sha256(sa_token.encode()).hexdigest()
+            if token_hash != token_info['token_hash']:
+                logger.warning(
+                    f'Service account token {token_id} has been rotated')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={
+                        'detail': 'Service account token has been rotated'
                     })
 
             # Update last used timestamp for token tracking

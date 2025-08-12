@@ -1,5 +1,7 @@
 """Tests for Bearer token middleware."""
 
+import datetime
+import hashlib
 import os
 import unittest.mock as mock
 
@@ -139,13 +141,11 @@ class TestBearerTokenMiddleware:
             'token_id': 'token_123'
         }
 
-        mock_service_account_token = mock.Mock()
-        mock_service_account_token.id = 'token_123'
-        mock_service_account_token.user_id = 'sa-123456'
-        mock_service_account_token.name = 'test-service-account'
-
         mock_user_info = mock.Mock()
         mock_user_info.name = 'test-service-account'
+
+        # token_info must include token_hash matching the provided token
+        expected_hash = hashlib.sha256('sky_valid_token'.encode()).hexdigest()
 
         with mock.patch.dict(
                 os.environ,
@@ -153,12 +153,14 @@ class TestBearerTokenMiddleware:
                 mock.patch('sky.users.token_service.token_service') as mock_token_service, \
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
                 mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used, \
-                mock.patch('sky.users.server.global_user_state.get_service_account_token') as mock_get_service_account_token, \
+                mock.patch('sky.server.server.global_user_state.get_service_account_token') as mock_get_service_account_token, \
                 mock.patch('sky.server.auth.authn.override_user_info_in_request_body') as mock_override_user_info:
 
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
-            mock_get_service_account_token.return_value = mock_service_account_token
+            mock_get_service_account_token.return_value = {
+                'token_hash': expected_hash
+            }
 
             response = await middleware.dispatch(request, mock_call_next)
 
@@ -292,13 +294,10 @@ class TestBearerTokenMiddleware:
             'token_id': 'token_123'
         }
 
-        mock_service_account_token = mock.Mock()
-        mock_service_account_token.id = 'token_123'
-        mock_service_account_token.user_id = 'sa-123456'
-        mock_service_account_token.name = 'test-service-account'
-
         mock_user_info = mock.Mock()
         mock_user_info.name = 'test-service-account'
+
+        expected_hash = hashlib.sha256('sky_valid_token'.encode()).hexdigest()
 
         with mock.patch.dict(
                 os.environ,
@@ -312,7 +311,9 @@ class TestBearerTokenMiddleware:
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
             mock_update_last_used.side_effect = Exception("Database error")
-            mock_get_service_account_token.return_value = mock_service_account_token
+            mock_get_service_account_token.return_value = {
+                'token_hash': expected_hash
+            }
 
             response = await middleware.dispatch(request, mock_call_next)
 
@@ -357,13 +358,10 @@ class TestBearerTokenMiddleware:
             'token_id': 'token_123'
         }
 
-        mock_service_account_token = mock.Mock()
-        mock_service_account_token.id = 'token_123'
-        mock_service_account_token.user_id = 'sa-123456'
-        mock_service_account_token.name = 'test-service-account'
-
         mock_user_info = mock.Mock()
         mock_user_info.name = 'test-service-account'
+
+        expected_hash = hashlib.sha256('sky_test_token'.encode()).hexdigest()
 
         with mock.patch.dict(
                 os.environ,
@@ -376,9 +374,79 @@ class TestBearerTokenMiddleware:
 
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
-            mock_get_service_account_token.return_value = mock_service_account_token
+            mock_get_service_account_token.return_value = {
+                'token_hash': expected_hash
+            }
 
             response = await middleware.dispatch(request, mock_call_next)
 
             assert response.status_code == 200
             assert request.state.auth_user.id == 'sa-123456'
+
+    @pytest.mark.asyncio
+    async def test_service_account_token_expired(self, middleware,
+                                                 mock_call_next):
+        """Test middleware returns 401 when token is expired (exp < now)."""
+        request = mock.Mock(spec=fastapi.Request)
+        request.headers = {'authorization': 'Bearer sky_expired_token'}
+
+        now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123',
+            'exp': now - 10,  # expired 10 seconds ago
+        }
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service:
+
+            mock_token_service.verify_token.return_value = mock_payload
+
+            response = await middleware.dispatch(request, mock_call_next)
+
+            assert response.status_code == 401
+            assert "Service account token has expired" in response.body.decode()
+
+    @pytest.mark.asyncio
+    async def test_service_account_token_rotated(self, middleware,
+                                                 mock_call_next):
+        """Test middleware returns 401 when token hash mismatch (rotated)."""
+        request = mock.Mock(spec=fastapi.Request)
+        # Provided token
+        token_value = 'sky_valid_token'
+        request.headers = {'authorization': f'Bearer {token_value}'}
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123',
+        }
+
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        # Wrong hash to simulate rotation
+        wrong_hash = hashlib.sha256('different_token'.encode()).hexdigest()
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_user') as mock_get_user, \
+                mock.patch('sky.server.server.global_user_state.get_service_account_token') as mock_get_service_account_token:
+
+            mock_token_service.verify_token.return_value = mock_payload
+            mock_get_user.return_value = mock_user_info
+            mock_get_service_account_token.return_value = {
+                'token_hash': wrong_hash
+            }
+
+            response = await middleware.dispatch(request, mock_call_next)
+
+            assert response.status_code == 401
+            assert "Service account token has been rotated" in response.body.decode(
+            )
