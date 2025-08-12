@@ -24,6 +24,7 @@ repos:
         args:
           - "--sg=build/**"  # Matches "${ISORT_YAPF_EXCLUDES[@]}"
           - "--sg=sky/skylet/providers/ibm/**"
+          - "--sg=sky/schemas/generated/**"
     # Second isort command
     -   id: isort
         name: isort (IBM specific)
@@ -58,7 +59,7 @@ repos:
     hooks:
     -   id: yapf
         name: yapf
-        exclude: (sky/skylet/providers/ibm/.*)  # Matches exclusions from the script
+        exclude: (sky/skylet/providers/ibm/.*|sky/schemas/generated/.*)  # Matches exclusions from the script
         args: ['--recursive', '--parallel', '--in-place']  # Only necessary flags
         additional_dependencies: [toml==0.10.2] # Match the version from requirements
 
@@ -74,4 +75,4 @@ repos:
             - --rcfile=.pylintrc  # Use your custom pylint configuration
             - --load-plugins=pylint_quotes  # Load the pylint-quotes plugin
         files: ^sky/  # Only include files from the 'sky/' directory
-        exclude: (^sky/skylet/providers/ibm/|.*_pb2.*\.py$|.*_pb2.*\.pyi$)
+        exclude: (^sky/skylet/providers/ibm/|^sky/schemas/generated/)

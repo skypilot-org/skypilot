@@ -1,0 +1,60 @@
+name: protobuf-check
+
+on:
+  # Trigger the workflow on push or pull request,
+  # but only for the main branch
+  push:
+    branches:
+      - master
+      - 'releases/**'
+  pull_request:
+    branches:
+      - master
+      - 'releases/**'
+  merge_group:
+
+jobs:
+  compile-protos-check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8"]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install the latest version of uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        uv venv --seed ~/test-env
+        source ~/test-env/bin/activate
+        uv pip install grpcio-tools==1.63.0
+        uv pip install grpcio==1.63.0
+        uv pip install protobuf==5.26.1
+    - name: Compile .proto files
+      run: |
+        source ~/test-env/bin/activate
+        python -m grpc_tools.protoc \
+          --proto_path=sky/schemas/generated=sky/schemas/proto \
+          --python_out=. \
+          --grpc_python_out=. \
+          --pyi_out=. \
+          sky/schemas/proto/*.proto
+    - name: Check for diff
+      run: |
+        if ! git diff --quiet sky/schemas/generated/; then
+          echo "Protobuf generated files are out of date!"
+          echo "Please regenerate them by running:"
+          echo "python -m grpc_tools.protoc \\"
+          echo "  --proto_path=sky/schemas/generated=sky/schemas/proto \\"
+          echo "  --python_out=. \\"
+          echo "  --grpc_python_out=. \\"
+          echo "  --pyi_out=. \\"
+          echo "  sky/schemas/proto/*.proto"
+          echo ""
+          echo "Differences found:"
+          git diff sky/schemas/generated/
+          exit 1
+        fi
