@@ -19,13 +19,13 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
     ) -> autostopv1_pb2.SetAutostopResponse:
         """Sets autostop configuration for the cluster."""
         try:
+            wait_for = autostop_lib.AutostopWaitFor.from_protobuf(
+                request.wait_for)
             autostop_lib.set_autostop(
                 idle_minutes=request.idle_minutes,
                 backend=request.backend,
-                wait_for=autostop_lib.AutostopWaitFor.from_protobuf(
-                    request.wait_for) if
-                request.wait_for != autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED
-                else autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                wait_for=wait_for if wait_for is not None else
+                autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
                 down=request.down)
             return autostopv1_pb2.SetAutostopResponse()
         except Exception as e:  # pylint: disable=broad-except

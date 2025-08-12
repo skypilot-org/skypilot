@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import time
 import typing
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -81,34 +81,33 @@ jobs or SSH connections."""
 
     @classmethod
     def from_protobuf(
-            cls, protobuf_value: autostopv1_pb2.AutostopWaitFor
-    ) -> 'AutostopWaitFor':
+        cls, protobuf_value: autostopv1_pb2.AutostopWaitFor
+    ) -> Optional['AutostopWaitFor']:
         """Convert protobuf AutostopWaitFor enum to Python enum value."""
-        mapping = {
+        protobuf_to_enum = {
             autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS_AND_SSH: cls.JOBS_AND_SSH,
             autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS: cls.JOBS,
             autostopv1_pb2.AUTOSTOP_WAIT_FOR_NONE: cls.NONE,
+            autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED: None,
         }
-
-        if protobuf_value not in mapping:
-            raise ValueError(
-                f'Unknown protobuf AutostopWaitFor value: {protobuf_value}')
-
-        return mapping[protobuf_value]
+        if protobuf_value not in protobuf_to_enum:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Unknown protobuf AutostopWaitFor value: {protobuf_value}')
+        return protobuf_to_enum[protobuf_value]
 
     def to_protobuf(self) -> autostopv1_pb2.AutostopWaitFor:
         """Convert this Python enum value to protobuf enum value."""
-        mapping: Dict[AutostopWaitFor, autostopv1_pb2.AutostopWaitFor] = {
+        enum_to_protobuf = {
             AutostopWaitFor.JOBS_AND_SSH:
                 autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS_AND_SSH,
             AutostopWaitFor.JOBS: autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS,
             AutostopWaitFor.NONE: autostopv1_pb2.AUTOSTOP_WAIT_FOR_NONE,
         }
-
-        if self not in mapping:
-            raise ValueError(f'Unknown AutostopWaitFor value: {self}')
-
-        return mapping[self]
+        if self not in enum_to_protobuf:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unknown AutostopWaitFor value: {self}')
+        return enum_to_protobuf[self]
 
 
 DEFAULT_AUTOSTOP_WAIT_FOR: AutostopWaitFor = AutostopWaitFor.JOBS_AND_SSH
