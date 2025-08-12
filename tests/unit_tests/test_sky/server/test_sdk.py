@@ -93,7 +93,7 @@ def test_api_info():
             mock_server_healthy.return_value = None
             response = client_sdk.api_info()
             assert response is not None
-            assert response["status"] == "healthy"
+            assert response["status"] == server_common.ApiServerStatus.HEALTHY
             assert response["api_version"] == "1"
             assert response["commit"] is not None
             assert response["version"] is not None
@@ -120,7 +120,7 @@ def test_api_info_with_cookie_file(set_api_cookie_jar):
             mock_server_healthy.return_value = None
             response = client_sdk.api_info()
             assert response is not None
-            assert response["status"] == "healthy"
+            assert response["status"] == server_common.ApiServerStatus.HEALTHY
             assert response["api_version"] == "1"
             assert response["commit"] is not None
             assert response["version"] is not None
