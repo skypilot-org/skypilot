@@ -141,6 +141,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
         else:
             return None
 
+
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
 

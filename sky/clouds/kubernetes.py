@@ -611,10 +611,11 @@ class Kubernetes(clouds.Cloud):
         # configure appropriate settings for different cluster types
         if (resources.network_tier is not None and
                 resources.network_tier == resources_utils.NetworkTier.BEST):
-            
+
             # Update image id
-            image_id = network_type.get_image_id()
-            if image_id:
+            network_image_id = network_type.get_image_id()
+            if network_image_id:
+                image_id = network_image_id
                 if image_id.startswith('docker:'):
                     image_id = image_id[len('docker:'):]
 
