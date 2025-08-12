@@ -294,6 +294,9 @@ def launch(
         task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
     num_jobs = num_jobs if num_jobs is not None else 1
+    # We do this assignment after applying the admin policy, so that we don't
+    # need to serialize the pool name in the dag. The dag object will be
+    # preserved. See sky/admin_policy.py::MutatedUserRequest::decode.
     dag.pool = pool
     consolidation_mode_job_ids = _maybe_submit_job_locally(
         prefix, dag, num_jobs)
