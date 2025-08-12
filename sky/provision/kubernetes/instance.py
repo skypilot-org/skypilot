@@ -1332,9 +1332,10 @@ def query_instances(
         reason = None
         if phase == 'Failed':
             reason = _get_pod_termination_reason(pod)
-            logger.info(f'Pod Status Reason(s): {reason}')
+            logger.debug(f'Pod Status Reason(s): {reason}')
         pod_name = pod.metadata.name
-        cluster_status[pod_name] = (pod_status, f'{pod_name}: {reason}')
+        reason = f'{pod_name}: {reason}' if reason is not None else None
+        cluster_status[pod_name] = (pod_status, reason)
     return cluster_status
 
 

@@ -1774,7 +1774,8 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
-    """Returns the status of the cluster.
+    """Returns the status of the cluster as a list of tuples corresponding
+    to the ClusterStatus of the node and an optional reason string.
 
     Raises:
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
@@ -1815,9 +1816,13 @@ def _query_cluster_status_via_cloud_api(
         region = provider_config.get('region') or provider_config.get(
             'location')
         zone = ray_config['provider'].get('availability_zone')
+        # TODO (kyuds): refactor cloud.query_status api to include reason.
+        # Currently not refactoring as this API is actually supposed to be
+        # deprecated soon.
         node_statuses = cloud.query_status(
             cluster_name_on_cloud,
             tag_filter_for_cluster(cluster_name_on_cloud), region, zone)
+        node_statuses = [(status, None) for status in node_statuses]
     return node_statuses
 
 

@@ -80,7 +80,8 @@ def query_instances(
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Query instances.
 
-    Returns a dictionary of instance IDs and a tuple of status and reason.
+    Returns a dictionary of instance IDs and a tuple of (status, reason for
+    being in status if any).
 
     A None status means the instance is marked as "terminated"
     or "terminating".
