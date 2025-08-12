@@ -1,7 +1,7 @@
 """SDK functions for managed jobs."""
 import json
 import typing
-from typing import List
+from typing import Any, Dict, List
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -24,8 +24,14 @@ logger = sky_logging.init_logger(__name__)
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def apply(volume: volume_lib.Volume) -> server_common.RequestId:
+def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
     """Creates or registers a volume.
+
+    Args:
+        volume: The volume to apply.
+
+    Returns:
+        The request ID of the apply request.
     """
     body = payloads.VolumeApplyBody(name=volume.name,
                                     volume_type=volume.type,
@@ -44,8 +50,12 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ls() -> server_common.RequestId:
-    """Lists all volumes."""
+def ls() -> server_common.RequestId[List[Dict[str, Any]]]:
+    """Lists all volumes.
+
+    Returns:
+        The request ID of the list request.
+    """
     response = requests.get(f'{server_common.get_server_url()}/volumes',
                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
@@ -55,8 +65,15 @@ def ls() -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def delete(names: List[str]) -> server_common.RequestId:
-    """Deletes a volume."""
+def delete(names: List[str]) -> server_common.RequestId[None]:
+    """Deletes volumes.
+
+    Args:
+        names: List of volume names to delete.
+
+    Returns:
+        The request ID of the delete request.
+    """
     body = payloads.VolumeDeleteBody(names=names)
     response = requests.post(f'{server_common.get_server_url()}/volumes/delete',
                              json=json.loads(body.model_dump_json()),

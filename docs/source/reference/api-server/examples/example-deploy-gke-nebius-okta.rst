@@ -29,7 +29,7 @@ More infra choices (AWS, Lambda Cloud, RunPod, SSH Node Pools, and more) are cov
 Prerequisites
 --------------
 
-* Okta with SkyPilot API server configured as OIDC App (see `auth proxy docs <https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#setting-up-oauth2-proxy-with-okta>`_)
+* Okta with SkyPilot API server configured as OIDC App (see `auth proxy docs <https://docs.skypilot.co/en/latest/reference/auth.html#okta-oidc-setup>`_)
 * GCP credentials with access to a GKE cluster and permissions to create VMs (`GCP service account with json key <https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html#service-account>`_)
 * Nebius credentials (`Nebius service account with json key <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_)
 * An existing `Nebius Managed Kubernetes cluster <https://docs.nebius.com/kubernetes>`_
@@ -157,7 +157,6 @@ Deploy the API server with helm:
      --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
      --set gcpCredentials.enabled=true \
      --set gcpCredentials.projectId=$GCP_PROJECT_ID \
-     --set gcpCredentials.serviceAccountJson=$GCP_SERVICE_ACCOUNT_JSON \
      --set nebiusCredentials.enabled=true \
      --set nebiusCredentials.tenantId=$NEBIUS_TENANT_ID
 

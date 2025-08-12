@@ -106,6 +106,37 @@ Similar to the CLIs, the SkyPilot SDK calls send asynchronous requests to the Sk
   sky.tail_logs(job_id)
 
 
+Async Python SDK
+~~~~~~~~~~~~~~~~~
+
+SkyPilot also provides an async SDK that automatically streams logs by default, providing a more interactive experience:
+
+.. code-block:: python
+
+  import asyncio
+  from sky.client import sdk_async as sdk
+  import sky
+
+  async def main():
+    task = sky.Task(
+        run="echo hello SkyPilot")
+    # Async functions stream logs by default and return results directly
+    job_id, handle = await sdk.launch(task, cluster_name="my-cluster")
+
+    # Get cluster status with live streaming
+    status = await sdk.status()
+
+    # Or disable streaming for simple result retrieval
+    status = await sdk.status(stream_logs=None)
+
+  asyncio.run(main())
+
+
+All async SDK functions support a ``stream_logs`` parameter:
+
+- ``stream_logs=True`` (default): Live log streaming with interactive progress
+- ``stream_logs=False``: Simple result retrieval without streaming
+
 Note that the following log functions are synchronous:
 
 - ``sky.tail_logs()``

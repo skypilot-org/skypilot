@@ -32,6 +32,9 @@ file_mounts:
   /configs: ./configs
 
 setup: |
+  conda create -n training python=3.10 -y
+  conda activate training
+
   # Download the repository configuration package
   wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
 
@@ -51,6 +54,8 @@ setup: |
 
 
 run: |
+  conda activate training
+
   MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
   echo "Starting distributed finetuning, head node: $MASTER_ADDR"
 

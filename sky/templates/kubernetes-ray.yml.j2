@@ -777,6 +777,15 @@ available_node_types:
                 {{ ray_installation_commands }}
 
                 VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                # Wait for `patch` package to be installed before applying ray patches
+                until dpkg -l | grep -q "^ii  patch "; do
+                  sleep 0.1
+                  echo "Waiting for patch package to be installed..."
+                done
+                # Apply Ray patches for progress bar fix
+                ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && { 
+                  VIRTUAL_ENV=~/skypilot-runtime python -c "from sky.skylet.ray_patches import patch; patch()" || exit 1; 
+                }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
 
@@ -1008,11 +1017,17 @@ available_node_types:
               # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
+              {% if k8s_network_type == 'coreweave' %}
+              rdma/ib: 1
+              {% endif %}
             {% if k8s_resource_key is not none %}
             limits:
               # Limits need to be defined for GPU/TPU requests
               {% if k8s_resource_key is not none %}
               {{k8s_resource_key}}: {{accelerator_count}}
+              {% endif %}
+              {% if k8s_network_type == 'coreweave' %}
+              rdma/ib: 1
               {% endif %}
             {% endif %}
           {% if k8s_ipc_lock_capability %}

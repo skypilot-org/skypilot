@@ -10,7 +10,7 @@ import copy
 from datetime import datetime
 import time
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import exceptions
 from sky import sky_logging
@@ -35,7 +35,7 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional['status_lib.ClusterStatus']]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Query instances.
 
     Returns a dictionary of instance IDs and status.
@@ -47,7 +47,8 @@ def query_instances(
     region = provider_config['region']
 
     status_map = oci_utils.oci_config.STATE_MAPPING_OCI_TO_SKY
-    statuses: Dict[str, Optional['status_lib.ClusterStatus']] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
     instances = _get_filtered_nodes(region, filters)
@@ -56,7 +57,7 @@ def query_instances(
         sky_status = status_map[vm_status]
         if non_terminated_only and sky_status is None:
             continue
-        statuses[node['inst_id']] = sky_status
+        statuses[node['inst_id']] = (sky_status, None)
 
     return statuses
 

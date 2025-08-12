@@ -19,7 +19,7 @@ docker:
     username: |-
       {{docker_login_config.username}}
     password: |-
-      {{docker_login_config.password}}
+      {{docker_login_config.password | indent(6) }}
     server: |-
       {{docker_login_config.server}}
   {%- endif %}
@@ -50,7 +50,7 @@ provider:
   disable_launch_config_check: true
 
 auth:
-  ssh_user: ubuntu
+  ssh_user: {{ssh_user}}
   ssh_private_key: {{ssh_private_key}}
 {% if ssh_proxy_command is not none %}
   ssh_proxy_command: {{ssh_proxy_command}}
@@ -131,6 +131,12 @@ available_node_types:
           - systemctl disable apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
           - systemctl mask apt-daily.service apt-daily-upgrade.service unattended-upgrades.service
           - systemctl daemon-reload
+        {%- if runcmd %}
+        runcmd:
+        {%- for cmd in runcmd %}
+          - {{cmd}}
+        {%- endfor %}
+        {%- endif %}
       TagSpecifications:
         - ResourceType: instance
           Tags:

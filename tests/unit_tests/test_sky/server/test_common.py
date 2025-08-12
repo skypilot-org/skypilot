@@ -180,6 +180,7 @@ allowed_clouds:
         client_command='test_cmd',
         using_remote_api_server=False,
         user=mock.Mock(id='test_user'),
+        request_id='dummy-request-id',
     )
     assert skypilot_config.get_nested(keys=('allowed_clouds',),
                                       default_value=None) == ['aws']
@@ -192,6 +193,7 @@ allowed_clouds:
         client_command='test_cmd',
         using_remote_api_server=False,
         user=mock.Mock(id='test_user'),
+        request_id='dummy-request-id',
     )
     assert skypilot_config.get_nested(keys=('allowed_clouds',),
                                       default_value=None) == ['gcp']
@@ -285,13 +287,27 @@ def test_cookies_set_with_no_file(monkeypatch):
 
     monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
                         lambda: temp_cookie_path)
-
-    common.set_api_cookie_jar(requests.cookies.RequestsCookieJar(),
-                              create_if_not_exists=True)
+    cookie = _create_test_cookie(name='test-cookie-2', value='test-value-2')
+    cookie_jar = requests.cookies.RequestsCookieJar()
+    cookie_jar.set_cookie(cookie)
+    common.set_api_cookie_jar(cookie_jar, create_if_not_exists=True)
 
     assert temp_cookie_path.exists()
 
     temp_cookie_dir.cleanup()
+
+
+def test_cookies_set_empty(monkeypatch):
+    """Test setting an empty cookie should be a no-op."""
+    temp_cookie_dir = tempfile.TemporaryDirectory(prefix='sky_cookies')
+    temp_cookie_path = pathlib.Path(temp_cookie_dir.name) / 'cookies.txt'
+
+    monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
+                        lambda: temp_cookie_path)
+    common.set_api_cookie_jar(requests.cookies.RequestsCookieJar(),
+                              create_if_not_exists=True)
+
+    assert not temp_cookie_path.exists()
 
 
 def test_cookies_set_with_file(monkeypatch):

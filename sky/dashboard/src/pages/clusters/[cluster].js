@@ -34,6 +34,7 @@ import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
+import { YamlHighlighter } from '@/components/YamlHighlighter';
 
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
@@ -527,7 +528,19 @@ function ActiveTab({
                     : 'N/A'}
                 </div>
               </div>
-
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Last Event
+                </div>
+                <div className="text-base mt-1">
+                  <NonCapitalizedTooltip
+                    content={clusterData.last_event || '-'}
+                    className="text-sm text-muted-foreground"
+                  >
+                    <span>{clusterData.last_event || '-'}</span>
+                  </NonCapitalizedTooltip>
+                </div>
+              </div>
               {/* Show duration and cost for historical clusters */}
               {isHistoricalCluster ? (
                 <>
@@ -648,12 +661,12 @@ function ActiveTab({
 
                           {isYamlExpanded && (
                             <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
-                              <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                              <YamlHighlighter className="whitespace-pre-wrap">
                                 {formatYaml(
                                   clusterData.task_yaml ||
                                     clusterData.last_creation_yaml
                                 )}
-                              </pre>
+                              </YamlHighlighter>
                             </div>
                           )}
                         </div>

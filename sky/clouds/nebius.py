@@ -16,7 +16,7 @@ from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 _INDENT_PREFIX = '    '
 
@@ -52,8 +52,6 @@ class Nebius(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTODOWN:
             ('Autodown not supported. Can\'t delete OS disk.'),
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot is not supported, as Nebius API does not implement spot.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
@@ -107,8 +105,6 @@ class Nebius(clouds.Cloud):
                               zone: Optional[str]) -> List[clouds.Region]:
         assert zone is None, 'Nebius does not support zones.'
         del accelerators, zone  # unused
-        if use_spot:
-            return []
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'nebius')
 
@@ -254,6 +250,7 @@ class Nebius(clouds.Cloud):
             'image_id': image_family,
             # Nebius does not support specific zones.
             'zones': None,
+            'use_spot': resources.use_spot,
             'filesystems': resources_vars_fs,
             'network_tier': resources.network_tier
         }
@@ -358,7 +355,7 @@ class Nebius(clouds.Cloud):
             f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.iam_token_path()} \n'  # pylint: disable=line-too-long
             f'{_INDENT_PREFIX} or generate  {nebius.credentials_path()} \n')
 
-        tenant_msg = (f'{_INDENT_PREFIX} Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
+        tenant_msg = (f'{_INDENT_PREFIX} Copy your tenant ID from the web console and save it to file \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long

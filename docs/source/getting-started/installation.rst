@@ -325,8 +325,9 @@ By default, the provisioned nodes will be in the root `compartment <https://docs
 .. code-block:: text
 
   oci:
-    default:
-      compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
+    region_configs:
+      default:
+        compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
 
 
 Lambda Cloud

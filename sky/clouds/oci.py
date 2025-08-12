@@ -40,7 +40,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 logger = logging.getLogger(__name__)
 

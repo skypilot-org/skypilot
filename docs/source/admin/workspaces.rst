@@ -165,6 +165,11 @@ Then, ``/monorepo/team-a/.sky.yaml`` may set:
 
 All SkyPilot CLI or API calls with ``/monorepo/team-a`` as the PWD will use the workspace ``team-a``.
 
+.. code-block:: console
+
+   $ cd /monorepo/team-a
+   $ sky launch -c training training.sky.yaml
+
 Similarly, ``/monorepo/team-b/.sky.yaml`` may set:
 
 .. code-block:: yaml
@@ -232,4 +237,4 @@ Currently, all users in an organization are allowed to use any configured
 workspace. Users can flexibly switch to a different workspace as shown above.
 
 SkyPilot supports using Okta, Google Workspace, or other SSO providers to
-authenticate users. See :ref:`here <api-server-auth-proxy>`.
+authenticate users. See :ref:`here <api-server-oauth>`.

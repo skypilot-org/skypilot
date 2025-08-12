@@ -9,6 +9,13 @@ The SkyPilot API server is packaged as a Helm chart which deploys a Kubernetes i
 
     This guide is for admins to deploy the API server. If you are a user looking to connect to the API server, refer to  :ref:`sky-api-server-connect`.
 
+.. tip::
+
+    Deploying the API server to a Kubernetes cluster using Helm provides the best reliability and enables additional features such as :ref:`OAuth2 authentication <api-server-oauth>` and :ref:`metrics <api-server-metrics-setup>`. However, there are two alternative options available for special cases:
+
+    * :ref:`Deploying the API server on cloud VMs <sky-api-server-cloud-deploy>` if you do not have a Kubernetes cluster and do not need the additional features.
+    * :ref:`Sharing an API server for multiple users on a single machine <sky-api-server-in-docker>` if you want to share the API server with multiple users on a single machine instead of exposing it to the public internet (e.g. a shared bastion machine).
+
 Prerequisites
 -------------
 
@@ -19,8 +26,6 @@ Prerequisites
 .. tip::
 
     If you do not have a Kubernetes cluster, refer to :ref:`Kubernetes Deployment Guides <kubernetes-deployment>` to set one up.
-
-    You can also deploy the API server on cloud VMs using an existing SkyPilot installation. See :ref:`sky-api-server-cloud-deploy`.
 
 .. _sky-api-server-helm-deploy-command:
 
@@ -66,7 +71,7 @@ Install the SkyPilot Helm chart with the following command:
 
     For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 
-The above command will install a SkyPilot API server and ingress-nginx controller in the given namespace, which by default conflicts with other installations. To deploy multiple API servers, refer to :ref:`Reusing ingress-nginx controller for API server <sky-api-server-helm-multiple-deploy>`.
+The above command will install a SkyPilot API server and ingress-nginx controller in the given namespace, which by default conflicts with other installations. To deploy multiple API servers, refer to :ref:`Reusing ingress-nginx controller for API server <sky-api-server-helm-multiple-deploy>`. To use a different ingress controller, refer to :ref:`sky-api-server-custom-ingress`
 
 .. tip::
 
@@ -80,16 +85,14 @@ After the API server is deployed, you can inspect the API server pod status with
 
 You should see the pod is initializing and finally becomes running and ready. If not, refer to :ref:`sky-api-server-troubleshooting-helm` to diagnose the issue.
 
-The API server above is deployed with a basic auth provided by Nginx. To use advanced OAuth2 authentication, refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>`.
+The API server above is deployed with a basic auth provided by Nginx. To use advanced OAuth2 authentication, refer to :ref:`Using OAuth for API server <api-server-oauth>`.
 
 .. _sky-get-api-server-url:
 
 Step 2: Get the API server URL
 ------------------------------
 
-Once the API server is deployed, we can fetch the API server URL. We use nginx ingress to expose the API server.
-
-Our default of using a NodePort service is the recommended way to expose the API server because some cloud load balancers (e.g., GKE) do not work with websocket connections, which are required for our Kubernetes SSH tunneling.
+Once the API server is deployed, we can fetch the API server URL. The chart uses nginx ingress to expose the API server and exposes the ingress to internet using a LoadBalancer service by default. If you are using a Kubernetes cluster without LoadBalancer support, you can use the NodePort option below instead.
 
 .. tab-set::
 
@@ -124,6 +127,7 @@ Our default of using a NodePort service is the recommended way to expose the API
         .. code-block:: bash
 
             $ helm upgrade --namespace $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --reuse-values \
               --set ingress-nginx.controller.service.type=NodePort \
               --set ingress-nginx.controller.service.nodePorts.http=30050 \
               --set ingress-nginx.controller.service.nodePorts.https=30051
@@ -440,6 +444,43 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set nebiusCredentials.enabled=true \
                     --set nebiusCredentials.nebiusSecretName=your_secret_name
 
+    .. tab-item:: Vast
+        :sync: vast-creds-tab
+
+        SkyPilot API server uses an **API key** to authenticate with Vast. To configure Vast access, go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console and get your **API key**.
+
+        Once the key is obtained, create a Kubernetes secret to store it:
+
+        .. code-block:: bash
+
+            kubectl create secret generic vast-credentials \
+              --namespace $NAMESPACE \
+              --from-literal api_key=YOUR_API_KEY
+
+        When installing or upgrading the Helm chart, enable Vast credentials by setting ``vastCredentials.enabled=true``
+
+        .. code-block:: bash
+
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set vastCredentials.enabled=true
+
+        .. dropdown:: Use existing Vast credentials
+
+            You can also set the following values to use a secret that already contains your Vast credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set vastCredentials.enabled=true \
+                    --set vastCredentials.vastSecretName=your_secret_name
+
+
     .. tab-item:: SSH Node Pools
         :sync: ssh-node-pools-tab
 
@@ -515,12 +556,12 @@ Following tabs describe how to configure credentials for different clouds on the
         Support for configuring other clouds through secrets is coming soon!
 
 
-Optional: Set up OAuth2 proxy
------------------------------
+Optional: Set up OAuth
+----------------------
 
-In addition to basic HTTP authentication, SkyPilot also supports using an OAuth2 proxy to securely authenticate users.
+In addition to basic HTTP authentication, SkyPilot also supports using OAuth2 to securely authenticate users.
 
-Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
+Refer to :ref:`Setup OAuth for SkyPilot API Server <api-server-oauth>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth-okta>` or Google Workspace.
 
 .. _api-server-persistence-db:
 
@@ -537,35 +578,18 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
 
 .. dropdown:: Configure PostgreSQL with Helm deployment during the first deployment
 
-    **Option 1: Set the DB connection URI via config**
+    **Option 1: Set the DB connection URI in helm values**
 
-    Set ``db: postgresql://<username>:<password>@<host>:<port>/<database>`` in the API server's ``config.yaml`` file.
-    To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
+    Set :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` to ``postgresql://<username>:<password>@<host>:<port>/<database>`` in the helm values:
 
 
     .. code-block:: bash
 
-        # Create the config.yaml file
-        cat <<EOF > config.yaml
-        db: postgresql://<username>:<password>@<host>:<port>/<database>
-        EOF
-
-        # Install the API server with the config file
         # --reuse-values keeps the Helm chart values set in the previous step
         helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \
-        --set-file apiService.config=config.yaml
-
-    You can also directly set this config value in the ``values.yaml`` file, e.g.:
-
-    .. code-block:: yaml
-
-        apiService:
-          config: |
-            db: postgresql://<username>:<password>@<host>:<port>/<database>
-
-    See :ref:`here <config-yaml-db>` for more details on the ``db`` setting.
+        --set apiService.dbConnectionString=postgresql://<username>:<password>@<host>:<port>/<database>
 
     **Option 2: Set the DB connection URI via Kubernetes secret**
 
@@ -598,11 +622,7 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
 
     .. note::
 
-        Once ``db`` is specified in the config, no other SkyPilot configuration
-        parameter can be specified in the helm chart.  This is because, with
-        the ``db`` setting, other configurations are now persistently saved in
-        the database instead. To set any other SkyPilot configuration, see
-        :ref:`sky-api-server-config`.
+        Once :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` is specified, no other SkyPilot configuration can be specified in the helm chart. That is, :ref:`apiService.config <helm-values-apiService-config>` must be ``null``. To set any other SkyPilot configuration, see :ref:`sky-api-server-config`.
 
 .. _sky-api-server-config:
 
@@ -718,9 +738,9 @@ To uninstall the API server, run:
 
 .. code-block:: bash
 
-    helm uninstall $RELEASE_NAME --namespace $NAMESPACE
+    helm uninstall $RELEASE_NAME --namespace $NAMESPACE --wait
 
-This will delete the API server and all associated resources.
+This will delete the API server and all associated resources. ``--wait`` ensures that all the resources of SkyPilot API server are deleted before the command returns.
 
 
 Other notes
@@ -941,6 +961,28 @@ The same approach also applies when you have a ingress-nginx controller deployed
 
 It is a good practice to specify a unique :ref:`ingress.path <helm-values-ingress-path>` too in this case, to avoid conflicts with other backends hosted on the same ingress controller.
 
+.. _sky-api-server-custom-ingress:
+
+Use custom ingress controller
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, the SkyPilot helm chart will deploy a new ingress-nginx controller when installing the API server. However, you can use a custom ingress controller by disabling the creation of nginx ingress controller and setting :ref:`ingress.ingressClassName <helm-values-ingress-ingressclassname>` to the ingress class name of your controller. In addition, most of the ingress controllers support customizing behavior by setting annotations on the ingress resource. You can set :ref:`ingress.annotations <helm-values-ingress-annotations>` in the helm values to pass annotations to the ingress resource. Here is an example of using a custom ingress controller:
+
+.. code-block:: bash
+
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+        --namespace $NAMESPACE \
+        --reuse-values \
+        --set ingress-nginx.enabled=false \
+        --set ingress.ingressClassName=custom-ingress-class \
+        --set ingress.annotations.custom-ingress-annotation=custom-ingress-annotation-value
+
+.. note::
+
+    .. TODO(aylei): document service account token based authentication and proxy auth for custom ingress controllers.
+
+    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` is only supported when using ingress-nginx controller. Consider using :ref:`OAuth2 <api-server-oauth>` to protect your API server instead.
+
 
 .. _sky-api-server-cloud-deploy:
 
@@ -1013,3 +1055,5 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
     GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>
+    Example: Deploy SkyPilot API Server in Docker <examples/api-server-in-docker>
+    Example: Deploy on GKE with Cloud SQL <examples/example-deploy-gcp-cloud-sql>

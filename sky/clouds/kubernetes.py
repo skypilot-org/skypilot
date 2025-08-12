@@ -29,7 +29,7 @@ from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
-from sky.volumes import volume as volume_lib
+from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -84,8 +84,8 @@ class Kubernetes(clouds.Cloud):
             ('Customized multiple network interfaces are not supported in '
              'Kubernetes.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
-            ('Custom network tier is currently not supported in '
-             f'{_REPR}.'),
+            ('Custom network tier is not supported in this Kubernetes '
+             'cluster.'),
     }
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
@@ -547,7 +547,8 @@ class Kubernetes(clouds.Cloud):
                 tpu_requested = True
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
             else:
-                k8s_resource_key = kubernetes_utils.get_gpu_resource_key()
+                k8s_resource_key = kubernetes_utils.get_gpu_resource_key(
+                    context)
         else:
             # If no GPUs are requested, we set NVIDIA_VISIBLE_DEVICES=none to
             # maintain GPU isolation. This is to override the default behavior
@@ -616,12 +617,9 @@ class Kubernetes(clouds.Cloud):
             if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
                     not in unsupported_features:
                 # Add high-performance networking environment variables for
-                # Nebius (GCP environment variables are handled directly in
-                # the template)
-                if (network_type == KubernetesHighPerformanceNetworkType.NEBIUS
-                   ):
-                    network_env_vars = network_type.get_network_env_vars()
-                    k8s_env_vars.update(network_env_vars)
+                # clusters with high performance networking
+                network_env_vars = network_type.get_network_env_vars()
+                k8s_env_vars.update(network_env_vars)
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -736,13 +734,15 @@ class Kubernetes(clouds.Cloud):
                 (constants.PERSISTENT_RUN_SCRIPT_DIR),
             'k8s_high_availability_restarting_signal_file':
                 (constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE),
-            'ha_recovery_log_path': constants.HA_PERSISTENT_RECOVERY_LOG_PATH,
+            'ha_recovery_log_path':
+                constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(''),
             'sky_python_cmd': constants.SKY_PYTHON_CMD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
             'k8s_enable_flex_start': enable_flex_start,
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
+            'k8s_network_type': network_type.value,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
@@ -819,6 +819,10 @@ class Kubernetes(clouds.Cloud):
             assert len(accelerators) == 1, resources
             # GPUs requested - build instance type.
             acc_type, acc_count = list(accelerators.items())[0]
+            # If acc_type contains spaces, return empty list since Kubernetes
+            # does not support spaces in label values
+            if ' ' in acc_type:
+                return resources_utils.FeasibleResources([], [], None)
 
             # Parse into KubernetesInstanceType
             k8s_instance_type = (kubernetes_utils.KubernetesInstanceType.
@@ -1094,6 +1098,10 @@ class Kubernetes(clouds.Cloud):
                         if label_key.startswith('nebius.com/'):
                             return (KubernetesHighPerformanceNetworkType.NEBIUS,
                                     '')
+                        if label_key.startswith('ib.coreweave.cloud/'):
+                            return (
+                                KubernetesHighPerformanceNetworkType.COREWEAVE,
+                                '')
 
                     # Check for GKE clusters with specific GPUDirect variants
                     machine_family = node.metadata.labels.get(

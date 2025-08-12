@@ -10,7 +10,7 @@ from sky.skylet import constants
 # /api/logs, /api/cancel, etc.
 _block_requests = False
 
-# The UUID generated on server instance startup.
+# UUID of current API server instance, set by external orchestration system.
 _host_uuid: str = os.environ.get(constants.APISERVER_UUID_ENV_VAR, '')
 
 

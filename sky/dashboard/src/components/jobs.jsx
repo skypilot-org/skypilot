@@ -17,17 +17,21 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { formatDuration, REFRESH_INTERVAL } from '@/components/utils';
-import { getManagedJobs } from '@/data/connectors/jobs';
+import {
+  formatDuration,
+  REFRESH_INTERVAL,
+  JobStatusBadges as SharedJobStatusBadges,
+  InfraBadges as SharedInfraBadges,
+  renderPoolLink,
+} from '@/components/utils';
+import { UI_CONFIG } from '@/lib/config';
+import { getManagedJobs, getPoolStatus } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
-import { Layout } from '@/components/elements/layout';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
-  relativeTime,
-  formatDateTime,
   TimestampWithTooltip,
 } from '@/components/utils';
 import {
@@ -35,6 +39,8 @@ import {
   RotateCwIcon,
   MonitorPlay,
   RefreshCcw,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
@@ -51,6 +57,13 @@ import {
 } from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
+import {
+  FilterDropdown,
+  Filters,
+  filterData,
+  updateURLParams as sharedUpdateURLParams,
+  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+} from '@/components/shared/FilterSystem';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -73,11 +86,25 @@ export const statusGroups = {
   ],
 };
 
-// Define constant for "All Workspaces" like in clusters.jsx
-const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__';
-
-// Define constant for "All Users"
-const ALL_USERS_VALUE = '__ALL_USERS__';
+// Define filter options for the filter dropdown
+const PROPERTY_OPTIONS = [
+  {
+    label: 'Name',
+    value: 'name',
+  },
+  {
+    label: 'User',
+    value: 'user',
+  },
+  {
+    label: 'Workspace',
+    value: 'workspace',
+  },
+  {
+    label: 'Pool',
+    value: 'pool',
+  },
+];
 
 // Helper function to filter jobs by name
 export function filterJobsByName(jobs, nameFilter) {
@@ -97,7 +124,7 @@ export function filterJobsByName(jobs, nameFilter) {
 // Helper function to filter jobs by workspace
 export function filterJobsByWorkspace(jobs, workspaceFilter) {
   // If no workspace filter or set to "All Workspaces", return all jobs
-  if (!workspaceFilter || workspaceFilter === ALL_WORKSPACES_VALUE) {
+  if (!workspaceFilter || workspaceFilter === 'ALL_WORKSPACES') {
     return jobs;
   }
 
@@ -111,7 +138,7 @@ export function filterJobsByWorkspace(jobs, workspaceFilter) {
 // Helper function to filter jobs by user
 export function filterJobsByUser(jobs, userFilter) {
   // If no user filter or set to "All Users", return all jobs
-  if (!userFilter || userFilter === ALL_USERS_VALUE) {
+  if (!userFilter || userFilter === 'ALL_USERS') {
     return jobs;
   }
 
@@ -119,6 +146,21 @@ export function filterJobsByUser(jobs, userFilter) {
   return jobs.filter((job) => {
     const jobUserId = job.user_hash || job.user;
     return jobUserId === userFilter;
+  });
+}
+
+// Helper function to filter jobs by pool
+export function filterJobsByPool(jobs, poolFilter) {
+  // If no pool filter, return all jobs
+  if (!poolFilter || poolFilter.trim() === '') {
+    return jobs;
+  }
+
+  // Filter jobs by the pool filter (case-insensitive partial match)
+  const filterLower = poolFilter.toLowerCase().trim();
+  return jobs.filter((job) => {
+    const jobPool = job.pool || '';
+    return jobPool.toLowerCase().includes(filterLower);
   });
 }
 
@@ -242,7 +284,12 @@ function shortenTimeForJobs(timeString) {
 export function ManagedJobs() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const refreshDataRef = React.useRef(null);
+  const [poolsLoading, setPoolsLoading] = useState(true); // Start as true for initial load
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const jobsRefreshRef = React.useRef(null);
+  const poolsRefreshRef = React.useRef(null);
+  const [jobsData, setJobsData] = useState([]);
+  const [poolsData, setPoolsData] = useState([]);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -250,186 +297,107 @@ export function ManagedJobs() {
     onConfirm: null,
   });
   const isMobile = useMobile();
-  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
-  const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
-  const [nameFilter, setNameFilter] = useState('');
-  const [workspaces, setWorkspaces] = useState([]);
-  const [users, setUsers] = useState([]);
+  const [filters, setFilters] = useState([]);
+  const [optionValues, setOptionValues] = useState({
+    name: [],
+    user: [],
+    workspace: [],
+    pool: [],
+  }); // Option values for properties
 
-  // Handle URL query parameters for workspace and user filtering
+  const fetchData = async (isRefreshButton = false) => {
+    setLoading(true);
+    // Only set poolsLoading on initial load, not on refresh button clicks
+    if (!isRefreshButton && isInitialLoad) {
+      setPoolsLoading(true);
+    }
+    try {
+      const [jobsResponse, poolsResponse] = await Promise.all([
+        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+        dashboardCache.get(getPoolStatus, [{}]),
+      ]);
+      setJobsData(jobsResponse.jobs || []);
+      setPoolsData(poolsResponse.pools || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+      if (!isRefreshButton && isInitialLoad) {
+        setPoolsLoading(false);
+        setIsInitialLoad(false);
+      }
+    }
+  };
+
   useEffect(() => {
-    if (router.isReady) {
-      if (router.query.workspace) {
-        const workspaceParam = Array.isArray(router.query.workspace)
-          ? router.query.workspace[0]
-          : router.query.workspace;
-        setWorkspaceFilter(workspaceParam);
-      }
-      if (router.query.user) {
-        const userParam = Array.isArray(router.query.user)
-          ? router.query.user[0]
-          : router.query.user;
-        setUserFilter(userParam);
-      }
-      if (router.query.name) {
-        const nameParam = Array.isArray(router.query.name)
-          ? router.query.name[0]
-          : router.query.name;
-        setNameFilter(nameParam);
-      }
-    }
-  }, [
-    router.isReady,
-    router.query.workspace,
-    router.query.user,
-    router.query.name,
-  ]);
-
-  // Helper function to update URL query parameters
-  const updateURLParams = (newWorkspace, newUser, newName) => {
-    const query = { ...router.query };
-
-    // Update workspace parameter
-    if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
-      query.workspace = newWorkspace;
-    } else {
-      delete query.workspace;
-    }
-
-    // Update user parameter
-    if (newUser && newUser !== ALL_USERS_VALUE) {
-      query.user = newUser;
-    } else {
-      delete query.user;
-    }
-
-    // Update name parameter
-    if (newName && newName.trim() !== '') {
-      query.name = newName.trim();
-    } else {
-      delete query.name;
-    }
-
-    // Use replace to avoid adding to browser history for filter changes
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
-
-  // Handle workspace filter change
-  const handleWorkspaceFilterChange = (newWorkspace) => {
-    setWorkspaceFilter(newWorkspace);
-    updateURLParams(newWorkspace, userFilter, nameFilter);
-  };
-
-  // Handle user filter change
-  const handleUserFilterChange = (newUser) => {
-    setUserFilter(newUser);
-    updateURLParams(workspaceFilter, newUser, nameFilter);
-  };
-
-  // Handle name filter change
-  const handleNameFilterChange = (newName) => {
-    setNameFilter(newName);
-    updateURLParams(workspaceFilter, userFilter, newName);
-  };
-
-  // Fetch workspaces and users for filter dropdown
-  useEffect(() => {
-    const fetchFilterData = async () => {
-      try {
-        // Trigger cache preloading for jobs page and background preload other pages
-        await cachePreloader.preloadForPage('jobs');
-
-        // Fetch configured workspaces for the filter dropdown
-        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
-        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
-
-        // Fetch all jobs to see if 'default' workspace is implicitly used
-        const jobsResponse = await dashboardCache.get(getManagedJobs, [
-          { allUsers: true },
-        ]);
-        const allJobs = jobsResponse.jobs || [];
-        const uniqueJobWorkspaces = [
-          ...new Set(
-            allJobs.map((job) => job.workspace || 'default').filter((ws) => ws)
-          ),
-        ];
-
-        // Combine configured workspaces with any actively used workspaces
-        const finalWorkspaces = new Set(configuredWorkspaceNames);
-        uniqueJobWorkspaces.forEach((wsName) => finalWorkspaces.add(wsName));
-
-        setWorkspaces(Array.from(finalWorkspaces).sort());
-
-        // Fetch users for the filter dropdown
-        const fetchedUsers = await dashboardCache.get(getUsers);
-        const uniqueJobUsers = [
-          ...new Set(
-            allJobs
-              .map((job) => ({
-                userId: job.user_hash || job.user,
-                username: job.user,
-              }))
-              .filter((user) => user.userId)
-          ).values(),
-        ];
-
-        // Combine fetched users with unique job users
-        const finalUsers = new Map();
-
-        // Add fetched users first
-        fetchedUsers.forEach((user) => {
-          finalUsers.set(user.userId, {
-            userId: user.userId,
-            username: user.username,
-            display: formatUserDisplay(user.username, user.userId),
-          });
-        });
-
-        // Add any job users not in the fetched list
-        uniqueJobUsers.forEach((user) => {
-          if (!finalUsers.has(user.userId)) {
-            finalUsers.set(user.userId, {
-              userId: user.userId,
-              username: user.username,
-              display: formatUserDisplay(user.username, user.userId),
-            });
-          }
-        });
-
-        setUsers(
-          Array.from(finalUsers.values()).sort((a, b) =>
-            a.display.localeCompare(b.display)
-          )
-        );
-      } catch (error) {
-        console.error('Error fetching data for filters:', error);
-        setWorkspaces(['default']); // Fallback or error state
-        setUsers([]); // Fallback or error state
-      }
-    };
-    fetchFilterData();
+    fetchData();
   }, []);
 
   const handleRefresh = () => {
-    // Invalidate cache to ensure fresh data is fetched
+    // Invalidate cache to ensure fresh data is fetched for both jobs and pools
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getPoolStatus, [{}]);
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
 
-    if (refreshDataRef.current) {
-      refreshDataRef.current();
+    // Refresh parent component data (including poolsData for link matching)
+    fetchData(true); // Pass true to indicate it's a refresh button click
+
+    // Trigger a re-fetch in both tables via their refreshDataRef
+    if (jobsRefreshRef.current) {
+      jobsRefreshRef.current();
+    }
+    if (poolsRefreshRef.current) {
+      poolsRefreshRef.current();
+    }
+  };
+
+  // Helper function to update URL query parameters
+  const updateURLParams = (filters) => {
+    sharedUpdateURLParams(router, filters);
+  };
+
+  const updateFiltersByURLParams = React.useCallback(() => {
+    const propertyMap = new Map();
+    propertyMap.set('', '');
+    propertyMap.set('status', 'Status');
+    propertyMap.set('name', 'Name');
+    propertyMap.set('user', 'User');
+    propertyMap.set('workspace', 'Workspace');
+    propertyMap.set('pool', 'Pool');
+
+    const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
+    setFilters(urlFilters);
+  }, [router, setFilters]);
+
+  // Handle URL query parameters for tab selection and filters
+  useEffect(() => {
+    if (router.isReady) {
+      updateFiltersByURLParams();
+    }
+  }, [router.isReady, router.query.tab, updateFiltersByURLParams]);
+
+  const handleJobAction = async (jobId, action) => {
+    try {
+      setConfirmationModal({
+        isOpen: true,
+        title: `${action.charAt(0).toUpperCase() + action.slice(1)} Job`,
+        message: `Are you sure you want to ${action} job ${jobId}?`,
+        onConfirm: async () => {
+          await handleJobAction(jobId, action);
+          if (jobsRefreshRef.current) {
+            jobsRefreshRef.current();
+          }
+        },
+      });
+    } catch (error) {
+      console.error(`Error ${action}ing job:`, error);
     }
   };
 
   return (
     <>
+      {/* Jobs section */}
       <div className="flex flex-wrap items-center gap-2 mb-1">
         <div className="text-base">
           <Link
@@ -439,109 +407,42 @@ export function ManagedJobs() {
             Managed Jobs
           </Link>
         </div>
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Filter by job name"
-            value={nameFilter}
-            onChange={(e) => handleNameFilterChange(e.target.value)}
-            className="h-8 w-40 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+        <div className="w-full sm:w-auto">
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={optionValues}
+            setFilters={setFilters}
+            updateURLParams={updateURLParams}
+            placeholder="Filter jobs"
           />
-          {nameFilter && (
-            <button
-              onClick={() => handleNameFilterChange('')}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              title="Clear filter"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          )}
-        </div>
-        <Select
-          value={workspaceFilter}
-          onValueChange={handleWorkspaceFilterChange}
-        >
-          <SelectTrigger className="h-8 w-36 sm:w-48 text-sm border-none focus:ring-0 focus:outline-none">
-            <SelectValue placeholder="Filter by workspace...">
-              {workspaceFilter === ALL_WORKSPACES_VALUE
-                ? 'All Workspaces'
-                : workspaceFilter}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_WORKSPACES_VALUE}>All Workspaces</SelectItem>
-            {workspaces.map((ws) => (
-              <SelectItem key={ws} value={ws}>
-                {ws}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={userFilter} onValueChange={handleUserFilterChange}>
-          <SelectTrigger className="h-8 w-32 sm:w-48 text-sm border-none focus:ring-0 focus:outline-none">
-            <SelectValue placeholder="Filter by user...">
-              {userFilter === ALL_USERS_VALUE
-                ? 'All Users'
-                : users.find((u) => u.userId === userFilter)?.display ||
-                  userFilter}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
-            {users.map((user) => (
-              <SelectItem key={user.userId} value={user.userId}>
-                {user.display}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="flex items-center gap-2 ml-auto">
-          {loading && (
-            <div className="flex items-center">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-            title="Refresh"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
         </div>
       </div>
+
+      <Filters
+        filters={filters}
+        setFilters={setFilters}
+        updateURLParams={updateURLParams}
+      />
+
       <ManagedJobsTable
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
-        refreshDataRef={refreshDataRef}
-        workspaceFilter={workspaceFilter}
-        userFilter={userFilter}
-        nameFilter={nameFilter}
+        refreshDataRef={jobsRefreshRef}
+        filters={filters}
+        setOptionValues={setOptionValues}
+        onRefresh={handleRefresh}
+        poolsData={poolsData}
+        poolsLoading={poolsLoading}
       />
-      <ConfirmationModal
-        isOpen={confirmationModal.isOpen}
-        onClose={() =>
-          setConfirmationModal({ ...confirmationModal, isOpen: false })
-        }
-        onConfirm={confirmationModal.onConfirm}
-        title={confirmationModal.title}
-        message={confirmationModal.message}
-      />
+
+      {/* Pools table - always visible */}
+      <div className="mb-4">
+        <PoolsTable
+          refreshInterval={REFRESH_INTERVAL}
+          setLoading={setLoading}
+          refreshDataRef={poolsRefreshRef}
+        />
+      </div>
     </>
   );
 }
@@ -550,9 +451,11 @@ export function ManagedJobsTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
-  workspaceFilter,
-  userFilter,
-  nameFilter,
+  filters,
+  setOptionValues,
+  onRefresh,
+  poolsData,
+  poolsLoading,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -633,6 +536,7 @@ export function ManagedJobsTable({
       }
 
       setData(jobs);
+      setOptionValues(fetchOptionValuesFromJobs(jobs));
       setControllerStopped(isControllerStopped);
       setIsInitialLoad(false);
     } catch (err) {
@@ -645,7 +549,7 @@ export function ManagedJobsTable({
       setLocalLoading(false);
       setLoading(false); // Clear parent loading state
     }
-  }, [setLoading]);
+  }, [setLoading, setOptionValues]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -728,16 +632,39 @@ export function ManagedJobsTable({
     return statusGroups[activeTab].includes(status);
   };
 
-  // Filter data based on selected statuses and active tab
+  // Helper function to extract option values from jobs data
+  const fetchOptionValuesFromJobs = (jobs) => {
+    let optionValues = {
+      status: [],
+      name: [],
+      user: [],
+      workspace: [],
+      pool: [],
+    };
+
+    const pushWithoutDuplication = (array, item) => {
+      if (array.includes(item)) return;
+      array.push(item);
+    };
+
+    jobs.map((job) => {
+      pushWithoutDuplication(optionValues.status, job.status);
+      pushWithoutDuplication(optionValues.name, job.name);
+      pushWithoutDuplication(optionValues.user, job.user);
+      pushWithoutDuplication(
+        optionValues.workspace,
+        job.workspace || 'default'
+      );
+      pushWithoutDuplication(optionValues.pool, job.pool);
+    });
+
+    return optionValues;
+  };
+
+  // Filter data based on filters and selected statuses
   const filteredData = React.useMemo(() => {
-    // First apply workspace filter
-    let filtered = filterJobsByWorkspace(data, workspaceFilter);
-
-    // Then apply user filter
-    filtered = filterJobsByUser(filtered, userFilter);
-
-    // Then apply name filter
-    filtered = filterJobsByName(filtered, nameFilter);
+    // First apply shared filters
+    let filtered = filterData(data, filters);
 
     // If specific statuses are selected, show jobs with any of those statuses
     if (selectedStatuses.length > 0) {
@@ -757,15 +684,7 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [
-    data,
-    activeTab,
-    selectedStatuses,
-    showAllMode,
-    workspaceFilter,
-    userFilter,
-    nameFilter,
-  ]);
+  }, [data, filters, activeTab, selectedStatuses, showAllMode]); // Removed poolFilter from dependency array
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -842,84 +761,111 @@ export function ManagedJobsTable({
     <div className="relative">
       <div className="flex flex-col space-y-1 mb-1">
         {/* Combined Status Filter */}
-        <div className="flex flex-wrap items-center text-sm mb-1">
-          <span className="mr-2 text-sm font-medium">Statuses:</span>
-          <div className="flex flex-wrap gap-2 items-center">
-            {!loading && (!data || data.length === 0) && !isInitialLoad && (
-              <span className="text-gray-500 mr-2">No jobs found</span>
-            )}
-            {Object.entries(statusCounts).map(([status, count]) => (
-              <button
-                key={status}
-                onClick={() => handleStatusClick(status)}
-                className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
-                  isStatusHighlighted(status) ||
-                  selectedStatuses.includes(status)
-                    ? getBadgeStyle(status)
-                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <span>{status}</span>
-                <span
-                  className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                >
-                  {count}
-                </span>
-              </button>
-            ))}
-            {data && data.length > 0 && (
-              <div className="flex items-center ml-2 gap-2">
-                <span className="text-gray-500">(</span>
+        <div className="flex flex-wrap items-center justify-between text-sm mb-1">
+          <div className="flex flex-wrap items-center">
+            <span className="mr-2 text-sm font-medium">Statuses:</span>
+            <div className="flex flex-wrap gap-2 items-center">
+              {!loading && (!data || data.length === 0) && !isInitialLoad && (
+                <span className="text-gray-500 mr-2">No jobs found</span>
+              )}
+              {Object.entries(statusCounts).map(([status, count]) => (
                 <button
-                  onClick={() => {
-                    // When showing all jobs, clear all selected statuses
-                    setActiveTab('all');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'all' && showAllMode
-                      ? 'text-purple-700 underline'
-                      : 'text-gray-600 hover:text-purple-700 hover:underline'
+                  key={status}
+                  onClick={() => handleStatusClick(status)}
+                  className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
+                    isStatusHighlighted(status) ||
+                    selectedStatuses.includes(status)
+                      ? getBadgeStyle(status)
+                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                   }`}
                 >
-                  show all jobs
+                  <span>{status}</span>
+                  <span
+                    className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                  >
+                    {count}
+                  </span>
                 </button>
-                <span className="text-gray-500 mx-1">|</span>
-                <button
-                  onClick={() => {
-                    // When showing all active jobs, clear all selected statuses
-                    setActiveTab('active');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'active' && showAllMode
-                      ? 'text-green-700 underline'
-                      : 'text-gray-600 hover:text-green-700 hover:underline'
-                  }`}
-                >
-                  show all active jobs
-                </button>
-                <span className="text-gray-500 mx-1">|</span>
-                <button
-                  onClick={() => {
-                    // When showing all finished jobs, clear all selected statuses
-                    setActiveTab('finished');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'finished' && showAllMode
-                      ? 'text-blue-700 underline'
-                      : 'text-gray-600 hover:text-blue-700 hover:underline'
-                  }`}
-                >
-                  show all finished jobs
-                </button>
-                <span className="text-gray-500">)</span>
+              ))}
+              {data && data.length > 0 && (
+                <div className="flex items-center ml-2 gap-2">
+                  <span className="text-gray-500">(</span>
+                  <button
+                    onClick={() => {
+                      // When showing all jobs, clear all selected statuses
+                      setActiveTab('all');
+                      setSelectedStatuses([]);
+                      setShowAllMode(true);
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'all' && showAllMode
+                        ? 'text-purple-700 underline'
+                        : 'text-gray-600 hover:text-purple-700 hover:underline'
+                    }`}
+                  >
+                    show all jobs
+                  </button>
+                  <span className="text-gray-500 mx-1">|</span>
+                  <button
+                    onClick={() => {
+                      // When showing all active jobs, clear all selected statuses
+                      setActiveTab('active');
+                      setSelectedStatuses([]);
+                      setShowAllMode(true);
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'active' && showAllMode
+                        ? 'text-green-700 underline'
+                        : 'text-gray-600 hover:text-green-700 hover:underline'
+                    }`}
+                  >
+                    show all active jobs
+                  </button>
+                  <span className="text-gray-500 mx-1">|</span>
+                  <button
+                    onClick={() => {
+                      // When showing all finished jobs, clear all selected statuses
+                      setActiveTab('finished');
+                      setSelectedStatuses([]);
+                      setShowAllMode(true);
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'finished' && showAllMode
+                        ? 'text-blue-700 underline'
+                        : 'text-gray-600 hover:text-blue-700 hover:underline'
+                    }`}
+                  >
+                    show all finished jobs
+                  </button>
+                  <span className="text-gray-500">)</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {loading && (
+              <div className="flex items-center">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
               </div>
             )}
+            <button
+              onClick={() => {
+                // Call the refresh function passed from parent
+                if (onRefresh) {
+                  onRefresh();
+                }
+                // Also call the local refresh function to ensure loading state is set
+                if (refreshDataRef && refreshDataRef.current) {
+                  refreshDataRef.current();
+                }
+              }}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              <span>Refresh</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1031,12 +977,19 @@ export function ManagedJobsTable({
                 >
                   Recoveries{getSortDirection('recoveries')}
                 </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('pool')}
+                >
+                  Worker Pool{getSortDirection('pool')}
+                </TableHead>
+
                 <TableHead>Details</TableHead>
                 <TableHead>Logs</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading || isInitialLoad ? (
+              {loading && isInitialLoad ? (
                 <TableRow>
                   <TableCell
                     colSpan={12}
@@ -1110,9 +1063,29 @@ export function ManagedJobsTable({
                                 {item.infra.includes('(') && (
                                   <span>
                                     {' ' +
-                                      item.infra.substring(
-                                        item.infra.indexOf('(')
-                                      )}
+                                      (() => {
+                                        const NAME_TRUNCATE_LENGTH =
+                                          UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                                        const fullRegionPart =
+                                          item.infra.substring(
+                                            item.infra.indexOf('(')
+                                          );
+                                        const regionContent =
+                                          fullRegionPart.substring(
+                                            1,
+                                            fullRegionPart.length - 1
+                                          );
+
+                                        if (
+                                          regionContent.length <=
+                                          NAME_TRUNCATE_LENGTH
+                                        ) {
+                                          return fullRegionPart;
+                                        }
+
+                                        const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                                        return `(${truncatedRegion})`;
+                                      })()}
                                   </span>
                                 )}
                               </span>
@@ -1132,6 +1105,23 @@ export function ManagedJobsTable({
                           </NonCapitalizedTooltip>
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>
+                        <TableCell>
+                          <div
+                            className={
+                              poolsLoading
+                                ? 'blur-sm transition-all duration-300'
+                                : ''
+                            }
+                          >
+                            {poolsLoading
+                              ? '-'
+                              : renderPoolLink(
+                                  item.pool,
+                                  item.pool_hash,
+                                  poolsData
+                                )}
+                          </div>
+                        </TableCell>
                         <TableCell>
                           {item.details ? (
                             <TruncatedDetails
@@ -1155,7 +1145,7 @@ export function ManagedJobsTable({
                       {expandedRowId === item.id && (
                         <ExpandedDetailsRow
                           text={item.details}
-                          colSpan={12}
+                          colSpan={13}
                           innerRef={expandedRowRef}
                         />
                       )}
@@ -1164,7 +1154,7 @@ export function ManagedJobsTable({
                 </>
               ) : (
                 <TableRow>
-                  <TableCell colSpan={12} className="text-center py-6">
+                  <TableCell colSpan={13} className="text-center py-6">
                     <div className="flex flex-col items-center space-y-4">
                       {controllerLaunching && (
                         <div className="flex flex-col items-center space-y-2">
@@ -1218,94 +1208,100 @@ export function ManagedJobsTable({
         </div>
       </Card>
 
-      {/* Pagination controls */}
-      {sortedData && sortedData.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center">
-              <span className="mr-2">Rows per page:</span>
-              <div className="relative inline-block">
-                <select
-                  value={pageSize}
-                  onChange={handlePageSizeChange}
-                  className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-                  style={{ minWidth: '40px' }}
-                >
-                  <option value={10}>10</option>
-                  <option value={30}>30</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={200}>200</option>
-                </select>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </div>
-            </div>
-            <div>
-              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
-              {sortedData.length}
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToPreviousPage}
-                disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
+      {/* Pagination controls - always show for visual separation */}
+      <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center">
+            <span className="mr-2">Rows per page:</span>
+            <div className="relative inline-block">
+              <select
+                value={pageSize}
+                onChange={handlePageSizeChange}
+                className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
+                style={{ minWidth: '40px' }}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
+                <option value={10}>10</option>
+                <option value={30}>30</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+              </select>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className="chevron-left"
-                >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToNextPage}
-                disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-right"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </Button>
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
             </div>
           </div>
+          <div>
+            {sortedData && sortedData.length > 0
+              ? `${startIndex + 1} – ${Math.min(endIndex, sortedData.length)} of ${sortedData.length}`
+              : '0 – 0 of 0'}
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={goToPreviousPage}
+              disabled={
+                currentPage === 1 || !sortedData || sortedData.length === 0
+              }
+              className="text-gray-500 h-8 w-8 p-0"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="chevron-left"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={goToNextPage}
+              disabled={
+                currentPage === totalPages ||
+                totalPages === 0 ||
+                !sortedData ||
+                sortedData.length === 0
+              }
+              className="text-gray-500 h-8 w-8 p-0"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="chevron-right"
+              >
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </Button>
+          </div>
         </div>
-      )}
+      </div>
 
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -1415,7 +1411,7 @@ export function ClusterJobs({
     let filtered = clusterJobData || [];
 
     // Apply user filter if provided
-    if (userFilter && userFilter !== ALL_USERS_VALUE) {
+    if (userFilter && userFilter !== 'ALL_USERS') {
       filtered = filterJobsByUser(filtered, userFilter);
     }
 
@@ -1794,5 +1790,257 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
         </button>
       )}
     </div>
+  );
+}
+
+function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
+  const [data, setData] = useState([]);
+  const [sortConfig, setSortConfig] = useState({
+    key: null,
+    direction: 'ascending',
+  });
+  const [loading, setLocalLoading] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const fetchData = React.useCallback(async () => {
+    setLocalLoading(true);
+    setLoading(true);
+    try {
+      const poolsResponse = await dashboardCache.get(getPoolStatus, [{}]);
+      const { pools = [] } = poolsResponse || {};
+      setData(pools);
+      setIsInitialLoad(false);
+    } catch (err) {
+      console.error('Error fetching pools data:', err);
+      setData([]);
+      setIsInitialLoad(false);
+    } finally {
+      setLocalLoading(false);
+      setLoading(false);
+    }
+  }, [setLoading]);
+
+  // Expose fetchData to parent component
+  React.useEffect(() => {
+    if (refreshDataRef) {
+      refreshDataRef.current = fetchData;
+    }
+  }, [refreshDataRef, fetchData]);
+
+  useEffect(() => {
+    setData([]);
+    let isCurrent = true;
+
+    fetchData();
+
+    const interval = setInterval(() => {
+      if (isCurrent) {
+        fetchData();
+      }
+    }, refreshInterval);
+
+    return () => {
+      isCurrent = false;
+      clearInterval(interval);
+    };
+  }, [refreshInterval, fetchData]);
+
+  const requestSort = (key) => {
+    let direction = 'ascending';
+    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+      direction = 'descending';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortDirection = (key) => {
+    if (sortConfig.key === key) {
+      return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
+    }
+    return '';
+  };
+
+  // Sort the data
+  const sortedData = React.useMemo(() => {
+    if (!sortConfig.key) return data;
+
+    return [...data].sort((a, b) => {
+      if (a[sortConfig.key] < b[sortConfig.key]) {
+        return sortConfig.direction === 'ascending' ? -1 : 1;
+      }
+      if (a[sortConfig.key] > b[sortConfig.key]) {
+        return sortConfig.direction === 'ascending' ? 1 : -1;
+      }
+      return 0;
+    });
+  }, [data, sortConfig]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(sortedData.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const paginatedData = sortedData.slice(startIndex, endIndex);
+
+  // Page navigation handlers
+  const goToPreviousPage = () => {
+    setCurrentPage((page) => Math.max(page - 1, 1));
+  };
+
+  const goToNextPage = () => {
+    setCurrentPage((page) => Math.min(page + 1, totalPages));
+  };
+
+  const handlePageSizeChange = (e) => {
+    const newSize = parseInt(e.target.value, 10);
+    setPageSize(newSize);
+    setCurrentPage(1);
+  };
+
+  const getWorkersCount = (pool) => {
+    if (!pool || !pool.replica_info || pool.replica_info.length === 0)
+      return '0 (target: 0)';
+
+    const readyWorkers = pool.replica_info.filter(
+      (worker) => worker.status === 'READY'
+    ).length;
+    const targetWorkers = pool.target_num_replicas || 0;
+    return `${readyWorkers} (target: ${targetWorkers})`;
+  };
+
+  const JobStatusBadges = ({ jobCounts }) => {
+    return (
+      <SharedJobStatusBadges
+        jobCounts={jobCounts}
+        getStatusStyle={getStatusStyle}
+      />
+    );
+  };
+
+  const InfraBadges = ({ replicaInfo }) => {
+    return <SharedInfraBadges replicaInfo={replicaInfo} />;
+  };
+
+  return (
+    <Card>
+      <div className="overflow-x-auto rounded-lg">
+        <Table className="min-w-full table-fixed">
+          <TableHeader>
+            <TableRow>
+              <TableHead
+                className="sortable whitespace-nowrap w-32"
+                onClick={() => requestSort('name')}
+              >
+                Pool{getSortDirection('name')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-40"
+                onClick={() => requestSort('job_counts')}
+              >
+                Jobs{getSortDirection('job_counts')}
+              </TableHead>
+              <TableHead className="whitespace-nowrap w-20">Workers</TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-36"
+                onClick={() => requestSort('requested_resources_str')}
+              >
+                Worker Details{getSortDirection('requested_resources_str')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-40"
+                onClick={() => requestSort('requested_resources_str')}
+              >
+                Worker Resources{getSortDirection('requested_resources_str')}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading && isInitialLoad ? (
+              <TableRow>
+                <TableCell
+                  colSpan={5}
+                  className="text-center py-6 text-gray-500"
+                >
+                  <div className="flex justify-center items-center">
+                    <CircularProgress size={20} className="mr-2" />
+                    <span>Loading...</span>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : paginatedData.length > 0 ? (
+              paginatedData.map((pool) => (
+                <TableRow key={pool.name}>
+                  <TableCell>
+                    <Link
+                      href={`/jobs/pools/${pool.name}`}
+                      className="text-blue-600 hover:text-blue-800"
+                    >
+                      {pool.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <JobStatusBadges jobCounts={pool.jobCounts} />
+                  </TableCell>
+                  <TableCell>{getWorkersCount(pool)}</TableCell>
+                  <TableCell>
+                    <InfraBadges replicaInfo={pool.replica_info} />
+                  </TableCell>
+                  <TableCell>{pool.requested_resources_str || '-'}</TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell
+                  colSpan={5}
+                  className="text-center py-6 text-gray-500"
+                >
+                  No pools found
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Pagination */}
+      {paginatedData.length > 0 && totalPages > 1 && (
+        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-700">Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={handlePageSizeChange}
+              className="border border-gray-300 rounded px-2 py-1 text-sm"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-700">
+              {startIndex + 1}-{Math.min(endIndex, sortedData.length)} of{' '}
+              {sortedData.length}
+            </span>
+            <button
+              onClick={goToPreviousPage}
+              disabled={currentPage === 1}
+              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={goToNextPage}
+              disabled={currentPage === totalPages}
+              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

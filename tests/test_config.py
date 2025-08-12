@@ -958,8 +958,99 @@ def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
     assert contexts[1] == 'contextB'
 
 
-def test_nebius_region_configs(monkeypatch, tmp_path) -> None:
-    """Test that nested per-region nebius config works"""
+def test_kubernetes_context_configs_mutation(monkeypatch, tmp_path) -> None:
+    """Test that the nested config works when part of the config is mutated."""
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    with open(tmp_path / 'context_configs.yaml', 'w', encoding='utf-8') as f:
+        f.write(f"""\
+        kubernetes:
+            custom_metadata:
+                labels:
+                    global_label: global_value
+            context_configs:
+                contextA:
+                    custom_metadata:
+                        labels:
+                            contextA_label: contextA_value
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'context_configs.yaml')
+    skypilot_config.reload_config()
+
+    # test custom_metadata property
+    context_a_custom_metadata = skypilot_config.get_effective_region_config(
+        cloud='kubernetes', region='contextA', keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value',
+            'contextA_label': 'contextA_value'
+        }
+    }
+
+    # mutate per-context config and check if it's updated
+    context_a_custom_labels = skypilot_config.get_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), {})
+    context_a_custom_labels['contextA_label'] = 'contextA_value_updated'
+    mutated_config = skypilot_config.set_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), context_a_custom_labels)
+
+    context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=mutated_config,
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value',
+            'contextA_label': 'contextA_value_updated'
+        }
+    }
+
+    # mutate global config and check if it's updated
+    global_custom_labels = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'labels'), {})
+    global_custom_labels['global_label'] = 'global_value_updated'
+    mutated_config = skypilot_config.set_nested(
+        ('kubernetes', 'custom_metadata', 'labels'), global_custom_labels)
+    context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=mutated_config,
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value_updated',
+            'contextA_label': 'contextA_value'
+        }
+    }
+
+    # mutate label defined by global config in per-context config
+    context_a_custom_labels = skypilot_config.get_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), {})
+    context_a_custom_labels['global_label'] = 'global_value_contextA_specific'
+    mutated_config = skypilot_config.set_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), context_a_custom_labels)
+    context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=mutated_config,
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value_contextA_specific',
+            'contextA_label': 'contextA_value'
+        }
+    }
+
+
+def test_standardized_region_configs(monkeypatch, tmp_path) -> None:
+    """Test that nested per-region standardized config works
+
+    Current clouds: Nebius, OCI"""
     from sky.provision.kubernetes import utils as kubernetes_utils
     with open(tmp_path / 'region_configs.yaml', 'w', encoding='utf-8') as f:
         f.write(f"""\
@@ -981,12 +1072,21 @@ def test_nebius_region_configs(monkeypatch, tmp_path) -> None:
                         - filesystem_id: computefilesystem-e00ccccc02dddddddd
                           mount_path: /mnt/fsnew2
                           attach_mode: READ_ONLY
+
+        oci:
+            region_configs:
+                default:
+                    vcn_ocid: vcn_ocid_default
+                    vcn_subnet: vcn_subnet_default
+                ap-seoul-1:
+                    vcn_ocid: vcn_ocid1
+                    vcn_subnet: vcn_subnet1
         """)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'region_configs.yaml')
     skypilot_config.reload_config()
 
-    # test project_id property
+    # nebius: test project_id property
     eu_n1_proj = skypilot_config.get_effective_region_config(
         cloud='nebius', region='eu-north1', keys=('project_id',))
     assert eu_n1_proj == 'project-e00'
@@ -994,7 +1094,7 @@ def test_nebius_region_configs(monkeypatch, tmp_path) -> None:
         cloud='nebius', region='eu-west1', keys=('project_id',))
     assert eu_w1_proj == 'project-e01'
 
-    # test fabric property
+    # nebius: test fabric property
     eu_n1_fabric = skypilot_config.get_effective_region_config(
         cloud='nebius', region='eu-north1', keys=('fabric',))
     assert eu_n1_fabric == 'fabric-3'
@@ -1002,7 +1102,7 @@ def test_nebius_region_configs(monkeypatch, tmp_path) -> None:
         cloud='nebius', region='eu-west1', keys=('fabric',))
     assert eu_w1_fabric == 'fabric-5'
 
-    # test use_internal_ips property
+    # nebius: test use_internal_ips property
     eu_n1_ip = skypilot_config.get_effective_region_config(
         cloud='nebius', region='eu-north1', keys=('use_internal_ips',))
     assert eu_n1_ip == True
@@ -1013,13 +1113,13 @@ def test_nebius_region_configs(monkeypatch, tmp_path) -> None:
         cloud='nebius', region=None, keys=('use_internal_ips',))
     assert generic == True
 
-    # test ssh_proxy_command defaults
+    # nebius: test ssh_proxy_command defaults
     ssh_proxy = skypilot_config.get_effective_region_config(
         cloud='nebius', region=None, keys=('ssh_proxy_command',))
     assert ssh_proxy['eu-north1'] == 'ssh -W %h:%p user@host'
     assert 'eu-west1' not in ssh_proxy
 
-    # test filesystems
+    # nebius: test filesystems
     no_filesystem = skypilot_config.get_effective_region_config(
         cloud='nebius',
         region='eu-north1',
@@ -1034,8 +1134,29 @@ def test_nebius_region_configs(monkeypatch, tmp_path) -> None:
         default_value=[])
     assert len(filesystems) == 2
 
+    # oci: test general
+    vcn_ocid = skypilot_config.get_effective_region_config(cloud='oci',
+                                                           region='default',
+                                                           keys=('vcn_ocid',),
+                                                           default_value=None)
+    assert vcn_ocid == 'vcn_ocid_default'
 
-def test_nebius_region_configs_back_compat(monkeypatch, tmp_path) -> None:
+    vcn_ocid = skypilot_config.get_effective_region_config(cloud='oci',
+                                                           region='ap-seoul-1',
+                                                           keys=('vcn_ocid',),
+                                                           default_value=None)
+    assert vcn_ocid == 'vcn_ocid1'
+
+    vcn_ocid = skypilot_config.get_effective_region_config(
+        cloud='oci',
+        region='not_valid_region',
+        keys=('vcn_ocid',),
+        default_value=None)
+    assert vcn_ocid is None
+
+
+# TODO (kyuds): remove after 0.11.0
+def test_standardized_region_configs_back_compat(monkeypatch, tmp_path) -> None:
     """Test that nested per-region nebius config works with legacy yaml"""
     from sky.provision.kubernetes import utils as kubernetes_utils
     with open(tmp_path / 'region_configs.yaml', 'w', encoding='utf-8') as f:
@@ -1057,6 +1178,14 @@ def test_nebius_region_configs_back_compat(monkeypatch, tmp_path) -> None:
                     - filesystem_id: computefilesystem-e00ccccc02dddddddd
                       mount_path: /mnt/fsnew2
                       attach_mode: READ_ONLY
+
+        oci:
+            default:
+                vcn_ocid: vcn_ocid_default
+                vcn_subnet: vcn_subnet_default
+            ap-seoul-1:
+                vcn_ocid: vcn_ocid1
+                vcn_subnet: vcn_subnet1
         """)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'region_configs.yaml')
@@ -1109,3 +1238,23 @@ def test_nebius_region_configs_back_compat(monkeypatch, tmp_path) -> None:
         keys=('filesystems',),
         default_value=[])
     assert len(filesystems) == 2
+
+    # oci: test general
+    vcn_ocid = skypilot_config.get_effective_region_config(cloud='oci',
+                                                           region='default',
+                                                           keys=('vcn_ocid',),
+                                                           default_value=None)
+    assert vcn_ocid == 'vcn_ocid_default'
+
+    vcn_ocid = skypilot_config.get_effective_region_config(cloud='oci',
+                                                           region='ap-seoul-1',
+                                                           keys=('vcn_ocid',),
+                                                           default_value=None)
+    assert vcn_ocid == 'vcn_ocid1'
+
+    vcn_ocid = skypilot_config.get_effective_region_config(
+        cloud='oci',
+        region='not_valid_region',
+        keys=('vcn_ocid',),
+        default_value=None)
+    assert vcn_ocid is None

@@ -68,7 +68,9 @@ def test_get_kubernetes_node_info():
                    return_value=[mock_node_1, mock_node_2]), \
          mock.patch('sky.provision.kubernetes.utils.'
                    'get_all_pods_in_kubernetes_cluster',
-                   return_value=[mock_pod_1, mock_pod_2]):
+                   return_value=[mock_pod_1, mock_pod_2]), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                    return_value='nvidia.com/gpu'):
         node_info = utils.get_kubernetes_node_info()
         assert isinstance(node_info, models.KubernetesNodesInfo)
         assert len(node_info.node_info_dict) == 2
@@ -350,10 +352,90 @@ def test_heterogenous_gpu_detection_key_counts():
          mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource', return_value=True), \
          mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter', return_value=[utils.GKELabelFormatter(), None]), \
          mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes', return_value=[mock_node1, mock_node2]), \
-         mock.patch('sky.provision.kubernetes.utils.get_all_pods_in_kubernetes_cluster', return_value=[mock_pod1, mock_pod2]):
+         mock.patch('sky.provision.kubernetes.utils.get_all_pods_in_kubernetes_cluster', return_value=[mock_pod1, mock_pod2]), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key', return_value='nvidia.com/gpu'):
 
         counts, capacity, available = kubernetes_catalog.list_accelerators_realtime(
             True, None, None, None)
         assert (set(counts.keys()) == set(capacity.keys()) == set(available.keys())), \
             (f'Keys of counts ({list(counts.keys())}), capacity ({list(capacity.keys())}), '
              f'and available ({list(available.keys())}) must be the same.')
+
+
+def test_low_priority_pod_filtering():
+    """Tests that low priority pods (e.g., CoreWeave HPC verification) are excluded from GPU allocation calculations."""
+    # Mock node with 8 GPUs
+    mock_node = mock.MagicMock()
+    mock_node.metadata.name = 'gpu-node'
+    mock_node.metadata.labels = {
+        'skypilot.co/accelerator': 'h100-80gb',
+        'cloud.google.com/gke-accelerator-count': '8'
+    }
+    mock_node.status.allocatable = {'nvidia.com/gpu': '8'}
+    mock_node.status.addresses = [
+        mock.MagicMock(type='InternalIP', address='10.0.0.1')
+    ]
+
+    # Mock regular pod requesting 2 GPUs
+    mock_regular_pod = mock.MagicMock()
+    mock_regular_pod.spec.node_name = 'gpu-node'
+    mock_regular_pod.status.phase = 'Running'
+    mock_regular_pod.metadata.name = 'regular-workload-pod'
+    mock_regular_pod.metadata.namespace = 'default'
+    mock_regular_pod.spec.containers = [
+        mock.MagicMock(resources=mock.MagicMock(
+            requests={'nvidia.com/gpu': '2'}))
+    ]
+
+    # Mock low priority pod requesting 4 GPUs (should be excluded)
+    mock_low_priority_pod = mock.MagicMock()
+    mock_low_priority_pod.spec.node_name = 'gpu-node'
+    mock_low_priority_pod.status.phase = 'Running'
+    mock_low_priority_pod.metadata.name = 'hpc-verification-h100-80gb-test'
+    mock_low_priority_pod.metadata.namespace = 'cw-hpc-verification'
+    mock_low_priority_pod.spec.containers = [
+        mock.MagicMock(resources=mock.MagicMock(
+            requests={'nvidia.com/gpu': '4'}))
+    ]
+
+    # Test with low priority pod filtering
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[mock_node]), \
+         mock.patch('sky.provision.kubernetes.utils.'
+                   'get_all_pods_in_kubernetes_cluster',
+                   return_value=[mock_regular_pod, mock_low_priority_pod]), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                    return_value='nvidia.com/gpu'):
+
+        node_info = utils.get_kubernetes_node_info()
+        assert isinstance(node_info, models.KubernetesNodesInfo)
+        assert len(node_info.node_info_dict) == 1
+        # Should have 8 total GPUs, 2 allocated (regular pod only), 6 available
+        # Low priority pod should be excluded from allocation calculations
+        assert node_info.node_info_dict['gpu-node'].total[
+            'accelerator_count'] == 8
+        assert node_info.node_info_dict['gpu-node'].free[
+            'accelerators_available'] == 6
+
+
+def test_should_exclude_pod_from_gpu_allocation():
+    """Tests the helper function that identifies pods to exclude from GPU allocation calculations."""
+    # Test CoreWeave HPC verification pod (should be excluded)
+    mock_hpc_pod = mock.MagicMock()
+    mock_hpc_pod.metadata.namespace = 'cw-hpc-verification'
+
+    # Test regular pod (should not be excluded)
+    mock_regular_pod = mock.MagicMock()
+    mock_regular_pod.metadata.namespace = 'default'
+
+    # Test pod with different namespace (should not be excluded)
+    mock_other_pod = mock.MagicMock()
+    mock_other_pod.metadata.namespace = 'some-other-namespace'
+
+    # CoreWeave HPC verification pod should be excluded
+    assert utils.should_exclude_pod_from_gpu_allocation(mock_hpc_pod) == True
+
+    # Regular pods should not be excluded
+    assert utils.should_exclude_pod_from_gpu_allocation(
+        mock_regular_pod) == False
+    assert utils.should_exclude_pod_from_gpu_allocation(mock_other_pod) == False
