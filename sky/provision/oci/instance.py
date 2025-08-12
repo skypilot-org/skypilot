@@ -32,7 +32,6 @@ logger = sky_logging.init_logger(__name__)
 @query_utils.debug_enabled(logger)
 @common_utils.retry
 def query_instances(
-    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
@@ -44,7 +43,6 @@ def query_instances(
     A None status means the instance is marked as "terminated"
     or "terminating".
     """
-    del cluster_name  # unusedå
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
 

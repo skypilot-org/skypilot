@@ -242,13 +242,11 @@ def get_cluster_info(
 
 
 def query_instances(
-    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
     # terminated instances are not retrieved by the
     # API making `non_terminated_only` argument moot.
     del non_terminated_only
