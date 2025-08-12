@@ -48,6 +48,7 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
                                         pull_frequency_hours=0)
         image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
     image_id = 'zpoint/skypilot_k8s:20250812'
+    print(image_id)
     return image_id
 
 
