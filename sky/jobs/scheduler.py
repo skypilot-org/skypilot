@@ -158,7 +158,8 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                 # an ALIVE_WAITING job, but we would be able to launch a WAITING
                 # job.
                 if current_state == state.ManagedJobScheduleState.ALIVE_WAITING:
-                    if not controller_utils.can_provision():
+                    if not (controller_utils.can_provision() or
+                            actual_pool is not None):
                         # Can't schedule anything, break from scheduling loop.
                         break
                 elif current_state == state.ManagedJobScheduleState.WAITING:
@@ -299,7 +300,8 @@ def _set_alive_waiting(job_id: int) -> None:
 
 def _can_start_new_job(pool: Optional[str]) -> bool:
     # Check basic resource limits
-    if not (controller_utils.can_provision() and
+    # Pool jobs don't need to provision resources, so we skip the check.
+    if not ((controller_utils.can_provision() or pool is not None) and
             controller_utils.can_start_new_process()):
         return False
 
