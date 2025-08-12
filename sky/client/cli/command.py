@@ -3005,8 +3005,8 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(msg)
     else:
-        click.echo(' * No in-progress managed jobs or pools found. It should be'
-                   ' safe to terminate (see caveats above).')
+        click.echo(' * No in-progress managed jobs or running pools found. It '
+                   'should be safe to terminate (see caveats above).')
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
