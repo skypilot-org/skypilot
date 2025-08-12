@@ -19,6 +19,7 @@ import colorama
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import aws
+from sky.clouds import aws as aws_cloud
 from sky.provision import common
 from sky.provision.aws import utils
 from sky.utils import annotations
@@ -103,6 +104,11 @@ def bootstrap_instances(
         security_group_ids = _configure_security_group(ec2, vpc_id,
                                                        expected_sg_name,
                                                        extended_ip_rules)
+        if expected_sg_name != aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
+            # Ensure the default security group is created.
+            _configure_security_group(ec2, vpc_id,
+                                      aws_cloud.DEFAULT_SECURITY_GROUP_NAME,
+                                      extended_ip_rules)
         end_time = time.time()
         elapsed = end_time - start_time
         logger.info(

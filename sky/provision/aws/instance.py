@@ -528,13 +528,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 associate_public_ip_address=(
                     not config.provider_config['use_internal_ips']))
 
-            # Ensure the default security group is created.
-            if _get_sg_from_name(ec2,
-                                 aws_cloud.DEFAULT_SECURITY_GROUP_NAME) is None:
-                ec2.create_security_group(
-                    GroupName=aws_cloud.DEFAULT_SECURITY_GROUP_NAME,
-                    Description='Default security group for SkyPilot clusters')
-
             created_instances.extend(created_remaining_instances)
         created_instances.sort(key=lambda x: x.id)
 
