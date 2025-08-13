@@ -108,11 +108,15 @@ Step 2 - Set up GPU support
 
 To utilize GPUs on Kubernetes, your cluster must:
 
-1. Have the ``nvidia.com/gpu`` **resource** available on all GPU nodes and have ``nvidia`` as the default runtime for your container engine.
+-  If using NVIDIA GPUs, have the ``nvidia.com/gpu`` **resource** available on all GPU nodes and have ``nvidia`` as the default runtime for your container engine.
 
    * If you are following :ref:`our deployment guides <kubernetes-deployment>` or using GKE or EKS, this would already be set up. Else, install the `Nvidia GPU Operator <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_.
 
-2. Have a **label on each node specifying the GPU type**. See :ref:`Setting up GPU labels <kubernetes-gpu-labels>` for more details.
+- If using AMD GPUs, have the ``amd.com/gpu`` **resource** available on all GPU nodes and install the AMD GPU Operator.
+
+  * Follow the instructions in :ref:`AMD GPUs on Kubernetes <kubernetes-amd-gpu>` to install the AMD GPU Operator.
+
+- Have a **label on each node specifying the GPU type**. See :ref:`Setting up GPU labels <kubernetes-gpu-labels>` for more details.
 
 
 .. tip::
@@ -180,6 +184,10 @@ If none of the above labels are present on your cluster, we provide a convenienc
 
 .. note::
 
+    Automatically labelling AMD GPUs is not supported at this moment. Please follow the instructions in "Manually labelling nodes" section below.
+
+.. note::
+
     If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
 
 Manually labelling nodes
@@ -187,7 +195,7 @@ Manually labelling nodes
 
 You can also manually label nodes, if required. Labels must be of the format ``skypilot.co/accelerator: <gpu_name>`` where ``<gpu_name>`` is the lowercase name of the GPU.
 
-For example, a node with H100 GPUs must have a label :code:`skypilot.co/accelerator: h100`.
+For example, a node with H100 GPUs must have a label :code:`skypilot.co/accelerator: h100`, and a node with MI300 GPUs must have a label :code:`skypilot.co/accelerator: mi300`.
 
 Use the following command to label a node:
 
@@ -397,6 +405,50 @@ Examples:
                      hostPath:
                        path: /path/on/host/nvme
                        type: Directory
+
+    .. tab-item:: PersistentVolumeClaim
+      :name: kubernetes-volumes-pvc
+
+      You can mount an existing `PersistentVolumeClaim <https://kubernetes.io/docs/concepts/storage/persistent-volumes/>`_ to SkyPilot pods. This is useful for accessing persistent storage that survives pod restarts.
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/storage/hello.txt
+             ls -la /mnt/storage
+
+           config:
+             kubernetes:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/storage
+                           name: persistent-storage
+                   volumes:
+                     - name: persistent-storage
+                       persistentVolumeClaim:
+                         claimName: my-storage-pvc
+
+      **Global configuration:**
+
+      .. code-block:: yaml
+
+           # ~/.sky/config.yaml
+           kubernetes:
+             pod_config:
+               spec:
+                 containers:
+                   - volumeMounts:
+                       - mountPath: /mnt/storage
+                         name: persistent-storage
+                 volumes:
+                   - name: persistent-storage
+                     persistentVolumeClaim:
+                       claimName: my-storage-pvc
 
     .. tab-item:: Nebius shared filesystem
       :name: kubernetes-volumes-nebius-shared-filesystem

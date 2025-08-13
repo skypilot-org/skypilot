@@ -16,16 +16,19 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import logs
 from sky import provision
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.backends import backend_utils
+from sky.jobs.server import utils as server_jobs_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
@@ -96,6 +99,12 @@ def _bulk_provision(
     logger.debug(
         f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
         f'seconds.')
+
+    # Add cluster event for provisioning completion.
+    global_user_state.add_cluster_event(
+        str(cluster_name), status_lib.ClusterStatus.INIT,
+        f'Instances launched on {cloud.display_name()} in {region}',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
 
     return provision_record
 
@@ -501,6 +510,24 @@ def _post_provision_setup(
             logger.info(f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}'
                         f'Docker container is up.{colorama.Style.RESET_ALL}')
 
+        # Check version compatibility for jobs controller clusters
+        if cluster_name.display_name.startswith(common.JOB_CONTROLLER_PREFIX):
+            # TODO(zeping): remove this in v0.12.0
+            # This only happens in upgrade from <0.9.3 to > 0.10.0
+            # After 0.10.0 no incompatibility issue
+            # See https://github.com/skypilot-org/skypilot/pull/6096
+            # For more details
+            status.update(
+                ux_utils.spinner_message(
+                    'Checking controller version compatibility'))
+            try:
+                server_jobs_utils.check_version_mismatch_and_non_terminal_jobs()
+            except exceptions.ClusterNotUpError:
+                # Controller is not up yet during initial provisioning, that
+                # also means no non-terminal jobs, so no incompatibility in
+                # this case.
+                pass
+
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
         # (1) jobs controllers need permission to launch/down nodes of
@@ -648,6 +675,15 @@ def _post_provision_setup(
             logger.debug('Ray cluster is ready. Skip starting ray cluster on '
                          'worker nodes.')
 
+        logging_agent = logs.get_logging_agent()
+        if logging_agent:
+            status.update(
+                ux_utils.spinner_message('Setting up logging agent',
+                                         provision_logging.config.log_path))
+            instance_setup.setup_logging_on_cluster(logging_agent, cluster_name,
+                                                    cluster_info,
+                                                    ssh_credentials)
+
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
 
@@ -672,6 +708,7 @@ def post_provision_runtime_setup(
        and other necessary files to the VM.
     3. Run setup commands to install dependencies.
     4. Start ray cluster and skylet.
+    5. (Optional) Setup logging agent.
 
     Raises:
         RuntimeError: If the setup process encounters any error.

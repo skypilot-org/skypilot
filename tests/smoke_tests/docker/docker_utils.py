@@ -9,7 +9,8 @@ CONTAINER_NAME_PREFIX = 'sky-remote-test'
 
 def is_inside_docker() -> bool:
     """Check if the current environment is running inside a Docker container."""
-    if os.path.exists('/.dockerenv'):
+    if os.path.exists('/.dockerenv') or os.path.exists(
+            '/proc/sys/fs/binfmt_misc/WSLInterop'):
         return True
 
     return False
@@ -71,6 +72,8 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
         os.path.join(user_home, '.azure'): f'/home/{username}/.azure',
         os.path.join(user_home, '.config/gcloud'): f'/home/{username}/.config/gcloud',
         os.path.join(user_home, '.kube/config'): f'/home/{username}/.kube/config',
+        # Use this directory to check if all files are copied/mounted correctly.
+        os.path.join(workspace_path, 'tests/smoke_tests/docker'): f'/success_mount_directory',
     }
 
     if is_inside_docker():
@@ -92,13 +95,17 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
                 if os.path.isdir(src_path):
                     # Copy directory contents
                     # The "/." at the end copies the contents of the directory, not the directory itself
-                    copy_cmd = f'docker cp {src_path}/. {target_container_name}:{dst_path}'
+                    copy_cmd = (
+                        f'docker cp {src_path}/. {target_container_name}:{dst_path} && '
+                        f'docker exec {target_container_name} sudo chown -R {username} {dst_path}'
+                    )
                 elif os.path.isfile(src_path):
                     # Copy file
                     # First create the parent directory in the container
                     copy_cmd = (
                         f'docker exec {target_container_name} mkdir -p {os.path.dirname(dst_path)} && '
-                        f'docker cp {src_path} {target_container_name}:{dst_path}'
+                        f'docker cp {src_path} {target_container_name}:{dst_path} && '
+                        f'docker exec {target_container_name} sudo chown -R {username} {dst_path}'
                     )
                 logger.info(f'Running copy command: {copy_cmd}')
                 subprocess.check_call(copy_cmd, shell=True)

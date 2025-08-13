@@ -53,6 +53,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import subprocess_utils
+from sky.utils import tempstore
 from sky.utils import timeline
 from sky.workspaces import core as workspaces_core
 
@@ -149,9 +150,24 @@ class RequestWorker:
         self.schedule_type = schedule_type
         self.garanteed_parallelism = config.garanteed_parallelism
         self.burstable_parallelism = config.burstable_parallelism
+        self._thread: Optional[threading.Thread] = None
+        self._cancel_event = threading.Event()
 
     def __str__(self) -> str:
         return f'Worker(schedule_type={self.schedule_type.value})'
+
+    def run_in_background(self) -> None:
+        # Thread dispatcher is sufficient for current scale, refer to
+        # tests/load_tests/test_queue_dispatcher.py for more details.
+        # Use daemon thread for automatic cleanup.
+        thread = threading.Thread(target=self.run, daemon=True)
+        thread.start()
+        self._thread = thread
+
+    def cancel(self) -> None:
+        if self._thread is not None:
+            self._cancel_event.set()
+            self._thread.join()
 
     def process_request(self, executor: process.BurstableExecutor,
                         queue: RequestQueue) -> None:
@@ -160,7 +176,7 @@ class RequestWorker:
             if request_element is None:
                 time.sleep(0.1)
                 return
-            request_id, ignore_return_value, retryable = request_element
+            request_id, ignore_return_value, _ = request_element
             request = api_requests.get_request(request_id)
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
@@ -174,12 +190,10 @@ class RequestWorker:
             # the process, such as subprocess_daemon.py.
             fut = executor.submit_until_success(_request_execution_wrapper,
                                                 request_id, ignore_return_value)
-            if retryable:
-                # If the task might fail and be retried, start a thread to
-                # monitor the future and process retry.
-                threading.Thread(target=self.handle_task_result,
-                                 args=(fut, request_element),
-                                 daemon=True).start()
+            # Monitor the result of the request execution.
+            threading.Thread(target=self.handle_task_result,
+                             args=(fut, request_element),
+                             daemon=True).start()
 
             logger.info(f'[{self}] Submitted request: {request_id}')
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -193,6 +207,21 @@ class RequestWorker:
                            request_element: Tuple[str, bool, bool]) -> None:
         try:
             fut.result()
+        except concurrent.futures.process.BrokenProcessPool as e:
+            # Happens when the worker process dies unexpectedly, e.g. OOM
+            # killed.
+            request_id, _, retryable = request_element
+            # Ensure the request status.
+            api_requests.set_request_failed(request_id, e)
+            logger.error(
+                f'Request {request_id} failed to get processed '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+            if retryable:
+                # If the request is retryable and disrupted by broken
+                # process pool, reschedule it immediately to get it
+                # retried in the new process pool.
+                queue = _get_queue(self.schedule_type)
+                queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
             time.sleep(e.retry_wait_seconds)
             # Reschedule the request.
@@ -219,7 +248,7 @@ class RequestWorker:
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
                 initargs=(proc_group,))
-            while True:
+            while not self._cancel_event.is_set():
                 self.process_request(executor, queue)
         # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.
         except KeyboardInterrupt:
@@ -242,7 +271,8 @@ def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
 
 @contextlib.contextmanager
 def override_request_env_and_config(
-        request_body: payloads.RequestBody) -> Generator[None, None, None]:
+        request_body: payloads.RequestBody,
+        request_id: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
     os.environ.update(request_body.env_vars)
@@ -253,13 +283,18 @@ def override_request_env_and_config(
     user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                        name=request_body.env_vars[constants.USER_ENV_VAR])
     global_user_state.add_or_update_user(user)
+    # Refetch the user to get the latest user info, including the created_at
+    # field.
+    user = global_user_state.get_user(user.id)
+
     # Force color to be enabled.
     os.environ['CLICOLOR_FORCE'] = '1'
     server_common.reload_for_new_request(
         client_entrypoint=request_body.entrypoint,
         client_command=request_body.entrypoint_command,
         using_remote_api_server=request_body.using_remote_api_server,
-        user=user)
+        user=user,
+        request_id=request_id)
     try:
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
@@ -319,6 +354,7 @@ def _request_execution_wrapper(request_id: str,
     2. Update the request status based on the execution result;
     3. Redirect the stdout and stderr of the execution to log file;
     4. Handle the SIGTERM signal to abort the request gracefully.
+    5. Maintain the lifecycle of the temp dir used by the request.
     """
     # Handle the SIGTERM signal to abort the request processing gracefully.
     signal.signal(signal.SIGTERM, _sigterm_handler)
@@ -342,7 +378,8 @@ def _request_execution_wrapper(request_id: str,
         # config, as there can be some logs during override that needs to be
         # captured in the log file.
         try:
-            with override_request_env_and_config(request_body):
+            with override_request_env_and_config(request_body, request_id), \
+                tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
@@ -377,11 +414,8 @@ def _request_execution_wrapper(request_id: str,
                         f'{common_utils.format_exception(e)}')
             return
         else:
-            with api_requests.update_request(request_id) as request_task:
-                assert request_task is not None, request_id
-                request_task.status = api_requests.RequestStatus.SUCCEEDED
-                if not ignore_return_value:
-                    request_task.set_return_value(return_value)
+            api_requests.set_request_succeeded(
+                request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
 
@@ -539,15 +573,21 @@ def schedule_request(request_id: str,
         enqueue()
 
 
-def start(config: server_config.ServerConfig) -> List[multiprocessing.Process]:
+def start(
+    config: server_config.ServerConfig
+) -> Tuple[Optional[multiprocessing.Process], List[RequestWorker]]:
     """Start the request workers.
 
     Request workers run in background, schedule the requests and delegate the
     request execution to executor processes.
+
+    Returns:
+        A tuple of the queue server process and the list of request worker
+        threads.
     """
     global queue_backend
     queue_backend = config.queue_backend
-    sub_procs = []
+    queue_server = None
     # Setup the queues.
     if queue_backend == server_config.QueueBackend.MULTIPROCESSING:
         logger.info('Creating shared request queues')
@@ -564,7 +604,6 @@ def start(config: server_config.ServerConfig) -> List[multiprocessing.Process]:
         queue_server = multiprocessing.Process(
             target=mp_queue.start_queue_manager, args=(queue_names, port))
         queue_server.start()
-        sub_procs.append(queue_server)
         mp_queue.wait_for_queues_to_be_ready(queue_names,
                                              queue_server,
                                              port=port)
@@ -577,20 +616,16 @@ def start(config: server_config.ServerConfig) -> List[multiprocessing.Process]:
 
     logger.info('Request queues created')
 
-    def run_worker_in_background(worker: RequestWorker):
-        # Thread dispatcher is sufficient for current scale, refer to
-        # tests/load_tests/test_queue_dispatcher.py for more details.
-        # Use daemon thread for automatic cleanup.
-        thread = threading.Thread(target=worker.run, daemon=True)
-        thread.start()
-
+    workers = []
     # Start a worker for long requests.
     long_worker = RequestWorker(schedule_type=api_requests.ScheduleType.LONG,
                                 config=config.long_worker_config)
-    run_worker_in_background(long_worker)
+    long_worker.run_in_background()
+    workers.append(long_worker)
 
     # Start a worker for short requests.
     short_worker = RequestWorker(schedule_type=api_requests.ScheduleType.SHORT,
                                  config=config.short_worker_config)
-    run_worker_in_background(short_worker)
-    return sub_procs
+    short_worker.run_in_background()
+    workers.append(short_worker)
+    return queue_server, workers

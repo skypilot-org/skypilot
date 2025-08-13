@@ -31,7 +31,7 @@ jobs:
       - name: Download distribution artifacts
         uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
+          name: skypilot-artifacts-${{ inputs.package_name }}
           path: dist/
 
       - name: Publish distribution to repository

@@ -24,6 +24,9 @@ from sky.provision.aws import config as aws_config
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_state
 from sky.server import common as server_common
+from sky.server import constants as server_constants
+from sky.server import rest
+from sky.server import versions
 from sky.server.requests import executor
 from sky.server.requests import requests as api_requests
 from sky.server.server import app
@@ -57,8 +60,7 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
     # It is used to simulate server responses for testing purposes without
     # making actual HTTP requests.
     client = testclient.TestClient(app)
-    original_requests_get = requests.get
-    original_requests_post = requests.post
+    original_request = requests.request
 
     def _execute_request(path: str, method: str,
                          response: fastapi.Response) -> None:
@@ -79,25 +81,19 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
             executor._request_execution_wrapper(request_id, ignore_return_value)
 
     def mock_http_request(method: str, url, *args, **kwargs):
-        if method == 'GET':
-            mock_func = client.get
-            original_func = original_requests_get
-        elif method == 'POST':
-            mock_func = client.post
-            original_func = original_requests_post
-        else:
-            raise ValueError(f'Unsupported method: {method}')
+        mock_func = client.request
+        original_func = original_request
         if server_common.get_server_url() in url:
             logger.info(f'Mocking {method} request to {url} through TestClient')
             path = url.replace(server_common.get_server_url(), "")
             # Remove stream parameter as it's not supported by TestClient
             stream = kwargs.pop('stream', False)
             # Extract and format query parameters
-            if 'params' in kwargs:
+            if 'params' in kwargs and kwargs['params'] is not None:
                 kwargs['params'] = {
                     k: v for k, v in kwargs['params'].items() if v is not None
                 }
-            response = mock_func(path, *args, **kwargs)
+            response = mock_func(method, path, *args, **kwargs)
             if not any(
                     path.startswith(p)
                     for p in ['/api/get', '/api/stream', '/api/status']):
@@ -116,22 +112,16 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
                 # Add iter_content method to response
                 response.iter_content = iter_content
 
+            response.headers[server_constants.API_VERSION_HEADER] = str(
+                server_constants.API_VERSION)
+            response.headers[server_constants.VERSION_HEADER] = \
+                versions.get_local_readable_version()
             return response
         else:
             return original_func(url, *args, **kwargs)
 
-    # Mock `requests.post` to use TestClient.post
-    def mock_post(url, *args, **kwargs):
-        # Convert full URL to path for TestClient
-        return mock_http_request('POST', url, *args, **kwargs)
-
-    # Mock `requests.get` to use TestClient.get
-    def mock_get(url, *args, **kwargs):
-        return mock_http_request('GET', url, *args, **kwargs)
-
-    # Use monkeypatch to replace `requests.post` and `requests.get`
-    monkeypatch.setattr(requests, "post", mock_post)
-    monkeypatch.setattr(requests, "get", mock_get)
+    # pylint: disable=protected-access
+    monkeypatch.setattr(rest._session, "request", mock_http_request)
 
 
 # Define helper functions at module level for pickleability
@@ -283,7 +273,11 @@ def mock_job_table_one_job(monkeypatch):
             'task_id': 0,
             'task_name': 'test_task',
             'job_duration': 20,
-            'priority': 500,
+            'priority': constants.DEFAULT_PRIORITY,
+            'pool': None,
+            'current_cluster_name': None,
+            'job_id_on_pool_cluster': None,
+            'pool_hash': None,
         }
         return 0, message_utils.encode_payload([job_data]), ''
 

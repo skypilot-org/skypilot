@@ -11,11 +11,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional, Set
+from typing import List, Set
 
 import yaml
 
 from sky.utils import ux_utils
+from sky.utils.kubernetes import ssh_utils
 
 # Colors for nicer UX
 RED = '\033[0;31m'
@@ -24,36 +25,12 @@ YELLOW = '\033[1;33m'
 WARNING_YELLOW = '\x1b[33m'
 NC = '\033[0m'  # No color
 
-DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 NODE_POOLS_INFO_DIR = os.path.expanduser('~/.sky/ssh_node_pools_info')
 
 # Get the directory of this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-class UniqueKeySafeLoader(yaml.SafeLoader):
-    """Custom YAML loader that raises an error if there are duplicate keys."""
-
-    def construct_mapping(self, node, deep=False):
-        mapping = {}
-        for key_node, value_node in node.value:
-            key = self.construct_object(key_node, deep=deep)
-            if key in mapping:
-                raise yaml.constructor.ConstructorError(
-                    note=(f'Duplicate cluster config for cluster {key!r}.\n'
-                          'Please remove one of them from: '
-                          f'{DEFAULT_SSH_NODE_POOLS_PATH}'))
-            value = self.construct_object(value_node, deep=deep)
-            mapping[key] = value
-        return mapping
-
-
-# Register the custom constructor inside the class
-UniqueKeySafeLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-    UniqueKeySafeLoader.construct_mapping)
 
 
 def parse_args():
@@ -64,9 +41,9 @@ def parse_args():
     parser.add_argument(
         '--ssh-node-pools-file',
         dest='ssh_node_pools_file',
-        default=DEFAULT_SSH_NODE_POOLS_PATH,
+        default=ssh_utils.DEFAULT_SSH_NODE_POOLS_PATH,
         help=
-        f'Path to SSH node pools YAML file (default: {DEFAULT_SSH_NODE_POOLS_PATH})'
+        f'Path to SSH node pools YAML file (default: {ssh_utils.DEFAULT_SSH_NODE_POOLS_PATH})'
     )
     parser.add_argument(
         '--kubeconfig-path',
@@ -115,143 +92,6 @@ def parse_args():
     )
 
     return parser.parse_args()
-
-
-def load_ssh_targets(file_path: str) -> Dict[str, Any]:
-    """Load SSH targets from YAML file."""
-    if not os.path.exists(file_path):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'SSH Node Pools file not found: {file_path}')
-
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            targets = yaml.load(f, Loader=UniqueKeySafeLoader)
-        return targets
-    except yaml.constructor.ConstructorError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(e.note) from e
-    except (yaml.YAMLError, IOError, OSError) as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Error loading SSH Node Pools file: {e}') from e
-
-
-def check_host_in_ssh_config(hostname: str) -> bool:
-    """Return True iff *hostname* matches at least one `Host`/`Match` stanza
-    in the user's OpenSSH client configuration (including anything pulled in
-    via Include).
-
-    It calls:  ssh -vvG <hostname> -o ConnectTimeout=0
-    which:
-      • -G  expands the effective config without connecting
-      • -vv prints debug lines that show which stanzas are applied
-      • ConnectTimeout=0 avoids a DNS lookup if <hostname> is a FQDN/IP
-
-    No config files are opened or parsed manually.
-
-    Parameters
-    ----------
-    hostname : str
-        The alias/IP/FQDN you want to test.
-
-    Returns
-    -------
-    bool
-        True  – a specific stanza matched the host
-        False – nothing but the global defaults (`Host *`) applied
-    """
-    # We direct stderr→stdout because debug output goes to stderr.
-    proc = subprocess.run(
-        ['ssh', '-vvG', hostname, '-o', 'ConnectTimeout=0'],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,  # we only want the text, not to raise
-    )
-
-    # Look for lines like:
-    #   debug1: ~/.ssh/config line 42: Applying options for <hostname>
-    # Anything other than "*"
-    pattern = re.compile(r'^debug\d+: .*Applying options for ([^*].*)$',
-                         re.MULTILINE)
-
-    return bool(pattern.search(proc.stdout))
-
-
-def get_cluster_config(targets: Dict[str, Any],
-                       cluster_name: Optional[str] = None,
-                       file_path: Optional[str] = None) -> Dict[str, Any]:
-    """Get configuration for specific clusters or all clusters."""
-    if not targets:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'No clusters defined in SSH Node Pools file {file_path}')
-
-    if cluster_name:
-        if cluster_name not in targets:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Cluster {cluster_name!r} not found in '
-                                 f'SSH Node Pools file {file_path}')
-        return {cluster_name: targets[cluster_name]}
-
-    # Return all clusters if no specific cluster is specified
-    return targets
-
-
-def prepare_hosts_info(cluster_name: str,
-                       cluster_config: Dict[str, Any]) -> List[Dict[str, str]]:
-    """Prepare list of hosts with resolved user, identity_file, and password."""
-    if 'hosts' not in cluster_config or not cluster_config['hosts']:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'No hosts defined in cluster {cluster_name} configuration')
-
-    # Get cluster-level defaults
-    cluster_user = cluster_config.get('user', '')
-    cluster_identity_file = cluster_config.get('identity_file', '')
-    cluster_password = cluster_config.get('password', '')
-
-    hosts_info = []
-    for host in cluster_config['hosts']:
-        # Host can be a string (IP or SSH config hostname) or a dict
-        if isinstance(host, str):
-            # Check if this is an SSH config hostname
-            is_ssh_config_host = check_host_in_ssh_config(host)
-
-            hosts_info.append({
-                'ip': host,
-                'user': '' if is_ssh_config_host else cluster_user,
-                'identity_file': '' if is_ssh_config_host else
-                                 cluster_identity_file,
-                'password': cluster_password,
-                'use_ssh_config': is_ssh_config_host
-            })
-        else:
-            # It's a dict with potential overrides
-            if 'ip' not in host:
-                print(
-                    f'{RED}Warning: Host missing \'ip\' field, skipping: {host}{NC}'
-                )
-                continue
-
-            # Check if this is an SSH config hostname
-            is_ssh_config_host = check_host_in_ssh_config(host['ip'])
-
-            # Use host-specific values or fall back to cluster defaults
-            host_user = '' if is_ssh_config_host else host.get(
-                'user', cluster_user)
-            host_identity_file = '' if is_ssh_config_host else host.get(
-                'identity_file', cluster_identity_file)
-            host_password = host.get('password', cluster_password)
-
-            hosts_info.append({
-                'ip': host['ip'],
-                'user': host_user,
-                'identity_file': host_identity_file,
-                'password': host_password,
-                'use_ssh_config': is_ssh_config_host
-            })
-
-    return hosts_info
 
 
 def run_command(cmd, shell=False):
@@ -306,6 +146,8 @@ def run_remote(node,
         ]
 
         if ssh_key:
+            if not os.path.isfile(ssh_key):
+                raise ValueError(f'SSH key not found: {ssh_key}')
             ssh_cmd.extend(['-i', ssh_key])
 
         ssh_cmd.append(f'{user}@{node}' if user else node)
@@ -660,10 +502,10 @@ def main():
         password = args.password
 
         # Check if hosts are in SSH config
-        head_use_ssh_config = global_use_ssh_config or check_host_in_ssh_config(
+        head_use_ssh_config = global_use_ssh_config or ssh_utils.check_host_in_ssh_config(
             head_node)
         worker_use_ssh_config = [
-            global_use_ssh_config or check_host_in_ssh_config(node)
+            global_use_ssh_config or ssh_utils.check_host_in_ssh_config(node)
             for node in worker_nodes
         ]
 
@@ -673,10 +515,9 @@ def main():
                        kubeconfig_path, args.cleanup)
     else:
         # Using YAML configuration
-        targets = load_ssh_targets(args.ssh_node_pools_file)
-        clusters_config = get_cluster_config(targets,
-                                             args.infra,
-                                             file_path=args.ssh_node_pools_file)
+        targets = ssh_utils.load_ssh_targets(args.ssh_node_pools_file)
+        clusters_config = ssh_utils.get_cluster_config(
+            targets, args.infra, file_path=args.ssh_node_pools_file)
 
         # Print information about clusters being processed
         num_clusters = len(clusters_config)
@@ -690,7 +531,8 @@ def main():
                 print(f'SKYPILOT_CURRENT_CLUSTER: {cluster_name}')
                 print(
                     f'{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}')
-                hosts_info = prepare_hosts_info(cluster_name, cluster_config)
+                hosts_info = ssh_utils.prepare_hosts_info(
+                    cluster_name, cluster_config)
 
                 if not hosts_info:
                     print(
@@ -729,7 +571,7 @@ def main():
                                 f'Cluster configuration has changed for field {key!r}. '
                                 f'Previous value: {history.get(key)}, '
                                 f'Current value: {cluster_config.get(key)}')
-                    history_hosts_info = prepare_hosts_info(
+                    history_hosts_info = ssh_utils.prepare_hosts_info(
                         cluster_name, history)
                     if not args.cleanup and history_hosts_info[0] != hosts_info[
                             0]:
@@ -834,10 +676,6 @@ def deploy_cluster(head_node,
 
     Returns: List of unsuccessful worker nodes.
     """
-    # Ensure SSH key is expanded for paths with ~ (home directory)
-    if ssh_key:
-        ssh_key = os.path.expanduser(ssh_key)
-
     history_yaml_file = os.path.join(NODE_POOLS_INFO_DIR,
                                      f'{context_name}-history.yaml')
     cert_file_path = os.path.join(NODE_POOLS_INFO_DIR,
@@ -1438,7 +1276,9 @@ def deploy_cluster(head_node,
     print(
         '  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes'
     )
-    print('  • Connect to pod with VSCode: code --remote ssh-remote+devbox ')
+    print(
+        '  • Connect to pod with VSCode: code --remote ssh-remote+devbox "/home"'
+    )
     # Print completion marker for current cluster
     print(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
 

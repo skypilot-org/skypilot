@@ -5,6 +5,8 @@ import { showToast } from '@/data/connectors/toast';
 import { apiClient } from '@/data/connectors/client';
 import dashboardCache from '@/lib/cache';
 
+const DEFAULT_TAIL_LINES = 10000;
+
 /**
  * Truncates a string in the middle, preserving parts from beginning and end.
  * @param {string} str - The string to truncate
@@ -70,6 +72,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         cluster: cluster.name,
         user: cluster.user_name,
         user_hash: cluster.user_hash,
+        cluster_hash: cluster.cluster_hash,
         cloud: cluster.cloud,
         region: cluster.region,
         infra: region_or_zone
@@ -87,6 +90,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
         autostop: cluster.autostop,
+        last_event: cluster.last_event,
         to_down: cluster.to_down,
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
@@ -106,6 +110,71 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
+export async function getClusterHistory() {
+  try {
+    const history = await apiClient.fetch('/cost_report', {
+      days: 30,
+    });
+
+    console.log('Raw cluster history data:', history); // Debug log
+
+    const historyData = history.map((cluster) => {
+      // Get cloud name from resources if available
+      let cloud = 'Unknown';
+      if (cluster.cloud) {
+        cloud = cluster.cloud;
+      } else if (cluster.resources && cluster.resources.cloud) {
+        cloud = cluster.resources.cloud;
+      }
+
+      // Get user name - need to look up from user_hash if needed
+      let user_name = cluster.user_name || '-';
+
+      // Extract resource info
+
+      return {
+        status: cluster.status
+          ? clusterStatusMap[cluster.status]
+          : 'TERMINATED',
+        cluster: cluster.name,
+        user: user_name,
+        user_hash: cluster.user_hash,
+        cluster_hash: cluster.cluster_hash,
+        cloud: cloud,
+        region: '',
+        infra: cloud,
+        full_infra: cloud,
+        resources_str: cluster.resources_str,
+        resources_str_full: cluster.resources_str_full,
+        time: cluster.launched_at ? new Date(cluster.launched_at * 1000) : null,
+        num_nodes: cluster.num_nodes || 1,
+        duration: cluster.duration,
+        total_cost: cluster.total_cost,
+        workspace: cluster.workspace || 'default',
+        autostop: -1,
+        to_down: false,
+        usage_intervals: cluster.usage_intervals,
+        command: cluster.last_creation_command || '',
+        task_yaml: cluster.last_creation_yaml || '{}',
+        events: [
+          {
+            time: cluster.launched_at
+              ? new Date(cluster.launched_at * 1000)
+              : new Date(),
+            event: 'Cluster created.',
+          },
+        ],
+      };
+    });
+
+    console.log('Processed cluster history data:', historyData); // Debug log
+    return historyData;
+  } catch (error) {
+    console.error('Error fetching cluster history:', error);
+    return [];
+  }
+}
+
 export async function streamClusterJobLogs({
   clusterName,
   jobId,
@@ -119,6 +188,7 @@ export async function streamClusterJobLogs({
         follow: false,
         cluster_name: clusterName,
         job_id: jobId,
+        tail: DEFAULT_TAIL_LINES,
         override_skypilot_config: {
           active_workspace: workspace || 'default',
         },
@@ -157,6 +227,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
         status: job.status,
         job: job.job_name,
         user: job.username,
+        user_hash: job.user_hash,
         gpus: job.accelerators || {},
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)
@@ -168,6 +239,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
         infra: '',
         logs: '',
         workspace: workspace || 'default',
+        git_commit: job.metadata?.git_commit || '-',
       };
     });
     return jobData;

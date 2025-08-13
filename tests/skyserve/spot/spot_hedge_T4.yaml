@@ -18,7 +18,8 @@ service:
 
 envs:
   MODEL_NAME: meta-llama/Llama-3.2-3B-Instruct
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 resources:
   any_of:

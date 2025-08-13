@@ -20,9 +20,12 @@
 # > pytest tests/smoke_tests/test_images.py --generic-cloud aws
 
 import os
+import pathlib
 import subprocess
+import tempfile
 import textwrap
 
+import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
 
@@ -452,6 +455,7 @@ def test_image_no_conda():
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_nebius  # Nebius does not support autodown
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
 def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':
@@ -561,11 +565,138 @@ def test_kubernetes_docker_image_and_ssh():
         os.unlink(unprefixed_yaml_path)
 
 
+@pytest.fixture
+def private_docker_registry_setup(request):
+    """Fixture to setup private docker registry test environment.
+
+    Args:
+        request: pytest request object containing the parameters
+    """
+    # Get parameters from the test function
+    docker_username = request.param['docker_username']
+    docker_password = request.param['docker_password']
+    docker_server = request.param['docker_server']
+    full_image_name = request.param['full_image_name']
+
+    # Dynamically get passwords for cloud providers
+    if 'ecr' in docker_server:
+        # Get ECR login password
+        # Extract region from ECR server URL
+        region = docker_server.split(
+            '.'
+        )[3]  # e.g., us-east-1 from 195275664570.dkr.ecr.us-east-1.amazonaws.com
+        result = subprocess.run(
+            ['aws', 'ecr', 'get-login-password', '--region', region],
+            capture_output=True,
+            text=True,
+            check=True)
+        docker_password = result.stdout.strip()
+
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_private_docker_registry.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(docker_username=docker_username,
+                              docker_password=docker_password,
+                              docker_server=docker_server,
+                              full_image_name=full_image_name)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        yield file_path
+
+
+@pytest.mark.no_azure
+@pytest.mark.no_kubernetes
+@pytest.mark.parametrize(
+    'private_docker_registry_setup,cloud_provider',
+    [
+        # AWS with docker.io registry
+        ({
+            'docker_username':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_USERNAME'),
+            'docker_password':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_PASSWORD'),
+            'docker_server':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_SERVER'),
+            'full_image_name':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_FULL_IMAGE_NAME')
+        }, 'aws'),
+        # GCP with Artifact Registry
+        ({
+            'docker_username':
+                os.environ.get('PRIVATE_REGISTRY_TEST_GCP_DOCKER_USERNAME'),
+            'docker_password':
+                os.environ.get('PRIVATE_REGISTRY_TEST_GCP_DOCKER_PASSWORD'),
+            'docker_server':
+                os.environ.get('PRIVATE_REGISTRY_TEST_GCP_DOCKER_SERVER'),
+            'full_image_name': os.environ.get(
+                'PRIVATE_REGISTRY_TEST_GCP_DOCKER_FULL_IMAGE_NAME')
+        }, 'gcp'),
+        # AWS with ECR
+        ({
+            'docker_username':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_USERNAME'),
+            'docker_password':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_PASSWORD'),
+            'docker_server':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_SERVER'),
+            'full_image_name':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_FULL_IMAGE_NAME')
+        }, 'aws'),
+    ],
+    indirect=['private_docker_registry_setup'])
+def test_private_docker_registry(generic_cloud,
+                                 private_docker_registry_setup: str,
+                                 cloud_provider: str):
+    # Skip test if environment variables are not set
+    if not os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_FULL_IMAGE_NAME'):
+        pytest.skip(
+            'Skipping test as docker registry environment variables are not set'
+        )
+
+    # Skip test if the required cloud provider is not available
+    if cloud_provider != generic_cloud:
+        pytest.skip(
+            f'Skipping test for {cloud_provider} as it is not the generic cloud'
+        )
+
+    name = smoke_tests_utils.get_cluster_name()
+    test_name = f'private_docker_registry_{cloud_provider}'
+
+    test = smoke_tests_utils.Test(
+        test_name,
+        [
+            f'sky launch -c {name} -y --infra {cloud_provider} {smoke_tests_utils.LOW_RESOURCE_ARG} {private_docker_registry_setup}',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.gcp
 def test_helm_deploy_gke(request):
+    if not request.config.getoption('--helm-package'):
+        # Test pulls image from dockerhub, unrelated to codebase. Package name
+        # indicates intentional testing - without it, test is meaningless.
+        pytest.skip('Skipping test as helm package is not set')
+
     helm_version = request.config.getoption('--helm-version')
     package_name = request.config.getoption('--helm-package')
-    test = smoke_tests_utils.Test('helm_deploy_gke', [
-        f'bash tests/kubernetes/scripts/helm_gcp.sh {package_name} {helm_version}',
+    test = smoke_tests_utils.Test(
+        'helm_deploy_gke',
+        [
+            f'bash tests/kubernetes/scripts/helm_gcp.sh {package_name} {helm_version}',
+        ],
+        # GKE termination requires longer timeout.
+        timeout=30 * 60)
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_helm_deploy_okta():
+    test = smoke_tests_utils.Test('helm_deploy_okta', [
+        f'bash tests/kubernetes/scripts/helm_okta.sh',
     ])
     smoke_tests_utils.run_one_test(test)

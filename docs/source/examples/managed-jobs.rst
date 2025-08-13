@@ -34,8 +34,7 @@ To start a managed job, use :code:`sky jobs launch`:
   ├── To cancel the job:                sky jobs cancel 1
   ├── To stream job logs:               sky jobs logs 1
   ├── To stream controller logs:        sky jobs logs --controller 1
-  ├── To view all managed jobs:         sky jobs queue
-  └── To view managed job dashboard:    sky jobs dashboard
+  └── To view all managed jobs:         sky jobs queue
 
 The job is launched on a temporary SkyPilot cluster, managed end-to-end, and automatically cleaned up.
 
@@ -194,39 +193,6 @@ The SkyPilot dashboard, ``sky dashboard`` has a **Jobs** page that shows all man
   :alt: Managed jobs dashboard
 
 The UI shows the same information as the CLI ``sky jobs queue -au``.
-
-
-.. _job-priority:
-
-Job queueing and priority
--------------------------
-
-Job queueing and priority are supported by managed jobs.
-
-
-Specify job priority by setting the ``job.priority`` field in the :ref:`SkyPilot YAML <yaml-spec-job-priority>`.
-
-.. code-block:: yaml
-
-  job:
-    # Priority of the job, between 0 and 1000 (default: 500).
-    #
-    # A lower value means that the job is higher priority. High priority jobs
-    # are scheduled sooner and will block lower priority jobs from starting
-    # until the high priority jobs have started.
-    priority: 500
-
-
-All jobs are submitted to a queue. When the scheduler is selecting the next job
-to schedule, it will select the highest priority job.
-
-If a high priority job is still launching, lower priority jobs will not be
-scheduled (i.e., stay in pending).
-
-.. image:: https://i.imgur.com/8H8ictY.png
-  :width: 800
-  :alt: Job queueing and priority
-
 
 
 .. _spot-jobs:
@@ -463,7 +429,7 @@ dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and
 
 To pass data between the tasks, use a shared file mount. In this example, the :code:`train` task writes its output to the :code:`/checkpoint` file mount, which the :code:`eval` task is then able to read from.
 
-To submit the pipeline, the same command :code:`sky jobs launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky jobs queue` or :code:`sky jobs dashboard`.
+To submit the pipeline, the same command :code:`sky jobs launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky jobs queue` or :code:`sky dashboard`.
 
 .. code-block:: console
 

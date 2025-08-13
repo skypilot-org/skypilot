@@ -25,7 +25,7 @@ docker:
     username: |-
       {{docker_login_config.username}}
     password: |-
-      {{docker_login_config.password}}
+      {{docker_login_config.password | indent(6) }}
     server: |-
       {{docker_login_config.server}}
   {%- endif %}
@@ -46,6 +46,7 @@ available_node_types:
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}
       DiskSize: {{disk_size}}
+      use_spot: {{ use_spot }}
       network_tier: {{network_tier}}
       filesystems:
         {%- for fs in filesystems %}

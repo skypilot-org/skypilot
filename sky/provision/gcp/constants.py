@@ -48,9 +48,6 @@ GPU_DIRECT_TCPX_INSTANCE_TYPES = [
     'a3-edgegpu-8g',
     'a3-highgpu-8g',
 ]
-# The prefix length of the cluster name.
-# To make sure the VPC and subnet names are within the GCP limits.
-CLUSTER_PREFIX_LENGTH = 10
 
 COMPACT_GROUP_PLACEMENT_POLICY = 'compact'
 COLLOCATED_COLLOCATION = 'COLLOCATED'

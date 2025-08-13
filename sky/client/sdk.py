@@ -10,36 +10,33 @@ Usage example:
     statuses = sky.get(request_id)
 
 """
-import base64
-import binascii
-import getpass
 from http import cookiejar
 import json
 import logging
 import os
-import pathlib
 import subprocess
-import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
 from urllib import parse as urlparse
-import webbrowser
 
 import click
 import colorama
 import filelock
 
 from sky import admin_policy
-from sky import backends
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
+from sky.schemas.api import responses
 from sky.server import common as server_common
+from sky.server import rest
+from sky.server import versions
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -55,40 +52,100 @@ from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils.kubernetes import ssh_utils
 
 if typing.TYPE_CHECKING:
+    import base64
+    import binascii
     import io
+    import pathlib
+    import time
+    import webbrowser
 
     import psutil
     import requests
 
     import sky
+    from sky import backends
+    from sky import models
+    import sky.catalog
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    from sky.skylet import job_lib
 else:
+    # only used in api_login()
+    base64 = adaptors_common.LazyImport('base64')
+    binascii = adaptors_common.LazyImport('binascii')
+    pathlib = adaptors_common.LazyImport('pathlib')
+    time = adaptors_common.LazyImport('time')
+    # only used in dashboard() and api_login()
+    webbrowser = adaptors_common.LazyImport('webbrowser')
+    # only used in api_stop()
     psutil = adaptors_common.LazyImport('psutil')
-    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
+_LINE_PROCESSED_KEY = 'line_processed'
 
-def stream_response(request_id: Optional[str],
+T = TypeVar('T')
+
+
+def reload_config() -> None:
+    """Reloads the client-side config."""
+    skypilot_config.safe_reload_config()
+
+
+@typing.overload
+def stream_response(request_id: None,
                     response: 'requests.Response',
-                    output_stream: Optional['io.TextIOBase'] = None) -> Any:
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False) -> None:
+    ...
+
+
+@typing.overload
+def stream_response(request_id: server_common.RequestId[T],
+                    response: 'requests.Response',
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False) -> T:
+    ...
+
+
+def stream_response(request_id: Optional[server_common.RequestId[T]],
+                    response: 'requests.Response',
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False) -> Optional[T]:
     """Streams the response to the console.
 
     Args:
-        request_id: The request ID.
+        request_id: The request ID of the request to stream. May be a full
+            request ID or a prefix.
+            If None, the latest request submitted to the API server is streamed.
+            Using None request_id is not recommended in multi-user environments.
         response: The HTTP response.
         output_stream: The output stream to write to. If None, print to the
             console.
+        resumable: Whether the response is resumable on retry. If True, the
+            streaming will start from the previous failure point on retry.
     """
 
+    retry_context: Optional[rest.RetryContext] = None
+    if resumable:
+        retry_context = rest.get_retry_context()
     try:
+        line_count = 0
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
-                print(line, flush=True, end='', file=output_stream)
+                line_count += 1
+                if retry_context is None:
+                    print(line, flush=True, end='', file=output_stream)
+                elif line_count > retry_context.line_processed:
+                    print(line, flush=True, end='', file=output_stream)
+                    retry_context.line_processed = line_count
         if request_id is not None:
             return get(request_id)
+        else:
+            return None
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
@@ -97,9 +154,11 @@ def stream_response(request_id: Optional[str],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def check(infra_list: Optional[Tuple[str, ...]],
-          verbose: bool,
-          workspace: Optional[str] = None) -> server_common.RequestId:
+def check(
+    infra_list: Optional[Tuple[str, ...]],
+    verbose: bool,
+    workspace: Optional[str] = None
+) -> server_common.RequestId[Dict[str, List[str]]]:
     """Checks the credentials to enable clouds.
 
     Args:
@@ -133,9 +192,8 @@ def check(infra_list: Optional[Tuple[str, ...]],
     body = payloads.CheckBody(clouds=clouds,
                               verbose=verbose,
                               workspace=workspace)
-    response = requests.post(f'{server_common.get_server_url()}/check',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/check', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -143,7 +201,7 @@ def check(infra_list: Optional[Tuple[str, ...]],
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def enabled_clouds(workspace: Optional[str] = None,
-                   expand: bool = False) -> server_common.RequestId:
+                   expand: bool = False) -> server_common.RequestId[List[str]]:
     """Gets the enabled clouds.
 
     Args:
@@ -159,23 +217,25 @@ def enabled_clouds(workspace: Optional[str] = None,
     """
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
-    response = requests.get((f'{server_common.get_server_url()}/enabled_clouds?'
-                             f'workspace={workspace}&expand={expand}'),
-                            cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'GET', f'/enabled_clouds?workspace={workspace}&expand={expand}')
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def list_accelerators(gpus_only: bool = True,
-                      name_filter: Optional[str] = None,
-                      region_filter: Optional[str] = None,
-                      quantity_filter: Optional[int] = None,
-                      clouds: Optional[Union[List[str], str]] = None,
-                      all_regions: bool = False,
-                      require_price: bool = True,
-                      case_sensitive: bool = True) -> server_common.RequestId:
+def list_accelerators(
+    gpus_only: bool = True,
+    name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    clouds: Optional[Union[List[str], str]] = None,
+    all_regions: bool = False,
+    require_price: bool = True,
+    case_sensitive: bool = True
+) -> server_common.RequestId[Dict[str,
+                                  List['sky.catalog.common.InstanceTypeInfo']]]:
     """Lists the names of all accelerators offered by Sky.
 
     This will include all accelerators offered by Sky, including those
@@ -209,10 +269,8 @@ def list_accelerators(gpus_only: bool = True,
         require_price=require_price,
         case_sensitive=case_sensitive,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/list_accelerators',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/list_accelerators', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -220,12 +278,12 @@ def list_accelerators(gpus_only: bool = True,
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def list_accelerator_counts(
-        gpus_only: bool = True,
-        name_filter: Optional[str] = None,
-        region_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None,
-        clouds: Optional[Union[List[str],
-                               str]] = None) -> server_common.RequestId:
+    gpus_only: bool = True,
+    name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    clouds: Optional[Union[List[str], str]] = None
+) -> server_common.RequestId[Dict[str, List[float]]]:
     """Lists all accelerators offered by Sky and available counts.
 
     Args:
@@ -250,10 +308,10 @@ def list_accelerator_counts(
         quantity_filter=quantity_filter,
         clouds=clouds,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/list_accelerator_counts',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/list_accelerator_counts',
+        json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -264,7 +322,7 @@ def optimize(
     dag: 'sky.Dag',
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
     admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
-) -> server_common.RequestId:
+) -> server_common.RequestId['sky.Dag']:
     """Finds the best execution plan for the given DAG.
 
     Args:
@@ -290,16 +348,14 @@ def optimize(
     body = payloads.OptimizeBody(dag=dag_str,
                                  minimize=minimize,
                                  request_options=admin_policy_request_options)
-    response = requests.post(f'{server_common.get_server_url()}/optimize',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/optimize', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
-def workspaces() -> server_common.RequestId:
+def workspaces() -> server_common.RequestId[Dict[str, Any]]:
     """Gets the workspaces."""
-    response = requests.get(f'{server_common.get_server_url()}/workspaces',
-                            cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request('GET', '/workspaces')
     return server_common.get_request_id(response)
 
 
@@ -326,16 +382,22 @@ def validate(
             validation. This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
+    remote_api_version = versions.get_remote_api_version()
+    # TODO(kevin): remove this in v0.13.0
+    omit_user_specified_yaml = (remote_api_version is None or
+                                remote_api_version < 15)
     for task in dag.tasks:
+        if omit_user_specified_yaml:
+            # pylint: disable=protected-access
+            task._user_specified_yaml = None
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
-    response = requests.post(f'{server_common.get_server_url()}/validate',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/validate', json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.deserialize_exception(
@@ -363,9 +425,10 @@ def launch(
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -376,7 +439,8 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
-) -> server_common.RequestId:
+) -> server_common.RequestId[Tuple[Optional[int],
+                                   Optional['backends.ResourceHandle']]]:
     """Launches a cluster or task.
 
     The task's setup and run commands are executed under the task's workdir
@@ -412,6 +476,15 @@ def launch(
             ``sky.autostop(idle_minutes=<minutes>)``. If set, the autostop
             config specified in the task' resources will be overridden by
             this parameter.
+        wait_for: determines the condition for resetting the idleness timer.
+            This option works in conjunction with ``idle_minutes_to_autostop``.
+            Choices:
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         dryrun: if True, do not actually launch the cluster.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
@@ -475,12 +548,27 @@ def launch(
             raise NotImplementedError('clone_disk_from is not implemented yet. '
                                       'Please contact the SkyPilot team if you '
                                       'need this feature at slack.skypilot.co.')
+
+    remote_api_version = versions.get_remote_api_version()
+    if wait_for is not None and (remote_api_version is None or
+                                 remote_api_version < 13):
+        logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
     dag = dag_utils.convert_entrypoint_to_dag(task)
     # Override the autostop config from command line flags to task YAML.
     for task in dag.tasks:
         for resource in task.resources:
-            resource.override_autostop_config(
-                down=down, idle_minutes=idle_minutes_to_autostop)
+            if remote_api_version is None or remote_api_version < 13:
+                # An older server would not recognize the wait_for field
+                # in the schema, so we need to omit it.
+                resource.override_autostop_config(
+                    down=down, idle_minutes=idle_minutes_to_autostop)
+            else:
+                resource.override_autostop_config(
+                    down=down,
+                    idle_minutes=idle_minutes_to_autostop,
+                    wait_for=wait_for)
             if resource.autostop_config is not None:
                 # For backward-compatbility, get the final autostop config for
                 # admin policy.
@@ -523,7 +611,7 @@ def _launch(
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -534,7 +622,8 @@ def _launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
-) -> server_common.RequestId:
+) -> server_common.RequestId[Tuple[Optional[int],
+                                   Optional['backends.ResourceHandle']]]:
     """Auxiliary function for launch(), refer to launch() for details."""
 
     validate(dag, admin_policy_request_options=request_options)
@@ -547,23 +636,24 @@ def _launch(
     if _need_confirmation:
         cluster_status = None
         # TODO(SKY-998): we should reduce RTTs before launching the cluster.
-        request_id = status([cluster_name], all_users=True)
-        clusters = get(request_id)
+        status_request_id = status([cluster_name], all_users=True)
+        clusters = get(status_request_id)
         cluster_user_hash = common_utils.get_user_hash()
         cluster_user_hash_str = ''
-        cluster_user_name = getpass.getuser()
+        current_user = common_utils.get_current_user_name()
+        cluster_user_name = current_user
         if not clusters:
             # Show the optimize log before the prompt if the cluster does not
             # exist.
-            request_id = optimize(dag,
-                                  admin_policy_request_options=request_options)
-            stream_and_get(request_id)
+            optimize_request_id = optimize(
+                dag, admin_policy_request_options=request_options)
+            stream_and_get(optimize_request_id)
         else:
             cluster_record = clusters[0]
             cluster_status = cluster_record['status']
             cluster_user_hash = cluster_record['user_hash']
             cluster_user_name = cluster_record['user_name']
-            if cluster_user_name == getpass.getuser():
+            if cluster_user_name == current_user:
                 # Only show the hash if the username is the same as the local
                 # username, to avoid confusion.
                 cluster_user_hash_str = f' (hash: {cluster_user_hash})'
@@ -618,12 +708,8 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/launch',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
@@ -635,8 +721,9 @@ def exec(  # pylint: disable=redefined-builtin
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
-) -> server_common.RequestId:
+    backend: Optional['backends.Backend'] = None,
+) -> server_common.RequestId[Tuple[Optional[int],
+                                   Optional['backends.ResourceHandle']]]:
     """Executes a task on an existing cluster.
 
     This function performs two actions:
@@ -702,18 +789,17 @@ def exec(  # pylint: disable=redefined-builtin
         backend=backend.NAME if backend else None,
     )
 
-    response = requests.post(
-        f'{server_common.get_server_url()}/exec',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/exec', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
+# TODO(aylei): when retry logs request, there will be duplciated log entries.
+# We should fix this.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@rest.retry_transient_errors()
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
@@ -752,15 +838,21 @@ def tail_logs(cluster_name: str,
         follow=follow,
         tail=tail,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/logs',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/logs',
         json=json.loads(body.model_dump_json()),
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
-                 None),
-        cookies=server_common.get_api_cookie_jar())
-    request_id = server_common.get_request_id(response)
-    return stream_response(request_id, response, output_stream)
+                 None))
+    request_id: server_common.RequestId[int] = server_common.get_request_id(
+        response)
+    # Log request is idempotent when tail is 0, thus can resume previous
+    # streaming point on retry.
+    return stream_response(request_id=request_id,
+                           response=response,
+                           output_stream=output_stream,
+                           resumable=(tail == 0))
 
 
 @usage_lib.entrypoint
@@ -794,11 +886,11 @@ def download_logs(cluster_name: str,
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.post(f'{server_common.get_server_url()}/download_logs',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
-    job_id_remote_path_dict = stream_and_get(
-        server_common.get_request_id(response))
+    response = server_common.make_authenticated_request(
+        'POST', '/download_logs', json=json.loads(body.model_dump_json()))
+    request_id: server_common.RequestId[Dict[
+        str, str]] = server_common.get_request_id(response)
+    job_id_remote_path_dict = stream_and_get(request_id)
     remote2local_path_dict = client_common.download_logs_from_api_server(
         job_id_remote_path_dict.values())
     return {
@@ -813,10 +905,11 @@ def download_logs(cluster_name: str,
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
-) -> server_common.RequestId:
+) -> server_common.RequestId['backends.CloudVmRayResourceHandle']:
     """Restart a cluster.
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -839,6 +932,15 @@ def start(
             flag is equivalent to running ``sky.launch()`` and then
             ``sky.autostop(idle_minutes=<minutes>)``. If not set, the
             cluster will not be autostopped.
+        wait_for: determines the condition for resetting the idleness timer.
+            This option works in conjunction with ``idle_minutes_to_autostop``.
+            Choices:
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         retry_until_up: whether to retry launching the cluster until it is
             up.
         down: Autodown the cluster: tear down the cluster after specified
@@ -867,26 +969,30 @@ def start(
         sky.exceptions.ClusterOwnerIdentitiesMismatchError: if the cluster to
             restart was launched by a different user.
     """
+    remote_api_version = versions.get_remote_api_version()
+    if wait_for is not None and (remote_api_version is None or
+                                 remote_api_version < 13):
+        logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
     body = payloads.StartBody(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        wait_for=wait_for,
         retry_until_up=retry_until_up,
         down=down,
         force=force,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/start',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/start', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def down(cluster_name: str, purge: bool = False) -> server_common.RequestId:
+def down(cluster_name: str,
+         purge: bool = False) -> server_common.RequestId[None]:
     """Tears down a cluster.
 
     Tearing down a cluster will delete all associated resources (all billing
@@ -920,19 +1026,16 @@ def down(cluster_name: str, purge: bool = False) -> server_common.RequestId:
         cluster_name=cluster_name,
         purge=purge,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/down',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/down', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
+def stop(cluster_name: str,
+         purge: bool = False) -> server_common.RequestId[None]:
     """Stops a cluster.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
@@ -969,12 +1072,8 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
         cluster_name=cluster_name,
         purge=purge,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/stop',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/stop', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
@@ -982,10 +1081,11 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def autostop(
-    cluster_name: str,
-    idle_minutes: int,
-    down: bool = False  # pylint: disable=redefined-outer-name
-) -> server_common.RequestId:
+        cluster_name: str,
+        idle_minutes: int,
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
+        down: bool = False,  # pylint: disable=redefined-outer-name
+) -> server_common.RequestId[None]:
     """Schedules an autostop/autodown for a cluster.
 
     Autostop/autodown will automatically stop or teardown a cluster when it
@@ -1015,6 +1115,15 @@ def autostop(
         idle_minutes: the number of minutes of idleness (no pending/running
             jobs) after which the cluster will be stopped automatically. Setting
             to a negative number cancels any autostop/autodown setting.
+        wait_for: determines the condition for resetting the idleness timer.
+            This option works in conjunction with ``idle_minutes``.
+            Choices:
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         down: if true, use autodown (tear down the cluster; non-restartable),
             rather than autostop (restartable).
 
@@ -1034,17 +1143,20 @@ def autostop(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
             user identity.
     """
+    remote_api_version = versions.get_remote_api_version()
+    if wait_for is not None and (remote_api_version is None or
+                                 remote_api_version < 13):
+        logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
         idle_minutes=idle_minutes,
+        wait_for=wait_for,
         down=down,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/autostop',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/autostop', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
@@ -1053,7 +1165,7 @@ def autostop(
 @annotations.client_api
 def queue(cluster_name: str,
           skip_finished: bool = False,
-          all_users: bool = False) -> server_common.RequestId:
+          all_users: bool = False) -> server_common.RequestId[List[dict]]:
     """Gets the job queue of a cluster.
 
     Args:
@@ -1102,17 +1214,19 @@ def queue(cluster_name: str,
         skip_finished=skip_finished,
         all_users=all_users,
     )
-    response = requests.post(f'{server_common.get_server_url()}/queue',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/queue', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def job_status(cluster_name: str,
-               job_ids: Optional[List[int]] = None) -> server_common.RequestId:
+def job_status(
+    cluster_name: str,
+    job_ids: Optional[List[int]] = None
+) -> server_common.RequestId[Dict[Optional[int],
+                                  Optional['job_lib.JobStatus']]]:
     """Gets the status of jobs on a cluster.
 
     Args:
@@ -1144,9 +1258,8 @@ def job_status(cluster_name: str,
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.post(f'{server_common.get_server_url()}/job_status',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/job_status', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1160,7 +1273,7 @@ def cancel(
     job_ids: Optional[List[int]] = None,
     # pylint: disable=invalid-name
     _try_cancel_if_cluster_is_init: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     """Cancels jobs on a cluster.
 
     Args:
@@ -1198,9 +1311,8 @@ def cancel(
         job_ids=job_ids,
         try_cancel_if_cluster_is_init=_try_cancel_if_cluster_is_init,
     )
-    response = requests.post(f'{server_common.get_server_url()}/cancel',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/cancel', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1211,7 +1323,7 @@ def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> server_common.RequestId:
+) -> server_common.RequestId[List[Dict[str, Any]]]:
     """Gets cluster statuses.
 
     If cluster_names is given, return those clusters. Otherwise, return all
@@ -1294,9 +1406,8 @@ def status(
         refresh=refresh,
         all_users=all_users,
     )
-    response = requests.post(f'{server_common.get_server_url()}/status',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/status', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1304,8 +1415,9 @@ def status(
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def endpoints(
-        cluster: str,
-        port: Optional[Union[int, str]] = None) -> server_common.RequestId:
+    cluster: str,
+    port: Optional[Union[int, str]] = None
+) -> server_common.RequestId[Dict[str, str]]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -1329,16 +1441,17 @@ def endpoints(
         cluster=cluster,
         port=port,
     )
-    response = requests.post(f'{server_common.get_server_url()}/endpoints',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/endpoints', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-builtin
+def cost_report(
+    days: Optional[int] = None
+) -> server_common.RequestId[List[Dict[str, Any]]]:  # pylint: disable=redefined-builtin
     """Gets all cluster cost reports, including those that have been downed.
 
     The estimated cost column indicates price for the cluster based on the type
@@ -1347,6 +1460,10 @@ def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-built
     show increasing price. The estimated cost is calculated based on the local
     cache of the cluster status, and may not be accurate for the cluster with
     autostop/use_spot set or terminated/stopped on the cloud console.
+
+    Args:
+        days: The number of days to get the cost report for. If not provided,
+            the default is 30 days.
 
     Returns:
         The request ID of the cost report request.
@@ -1369,8 +1486,9 @@ def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-built
               'total_cost': (float) cost given resources and usage intervals,
             }
     """
-    response = requests.get(f'{server_common.get_server_url()}/cost_report',
-                            cookies=server_common.get_api_cookie_jar())
+    body = payloads.CostReportBody(days=days)
+    response = server_common.make_authenticated_request(
+        'POST', '/cost_report', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1378,7 +1496,7 @@ def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-built
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def storage_ls() -> server_common.RequestId:
+def storage_ls() -> server_common.RequestId[List[Dict[str, Any]]]:
     """Gets the storages.
 
     Returns:
@@ -1399,15 +1517,14 @@ def storage_ls() -> server_common.RequestId:
                 }
         ]
     """
-    response = requests.get(f'{server_common.get_server_url()}/storage/ls',
-                            cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request('GET', '/storage/ls')
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def storage_delete(name: str) -> server_common.RequestId:
+def storage_delete(name: str) -> server_common.RequestId[None]:
     """Deletes a storage.
 
     Args:
@@ -1423,9 +1540,8 @@ def storage_delete(name: str) -> server_common.RequestId:
         ValueError: If the storage does not exist.
     """
     body = payloads.StorageBody(name=name)
-    response = requests.post(f'{server_common.get_server_url()}/storage/delete',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/storage/delete', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1441,7 +1557,7 @@ def local_up(gpus: bool,
              ssh_key: Optional[str],
              cleanup: bool,
              context_name: Optional[str] = None,
-             password: Optional[str] = None) -> server_common.RequestId:
+             password: Optional[str] = None) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -1462,16 +1578,15 @@ def local_up(gpus: bool,
                                 cleanup=cleanup,
                                 context_name=context_name,
                                 password=password)
-    response = requests.post(f'{server_common.get_server_url()}/local_up',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_down() -> server_common.RequestId:
+def local_down() -> server_common.RequestId[None]:
     """Tears down the Kubernetes cluster started by local_up."""
     # We do not allow local up when the API server is running remotely since it
     # will modify the kubeconfig.
@@ -1480,38 +1595,106 @@ def local_down() -> server_common.RequestId:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('sky local down is only supported when running '
                              'SkyPilot locally.')
-    response = requests.post(f'{server_common.get_server_url()}/local_down',
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request('POST', '/local_down')
     return server_common.get_request_id(response)
+
+
+def _update_remote_ssh_node_pools(file: str,
+                                  infra: Optional[str] = None) -> None:
+    """Update the SSH node pools on the remote server.
+
+    This function will also upload the local SSH key to the remote server, and
+    replace the file path to the remote SSH key file path.
+
+    Args:
+        file: The path to the local SSH node pools config file.
+        infra: The name of the cluster configuration in the local SSH node
+            pools config file. If None, all clusters in the file are updated.
+    """
+    file = os.path.expanduser(file)
+    if not os.path.exists(file):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'SSH Node Pool config file {file} does not exist. '
+                'Please check if the file exists and the path is correct.')
+    config = ssh_utils.load_ssh_targets(file)
+    config = ssh_utils.get_cluster_config(config, infra)
+    pools_config = {}
+    for name, pool_config in config.items():
+        hosts_info = ssh_utils.prepare_hosts_info(
+            name, pool_config, upload_ssh_key_func=_upload_ssh_key_and_wait)
+        pools_config[name] = {'hosts': hosts_info}
+    server_common.make_authenticated_request('POST',
+                                             '/ssh_node_pools',
+                                             json=pools_config)
+
+
+def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
+    """Upload the SSH key to the remote server and wait for the key to be
+    uploaded.
+
+    Args:
+        key_name: The name of the SSH key.
+        key_file_path: The path to the local SSH key file.
+
+    Returns:
+        The path for the remote SSH key file on the API server.
+    """
+    if not os.path.exists(os.path.expanduser(key_file_path)):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'SSH key file not found: {key_file_path}')
+
+    with open(os.path.expanduser(key_file_path), 'rb') as key_file:
+        response = server_common.make_authenticated_request(
+            'POST',
+            '/ssh_node_pools/keys',
+            files={
+                'key_file': (key_name, key_file, 'application/octet-stream')
+            },
+            data={'key_name': key_name},
+            cookies=server_common.get_api_cookie_jar())
+
+    return response.json()['key_path']
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
+def ssh_up(infra: Optional[str] = None,
+           file: Optional[str] = None) -> server_common.RequestId[None]:
     """Deploys the SSH Node Pools defined in ~/.sky/ssh_targets.yaml.
 
     Args:
         infra: Name of the cluster configuration in ssh_targets.yaml.
             If None, the first cluster in the file is used.
+        file: Name of the ssh node pool configuration file to use. If
+            None, the default path, ~/.sky/ssh_node_pools.yaml is used.
 
     Returns:
         request_id: The request ID of the SSH cluster deployment request.
     """
-    body = payloads.SSHUpBody(
-        infra=infra,
-        cleanup=False,
-    )
-    response = requests.post(f'{server_common.get_server_url()}/ssh_up',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    if file is not None:
+        _update_remote_ssh_node_pools(file, infra)
+
+    # Use SSH node pools router endpoint
+    body = payloads.SSHUpBody(infra=infra, cleanup=False)
+    if infra is not None:
+        # Call the specific pool deployment endpoint
+        response = server_common.make_authenticated_request(
+            'POST', f'/ssh_node_pools/{infra}/deploy')
+    else:
+        # Call the general deployment endpoint
+        response = server_common.make_authenticated_request(
+            'POST',
+            '/ssh_node_pools/deploy',
+            json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
+def ssh_down(infra: Optional[str] = None) -> server_common.RequestId[None]:
     """Tears down a Kubernetes cluster on SSH targets.
 
     Args:
@@ -1521,13 +1704,18 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
     Returns:
         request_id: The request ID of the SSH cluster teardown request.
     """
-    body = payloads.SSHUpBody(
-        infra=infra,
-        cleanup=True,
-    )
-    response = requests.post(f'{server_common.get_server_url()}/ssh_down',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    # Use SSH node pools router endpoint
+    body = payloads.SSHUpBody(infra=infra, cleanup=True)
+    if infra is not None:
+        # Call the specific pool down endpoint
+        response = server_common.make_authenticated_request(
+            'POST', f'/ssh_node_pools/{infra}/down')
+    else:
+        # Call the general down endpoint
+        response = server_common.make_authenticated_request(
+            'POST',
+            '/ssh_node_pools/down',
+            json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1535,10 +1723,12 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def realtime_kubernetes_gpu_availability(
-        context: Optional[str] = None,
-        name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None,
-        is_ssh: Optional[bool] = None) -> server_common.RequestId:
+    context: Optional[str] = None,
+    name_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    is_ssh: Optional[bool] = None
+) -> server_common.RequestId[List[Tuple[
+        str, List['models.RealtimeGpuAvailability']]]]:
     """Gets the real-time Kubernetes GPU availability.
 
     Returns:
@@ -1550,11 +1740,10 @@ def realtime_kubernetes_gpu_availability(
         quantity_filter=quantity_filter,
         is_ssh=is_ssh,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/'
-        'realtime_kubernetes_gpu_availability',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/realtime_kubernetes_gpu_availability',
+        json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1562,7 +1751,8 @@ def realtime_kubernetes_gpu_availability(
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def kubernetes_node_info(
-        context: Optional[str] = None) -> server_common.RequestId:
+    context: Optional[str] = None
+) -> server_common.RequestId['models.KubernetesNodesInfo']:
     """Gets the resource information for all the nodes in the cluster.
 
     Currently only GPU resources are supported. The function returns the total
@@ -1583,17 +1773,20 @@ def kubernetes_node_info(
             information.
     """
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
-    response = requests.post(
-        f'{server_common.get_server_url()}/kubernetes_node_info',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/kubernetes_node_info',
+        json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def status_kubernetes() -> server_common.RequestId:
+def status_kubernetes() -> server_common.RequestId[Tuple[
+    List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+    List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'], List[Dict[
+        str, Any]], Optional[str]]]:
     """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.
@@ -1614,21 +1807,24 @@ def status_kubernetes() -> server_common.RequestId:
             dictionary job info, see jobs.queue_from_kubernetes_pod for details.
         - context: Kubernetes context used to fetch the cluster information.
     """
-    response = requests.get(
-        f'{server_common.get_server_url()}/status_kubernetes',
-        cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request('GET',
+                                                        '/status_kubernetes')
     return server_common.get_request_id(response)
 
 
 # === API request APIs ===
 @usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
 @annotations.client_api
-def get(request_id: str) -> Any:
+def get(request_id: server_common.RequestId[T]) -> T:
     """Waits for and gets the result of a request.
 
+    This function will not check the server health since /api/get is typically
+    not the first API call in an SDK session and checking the server health
+    may cause GET /api/get being sent to a restarted API server.
+
     Args:
-        request_id: The request ID of the request to get.
+        request_id: The request ID of the request to get. May be a full request
+            ID or a prefix.
 
     Returns:
         The ``Request Returns`` of the specified request. See the documentation
@@ -1639,19 +1835,20 @@ def get(request_id: str) -> Any:
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
-    response = requests.get(
-        f'{server_common.get_server_url()}/api/get?request_id={request_id}',
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/api/get?request_id={request_id}',
+        retry=False,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
-                 None),
-        cookies=server_common.get_api_cookie_jar())
+                 None))
     request_task = None
     if response.status_code == 200:
         request_task = requests_lib.Request.decode(
-            requests_lib.RequestPayload(**response.json()))
+            payloads.RequestPayload(**response.json()))
     elif response.status_code == 500:
         try:
             request_task = requests_lib.Request.decode(
-                requests_lib.RequestPayload(**response.json().get('detail')))
+                payloads.RequestPayload(**response.json().get('detail')))
             logger.debug(f'Got request with error: {request_task.name}')
         except Exception:  # pylint: disable=broad-except
             request_task = None
@@ -1677,23 +1874,44 @@ def get(request_id: str) -> Any:
     return request_task.get_return_value()
 
 
+@typing.overload
+def stream_and_get(request_id: server_common.RequestId[T],
+                   log_path: Optional[str] = None,
+                   tail: Optional[int] = None,
+                   follow: bool = True,
+                   output_stream: Optional['io.TextIOBase'] = None) -> T:
+    ...
+
+
+@typing.overload
+def stream_and_get(request_id: None = None,
+                   log_path: Optional[str] = None,
+                   tail: Optional[int] = None,
+                   follow: bool = True,
+                   output_stream: Optional['io.TextIOBase'] = None) -> None:
+    ...
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def stream_and_get(
-    request_id: Optional[str] = None,
+    request_id: Optional[server_common.RequestId[T]] = None,
     log_path: Optional[str] = None,
     tail: Optional[int] = None,
     follow: bool = True,
     output_stream: Optional['io.TextIOBase'] = None,
-) -> Any:
+) -> Optional[T]:
     """Streams the logs of a request or a log file and gets the final result.
 
     This will block until the request is finished. The request id can be a
     prefix of the full request id.
 
     Args:
-        request_id: The prefix of the request ID of the request to stream.
+        request_id: The request ID of the request to stream. May be a full
+            request ID or a prefix.
+            If None, the latest request submitted to the API server is streamed.
+            Using None request_id is not recommended in multi-user environments.
         log_path: The path to the log file to stream.
         tail: The number of lines to show from the end of the logs.
             If None, show all logs.
@@ -1717,27 +1935,34 @@ def stream_and_get(
         'follow': follow,
         'format': 'console',
     }
-    response = requests.get(
-        f'{server_common.get_server_url()}/api/stream',
+    response = server_common.make_authenticated_request(
+        'GET',
+        '/api/stream',
         params=params,
+        retry=False,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
-        stream=True,
-        cookies=server_common.get_api_cookie_jar())
+        stream=True)
     if response.status_code in [404, 400]:
         detail = response.json().get('detail')
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
+        # TODO(syang): handle the case where the requestID is not provided
+        # see https://github.com/skypilot-org/skypilot/issues/6549
+        if request_id is None:
+            return None
         return get(request_id)
     return stream_response(request_id, response, output_stream)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
+def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
+                                           List[server_common.RequestId[T]],
+                                           str, List[str]]] = None,
                all_users: bool = False,
-               silent: bool = False) -> server_common.RequestId:
+               silent: bool = False) -> server_common.RequestId[List[str]]:
     """Aborts a request or all requests.
 
     Args:
@@ -1777,20 +2002,33 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
         echo(f'Cancelling {len(request_ids)} request{plural}: '
              f'{request_id_str}...')
 
-    response = requests.post(f'{server_common.get_server_url()}/api/cancel',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=5,
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/api/cancel',
+        json=json.loads(body.model_dump_json()),
+        timeout=5)
     return server_common.get_request_id(response)
+
+
+def _local_api_server_running(kill: bool = False) -> bool:
+    """Checks if the local api server is running."""
+    for process in psutil.process_iter(attrs=['pid', 'cmdline']):
+        cmdline = process.info['cmdline']
+        if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
+            if kill:
+                subprocess_utils.kill_children_processes(
+                    parent_pids=[process.pid], force=True)
+            return True
+    return False
 
 
 @usage_lib.entrypoint
 @annotations.client_api
 def api_status(
-    request_ids: Optional[List[str]] = None,
+    request_ids: Optional[List[Union[server_common.RequestId[T], str]]] = None,
     # pylint: disable=redefined-builtin
     all_status: bool = False
-) -> List[requests_lib.RequestPayload]:
+) -> List[payloads.RequestPayload]:
     """Lists all requests.
 
     Args:
@@ -1802,25 +2040,27 @@ def api_status(
     Returns:
         A list of request payloads.
     """
+    if server_common.is_api_server_local() and not _local_api_server_running():
+        logger.info('SkyPilot API server is not running.')
+        return []
+
     body = payloads.RequestStatusBody(request_ids=request_ids,
                                       all_status=all_status)
-    response = requests.get(
-        f'{server_common.get_server_url()}/api/status',
+    response = server_common.make_authenticated_request(
+        'GET',
+        '/api/status',
         params=server_common.request_body_to_params(body),
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
-                 None),
-        cookies=server_common.get_api_cookie_jar())
+                 None))
     server_common.handle_request_error(response)
-    return [
-        requests_lib.RequestPayload(**request) for request in response.json()
-    ]
+    return [payloads.RequestPayload(**request) for request in response.json()]
 
 
 # === API server management APIs ===
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def api_info() -> Dict[str, Any]:
+def api_info() -> responses.APIHealthResponse:
     """Gets the server's status, commit and version.
 
     Returns:
@@ -1843,10 +2083,9 @@ def api_info() -> Dict[str, Any]:
         Note that user may be None if we are not using an auth proxy.
 
     """
-    response = requests.get(f'{server_common.get_server_url()}/api/health',
-                            cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request('GET', '/api/health')
     response.raise_for_status()
-    return response.json()
+    return responses.APIHealthResponse(**response.json())
 
 
 @usage_lib.entrypoint
@@ -1856,6 +2095,9 @@ def api_start(
     deploy: bool = False,
     host: str = '127.0.0.1',
     foreground: bool = False,
+    metrics: bool = False,
+    metrics_port: Optional[int] = None,
+    enable_basic_auth: bool = False,
 ) -> None:
     """Starts the API server.
 
@@ -1869,6 +2111,10 @@ def api_start(
             if deploy is True, to allow remote access.
         foreground: Whether to run the API server in the foreground (run in
             the current process).
+        metrics: Whether to export metrics of the API server.
+        metrics_port: The port to export metrics of the API server.
+        enable_basic_auth: Whether to enable basic authentication
+            in the API server.
     Returns:
         None
     """
@@ -1887,7 +2133,9 @@ def api_start(
                              'from the config file and/or unset the '
                              'SKYPILOT_API_SERVER_ENDPOINT environment '
                              'variable.')
-    server_common.check_server_healthy_or_start_fn(deploy, host, foreground)
+    server_common.check_server_healthy_or_start_fn(deploy, host, foreground,
+                                                   metrics, metrics_port,
+                                                   enable_basic_auth)
     if foreground:
         # Explain why current process exited
         logger.info('API server is already running:')
@@ -1916,13 +2164,7 @@ def api_stop() -> None:
                 f'Cannot kill the API server at {server_url} because it is not '
                 f'the default SkyPilot API server started locally.')
 
-    found = False
-    for process in psutil.process_iter(attrs=['pid', 'cmdline']):
-        cmdline = process.info['cmdline']
-        if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
-            subprocess_utils.kill_children_processes(parent_pids=[process.pid],
-                                                     force=True)
-            found = True
+    found = _local_api_server_running(kill=True)
 
     # Remove the database for requests.
     server_common.clear_local_api_server_database()
@@ -1960,9 +2202,69 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
         stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
 
 
+def _save_config_updates(endpoint: Optional[str] = None,
+                         service_account_token: Optional[str] = None) -> None:
+    """Save endpoint and/or service account token to config file."""
+    config_path = pathlib.Path(
+        skypilot_config.get_user_config_path()).expanduser()
+    with filelock.FileLock(config_path.with_suffix('.lock')):
+        if not config_path.exists():
+            config_path.touch()
+            config: Dict[str, Any] = {}
+        else:
+            config = skypilot_config.get_user_config()
+            config = dict(config)
+
+        # Update endpoint if provided
+        if endpoint is not None:
+            # We should always reset the api_server config to avoid legacy
+            # service account token.
+            config['api_server'] = {}
+            config['api_server']['endpoint'] = endpoint
+
+        # Update service account token if provided
+        if service_account_token is not None:
+            if 'api_server' not in config:
+                config['api_server'] = {}
+            config['api_server'][
+                'service_account_token'] = service_account_token
+
+        common_utils.dump_yaml(str(config_path), config)
+        skypilot_config.reload_config()
+
+
+def _clear_api_server_config() -> None:
+    """Clear endpoint and service account token from config file."""
+    config_path = pathlib.Path(
+        skypilot_config.get_user_config_path()).expanduser()
+    with filelock.FileLock(config_path.with_suffix('.lock')):
+        if not config_path.exists():
+            return
+
+        config = skypilot_config.get_user_config()
+        config = dict(config)
+        del config['api_server']
+
+        common_utils.dump_yaml(str(config_path), config, blank=True)
+        skypilot_config.reload_config()
+
+
+def _validate_endpoint(endpoint: Optional[str]) -> str:
+    """Validate and normalize the endpoint URL."""
+    if endpoint is None:
+        endpoint = click.prompt('Enter your SkyPilot API server endpoint')
+    # Check endpoint is a valid URL
+    if (endpoint is not None and not endpoint.startswith('http://') and
+            not endpoint.startswith('https://')):
+        raise click.BadParameter('Endpoint must be a valid URL.')
+    return endpoint.rstrip('/')
+
+
 @usage_lib.entrypoint
 @annotations.client_api
-def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
+def api_login(endpoint: Optional[str] = None,
+              relogin: bool = False,
+              service_account_token: Optional[str] = None) -> None:
     """Logs into a SkyPilot API server.
 
     This sets the endpoint globally, i.e., all SkyPilot CLI and SDK calls will
@@ -1974,24 +2276,80 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
     Args:
         endpoint: The endpoint of the SkyPilot API server, e.g.,
             http://1.2.3.4:46580 or https://skypilot.mydomain.com.
-        get_token: Whether to force getting a new token even if not needed.
+        relogin: Whether to force relogin with OAuth2 when enabled.
+        service_account_token: Service account token for authentication.
 
     Returns:
         None
     """
+    # Validate and normalize endpoint
+    endpoint = _validate_endpoint(endpoint)
+
+    def _show_logged_in_message(
+            endpoint: str, dashboard_url: str, user: Optional[Dict[str, Any]],
+            server_status: server_common.ApiServerStatus) -> None:
+        """Show the logged in message."""
+        if server_status != server_common.ApiServerStatus.HEALTHY:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Cannot log in API server at '
+                                 f'{endpoint} (status: {server_status.value})')
+
+        identity_info = f'\n{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}User: '
+        if user:
+            user_name = user.get('name')
+            user_id = user.get('id')
+            if user_name and user_id:
+                identity_info += f'{user_name} ({user_id})'
+            elif user_id:
+                identity_info += user_id
+        else:
+            identity_info = ''
+        dashboard_msg = f'Dashboard: {dashboard_url}'
+        click.secho(
+            f'Logged into SkyPilot API server at: {endpoint}'
+            f'{identity_info}'
+            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+            f'{dashboard_msg}',
+            fg='green')
+
+    # Handle service account token authentication
+    if service_account_token:
+        if not service_account_token.startswith('sky_'):
+            raise ValueError('Invalid service account token format. '
+                             'Token must start with "sky_"')
+
+        # Save both endpoint and token to config in a single operation
+        _save_config_updates(endpoint=endpoint,
+                             service_account_token=service_account_token)
+
+        # Test the authentication by checking server health
+        try:
+            server_status, api_server_info = server_common.check_server_healthy(
+                endpoint)
+            dashboard_url = server_common.get_dashboard_url(endpoint)
+            _show_logged_in_message(endpoint, dashboard_url,
+                                    api_server_info.user, server_status)
+
+            return
+        except exceptions.ApiServerConnectionError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to connect to API server at {endpoint}: {e}'
+                ) from e
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'{colorama.Fore.RED}Service account token authentication '
+                    f'failed:{colorama.Style.RESET_ALL} {e}') from None
+
+    # OAuth2/cookie-based authentication flow
     # TODO(zhwu): this SDK sets global endpoint, which may not be the best
     # design as a user may expect this is only effective for the current
     # session. We should consider using env var for specifying endpoint.
-    if endpoint is None:
-        endpoint = click.prompt('Enter your SkyPilot API server endpoint')
-    # Check endpoint is a valid URL
-    if (endpoint is not None and not endpoint.startswith('http://') and
-            not endpoint.startswith('https://')):
-        raise click.BadParameter('Endpoint must be a valid URL.')
-    endpoint = endpoint.rstrip('/')
 
-    server_status = server_common.check_server_healthy(endpoint)
-    if server_status == server_common.ApiServerStatus.NEEDS_AUTH or get_token:
+    server_status, api_server_info = server_common.check_server_healthy(
+        endpoint)
+    if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
         # We detected an auth proxy, so go through the auth proxy cookie flow.
         token: Optional[str] = None
         server: Optional[oauth_lib.HTTPServer] = None
@@ -2121,22 +2479,51 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
                       'w',
                       encoding='utf-8') as f:
                 f.write(user_hash)
+    else:
+        # Check if basic auth is enabled
+        if api_server_info.basic_auth_enabled:
+            if api_server_info.user is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Basic auth is enabled but no valid user is found')
+            # Set the user hash in the local file
+            user_hash = api_server_info.user.get('id')
+            if not user_hash or not common_utils.is_valid_user_hash(user_hash):
+                raise ValueError(f'Invalid user hash: {user_hash}')
+            with open(os.path.expanduser('~/.sky/user_hash'),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(user_hash)
 
     # Set the endpoint in the config file
-    config_path = pathlib.Path(
-        skypilot_config.get_user_config_path()).expanduser()
-    with filelock.FileLock(config_path.with_suffix('.lock')):
-        if not config_path.exists():
-            config_path.touch()
-            config = {'api_server': {'endpoint': endpoint}}
-        else:
-            config = skypilot_config.get_user_config()
-            config.set_nested(('api_server', 'endpoint'), endpoint)
-        common_utils.dump_yaml(str(config_path), dict(config))
-        dashboard_url = server_common.get_dashboard_url(endpoint)
-        dashboard_msg = f'Dashboard: {dashboard_url}'
-        click.secho(
-            f'Logged into SkyPilot API server at: {endpoint}'
-            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
-            f'{dashboard_msg}',
-            fg='green')
+    _save_config_updates(endpoint=endpoint)
+    dashboard_url = server_common.get_dashboard_url(endpoint)
+
+    # see https://github.com/python/mypy/issues/5107 on why
+    # typing is disabled on this line
+    server_common.get_api_server_status.cache_clear()  # type: ignore
+    # After successful authentication, check server health again to get user
+    # identity
+    server_status, final_api_server_info = server_common.check_server_healthy(
+        endpoint)
+    _show_logged_in_message(endpoint, dashboard_url, final_api_server_info.user,
+                            server_status)
+
+
+@usage_lib.entrypoint
+@annotations.client_api
+def api_logout() -> None:
+    """Logout of the API server.
+
+    Clears all cookies and settings stored in ~/.sky/config.yaml"""
+    if server_common.is_api_server_local():
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Local api server cannot be logged out. '
+                               'Use `sky api stop` instead.')
+
+    # no need to clear cookies if it doesn't exist.
+    server_common.set_api_cookie_jar(cookiejar.MozillaCookieJar(),
+                                     create_if_not_exists=False)
+    _clear_api_server_config()
+    logger.info(f'{colorama.Fore.GREEN}Logged out of SkyPilot API server.'
+                f'{colorama.Style.RESET_ALL}')

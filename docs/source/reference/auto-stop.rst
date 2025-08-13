@@ -29,7 +29,11 @@ To schedule autostop for a cluster, set autostop in the SkyPilot YAML:
      autostop: true  # Stop after default idle minutes (5).
 
      # Or:
-     autostop: 10  # Stop after this many idle minutes.
+     autostop: 10m  # Stop after this many idle minutes.
+
+     # Or:
+     autostop:
+       idle_minutes: 10
 
 Alternatively, use :code:`sky autostop` or ``sky launch -i <idle minutes>``:
 
@@ -94,4 +98,32 @@ To view the status of the cluster, use ``sky dashboard`` or ``sky status``:
    mycluster    AWS (us-east-1) 2x(cpus=8, m4.2xlarge, ...)   UP       10 min         1 min ago
    mycluster2   AWS (us-east-1) 2x(cpus=8, m4.2xlarge, ...)   UP       10 min(down)   1 min ago
 
-Cluster that are autostopped/autodowned are automatically removed from the status table.
+Clusters that are autostopped/autodowned are automatically removed from the status table.
+
+Setting idleness behavior
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To control when the idleness timer resets, set the wait mode in the SkyPilot YAML:
+
+.. code-block:: yaml
+
+   resources:
+     autostop:
+       idle_minutes: 10
+       wait_for: jobs_and_ssh
+
+Alternatively, pass the ``--wait-for`` flag to either ``sky autostop`` or ``sky launch``:
+
+.. code-block:: bash
+
+   # Default: Running jobs and active SSH sessions reset the idleness timer.
+   sky launch -d -c mycluster cluster.yaml -i 10 --wait-for jobs_and_ssh
+
+   # Or:
+   sky autostop mycluster -i 10 --wait-for jobs_and_ssh
+
+   # Only running jobs reset the idleness timer.
+   sky autostop mycluster -i 10 --wait-for jobs
+
+   # Hard time limit: Stop after 10 minutes, regardless of running jobs or SSH sessions.
+   sky autostop mycluster -i 10 --wait-for none

@@ -3,11 +3,36 @@ import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 // Importing from the same directory
 import { apiClient } from '@/data/connectors/client';
 
-export async function getCloudInfrastructure(clusters, jobs) {
+export async function getCloudInfrastructure(
+  clusters,
+  jobs,
+  forceRefresh = false
+) {
   try {
     // Get enabled clouds
     let enabledCloudsList = [];
     try {
+      // If forceRefresh is true, first run sky check to refresh cloud status
+      if (forceRefresh) {
+        console.log('Force refreshing clouds by running sky check...');
+        try {
+          const checkResponse = await apiClient.post('/check', {});
+          const checkId =
+            checkResponse.headers.get('X-Skypilot-Request-ID') ||
+            checkResponse.headers.get('X-Request-ID');
+
+          // Wait for the check to complete
+          const checkResult = await apiClient.get(
+            `/api/get?request_id=${checkId}`
+          );
+          const checkData = await checkResult.json();
+          console.log('Sky check completed:', checkData);
+        } catch (checkError) {
+          console.error('Error running sky check:', checkError);
+          // Continue anyway - we'll still try to get the cached enabled clouds
+        }
+      }
+
       const enabledCloudsResponse = await apiClient.get(`/enabled_clouds`);
 
       const id =
@@ -71,10 +96,10 @@ export async function getCloudInfrastructure(clusters, jobs) {
       (c) => c.enabled
     ).length;
 
-    // Convert to array, filter to only enabled clouds, and sort
+    // Convert to array, filter to only enabled clouds, and sort by name
     const result = Object.values(cloudsData)
       .filter((cloud) => cloud.enabled)
-      .sort((a, b) => b.clusters - a.clusters || b.jobs - a.jobs);
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     return {
       clouds: result,
@@ -95,7 +120,7 @@ export async function getCloudInfrastructure(clusters, jobs) {
  * Main function to get all infrastructure data.
  * Uses cached data from clusters and jobs to avoid redundant API calls.
  */
-export async function getInfraData() {
+export async function getInfraData(forceRefresh = false) {
   // Import here to avoid circular dependencies
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
@@ -113,7 +138,7 @@ export async function getInfraData() {
   // Fetch both GPU and cloud data together
   const [gpuData, cloudData] = await Promise.all([
     getGPUs(clusters, jobs),
-    getCloudInfrastructure(clusters, jobs),
+    getCloudInfrastructure(clusters, jobs, forceRefresh),
   ]);
 
   return {
@@ -437,6 +462,7 @@ async function getKubernetesGPUs(clustersAndJobsData) {
             gpu_name: acceleratorType,
             gpu_total: totalAccelerators,
             gpu_free: freeAccelerators,
+            ip_address: nodeData['ip_address'] || null,
             context: context,
           };
 

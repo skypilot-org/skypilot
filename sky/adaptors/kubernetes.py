@@ -93,12 +93,13 @@ def _load_config(context: Optional[str] = None):
             context_name = '(current-context)' if context is None else context
             is_ssh_node_pool = False
             if context_name.startswith('ssh-'):
-                context_name = context_name.lstrip('ssh-')
+                context_name = common_utils.removeprefix(context_name, 'ssh-')
                 is_ssh_node_pool = True
             # Check if exception was due to no current-context
             if 'Expected key current-context' in str(e):
                 if is_ssh_node_pool:
-                    context_name = context_name.lstrip('ssh-')
+                    context_name = common_utils.removeprefix(
+                        context_name, 'ssh-')
                     err_str = ('Failed to load SSH Node Pool configuration for '
                                f'{context_name!r}.\n'
                                '    Run `sky ssh up --infra {context_name}` to '
@@ -132,12 +133,7 @@ def _load_config(context: Optional[str] = None):
                     '\nHint: Kubernetes attempted to query the current-context '
                     'set in kubeconfig. Check if the current-context is valid.')
             with ux_utils.print_exception_no_traceback():
-                if is_ssh_node_pool:
-                    # For SSH Node Pool, we don't want to surface k8s errors
-                    # (e.g., missing context) unless debug flag is set.
-                    logging.debug(f'Kubernetes error: {suffix}')
-                else:
-                    raise ValueError(err_str) from None
+                raise ValueError(err_str) from None
 
     if context == in_cluster_context_name() or context is None:
         try:
@@ -146,8 +142,11 @@ def _load_config(context: Optional[str] = None):
             # show up in SkyPilot tasks. For now, we work around by using
             # DNS name instead of environment variables.
             # See issue: https://github.com/skypilot-org/skypilot/issues/2287
-            os.environ['KUBERNETES_SERVICE_HOST'] = 'kubernetes.default.svc'
-            os.environ['KUBERNETES_SERVICE_PORT'] = '443'
+            # Only set if not already present (preserving existing values)
+            if 'KUBERNETES_SERVICE_HOST' not in os.environ:
+                os.environ['KUBERNETES_SERVICE_HOST'] = 'kubernetes.default.svc'
+            if 'KUBERNETES_SERVICE_PORT' not in os.environ:
+                os.environ['KUBERNETES_SERVICE_PORT'] = '443'
             kubernetes.config.load_incluster_config()
         except kubernetes.config.config_exception.ConfigException:
             _load_config_from_kubeconfig()
@@ -164,6 +163,13 @@ def list_kube_config_contexts():
 def core_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CoreV1Api()
+
+
+@_api_logging_decorator('urllib3', logging.ERROR)
+@annotations.lru_cache(scope='request')
+def storage_api(context: Optional[str] = None):
+    _load_config(context)
+    return kubernetes.client.StorageV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
@@ -213,6 +219,13 @@ def batch_api(context: Optional[str] = None):
 def api_client(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.ApiClient()
+
+
+@_api_logging_decorator('urllib3', logging.ERROR)
+@annotations.lru_cache(scope='request')
+def custom_resources_api(context: Optional[str] = None):
+    _load_config(context)
+    return kubernetes.client.CustomObjectsApi()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)

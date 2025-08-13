@@ -17,27 +17,36 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { formatDuration, REFRESH_INTERVAL } from '@/components/utils';
-import { getManagedJobs } from '@/data/connectors/jobs';
+import {
+  formatDuration,
+  REFRESH_INTERVAL,
+  JobStatusBadges as SharedJobStatusBadges,
+  InfraBadges as SharedInfraBadges,
+  renderPoolLink,
+} from '@/components/utils';
+import { UI_CONFIG } from '@/lib/config';
+import { getManagedJobs, getPoolStatus } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
-import { Layout } from '@/components/elements/layout';
+import { getUsers } from '@/data/connectors/users';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
-  relativeTime,
-  formatDateTime,
+  TimestampWithTooltip,
 } from '@/components/utils';
 import {
   FileSearchIcon,
   RotateCwIcon,
   MonitorPlay,
   RefreshCcw,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import {
   Select,
@@ -48,6 +57,13 @@ import {
 } from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
+import {
+  FilterDropdown,
+  Filters,
+  filterData,
+  updateURLParams as sharedUpdateURLParams,
+  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+} from '@/components/shared/FilterSystem';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -70,13 +86,45 @@ export const statusGroups = {
   ],
 };
 
-// Define constant for "All Workspaces" like in clusters.jsx
-const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__';
+// Define filter options for the filter dropdown
+const PROPERTY_OPTIONS = [
+  {
+    label: 'Name',
+    value: 'name',
+  },
+  {
+    label: 'User',
+    value: 'user',
+  },
+  {
+    label: 'Workspace',
+    value: 'workspace',
+  },
+  {
+    label: 'Pool',
+    value: 'pool',
+  },
+];
+
+// Helper function to filter jobs by name
+export function filterJobsByName(jobs, nameFilter) {
+  // If no name filter, return all jobs
+  if (!nameFilter || nameFilter.trim() === '') {
+    return jobs;
+  }
+
+  // Filter jobs by the name filter (case-insensitive partial match)
+  const filterLower = nameFilter.toLowerCase().trim();
+  return jobs.filter((job) => {
+    const jobName = job.name || '';
+    return jobName.toLowerCase().includes(filterLower);
+  });
+}
 
 // Helper function to filter jobs by workspace
 export function filterJobsByWorkspace(jobs, workspaceFilter) {
   // If no workspace filter or set to "All Workspaces", return all jobs
-  if (!workspaceFilter || workspaceFilter === ALL_WORKSPACES_VALUE) {
+  if (!workspaceFilter || workspaceFilter === 'ALL_WORKSPACES') {
     return jobs;
   }
 
@@ -87,7 +135,57 @@ export function filterJobsByWorkspace(jobs, workspaceFilter) {
   });
 }
 
-// Helper function to format submitted time with abbreviated units
+// Helper function to filter jobs by user
+export function filterJobsByUser(jobs, userFilter) {
+  // If no user filter or set to "All Users", return all jobs
+  if (!userFilter || userFilter === 'ALL_USERS') {
+    return jobs;
+  }
+
+  // Filter jobs by the selected user
+  return jobs.filter((job) => {
+    const jobUserId = job.user_hash || job.user;
+    return jobUserId === userFilter;
+  });
+}
+
+// Helper function to filter jobs by pool
+export function filterJobsByPool(jobs, poolFilter) {
+  // If no pool filter, return all jobs
+  if (!poolFilter || poolFilter.trim() === '') {
+    return jobs;
+  }
+
+  // Filter jobs by the pool filter (case-insensitive partial match)
+  const filterLower = poolFilter.toLowerCase().trim();
+  return jobs.filter((job) => {
+    const jobPool = job.pool || '';
+    return jobPool.toLowerCase().includes(filterLower);
+  });
+}
+
+// Helper function to format username for display (reuse from clusters.jsx)
+const formatUserDisplay = (username, userId) => {
+  if (username && username.includes('@')) {
+    const emailPrefix = username.split('@')[0];
+    // Show email prefix with userId if they're different
+    if (userId && userId !== emailPrefix) {
+      return `${emailPrefix} (${userId})`;
+    }
+    return emailPrefix;
+  }
+  // If no email, show username with userId in parentheses only if they're different
+  const usernameBase = username || userId || 'N/A';
+
+  // Skip showing userId if it's the same as username
+  if (userId && userId !== usernameBase) {
+    return `${usernameBase} (${userId})`;
+  }
+
+  return usernameBase;
+};
+
+// Helper function to format submitted time with abbreviated units (now uses TimestampWithTooltip)
 const formatSubmittedTime = (timestamp) => {
   if (!timestamp) return '-';
 
@@ -95,59 +193,7 @@ const formatSubmittedTime = (timestamp) => {
   const date =
     timestamp instanceof Date ? timestamp : new Date(timestamp * 1000);
 
-  // Get the original timeString from relativeTime
-  let timeString = relativeTime(date);
-
-  // If relativeTime returns a React element, extract the string from its props
-  if (
-    React.isValidElement(timeString) &&
-    timeString.props &&
-    timeString.props.children
-  ) {
-    // The actual string is nested within the Tooltip
-    if (
-      React.isValidElement(timeString.props.children) &&
-      timeString.props.children.props &&
-      timeString.props.children.props.children
-    ) {
-      timeString = timeString.props.children.props.children;
-    } else {
-      timeString = timeString.props.children;
-    }
-  }
-
-  // Ensure we have a string before proceeding
-  if (typeof timeString !== 'string') {
-    return timeString; // Return as is if not a string after extraction
-  }
-
-  // Apply the same shortening logic
-  const shortenedTime = shortenTimeForJobs(timeString);
-
-  // Return with tooltip functionality like relativeTime does
-  const now = new Date();
-  const differenceInDays =
-    (now.getTime() - date.getTime()) / (1000 * 3600 * 24);
-
-  if (Math.abs(differenceInDays) < 7) {
-    return (
-      <Tooltip
-        content={formatDateTime(date)}
-        className="capitalize text-sm text-muted-foreground"
-      >
-        {shortenedTime}
-      </Tooltip>
-    );
-  } else {
-    return (
-      <Tooltip
-        content={formatDateTime(date)}
-        className="text-sm text-muted-foreground"
-      >
-        {shortenedTime}
-      </Tooltip>
-    );
-  }
+  return <TimestampWithTooltip date={date} />;
 };
 
 // Helper function to shorten time strings for jobs
@@ -163,7 +209,7 @@ function shortenTimeForJobs(timeString) {
 
   // Handle "less than a minute ago" case
   if (timeString.toLowerCase() === 'less than a minute ago') {
-    return 'Less than a minute ago';
+    return 'Less than 1m ago';
   }
 
   // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "1h ago"
@@ -238,7 +284,12 @@ function shortenTimeForJobs(timeString) {
 export function ManagedJobs() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const refreshDataRef = React.useRef(null);
+  const [poolsLoading, setPoolsLoading] = useState(true); // Start as true for initial load
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const jobsRefreshRef = React.useRef(null);
+  const poolsRefreshRef = React.useRef(null);
+  const [jobsData, setJobsData] = useState([]);
+  const [poolsData, setPoolsData] = useState([]);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -246,127 +297,152 @@ export function ManagedJobs() {
     onConfirm: null,
   });
   const isMobile = useMobile();
-  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
-  const [workspaces, setWorkspaces] = useState([]);
+  const [filters, setFilters] = useState([]);
+  const [optionValues, setOptionValues] = useState({
+    name: [],
+    user: [],
+    workspace: [],
+    pool: [],
+  }); // Option values for properties
 
-  // Handle URL query parameters for workspace filtering
-  useEffect(() => {
-    if (router.isReady && router.query.workspace) {
-      const workspaceParam = Array.isArray(router.query.workspace)
-        ? router.query.workspace[0]
-        : router.query.workspace;
-      setWorkspaceFilter(workspaceParam);
+  const fetchData = async (isRefreshButton = false) => {
+    setLoading(true);
+    // Only set poolsLoading on initial load, not on refresh button clicks
+    if (!isRefreshButton && isInitialLoad) {
+      setPoolsLoading(true);
     }
-  }, [router.isReady, router.query.workspace]);
-
-  // Fetch workspaces for filter dropdown
-  useEffect(() => {
-    const fetchFilterData = async () => {
-      try {
-        // Trigger cache preloading for jobs page and background preload other pages
-        await cachePreloader.preloadForPage('jobs');
-
-        // Fetch configured workspaces for the filter dropdown
-        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
-        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
-
-        // Fetch all jobs to see if 'default' workspace is implicitly used
-        const jobsResponse = await dashboardCache.get(getManagedJobs, [
-          { allUsers: true },
-        ]);
-        const allJobs = jobsResponse.jobs || [];
-        const uniqueJobWorkspaces = [
-          ...new Set(
-            allJobs.map((job) => job.workspace || 'default').filter((ws) => ws)
-          ),
-        ];
-
-        // Combine configured workspaces with any actively used workspaces
-        const finalWorkspaces = new Set(configuredWorkspaceNames);
-        uniqueJobWorkspaces.forEach((wsName) => finalWorkspaces.add(wsName));
-
-        setWorkspaces(Array.from(finalWorkspaces).sort());
-      } catch (error) {
-        console.error('Error fetching data for workspace filter:', error);
-        setWorkspaces(['default']); // Fallback or error state
+    try {
+      const [jobsResponse, poolsResponse] = await Promise.all([
+        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+        dashboardCache.get(getPoolStatus, [{}]),
+      ]);
+      setJobsData(jobsResponse.jobs || []);
+      setPoolsData(poolsResponse.pools || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+      if (!isRefreshButton && isInitialLoad) {
+        setPoolsLoading(false);
+        setIsInitialLoad(false);
       }
-    };
-    fetchFilterData();
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
   }, []);
 
   const handleRefresh = () => {
-    // Invalidate cache to ensure fresh data is fetched
+    // Invalidate cache to ensure fresh data is fetched for both jobs and pools
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getPoolStatus, [{}]);
     dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidate(getUsers);
 
-    if (refreshDataRef.current) {
-      refreshDataRef.current();
+    // Refresh parent component data (including poolsData for link matching)
+    fetchData(true); // Pass true to indicate it's a refresh button click
+
+    // Trigger a re-fetch in both tables via their refreshDataRef
+    if (jobsRefreshRef.current) {
+      jobsRefreshRef.current();
+    }
+    if (poolsRefreshRef.current) {
+      poolsRefreshRef.current();
+    }
+  };
+
+  // Helper function to update URL query parameters
+  const updateURLParams = (filters) => {
+    sharedUpdateURLParams(router, filters);
+  };
+
+  const updateFiltersByURLParams = React.useCallback(() => {
+    const propertyMap = new Map();
+    propertyMap.set('', '');
+    propertyMap.set('status', 'Status');
+    propertyMap.set('name', 'Name');
+    propertyMap.set('user', 'User');
+    propertyMap.set('workspace', 'Workspace');
+    propertyMap.set('pool', 'Pool');
+
+    const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
+    setFilters(urlFilters);
+  }, [router, setFilters]);
+
+  // Handle URL query parameters for tab selection and filters
+  useEffect(() => {
+    if (router.isReady) {
+      updateFiltersByURLParams();
+    }
+  }, [router.isReady, router.query.tab, updateFiltersByURLParams]);
+
+  const handleJobAction = async (jobId, action) => {
+    try {
+      setConfirmationModal({
+        isOpen: true,
+        title: `${action.charAt(0).toUpperCase() + action.slice(1)} Job`,
+        message: `Are you sure you want to ${action} job ${jobId}?`,
+        onConfirm: async () => {
+          await handleJobAction(jobId, action);
+          if (jobsRefreshRef.current) {
+            jobsRefreshRef.current();
+          }
+        },
+      });
+    } catch (error) {
+      console.error(`Error ${action}ing job:`, error);
     }
   };
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base flex items-center">
+      {/* Jobs section */}
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <div className="text-base">
           <Link
             href="/jobs"
             className="text-sky-blue hover:underline leading-none"
           >
             Managed Jobs
           </Link>
-          <Select value={workspaceFilter} onValueChange={setWorkspaceFilter}>
-            <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
-              <SelectValue placeholder="Filter by workspace...">
-                {workspaceFilter === ALL_WORKSPACES_VALUE
-                  ? 'All Workspaces'
-                  : workspaceFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_WORKSPACES_VALUE}>
-                All Workspaces
-              </SelectItem>
-              {workspaces.map((ws) => (
-                <SelectItem key={ws} value={ws}>
-                  {ws}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
-        <div className="flex items-center space-x-2">
-          {loading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-            title="Refresh"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
+        <div className="w-full sm:w-auto">
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={optionValues}
+            setFilters={setFilters}
+            updateURLParams={updateURLParams}
+            placeholder="Filter jobs"
+          />
         </div>
       </div>
+
+      <Filters
+        filters={filters}
+        setFilters={setFilters}
+        updateURLParams={updateURLParams}
+      />
+
       <ManagedJobsTable
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
-        refreshDataRef={refreshDataRef}
-        workspaceFilter={workspaceFilter}
+        refreshDataRef={jobsRefreshRef}
+        filters={filters}
+        setOptionValues={setOptionValues}
+        onRefresh={handleRefresh}
+        poolsData={poolsData}
+        poolsLoading={poolsLoading}
       />
-      <ConfirmationModal
-        isOpen={confirmationModal.isOpen}
-        onClose={() =>
-          setConfirmationModal({ ...confirmationModal, isOpen: false })
-        }
-        onConfirm={confirmationModal.onConfirm}
-        title={confirmationModal.title}
-        message={confirmationModal.message}
-      />
+
+      {/* Pools table - always visible */}
+      <div className="mb-4">
+        <PoolsTable
+          refreshInterval={REFRESH_INTERVAL}
+          setLoading={setLoading}
+          refreshDataRef={poolsRefreshRef}
+        />
+      </div>
     </>
   );
 }
@@ -375,7 +451,11 @@ export function ManagedJobsTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
-  workspaceFilter,
+  filters,
+  setOptionValues,
+  onRefresh,
+  poolsData,
+  poolsLoading,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -401,6 +481,7 @@ export function ManagedJobsTable({
     message: '',
     onConfirm: null,
   });
+  const isMobile = useMobile();
 
   const handleRestartController = async () => {
     setConfirmationModal({
@@ -455,6 +536,7 @@ export function ManagedJobsTable({
       }
 
       setData(jobs);
+      setOptionValues(fetchOptionValuesFromJobs(jobs));
       setControllerStopped(isControllerStopped);
       setIsInitialLoad(false);
     } catch (err) {
@@ -467,7 +549,7 @@ export function ManagedJobsTable({
       setLocalLoading(false);
       setLoading(false); // Clear parent loading state
     }
-  }, [setLoading]);
+  }, [setLoading, setOptionValues]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -550,10 +632,39 @@ export function ManagedJobsTable({
     return statusGroups[activeTab].includes(status);
   };
 
-  // Filter data based on selected statuses and active tab
+  // Helper function to extract option values from jobs data
+  const fetchOptionValuesFromJobs = (jobs) => {
+    let optionValues = {
+      status: [],
+      name: [],
+      user: [],
+      workspace: [],
+      pool: [],
+    };
+
+    const pushWithoutDuplication = (array, item) => {
+      if (array.includes(item)) return;
+      array.push(item);
+    };
+
+    jobs.map((job) => {
+      pushWithoutDuplication(optionValues.status, job.status);
+      pushWithoutDuplication(optionValues.name, job.name);
+      pushWithoutDuplication(optionValues.user, job.user);
+      pushWithoutDuplication(
+        optionValues.workspace,
+        job.workspace || 'default'
+      );
+      pushWithoutDuplication(optionValues.pool, job.pool);
+    });
+
+    return optionValues;
+  };
+
+  // Filter data based on filters and selected statuses
   const filteredData = React.useMemo(() => {
-    // First apply workspace filter
-    let filtered = filterJobsByWorkspace(data, workspaceFilter);
+    // First apply shared filters
+    let filtered = filterData(data, filters);
 
     // If specific statuses are selected, show jobs with any of those statuses
     if (selectedStatuses.length > 0) {
@@ -573,7 +684,7 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [data, activeTab, selectedStatuses, showAllMode, workspaceFilter]);
+  }, [data, filters, activeTab, selectedStatuses, showAllMode]); // Removed poolFilter from dependency array
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -650,430 +761,547 @@ export function ManagedJobsTable({
     <div className="relative">
       <div className="flex flex-col space-y-1 mb-1">
         {/* Combined Status Filter */}
-        <div className="flex flex-wrap items-center text-sm mb-1">
-          <span className="mr-2 text-sm font-medium">Statuses:</span>
-          <div className="flex flex-wrap gap-2 items-center">
-            {!loading && (!data || data.length === 0) && !isInitialLoad && (
-              <span className="text-gray-500 mr-2">No jobs found</span>
-            )}
-            {Object.entries(statusCounts).map(([status, count]) => (
-              <button
-                key={status}
-                onClick={() => handleStatusClick(status)}
-                className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                  isStatusHighlighted(status) ||
-                  selectedStatuses.includes(status)
-                    ? getBadgeStyle(status)
-                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <span>{status}</span>
-                <span
-                  className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                >
-                  {count}
-                </span>
-              </button>
-            ))}
-            {data && data.length > 0 && (
-              <div className="flex items-center ml-2 gap-2">
-                <span className="text-gray-500">(</span>
+        <div className="flex flex-wrap items-center justify-between text-sm mb-1">
+          <div className="flex flex-wrap items-center">
+            <span className="mr-2 text-sm font-medium">Statuses:</span>
+            <div className="flex flex-wrap gap-2 items-center">
+              {!loading && (!data || data.length === 0) && !isInitialLoad && (
+                <span className="text-gray-500 mr-2">No jobs found</span>
+              )}
+              {Object.entries(statusCounts).map(([status, count]) => (
                 <button
-                  onClick={() => {
-                    // When showing all jobs, clear all selected statuses
-                    setActiveTab('all');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'all' && showAllMode
-                      ? 'text-purple-700 underline'
-                      : 'text-gray-600 hover:text-purple-700 hover:underline'
+                  key={status}
+                  onClick={() => handleStatusClick(status)}
+                  className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
+                    isStatusHighlighted(status) ||
+                    selectedStatuses.includes(status)
+                      ? getBadgeStyle(status)
+                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                   }`}
                 >
-                  show all jobs
+                  <span>{status}</span>
+                  <span
+                    className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                  >
+                    {count}
+                  </span>
                 </button>
-                <span className="text-gray-500 mx-1">|</span>
-                <button
-                  onClick={() => {
-                    // When showing all active jobs, clear all selected statuses
-                    setActiveTab('active');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'active' && showAllMode
-                      ? 'text-green-700 underline'
-                      : 'text-gray-600 hover:text-green-700 hover:underline'
-                  }`}
-                >
-                  show all active jobs
-                </button>
-                <span className="text-gray-500 mx-1">|</span>
-                <button
-                  onClick={() => {
-                    // When showing all finished jobs, clear all selected statuses
-                    setActiveTab('finished');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'finished' && showAllMode
-                      ? 'text-blue-700 underline'
-                      : 'text-gray-600 hover:text-blue-700 hover:underline'
-                  }`}
-                >
-                  show all finished jobs
-                </button>
-                <span className="text-gray-500">)</span>
+              ))}
+              {data && data.length > 0 && (
+                <div className="flex items-center ml-2 gap-2">
+                  <span className="text-gray-500">(</span>
+                  <button
+                    onClick={() => {
+                      // When showing all jobs, clear all selected statuses
+                      setActiveTab('all');
+                      setSelectedStatuses([]);
+                      setShowAllMode(true);
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'all' && showAllMode
+                        ? 'text-purple-700 underline'
+                        : 'text-gray-600 hover:text-purple-700 hover:underline'
+                    }`}
+                  >
+                    show all jobs
+                  </button>
+                  <span className="text-gray-500 mx-1">|</span>
+                  <button
+                    onClick={() => {
+                      // When showing all active jobs, clear all selected statuses
+                      setActiveTab('active');
+                      setSelectedStatuses([]);
+                      setShowAllMode(true);
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'active' && showAllMode
+                        ? 'text-green-700 underline'
+                        : 'text-gray-600 hover:text-green-700 hover:underline'
+                    }`}
+                  >
+                    show all active jobs
+                  </button>
+                  <span className="text-gray-500 mx-1">|</span>
+                  <button
+                    onClick={() => {
+                      // When showing all finished jobs, clear all selected statuses
+                      setActiveTab('finished');
+                      setSelectedStatuses([]);
+                      setShowAllMode(true);
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'finished' && showAllMode
+                        ? 'text-blue-700 underline'
+                        : 'text-gray-600 hover:text-blue-700 hover:underline'
+                    }`}
+                  >
+                    show all finished jobs
+                  </button>
+                  <span className="text-gray-500">)</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {loading && (
+              <div className="flex items-center">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
               </div>
             )}
+            <button
+              onClick={() => {
+                // Call the refresh function passed from parent
+                if (onRefresh) {
+                  onRefresh();
+                }
+                // Also call the local refresh function to ensure loading state is set
+                if (refreshDataRef && refreshDataRef.current) {
+                  refreshDataRef.current();
+                }
+              }}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              <span>Refresh</span>
+            </button>
           </div>
         </div>
       </div>
 
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('id')}
-              >
-                ID{getSortDirection('id')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('name')}
-              >
-                Name{getSortDirection('name')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('user')}
-              >
-                User{getSortDirection('user')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('workspace')}
-              >
-                Workspace{getSortDirection('workspace')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('submitted_at')}
-              >
-                Submitted{getSortDirection('submitted_at')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('job_duration')}
-              >
-                Duration{getSortDirection('job_duration')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('status')}
-              >
-                Status{getSortDirection('status')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('priority')}
-              >
-                Priority{getSortDirection('priority')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources_str')}
-              >
-                Requested{getSortDirection('resources_str')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('infra')}
-              >
-                Infra{getSortDirection('infra')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('cluster')}
-              >
-                Resources{getSortDirection('cluster')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('recoveries')}
-              >
-                Recoveries{getSortDirection('recoveries')}
-              </TableHead>
-              <TableHead>Details</TableHead>
-              <TableHead>Logs</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading || isInitialLoad ? (
-              <TableRow>
-                <TableCell
-                  colSpan={13}
-                  className="text-center py-6 text-gray-500"
-                >
-                  <div className="flex justify-center items-center">
-                    <CircularProgress size={20} className="mr-2" />
-                    <span>Loading...</span>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : paginatedData.length > 0 ? (
-              <>
-                {paginatedData.map((item) => (
-                  <React.Fragment key={item.id}>
-                    <TableRow>
-                      <TableCell>
-                        <Link
-                          href={`/jobs/${item.id}`}
-                          className="text-blue-600"
-                        >
-                          {item.id}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          href={`/jobs/${item.id}`}
-                          className="text-blue-600"
-                        >
-                          {item.name}
-                        </Link>
-                      </TableCell>
-                      <TableCell>{item.user}</TableCell>
-                      <TableCell>
-                        <Link
-                          href="/workspaces"
-                          className="text-blue-600 hover:underline"
-                        >
-                          {item.workspace || 'default'}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        {formatSubmittedTime(item.submitted_at)}
-                      </TableCell>
-                      <TableCell>{formatDuration(item.job_duration)}</TableCell>
-                      <TableCell>
-                        <StatusBadge status={item.status} />
-                      </TableCell>
-                      <TableCell>{item.priority}</TableCell>
-                      <TableCell>{item.requested_resources}</TableCell>
-                      <TableCell>
-                        {item.infra && item.infra !== '-' ? (
-                          <NonCapitalizedTooltip
-                            content={item.full_infra || item.infra}
-                            className="text-sm text-muted-foreground"
-                          >
-                            <span>
-                              <Link
-                                href="/infra"
-                                className="text-blue-600 hover:underline"
-                              >
-                                {item.cloud || item.infra.split('(')[0].trim()}
-                              </Link>
-                              {item.infra.includes('(') && (
-                                <span>
-                                  {' ' +
-                                    item.infra.substring(
-                                      item.infra.indexOf('(')
-                                    )}
-                                </span>
-                              )}
-                            </span>
-                          </NonCapitalizedTooltip>
-                        ) : (
-                          <span>{item.infra || '-'}</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <NonCapitalizedTooltip
-                          content={
-                            item.resources_str_full || item.resources_str
-                          }
-                          className="text-sm text-muted-foreground"
-                        >
-                          <span>{item.resources_str}</span>
-                        </NonCapitalizedTooltip>
-                      </TableCell>
-                      <TableCell>{item.recoveries}</TableCell>
-                      <TableCell>
-                        {item.details ? (
-                          <TruncatedDetails
-                            text={item.details}
-                            rowId={item.id}
-                            expandedRowId={expandedRowId}
-                            setExpandedRowId={setExpandedRowId}
-                          />
-                        ) : (
-                          '-'
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Status2Actions
-                          jobParent="/jobs"
-                          jobId={item.id}
-                          managed={true}
-                        />
-                      </TableCell>
-                    </TableRow>
-                    {expandedRowId === item.id && (
-                      <ExpandedDetailsRow
-                        text={item.details}
-                        colSpan={13}
-                        innerRef={expandedRowRef}
-                      />
-                    )}
-                  </React.Fragment>
-                ))}
-              </>
-            ) : (
-              <TableRow>
-                <TableCell colSpan={13} className="text-center py-6">
-                  <div className="flex flex-col items-center space-y-4">
-                    {controllerLaunching && (
-                      <div className="flex flex-col items-center space-y-2">
-                        <p className="text-gray-700">
-                          The managed job controller is launching. It will be
-                          ready shortly.
-                        </p>
-                        <div className="flex items-center">
-                          <CircularProgress size={12} className="mr-2" />
-                          <span className="text-gray-500">Launching...</span>
-                        </div>
-                      </div>
-                    )}
-                    {!controllerStopped && !controllerLaunching && (
-                      <p className="text-gray-500">No active jobs</p>
-                    )}
-                    {controllerStopped && (
-                      <div className="flex flex-col items-center space-y-2">
-                        <p className="text-gray-700">
-                          The managed job controller has been stopped. Restart
-                          to check the latest job status.
-                        </p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleRestartController}
-                          className="text-sky-blue hover:text-sky-blue-bright"
-                          disabled={loading || isRestarting}
-                        >
-                          {isRestarting ? (
-                            <>
-                              <CircularProgress size={12} className="mr-2" />
-                              Restarting...
-                            </>
-                          ) : (
-                            <>
-                              <RefreshCcw className="h-4 w-4 mr-2" />
-                              Restart Controller
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-
-      {/* Pagination controls */}
-      {sortedData && sortedData.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center">
-              <span className="mr-2">Rows per page:</span>
-              <div className="relative inline-block">
-                <select
-                  value={pageSize}
-                  onChange={handlePageSizeChange}
-                  className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-                  style={{ minWidth: '40px' }}
-                >
-                  <option value={10}>10</option>
-                  <option value={30}>30</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={200}>200</option>
-                </select>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </div>
-            </div>
-            <div>
-              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
-              {sortedData.length}
-            </div>
-            <div className="flex items-center space-x-2">
+      {/* Mobile-specific controller stopped message outside table */}
+      {isMobile &&
+        controllerStopped &&
+        paginatedData.length === 0 &&
+        !loading &&
+        !isInitialLoad && (
+          <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
+            <div className="flex flex-col items-center space-y-3">
+              <p className="text-gray-700 text-center text-sm">
+                Job controller stopped.
+                <br />
+                Restart to check status.
+              </p>
               <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToPreviousPage}
-                disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
+                variant="outline"
+                size="sm"
+                onClick={handleRestartController}
+                className="text-sky-blue hover:text-sky-blue-bright"
+                disabled={loading || isRestarting}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-left"
-                >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToNextPage}
-                disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-right"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
+                {isRestarting ? (
+                  <>
+                    <CircularProgress size={12} className="mr-2" />
+                    Restarting...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCcw className="h-4 w-4 mr-2" />
+                    Restart
+                  </>
+                )}
               </Button>
             </div>
           </div>
+        )}
+
+      <Card>
+        <div className="overflow-x-auto rounded-lg">
+          <Table className="min-w-full">
+            <TableHeader>
+              <TableRow>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('id')}
+                >
+                  ID{getSortDirection('id')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('name')}
+                >
+                  Name{getSortDirection('name')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('user')}
+                >
+                  User{getSortDirection('user')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('workspace')}
+                >
+                  Workspace{getSortDirection('workspace')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('submitted_at')}
+                >
+                  Submitted{getSortDirection('submitted_at')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('job_duration')}
+                >
+                  Duration{getSortDirection('job_duration')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('status')}
+                >
+                  Status{getSortDirection('status')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('resources_str')}
+                >
+                  Requested{getSortDirection('resources_str')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('infra')}
+                >
+                  Infra{getSortDirection('infra')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('cluster')}
+                >
+                  Resources{getSortDirection('cluster')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('recoveries')}
+                >
+                  Recoveries{getSortDirection('recoveries')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('pool')}
+                >
+                  Worker Pool{getSortDirection('pool')}
+                </TableHead>
+
+                <TableHead>Details</TableHead>
+                <TableHead>Logs</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading && isInitialLoad ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={12}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    <div className="flex justify-center items-center">
+                      <CircularProgress size={20} className="mr-2" />
+                      <span>Loading...</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : paginatedData.length > 0 ? (
+                <>
+                  {paginatedData.map((item) => (
+                    <React.Fragment key={item.id}>
+                      <TableRow>
+                        <TableCell>
+                          <Link
+                            href={`/jobs/${item.id}`}
+                            className="text-blue-600"
+                          >
+                            {item.id}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            href={`/jobs/${item.id}`}
+                            className="text-blue-600"
+                          >
+                            {item.name}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <UserDisplay
+                            username={item.user}
+                            userHash={item.user_hash}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            href="/workspaces"
+                            className="text-gray-700 hover:text-blue-600 hover:underline"
+                          >
+                            {item.workspace || 'default'}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          {formatSubmittedTime(item.submitted_at)}
+                        </TableCell>
+                        <TableCell>
+                          {formatDuration(item.job_duration)}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={item.status} />
+                        </TableCell>
+                        <TableCell>{item.requested_resources}</TableCell>
+                        <TableCell>
+                          {item.infra && item.infra !== '-' ? (
+                            <NonCapitalizedTooltip
+                              content={item.full_infra || item.infra}
+                              className="text-sm text-muted-foreground"
+                            >
+                              <span>
+                                <Link
+                                  href="/infra"
+                                  className="text-blue-600 hover:underline"
+                                >
+                                  {item.cloud ||
+                                    item.infra.split('(')[0].trim()}
+                                </Link>
+                                {item.infra.includes('(') && (
+                                  <span>
+                                    {' ' +
+                                      (() => {
+                                        const NAME_TRUNCATE_LENGTH =
+                                          UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                                        const fullRegionPart =
+                                          item.infra.substring(
+                                            item.infra.indexOf('(')
+                                          );
+                                        const regionContent =
+                                          fullRegionPart.substring(
+                                            1,
+                                            fullRegionPart.length - 1
+                                          );
+
+                                        if (
+                                          regionContent.length <=
+                                          NAME_TRUNCATE_LENGTH
+                                        ) {
+                                          return fullRegionPart;
+                                        }
+
+                                        const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                                        return `(${truncatedRegion})`;
+                                      })()}
+                                  </span>
+                                )}
+                              </span>
+                            </NonCapitalizedTooltip>
+                          ) : (
+                            <span>{item.infra || '-'}</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <NonCapitalizedTooltip
+                            content={
+                              item.resources_str_full || item.resources_str
+                            }
+                            className="text-sm text-muted-foreground"
+                          >
+                            <span>{item.resources_str}</span>
+                          </NonCapitalizedTooltip>
+                        </TableCell>
+                        <TableCell>{item.recoveries}</TableCell>
+                        <TableCell>
+                          <div
+                            className={
+                              poolsLoading
+                                ? 'blur-sm transition-all duration-300'
+                                : ''
+                            }
+                          >
+                            {poolsLoading
+                              ? '-'
+                              : renderPoolLink(
+                                  item.pool,
+                                  item.pool_hash,
+                                  poolsData
+                                )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {item.details ? (
+                            <TruncatedDetails
+                              text={item.details}
+                              rowId={item.id}
+                              expandedRowId={expandedRowId}
+                              setExpandedRowId={setExpandedRowId}
+                            />
+                          ) : (
+                            '-'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Status2Actions
+                            jobParent="/jobs"
+                            jobId={item.id}
+                            managed={true}
+                          />
+                        </TableCell>
+                      </TableRow>
+                      {expandedRowId === item.id && (
+                        <ExpandedDetailsRow
+                          text={item.details}
+                          colSpan={13}
+                          innerRef={expandedRowRef}
+                        />
+                      )}
+                    </React.Fragment>
+                  ))}
+                </>
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={13} className="text-center py-6">
+                    <div className="flex flex-col items-center space-y-4">
+                      {controllerLaunching && (
+                        <div className="flex flex-col items-center space-y-2">
+                          <p className="text-gray-700">
+                            The managed job controller is launching. It will be
+                            ready shortly.
+                          </p>
+                          <div className="flex items-center">
+                            <CircularProgress size={12} className="mr-2" />
+                            <span className="text-gray-500">Launching...</span>
+                          </div>
+                        </div>
+                      )}
+                      {!controllerStopped && !controllerLaunching && (
+                        <p className="text-gray-500">No active jobs</p>
+                      )}
+                      {/* Desktop controller stopped message stays in table */}
+                      {!isMobile && controllerStopped && (
+                        <div className="flex flex-col items-center space-y-3 px-4">
+                          <p className="text-gray-700 text-center text-sm sm:text-base max-w-md">
+                            The managed job controller has been stopped. Restart
+                            to check the latest job status.
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleRestartController}
+                            className="text-sky-blue hover:text-sky-blue-bright"
+                            disabled={loading || isRestarting}
+                          >
+                            {isRestarting ? (
+                              <>
+                                <CircularProgress size={12} className="mr-2" />
+                                Restarting...
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCcw className="h-4 w-4 mr-2" />
+                                Restart Controller
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </div>
-      )}
+      </Card>
+
+      {/* Pagination controls - always show for visual separation */}
+      <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center">
+            <span className="mr-2">Rows per page:</span>
+            <div className="relative inline-block">
+              <select
+                value={pageSize}
+                onChange={handlePageSizeChange}
+                className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
+                style={{ minWidth: '40px' }}
+              >
+                <option value={10}>10</option>
+                <option value={30}>30</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+              </select>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </div>
+          </div>
+          <div>
+            {sortedData && sortedData.length > 0
+              ? `${startIndex + 1} – ${Math.min(endIndex, sortedData.length)} of ${sortedData.length}`
+              : '0 – 0 of 0'}
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={goToPreviousPage}
+              disabled={
+                currentPage === 1 || !sortedData || sortedData.length === 0
+              }
+              className="text-gray-500 h-8 w-8 p-0"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="chevron-left"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={goToNextPage}
+              disabled={
+                currentPage === totalPages ||
+                totalPages === 0 ||
+                !sortedData ||
+                sortedData.length === 0
+              }
+              className="text-gray-500 h-8 w-8 p-0"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="chevron-right"
+              >
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </Button>
+          </div>
+        </div>
+      </div>
 
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -1150,6 +1378,8 @@ export function ClusterJobs({
   clusterJobData,
   loading,
   refreshClusterJobsOnly,
+  userFilter = null,
+  nameFilter = null,
 }) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
@@ -1178,8 +1408,20 @@ export function ClusterJobs({
   }, [expandedRowId]);
 
   const jobData = React.useMemo(() => {
-    return clusterJobData || [];
-  }, [clusterJobData]);
+    let filtered = clusterJobData || [];
+
+    // Apply user filter if provided
+    if (userFilter && userFilter !== 'ALL_USERS') {
+      filtered = filterJobsByUser(filtered, userFilter);
+    }
+
+    // Apply name filter if provided
+    if (nameFilter) {
+      filtered = filterJobsByName(filtered, nameFilter);
+    }
+
+    return filtered;
+  }, [clusterJobData, userFilter, nameFilter]);
 
   useEffect(() => {
     // Check if the data has changed significantly (new data received)
@@ -1351,11 +1593,16 @@ export function ClusterJobs({
                         />
                       </Link>
                     </TableCell>
-                    <TableCell>{item.user}</TableCell>
+                    <TableCell>
+                      <UserDisplay
+                        username={item.user}
+                        userHash={item.user_hash}
+                      />
+                    </TableCell>
                     <TableCell>
                       <Link
                         href="/workspaces"
-                        className="text-blue-600 hover:underline"
+                        className="text-gray-700 hover:text-blue-600 hover:underline"
                       >
                         {item.workspace || 'default'}
                       </Link>
@@ -1543,5 +1790,257 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
         </button>
       )}
     </div>
+  );
+}
+
+function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
+  const [data, setData] = useState([]);
+  const [sortConfig, setSortConfig] = useState({
+    key: null,
+    direction: 'ascending',
+  });
+  const [loading, setLocalLoading] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const fetchData = React.useCallback(async () => {
+    setLocalLoading(true);
+    setLoading(true);
+    try {
+      const poolsResponse = await dashboardCache.get(getPoolStatus, [{}]);
+      const { pools = [] } = poolsResponse || {};
+      setData(pools);
+      setIsInitialLoad(false);
+    } catch (err) {
+      console.error('Error fetching pools data:', err);
+      setData([]);
+      setIsInitialLoad(false);
+    } finally {
+      setLocalLoading(false);
+      setLoading(false);
+    }
+  }, [setLoading]);
+
+  // Expose fetchData to parent component
+  React.useEffect(() => {
+    if (refreshDataRef) {
+      refreshDataRef.current = fetchData;
+    }
+  }, [refreshDataRef, fetchData]);
+
+  useEffect(() => {
+    setData([]);
+    let isCurrent = true;
+
+    fetchData();
+
+    const interval = setInterval(() => {
+      if (isCurrent) {
+        fetchData();
+      }
+    }, refreshInterval);
+
+    return () => {
+      isCurrent = false;
+      clearInterval(interval);
+    };
+  }, [refreshInterval, fetchData]);
+
+  const requestSort = (key) => {
+    let direction = 'ascending';
+    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+      direction = 'descending';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortDirection = (key) => {
+    if (sortConfig.key === key) {
+      return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
+    }
+    return '';
+  };
+
+  // Sort the data
+  const sortedData = React.useMemo(() => {
+    if (!sortConfig.key) return data;
+
+    return [...data].sort((a, b) => {
+      if (a[sortConfig.key] < b[sortConfig.key]) {
+        return sortConfig.direction === 'ascending' ? -1 : 1;
+      }
+      if (a[sortConfig.key] > b[sortConfig.key]) {
+        return sortConfig.direction === 'ascending' ? 1 : -1;
+      }
+      return 0;
+    });
+  }, [data, sortConfig]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(sortedData.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const paginatedData = sortedData.slice(startIndex, endIndex);
+
+  // Page navigation handlers
+  const goToPreviousPage = () => {
+    setCurrentPage((page) => Math.max(page - 1, 1));
+  };
+
+  const goToNextPage = () => {
+    setCurrentPage((page) => Math.min(page + 1, totalPages));
+  };
+
+  const handlePageSizeChange = (e) => {
+    const newSize = parseInt(e.target.value, 10);
+    setPageSize(newSize);
+    setCurrentPage(1);
+  };
+
+  const getWorkersCount = (pool) => {
+    if (!pool || !pool.replica_info || pool.replica_info.length === 0)
+      return '0 (target: 0)';
+
+    const readyWorkers = pool.replica_info.filter(
+      (worker) => worker.status === 'READY'
+    ).length;
+    const targetWorkers = pool.target_num_replicas || 0;
+    return `${readyWorkers} (target: ${targetWorkers})`;
+  };
+
+  const JobStatusBadges = ({ jobCounts }) => {
+    return (
+      <SharedJobStatusBadges
+        jobCounts={jobCounts}
+        getStatusStyle={getStatusStyle}
+      />
+    );
+  };
+
+  const InfraBadges = ({ replicaInfo }) => {
+    return <SharedInfraBadges replicaInfo={replicaInfo} />;
+  };
+
+  return (
+    <Card>
+      <div className="overflow-x-auto rounded-lg">
+        <Table className="min-w-full table-fixed">
+          <TableHeader>
+            <TableRow>
+              <TableHead
+                className="sortable whitespace-nowrap w-32"
+                onClick={() => requestSort('name')}
+              >
+                Pool{getSortDirection('name')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-40"
+                onClick={() => requestSort('job_counts')}
+              >
+                Jobs{getSortDirection('job_counts')}
+              </TableHead>
+              <TableHead className="whitespace-nowrap w-20">Workers</TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-36"
+                onClick={() => requestSort('requested_resources_str')}
+              >
+                Worker Details{getSortDirection('requested_resources_str')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-40"
+                onClick={() => requestSort('requested_resources_str')}
+              >
+                Worker Resources{getSortDirection('requested_resources_str')}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading && isInitialLoad ? (
+              <TableRow>
+                <TableCell
+                  colSpan={5}
+                  className="text-center py-6 text-gray-500"
+                >
+                  <div className="flex justify-center items-center">
+                    <CircularProgress size={20} className="mr-2" />
+                    <span>Loading...</span>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : paginatedData.length > 0 ? (
+              paginatedData.map((pool) => (
+                <TableRow key={pool.name}>
+                  <TableCell>
+                    <Link
+                      href={`/jobs/pools/${pool.name}`}
+                      className="text-blue-600 hover:text-blue-800"
+                    >
+                      {pool.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <JobStatusBadges jobCounts={pool.jobCounts} />
+                  </TableCell>
+                  <TableCell>{getWorkersCount(pool)}</TableCell>
+                  <TableCell>
+                    <InfraBadges replicaInfo={pool.replica_info} />
+                  </TableCell>
+                  <TableCell>{pool.requested_resources_str || '-'}</TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell
+                  colSpan={5}
+                  className="text-center py-6 text-gray-500"
+                >
+                  No pools found
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Pagination */}
+      {paginatedData.length > 0 && totalPages > 1 && (
+        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-700">Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={handlePageSizeChange}
+              className="border border-gray-300 rounded px-2 py-1 text-sm"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-700">
+              {startIndex + 1}-{Math.min(endIndex, sortedData.length)} of{' '}
+              {sortedData.length}
+            </span>
+            <button
+              onClick={goToPreviousPage}
+              disabled={currentPage === 1}
+              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={goToNextPage}
+              disabled={currentPage === totalPages}
+              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

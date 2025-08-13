@@ -3,6 +3,7 @@ import unittest
 
 import jsonschema
 
+from sky.skylet import constants
 from sky.utils import schemas
 
 
@@ -106,6 +107,63 @@ class TestResourcesSchema(unittest.TestCase):
             with self.assertRaises(
                     jsonschema.exceptions.ValidationError,
                     msg=f"Expected '{config['infra']}' to be rejected"):
+                jsonschema.validate(instance=config, schema=resources_schema)
+
+    def test_valid_priority_configs(self):
+        """Test validation of valid priority field configs."""
+        resources_schema = schemas.get_resources_schema()
+
+        # Valid priority configurations
+        valid_priority_configs = [
+            {
+                'priority': 0
+            },  # Minimum value
+            {
+                'priority': 500
+            },  # Middle value
+            {
+                'priority': 1000
+            },  # Maximum value
+            {
+                'cpus': 4,
+                'priority': 750
+            },  # With other fields
+        ]
+
+        for config in valid_priority_configs:
+            # Should not raise an exception
+            jsonschema.validate(instance=config, schema=resources_schema)
+
+    def test_invalid_priority_configs(self):
+        """Test validation rejects invalid priority field configs."""
+        resources_schema = schemas.get_resources_schema()
+
+        # Invalid priority configurations
+        invalid_priority_configs = [
+            {
+                'priority': constants.MIN_PRIORITY - 1
+            },  # Below minimum
+            {
+                'priority': constants.MAX_PRIORITY + 1
+            },  # Above maximum
+            {
+                'priority': 'high'
+            },  # Not an integer
+            {
+                'priority': 500.5
+            },  # Not an integer
+            {
+                'priority': None
+            },  # None (should be omitted instead)
+            {
+                'priority': True
+            },  # Boolean
+        ]
+
+        for config in invalid_priority_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f"Expected priority config {config} to be rejected"):
                 jsonschema.validate(instance=config, schema=resources_schema)
 
 
@@ -363,6 +421,25 @@ class TestWorkspaceSchema(unittest.TestCase):
                     msg=f"Uppercase cloud config {config} should be rejected"):
                 jsonschema.validate(instance=config,
                                     schema=self.workspaces_schema)
+
+
+class TestKubernetesSchema(unittest.TestCase):
+    """Tests for the kubernetes schema in schemas.py."""
+
+    def setUp(self):
+        self.config_schema = schemas.get_config_schema()
+        self.k8s_schema = self.config_schema['properties']['kubernetes']
+
+    def test_context_configs_allows_remote_identity(self):
+        """Test that context_configs allows remote_identity."""
+        valid_config = {
+            'context_configs': {
+                'my-context': {
+                    'remote_identity': 'my-service-account'
+                }
+            }
+        }
+        jsonschema.validate(instance=valid_config, schema=self.k8s_schema)
 
 
 if __name__ == "__main__":

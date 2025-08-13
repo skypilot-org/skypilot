@@ -419,12 +419,17 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    context = kubernetes_utils.get_context_from_config(config['provider'])
+
     # Default ssh session is established with kubectl port-forwarding with
     # ClusterIP service.
     nodeport_mode = kubernetes_enums.KubernetesNetworkingMode.NODEPORT
     port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_nested(('kubernetes', 'networking'),
-                                                  port_forward_mode.value)
+    network_mode_str = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('networking',),
+        default_value=port_forward_mode.value)
     try:
         network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
             network_mode_str)
@@ -432,14 +437,13 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         # Add message saying "Please check: ~/.sky/config.yaml" to the error
         # message.
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
-                from None
+            raise ValueError(str(e) +
+                             ' Please check: ~/.sky/config.yaml.') from None
     _, public_key_path = get_or_generate_keys()
 
     # Add the user's public key to the SkyPilot cluster.
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
-    context = kubernetes_utils.get_context_from_config(config['provider'])
     namespace = kubernetes_utils.get_namespace_from_config(config['provider'])
     k8s = kubernetes.kubernetes
     with open(public_key_path, 'r', encoding='utf-8') as f:
@@ -454,8 +458,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 'parent': 'skypilot'
             }
         }
-        custom_metadata = skypilot_config.get_nested(
-            ('kubernetes', 'custom_metadata'), {})
+        custom_metadata = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('custom_metadata',),
+            default_value={})
         config_utils.merge_k8s_configs(secret_metadata, custom_metadata)
 
         secret = k8s.client.V1Secret(
@@ -566,4 +573,22 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         public_key = f.read()
     client.get_or_add_ssh_key(public_key)
     config['auth']['ssh_public_key'] = public_key_path
+    return configure_ssh_info(config)
+
+
+def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Hyperbolic."""
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    # TODO: adjust below to use public_keys instead of
+    # public_key once backwards-compatibility is no longer required
+    config['publicKey'] = public_key
+
+    # Set up auth section for Ray template
+    config.setdefault('auth', {})
+    config['auth']['ssh_user'] = 'ubuntu'
+    config['auth']['ssh_public_key'] = public_key_path
+
     return configure_ssh_info(config)

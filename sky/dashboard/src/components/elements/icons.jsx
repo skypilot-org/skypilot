@@ -241,6 +241,31 @@ export function StorageIcon(props) {
   );
 }
 
+export function VolumeIcon(props) {
+  return (
+    <svg
+      {...props}
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <ellipse cx="12" cy="4" rx="8" ry="2" />
+      <ellipse cx="12" cy="20" rx="8" ry="2" />
+      <path d="M4 4v16" />
+      <path d="M20 4v16" />
+      <path d="M9 9h6" />
+      <path d="M9 12h6" />
+      <path d="M9 15h6" />
+    </svg>
+  );
+}
+
 export function HandHelpingIcon(props) {
   return (
     <svg

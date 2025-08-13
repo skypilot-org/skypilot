@@ -27,6 +27,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import status_lib
+    from sky.utils import volume as volume_lib
 
 
 class CloudImplementationFeatures(enum.Enum):
@@ -54,6 +55,9 @@ class CloudImplementationFeatures(enum.Enum):
     AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
     AUTOSTOP = 'autostop'  # Pod/VM can stop itself
     AUTODOWN = 'autodown'  # Pod/VM can down itself
+    # Pod/VM can have customized multiple network interfaces
+    # e.g. GCP GPUDirect TCPX
+    CUSTOM_MULTI_NETWORK = 'custom_multi_network'
 
 
 # Use str, enum.Enum to allow CloudCapability to be used as a string.
@@ -307,6 +311,7 @@ class Cloud:
         zones: Optional[List['Zone']],
         num_nodes: int,
         dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
@@ -336,14 +341,15 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
-        """Returns the default instance type with the given #vCPUs, memory and
-        disk tier.
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
+        """Returns the default instance type with the given #vCPUs, memory,
+        disk tier, region, and zone.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance
@@ -631,7 +637,7 @@ class Cloud:
 
     def need_cleanup_after_preemption_or_failure(
             self, resources: 'resources_lib.Resources') -> bool:
-        """Whether a resource needs cleanup after preeemption or failure.
+        """Whether a resource needs cleanup after preemption or failure.
 
         In most cases, spot resources do not need cleanup after preemption,
         as long as the cluster can be relaunched with the same name and tag,
@@ -667,8 +673,11 @@ class Cloud:
             resources)
 
         # Docker image is not compatible with ssh proxy command.
-        if skypilot_config.get_nested(
-            (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
+        if skypilot_config.get_effective_region_config(
+                cloud=str(cls).lower(),
+                region=None,
+                keys=('ssh_proxy_command',),
+                default_value=None) is not None:
             unsupported_features2reason.update({
                 CloudImplementationFeatures.DOCKER_IMAGE: (
                     f'Docker image is currently not supported on {cls._REPR} '

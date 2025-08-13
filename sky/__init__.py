@@ -81,7 +81,6 @@ _set_http_proxy_env_vars()
 # Keep this order to avoid cyclic imports
 # pylint: disable=wrong-import-position
 from sky import backends
-from sky import benchmark
 from sky import clouds
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
@@ -89,6 +88,7 @@ from sky.admin_policy import UserRequest
 from sky.catalog import list_accelerators
 from sky.client.sdk import api_cancel
 from sky.client.sdk import api_info
+from sky.client.sdk import api_login
 from sky.client.sdk import api_server_logs
 from sky.client.sdk import api_start
 from sky.client.sdk import api_status
@@ -98,12 +98,14 @@ from sky.client.sdk import cancel
 from sky.client.sdk import cost_report
 from sky.client.sdk import down
 from sky.client.sdk import download_logs
+from sky.client.sdk import endpoints
 from sky.client.sdk import exec  # pylint: disable=redefined-builtin
 from sky.client.sdk import get
 from sky.client.sdk import job_status
 from sky.client.sdk import launch
 from sky.client.sdk import optimize
 from sky.client.sdk import queue
+from sky.client.sdk import reload_config
 from sky.client.sdk import start
 from sky.client.sdk import status
 from sky.client.sdk import stop
@@ -144,6 +146,7 @@ Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
+Hyperbolic = clouds.Hyperbolic
 
 __all__ = [
     '__version__',
@@ -163,10 +166,10 @@ __all__ = [
     'Vsphere',
     'Fluidstack',
     'Nebius',
+    'Hyperbolic',
     'Optimizer',
     'OptimizeTarget',
     'backends',
-    'benchmark',
     'list_accelerators',
     '__root_dir__',
     'Storage',
@@ -184,6 +187,7 @@ __all__ = [
     'optimize',
     'launch',
     'exec',
+    'reload_config',
     # core APIs
     'status',
     'start',
@@ -191,6 +195,7 @@ __all__ = [
     'down',
     'autostop',
     'cost_report',
+    'endpoints',
     # core APIs Job Management
     'queue',
     'cancel',
@@ -206,6 +211,7 @@ __all__ = [
     'api_status',
     'api_cancel',
     'api_info',
+    'api_login',
     'api_start',
     'api_stop',
     'api_server_logs',

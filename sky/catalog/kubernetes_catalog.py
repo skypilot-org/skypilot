@@ -195,6 +195,10 @@ def _list_accelerators(
                 accelerator_name = lf.get_accelerator_from_label_value(
                     node.metadata.labels.get(key))
 
+                # Heterogenous cluster may have some nodes with empty labels.
+                if not accelerator_name:
+                    continue
+
                 # Exclude multi-host TPUs from being processed.
                 # TODO(Doyoung): Remove the logic when adding support for
                 # multi-host TPUs.
@@ -210,9 +214,9 @@ def _list_accelerators(
                 # Generate the accelerator quantities
                 accelerator_count = (
                     kubernetes_utils.get_node_accelerator_count(
-                        node.status.allocatable))
+                        context, node.status.allocatable))
 
-                if accelerator_name and accelerator_count > 0:
+                if accelerator_count > 0:
                     # TPUs are counted in a different way compared to GPUs.
                     # Multi-node GPUs can be split into smaller units and be
                     # provisioned, but TPUs are considered as an atomic unit.
@@ -251,13 +255,21 @@ def _list_accelerators(
                     # Get all the pods running on the node
                     if (pod.spec.node_name == node.metadata.name and
                             pod.status.phase in ['Running', 'Pending']):
+                        # Skip pods that should not count against GPU count
+                        if (kubernetes_utils.
+                                should_exclude_pod_from_gpu_allocation(pod)):
+                            logger.debug(
+                                f'Excluding pod '
+                                f'{pod.metadata.name} from GPU count '
+                                f'calculations on node {node.metadata.name}')
+                            continue
                         # Iterate over all the containers in the pod and sum
                         # the GPU requests
                         for container in pod.spec.containers:
                             if container.resources.requests:
                                 allocated_qty += (
                                     kubernetes_utils.get_node_accelerator_count(
-                                        container.resources.requests))
+                                        context, container.resources.requests))
 
                 accelerators_available = accelerator_count - allocated_qty
                 # Initialize the total_accelerators_available to make sure the

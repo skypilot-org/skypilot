@@ -103,6 +103,10 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
       - apiGroups: ["node.k8s.io"]
         resources: ["runtimeclasses"]
         verbs: ["get", "list", "watch"]
+      # Required for accessing storage classes.
+      - apiGroups: ["storage.k8s.io"]
+        resources: ["storageclasses"]
+        verbs: ["get", "list", "watch"]
 
 
 .. tip::
@@ -278,6 +282,9 @@ To create a service account that has all necessary permissions for SkyPilot (inc
       - apiGroups: [""]                 # Required for `sky show-gpus` command
         resources: ["pods"]
         verbs: ["get", "list"]
+      - apiGroups: ["storage.k8s.io"]   # Required for using volumes
+        resources: ["storageclasses"]
+        verbs: ["get", "list", "watch"]
     ---
     # ClusterRoleBinding for the service account
     apiVersion: rbac.authorization.k8s.io/v1

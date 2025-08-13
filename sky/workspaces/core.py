@@ -1,22 +1,24 @@
 """Workspace management core."""
 
-import concurrent.futures
-from typing import Any, Callable, Dict, List
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Tuple
 
 import filelock
 
 from sky import check as sky_check
 from sky import exceptions
-from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.users import permission
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import locks
+from sky.utils import resource_checker
 from sky.utils import schemas
 from sky.workspaces import utils as workspaces_utils
 
@@ -24,6 +26,37 @@ logger = sky_logging.init_logger(__name__)
 
 # Lock for workspace configuration updates to prevent race conditions
 _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60
+
+
+@dataclass
+class WorkspaceConfigComparison:
+    """Result of comparing current and new workspace configurations.
+
+    This class encapsulates the results of analyzing differences between
+    workspace configurations, particularly focusing on user access changes
+    and their implications for resource validation.
+
+    Attributes:
+        only_user_access_changes: True if only allowed_users or private changed
+        private_changed: True if private setting changed
+        private_old: Old private setting value
+        private_new: New private setting value
+        allowed_users_changed: True if allowed_users changed
+        allowed_users_old: Old allowed users list
+        allowed_users_new: New allowed users list
+        removed_users: Users removed from allowed_users
+        added_users: Users added to allowed_users
+    """
+    only_user_access_changes: bool
+    private_changed: bool
+    private_old: bool
+    private_new: bool
+    allowed_users_changed: bool
+    allowed_users_old: List[str]
+    allowed_users_new: List[str]
+    removed_users: List[str]
+    added_users: List[str]
+
 
 # =========================
 # = Workspace Management =
@@ -79,116 +112,6 @@ def _update_workspaces_config(
             f'file if you believe it is stale.') from e
 
 
-def _check_workspace_has_no_active_resources(workspace_name: str,
-                                             operation: str) -> None:
-    """Check if a workspace has active clusters or managed jobs.
-
-    Args:
-        workspace_name: The name of the workspace to check.
-        operation: The operation being performed ('update' or 'delete').
-
-    Raises:
-        ValueError: If the workspace has active clusters or managed jobs.
-    """
-    _check_workspaces_have_no_active_resources([(workspace_name, operation)])
-
-
-def _check_workspaces_have_no_active_resources(
-        workspace_operations: list) -> None:
-    """Check if workspaces have active clusters or managed jobs.
-
-    Args:
-        workspace_operations: List of tuples (workspace_name, operation) where
-            operation is 'update' or 'delete'.
-
-    Raises:
-        ValueError: If any workspace has active clusters or managed jobs.
-            The error message will include all workspaces with issues.
-    """
-    if not workspace_operations:
-        return
-
-    def get_all_clusters():
-        return global_user_state.get_clusters()
-
-    def get_all_managed_jobs():
-        # pylint: disable=import-outside-toplevel
-        from sky.jobs.server import core as managed_jobs_core
-        try:
-            return managed_jobs_core.queue(refresh=False,
-                                           skip_finished=True,
-                                           all_users=True)
-        except exceptions.ClusterNotUpError:
-            logger.warning('All jobs should be finished in workspace.')
-            return []
-
-    # Fetch both clusters and jobs in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        clusters_future = executor.submit(get_all_clusters)
-        jobs_future = executor.submit(get_all_managed_jobs)
-
-        all_clusters = clusters_future.result()
-        all_managed_jobs = jobs_future.result()
-
-    # Collect all error messages instead of raising immediately
-    error_messages = []
-
-    # Check each workspace against the fetched data
-    for workspace_name, operation in workspace_operations:
-        # Filter clusters for this workspace
-        workspace_clusters = [
-            cluster for cluster in all_clusters
-            if (cluster.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
-                == workspace_name)
-        ]
-
-        # Filter managed jobs for this workspace
-        workspace_active_jobs = [
-            job for job in all_managed_jobs
-            if job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) ==
-            workspace_name
-        ]
-
-        # Collect error messages for this workspace
-        workspace_errors = []
-
-        if workspace_clusters:
-            active_cluster_names = [
-                cluster['name'] for cluster in workspace_clusters
-            ]
-            cluster_list = ', '.join(active_cluster_names)
-            workspace_errors.append(
-                f'{len(workspace_clusters)} active cluster(s): {cluster_list}')
-
-        if workspace_active_jobs:
-            job_names = [str(job['job_id']) for job in workspace_active_jobs]
-            job_list = ', '.join(job_names)
-            workspace_errors.append(
-                f'{len(workspace_active_jobs)} active managed job(s): '
-                f'{job_list}')
-
-        # If this workspace has issues, add to overall error messages
-        if workspace_errors:
-            workspace_error_summary = ' and '.join(workspace_errors)
-            error_messages.append(
-                f'Cannot {operation} workspace {workspace_name!r} because it '
-                f'has {workspace_error_summary}.')
-
-    # If we collected any errors, raise them all together
-    if error_messages:
-        if len(error_messages) == 1:
-            # Single workspace error
-            full_message = error_messages[
-                0] + ' Please terminate these resources first.'
-        else:
-            # Multiple workspace errors
-            full_message = (f'Cannot proceed due to active resources in '
-                            f'{len(error_messages)} workspace(s):\n' +
-                            '\n'.join(f'• {msg}' for msg in error_messages) +
-                            '\nPlease terminate these resources first.')
-        raise ValueError(full_message)
-
-
 def _validate_workspace_config(workspace_name: str,
                                workspace_config: Dict[str, Any]) -> None:
     """Validate the workspace configuration.
@@ -206,6 +129,153 @@ def _validate_workspace_config(workspace_name: str,
         raise ValueError(str(e)) from e
 
 
+def _compare_workspace_configs(
+    current_config: Dict[str, Any],
+    new_config: Dict[str, Any],
+) -> WorkspaceConfigComparison:
+    """Compare current and new workspace configurations.
+
+    Args:
+        current_config: The current workspace configuration.
+        new_config: The new workspace configuration.
+
+    Returns:
+        WorkspaceConfigComparison object containing the comparison results.
+    """
+    # Get private settings
+    private_old = current_config.get('private', False)
+    private_new = new_config.get('private', False)
+    private_changed = private_old != private_new
+
+    # Get allowed users (resolve to user IDs for comparison)
+    allowed_users_old = workspaces_utils.get_workspace_users(
+        current_config) if private_old else []
+    allowed_users_new = workspaces_utils.get_workspace_users(
+        new_config) if private_new else []
+
+    # Convert to sets for easier comparison
+    old_users_set = set(allowed_users_old)
+    new_users_set = set(allowed_users_new)
+
+    allowed_users_changed = old_users_set != new_users_set
+    removed_users = list(old_users_set - new_users_set)
+    added_users = list(new_users_set - old_users_set)
+
+    # Check if only user access related fields changed
+    # Create copies without the user access fields for comparison
+    current_without_access = {
+        k: v
+        for k, v in current_config.items()
+        if k not in ['private', 'allowed_users']
+    }
+    new_without_access = {
+        k: v
+        for k, v in new_config.items()
+        if k not in ['private', 'allowed_users']
+    }
+
+    only_user_access_changes = current_without_access == new_without_access
+
+    return WorkspaceConfigComparison(
+        only_user_access_changes=only_user_access_changes,
+        private_changed=private_changed,
+        private_old=private_old,
+        private_new=private_new,
+        allowed_users_changed=allowed_users_changed,
+        allowed_users_old=allowed_users_old,
+        allowed_users_new=allowed_users_new,
+        removed_users=removed_users,
+        added_users=added_users)
+
+
+def _validate_workspace_config_changes(workspace_name: str,
+                                       current_config: Dict[str, Any],
+                                       new_config: Dict[str, Any]) -> None:
+    """Validate workspace configuration changes based on active resources.
+
+    This function implements the logic:
+    - If only allowed_users or private changed:
+      - If private changed from true to false: allow it
+      - If private changed from false to true: check that all active resources
+        belong to allowed_users
+      - If private didn't change: check that removed users don't have active
+        resources
+    - Otherwise: check that workspace has no active resources
+
+    Args:
+        workspace_name: The name of the workspace.
+        current_config: The current workspace configuration.
+        new_config: The new workspace configuration.
+
+    Raises:
+        ValueError: If the configuration change is not allowed due to active
+        resources.
+    """
+    config_comparison = _compare_workspace_configs(current_config, new_config)
+
+    if config_comparison.only_user_access_changes:
+        # Only user access settings changed
+        if config_comparison.private_changed:
+            if (config_comparison.private_old and
+                    not config_comparison.private_new):
+                # Changed from private to public - always allow
+                logger.info(
+                    f'Workspace {workspace_name!r} changed from private to'
+                    f' public.')
+                return
+            elif (not config_comparison.private_old and
+                  config_comparison.private_new):
+                # Changed from public to private - check that all active
+                # resources belong to the new allowed users
+                logger.info(
+                    f'Workspace {workspace_name!r} changed from public to'
+                    f' private. Checking that all active resources belong'
+                    f' to allowed users.')
+
+                error_summary, missed_users_names = (
+                    resource_checker.check_users_workspaces_active_resources(
+                        config_comparison.allowed_users_new, [workspace_name]))
+                if error_summary:
+                    error_msg=f'Cannot change workspace {workspace_name!r}' \
+                    f' to private '
+                    if missed_users_names:
+                        missed_users_list = ', '.join(missed_users_names)
+                        if len(missed_users_names) == 1:
+                            error_msg += f'because the user ' \
+                            f'{missed_users_list!r} has {error_summary}'
+                        else:
+                            error_msg += f'because the users ' \
+                            f'{missed_users_list!r} have {error_summary}'
+                        error_msg += ' but not in the allowed_users list.' \
+                        ' Please either add the users to allowed_users or' \
+                        ' ask them to terminate their resources.'
+                    raise ValueError(error_msg)
+        else:
+            # Private setting didn't change, but allowed_users changed
+            if (config_comparison.allowed_users_changed and
+                    config_comparison.removed_users):
+                # Check that removed users don't have active resources
+                logger.info(
+                    f'Checking that removed users'
+                    f' {config_comparison.removed_users} do not have'
+                    f' active resources in workspace {workspace_name!r}.')
+                user_operations = []
+                for user_id in config_comparison.removed_users:
+                    user_operations.append((user_id, 'remove'))
+                resource_checker.check_no_active_resources_for_users(
+                    user_operations)
+    else:
+        # Other configuration changes - check that workspace has no active
+        # resources
+        logger.info(
+            f'Non-user-access configuration changes detected for'
+            f' workspace {workspace_name!r}. Checking that workspace has'
+            f' no active resources.')
+        resource_checker.check_no_active_resources_for_workspaces([
+            (workspace_name, 'update')
+        ])
+
+
 @usage_lib.entrypoint
 def update_workspace(workspace_name: str, config: Dict[str,
                                                        Any]) -> Dict[str, Any]:
@@ -220,16 +290,40 @@ def update_workspace(workspace_name: str, config: Dict[str,
 
     Raises:
         ValueError: If the workspace configuration is invalid, or if there are
-            active clusters or managed jobs in the workspace.
+            active clusters or managed jobs that prevent the configuration
+            change.
+            The validation logic depends on what changed:
+            - If only allowed_users or private changed:
+              - Private true->false: Always allowed
+              - Private false->true: All active resources must belong to
+                allowed_users
+              - allowed_users changes: Removed users must not have active
+                resources
+            - Other changes: Workspace must have no active resources
         FileNotFoundError: If the config file cannot be found.
         PermissionError: If the config file cannot be written.
     """
     _validate_workspace_config(workspace_name, config)
 
-    # Check for active clusters and managed jobs in the workspace
-    # TODO(zhwu): we should allow the edits that only contain changes to
-    # allowed_users or private.
-    _check_workspace_has_no_active_resources(workspace_name, 'update')
+    # Get the current workspace configuration for comparison
+    current_workspaces = skypilot_config.get_nested(('workspaces',),
+                                                    default_value={})
+    current_config = current_workspaces.get(workspace_name, {})
+
+    if current_config:
+        lock_id = backend_utils.workspace_lock_id(workspace_name)
+        lock_timeout = backend_utils.WORKSPACE_LOCK_TIMEOUT_SECONDS
+        try:
+            with locks.get_lock(lock_id, lock_timeout):
+                # Validate the configuration changes based on active resources
+                _validate_workspace_config_changes(workspace_name,
+                                                   current_config, config)
+        except locks.LockTimeout as e:
+            raise RuntimeError(
+                f'Failed to validate workspace {workspace_name!r} due to '
+                'a timeout when trying to access database. Please '
+                f'try again or manually remove the lock at {lock_id}. '
+                f'{common_utils.format_exception(e)}') from None
 
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
@@ -327,7 +421,8 @@ def delete_workspace(workspace_name: str) -> Dict[str, Any]:
         raise ValueError(f'Workspace {workspace_name!r} does not exist.')
 
     # Check for active clusters and managed jobs in the workspace
-    _check_workspace_has_no_active_resources(workspace_name, 'delete')
+    resource_checker.check_no_active_resources_for_workspaces([(workspace_name,
+                                                                'delete')])
 
     def delete_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to delete workspace inside the lock."""
@@ -396,7 +491,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     new_workspaces = config.get('workspaces', {})
 
     # Collect all workspaces that need to be checked for active resources
-    workspaces_to_check = []
+    workspaces_to_check: List[Tuple[str, str]] = []
     workspaces_to_check_policy: Dict[str, Dict[str, List[str]]] = {
         'add': {},
         'update': {},
@@ -430,7 +525,8 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             workspaces_to_check_policy['delete'][workspace_name] = ['*']
 
     # Check all workspaces for active resources in one efficient call
-    _check_workspaces_have_no_active_resources(workspaces_to_check)
+    resource_checker.check_no_active_resources_for_workspaces(
+        workspaces_to_check)
 
     # Use file locking to prevent race conditions
     lock_path = skypilot_config.get_skypilot_config_lock_path()

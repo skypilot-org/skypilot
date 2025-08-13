@@ -60,20 +60,20 @@ AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
 
 # Deploy SkyPilot API server
 echo "Deploying SkyPilot API server..."
+
+# Set version-specific flag
 if [ "$HELM_VERSION" = "latest" ]; then
-    helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME --devel \
-        --namespace $NAMESPACE \
-        --create-namespace \
-        --set ingress.authCredentials=$AUTH_STRING
+    extra_flag="--devel"
 else
     # Convert PEP440 version to SemVer if needed (e.g., 1.0.0.dev20250609 -> 1.0.0-dev.20250609)
     SEMVER_VERSION=$(echo "$HELM_VERSION" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
-    helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME \
-        --namespace $NAMESPACE \
-        --create-namespace \
-        --version "$SEMVER_VERSION" \
-        --set ingress.authCredentials=$AUTH_STRING
+    extra_flag="--version $SEMVER_VERSION"
 fi
+
+helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME $extra_flag \
+    --namespace $NAMESPACE \
+    --create-namespace \
+    --set ingress.authCredentials=$AUTH_STRING
 
 # Wait for pods to be ready
 echo "Waiting for pods to be ready..."
@@ -98,15 +98,51 @@ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
 
 echo "API server endpoint: $ENDPOINT"
 
-# Test the API server
+# Test the API server with retry logic
 echo "Testing API server health endpoint..."
-HEALTH_RESPONSE=$(curl -s ${ENDPOINT}/api/health)
-echo "Health response: $HEALTH_RESPONSE"
+echo "Endpoint: $ENDPOINT/api/health"
+MAX_RETRIES=10  # 5 minutes with 30 second intervals
+RETRY_INTERVAL=30
+RETRY_COUNT=0
 
-# Extract version from response and verify it matches
-RETURNED_VERSION=$(echo $HEALTH_RESPONSE | jq -r '.version')
-if [ "$RETURNED_VERSION" != "$HELM_VERSION" ]; then
-    echo "Error: Version mismatch! Expected: $HELM_VERSION, Got: $RETURNED_VERSION"
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: Testing health endpoint..."
+    HEALTH_RESPONSE=$(curl -s ${ENDPOINT}/api/health)
+    echo "Health response: $HEALTH_RESPONSE"
+
+    # Check if response is valid JSON (not HTML error page)
+    if echo "$HEALTH_RESPONSE" | jq . >/dev/null 2>&1; then
+        echo "API server is responding with valid JSON!"
+        break
+    else
+        echo "API server not ready yet (received HTML error page). Waiting ${RETRY_INTERVAL} seconds..."
+        if [ $RETRY_COUNT -lt $((MAX_RETRIES - 1)) ]; then
+            sleep $RETRY_INTERVAL
+        fi
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+    fi
+done
+
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    echo "Error: API server failed to become ready after $((MAX_RETRIES * RETRY_INTERVAL)) seconds"
     exit 1
 fi
-echo "Version verification successful! Expected version $HELM_VERSION matches returned version $RETURNED_VERSION"
+
+# Extract version from response and verify it matches (only if not using 'latest')
+RETURNED_VERSION=$(echo $HEALTH_RESPONSE | jq -r '.version')
+
+# Verify that we got a valid version string
+if [ -z "$RETURNED_VERSION" ] || [ ${#RETURNED_VERSION} -le 1 ]; then
+    echo "Error: Invalid version returned from API. Got: '$RETURNED_VERSION'"
+    exit 1
+fi
+
+if [ "$HELM_VERSION" != "latest" ]; then
+    if [ "$RETURNED_VERSION" != "$HELM_VERSION" ]; then
+        echo "Error: Version mismatch! Expected: $HELM_VERSION, Got: $RETURNED_VERSION"
+        exit 1
+    fi
+    echo "Version verification successful! Expected version $HELM_VERSION matches returned version $RETURNED_VERSION"
+else
+    echo "Using latest version. Skipping version verification. Deployed version: $RETURNED_VERSION"
+fi

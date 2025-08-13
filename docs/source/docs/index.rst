@@ -25,14 +25,33 @@ Welcome to SkyPilot!
    <script async defer src="https://buttons.github.io/buttons.js"></script>
    </p>
 
-SkyPilot is an open-source framework for running AI and batch workloads on any infra.
+
+.. grid:: 1 1 1 1
+    :gutter: 3
+
+
+    .. grid-item-card::
+        :link: https://demo.skypilot.co/dashboard/
+        :text-align: center
+
+        🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour
+
+
+
+SkyPilot is an open-source system for running AI and batch workloads on any infra.
 
 
 SkyPilot **is easy to use for AI users**:
 
-- Quickly spin up compute on your own infra
+- Quickly spin up jobs on your own infra
 - Environment and job as code --- simple and portable
-- Easy job management: queue, run, and auto-recover many jobs
+- Easy management: queue, run, and auto-recover many jobs
+
+SkyPilot **makes Kubernetes easy for AI teams**:
+
+- Slurm-like ease of use, cloud-native robustness
+- Local dev experience on K8s: SSH into pods, sync code, or connect IDE
+- Turbocharge your clusters: gang scheduling, multi-cluster, and scaling
 
 SkyPilot **unifies multiple clusters, clouds, and hardware**:
 
@@ -200,6 +219,24 @@ Ready to get started?
 
 SkyPilot is BYOC: Everything is launched within your cloud accounts, VPCs, and clusters.
 
+Can I use SkyPilot on Kubernetes?
+----------------------------------
+
+Yes. SkyPilot makes Kubernetes easy for AI teams via AI-native optimizations.
+
+It turbocharges your existing Kubernetes clusters by **accelerating AI/ML velocity**:
+
+- AI-friendly interface to launch jobs and deployments
+- Much simplified interactive dev for K8s (SSH / sync code / connect IDE to pods)
+
+...and **optimizing GPU costs, utilization, and scaling**:
+
+- Advanced scheduling: Gang scheduling, multi-node jobs, and queueing
+- Multi-cluster support: One entrypoint to use compute across one or many clusters
+- Multi-cloud bursting: Get global GPU capacity without pre-provisioning clusters
+
+See :ref:`SkyPilot vs Vanilla Kubernetes <sky-compare>` and this `blog post <https://blog.skypilot.co/ai-on-kubernetes/>`_ for more details.
+
 Contact the SkyPilot team
 ---------------------------------
 
@@ -294,7 +331,7 @@ Read the research:
    :caption: User Guides
 
    ../reference/async
-   Secrets and Environment Variables <../running-jobs/environment-variables>
+   ../running-jobs/environment-variables
    Docker Containers <../examples/docker-containers>
    ../examples/ports
    ../reference/logging
@@ -306,9 +343,11 @@ Read the research:
    :caption: Administrator Guides
 
    ../reference/api-server/api-server
+   ../reference/auth
    ../admin/workspaces
    ../cloud-setup/cloud-permissions/index
    Admin Policies <../cloud-setup/policy>
+   External Logging Storage <../cloud-setup/external-logging>
 
 .. toctree::
    :hidden:
@@ -319,5 +358,6 @@ Read the research:
    CLI <../reference/cli>
    ../reference/api
    ../reference/config
+   SkyPilot State <../reference/architecture/state>
    ../developers/index
 

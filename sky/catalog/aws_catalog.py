@@ -38,14 +38,26 @@ _DEFAULT_INSTANCE_FAMILY = [
     # CPU: Intel Ice Lake 8375C.
     # Memory: 4 GiB RAM per 1 vCPU;
     'm6i',
+    # This is the latest general-purpose instance family as of Jul 2025.
+    # CPU: Intel Sapphire Rapids.
+    # Memory: 4 GiB RAM per 1 vCPU;
+    'm7i',
     # This is the latest memory-optimized instance family as of Mar 2023.
     # CPU: Intel Ice Lake 8375C
     # Memory: 8 GiB RAM per 1 vCPU;
     'r6i',
+    # This is the latest memory-optimized instance family as of Jul 2025.
+    # CPU: Intel Sapphire Rapids.
+    # Memory: 8 GiB RAM per 1 vCPU;
+    'r7i',
     # This is the latest compute-optimized instance family as of Mar 2023.
     # CPU: Intel Ice Lake 8375C
     # Memory: 2 GiB RAM per 1 vCPU;
     'c6i',
+    # This is the latest compute-optimized instance family as of Jul 2025.
+    # CPU: Intel Sapphire Rapids.
+    # Memory: 2 GiB RAM per 1 vCPU;
+    'c7i',
 ]
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
@@ -230,10 +242,12 @@ def get_vcpus_mem_from_instance_type(
                                                         instance_type)
 
 
-def get_default_instance_type(
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[
+                                  resources_utils.DiskTier] = None,
+                              region: Optional[str] = None,
+                              zone: Optional[str] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
@@ -247,7 +261,8 @@ def get_default_instance_type(
     df = _get_df()
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
-                                                      memory_gb_or_ratio)
+                                                      memory_gb_or_ratio,
+                                                      region, zone)
 
 
 def get_accelerators_from_instance_type(

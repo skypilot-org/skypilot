@@ -214,8 +214,7 @@ def _volume_mounts_commands_generator(f: TextIO, name: str,
             launch_cmd = f'sky launch -y -c {name} --infra gcp/{region} --instance-type {instance_type} {file_path}'
 
     test_commands = [
-        smoke_tests_utils.run_cloud_cmd_on_cluster(name,
-                                                   cmd=pre_launch_disk_cmd),
+        pre_launch_disk_cmd,
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
         launch_cmd,
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
@@ -223,8 +222,6 @@ def _volume_mounts_commands_generator(f: TextIO, name: str,
     # Have not support creating new volumes for TPU node now
     # and MIGs do not support specifying volume name
     if not tpu and not use_mig:
-        test_commands.append(
-            smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name, cmd=post_launch_disk_cmd))
+        test_commands.append(post_launch_disk_cmd)
 
     return test_commands, clean_cmd

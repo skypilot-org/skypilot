@@ -29,32 +29,11 @@ setup: |
   grep -q 'export SKYPILOT_DEV=' ~/.bashrc || echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
   {% endif %}
-  
-  # Create systemd service file
-  mkdir -p ~/.config/systemd/user/
-
-  # Create systemd user service file
-  cat << EOF > ~/.config/systemd/user/skypilot-dashboard.service
-  [Unit]
-  Description=SkyPilot Jobs Dashboard
-  After=network.target
-
-  [Service]
-  Environment="SKYPILOT_USER_ID={{ dashboard_user_id }}"
-  Restart=always
-  StandardOutput=append:/home/$USER/.sky/job-dashboard.log
-  StandardError=append:/home/$USER/.sky/job-dashboard.log
-  ExecStart={{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard
-
-  [Install]
-  WantedBy=default.target
-  EOF
-
-  export SKYPILOT_USER_ID="{{ dashboard_user_id }}"
-  {{ dashboard_setup_cmd }}
 
 run: |
+  {%- if consolidation_mode_job_id is none %}
   {{ sky_activate_python_env }}
+  {%- endif %}
 
   # Write env vars to a file
   {%- for env_name, env_value in controller_envs.items() %}
@@ -65,10 +44,22 @@ run: |
   # Note: The job is already in the `spot` table, marked as PENDING.
   # CloudVmRayBackend._exec_code_on_head() calls
   # managed_job_codegen.set_pending() before we get here.
-  python -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
+  {%- if consolidation_mode_job_id is not none %}
+  {{sky_python_cmd}} \
+  {%- else %}
+  python \
+  {%- endif %}
+    -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
     --user-yaml-path {{remote_original_user_yaml_path}} \
+    {%- if consolidation_mode_job_id is not none %}
+    --job-id {{consolidation_mode_job_id}} \
+    {%- else %}
     --job-id $SKYPILOT_INTERNAL_JOB_ID \
+    {%- endif %}
     --env-file {{remote_env_file_path}} \
+    {%- if pool is not none %}
+    --pool {{pool}} \
+    {%- endif %}
     --priority {{priority}}
 
 

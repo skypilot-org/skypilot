@@ -4,6 +4,7 @@ Responsible for autoscaling and replica management.
 """
 import contextlib
 import logging
+import os
 import threading
 import time
 import traceback
@@ -26,11 +27,12 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
-class SuppressSuccessGetAccessLogsFilter(logging.Filter):
+class AutoscalerInfoFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        return not ('GET' in message and '200' in message)
+        return not ('GET' in message and '200' in message and
+                    '/autoscaler/info' in message)
 
 
 class SkyServeController:
@@ -60,6 +62,7 @@ class SkyServeController:
         uvicorn_access_logger = logging.getLogger('uvicorn.access')
         for handler in uvicorn_access_logger.handlers:
             handler.setFormatter(sky_logging.FORMATTER)
+            handler.addFilter(AutoscalerInfoFilter())
         yield
 
     def _run_autoscaler(self):
@@ -99,6 +102,11 @@ class SkyServeController:
             time.sleep(self._autoscaler.get_decision_interval())
 
     def run(self) -> None:
+
+        @self._app.get('/autoscaler/info')
+        async def get_autoscaler_info() -> fastapi.Response:
+            return responses.JSONResponse(content=self._autoscaler.info(),
+                                          status_code=200)
 
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(
@@ -156,9 +164,13 @@ class SkyServeController:
                 return responses.JSONResponse(content={'message': 'Success'},
                                               status_code=200)
             except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error in update_service: '
-                             f'{common_utils.format_exception(e)}')
-                return responses.JSONResponse(content={'message': 'Error'},
+                exception_str = common_utils.format_exception(e)
+                logger.error(f'Error in update_service: {exception_str}')
+                return responses.JSONResponse(content={
+                    'message': 'Error',
+                    'exception': exception_str,
+                    'traceback': traceback.format_exc()
+                },
                                               status_code=500)
 
         @self._app.post('/controller/terminate_replica')
@@ -233,7 +245,7 @@ class SkyServeController:
         threading.Thread(target=self._run_autoscaler).start()
 
         logger.info('SkyServe Controller started on '
-                    f'http://{self._host}:{self._port}')
+                    f'http://{self._host}:{self._port}. PID: {os.getpid()}')
 
         uvicorn.run(self._app, host=self._host, port=self._port)
 

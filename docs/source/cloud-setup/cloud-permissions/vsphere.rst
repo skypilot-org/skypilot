@@ -273,7 +273,7 @@ Follow the steps bellow to tag the VM template:
 .. image:: ../../images/screenshots/vsphere/content-lib-item-tag-adding.png
     :width: 80%
     :align: center
-    :alt: Content Lib Item Taging
+    :alt: Content Lib Item Tagging
 
 .. _cloud-prepare-vsphere-references:
 
