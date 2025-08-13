@@ -5,7 +5,6 @@ import shlex
 import signal
 import tempfile
 import threading
-import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
@@ -36,14 +35,11 @@ from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
-if typing.TYPE_CHECKING:
-    import sky
-
 logger = sky_logging.init_logger(__name__)
 
 
 def _rewrite_tls_credential_paths_and_get_tls_env_vars(
-        service_name: str, task: 'sky.Task') -> Dict[str, Any]:
+        service_name: str, task: 'task_lib.Task') -> Dict[str, Any]:
     """Rewrite the paths of TLS credentials in the task.
 
     Args:
@@ -107,7 +103,7 @@ def _get_service_record(
 
 
 def up(
-    task: 'sky.Task',
+    task: 'task_lib.Task',
     service_name: Optional[str] = None,
     pool: bool = False,
 ) -> Tuple[str, str]:
@@ -425,7 +421,7 @@ def up(
 
 
 def update(
-    task: 'sky.Task',
+    task: 'task_lib.Task',
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
@@ -580,7 +576,7 @@ def update(
 
 
 def apply(
-    task: 'sky.Task',
+    task: 'task_lib.Task',
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
