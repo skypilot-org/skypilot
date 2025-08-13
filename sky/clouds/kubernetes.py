@@ -771,7 +771,8 @@ class Kubernetes(clouds.Cloud):
 
         return deploy_vars
 
-    def _warn_on_disk_size(self, resources: 'resources_lib.Resources'):
+    @staticmethod
+    def _warn_on_disk_size(resources: 'resources_lib.Resources'):
         if resources.disk_size is not None:
             logger.info(f'{colorama.Style.DIM}Disk size {resources.disk_size} '
                         'is not supported by Kubernetes. '
