@@ -62,7 +62,12 @@ def test_deepseek_r1_vllm(generic_cloud: str, model_name: str, gpu_spec: str):
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=300),
-            (f'ENDPOINT=$(sky status --ip {name}); '
+            # Disable SKYPILOT_DEBUG while retrieving the IP to avoid debug logs
+            # contaminating the output of `sky status --ip`, which would break curl.
+            # Use `tail -n 1` to ensure only the pure IP/hostname is captured.
+            (f'ORIGIN_SKYPILOT_DEBUG=$SKYPILOT_DEBUG; export SKYPILOT_DEBUG=0; '
+             f'ENDPOINT=$(sky status --ip {name} | tail -n 1); '
+             f'export SKYPILOT_DEBUG=$ORIGIN_SKYPILOT_DEBUG; '
              f's=$(curl -sS http://$ENDPOINT:8000/v1/chat/completions -H "Content-Type: application/json" -d \'{json_payload}\'); '
              f'echo "$s" | jq .; '
              f'content=$(echo "$s" | jq -r ".choices[0].message.content"); '
