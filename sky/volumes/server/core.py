@@ -7,12 +7,12 @@ import uuid
 
 import filelock
 
-import sky
 from sky import global_user_state
 from sky import models
 from sky import provision
 from sky import sky_logging
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -180,7 +180,7 @@ def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
     with rich_utils.safe_status(ux_utils.spinner_message('Creating volume')):
         # Reuse the method for cluster name on cloud to
         # generate the storage name on cloud.
-        cloud_obj = sky.CLOUD_REGISTRY.from_str(cloud)
+        cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
         assert cloud_obj is not None
         name_uuid = str(uuid.uuid4())[:6]
         name_on_cloud = common_utils.make_cluster_name_on_cloud(

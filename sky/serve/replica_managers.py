@@ -16,13 +16,13 @@ import colorama
 import psutil
 import requests
 
-import sky
 from sky import backends
 from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import sky_logging
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.jobs import scheduler as jobs_scheduler
 from sky.serve import constants as serve_constants
@@ -81,7 +81,7 @@ def launch_cluster(replica_id: int,
     try:
         config = common_utils.read_yaml(
             os.path.expanduser(service_task_yaml_path))
-        task = sky.Task.from_yaml_config(config)
+        task = task_lib.Task.from_yaml_config(config)
         if resources_override is not None:
             resources = task.resources
             overrided_resources = [
@@ -177,7 +177,7 @@ def terminate_cluster(cluster_name: str,
 
 def _get_resources_ports(service_task_yaml_path: str) -> str:
     """Get the resources ports used by the task."""
-    task = sky.Task.from_yaml(service_task_yaml_path)
+    task = task_lib.Task.from_yaml(service_task_yaml_path)
     # Already checked all ports are valid in sky.serve.core.up
     assert task.resources, task
     assert task.service is not None, task
@@ -195,7 +195,7 @@ def _should_use_spot(service_task_yaml_path: str,
         if use_spot_override is not None:
             assert isinstance(use_spot_override, bool)
             return use_spot_override
-    task = sky.Task.from_yaml(service_task_yaml_path)
+    task = task_lib.Task.from_yaml(service_task_yaml_path)
     spot_use_resources = [
         resources for resources in task.resources if resources.use_spot
     ]
@@ -688,7 +688,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                  service_task_yaml_path: str) -> None:
         super().__init__(service_name, spec)
         self.service_task_yaml_path = service_task_yaml_path
-        task = sky.Task.from_yaml(service_task_yaml_path)
+        task = task_lib.Task.from_yaml(service_task_yaml_path)
         self._spot_placer: Optional[spot_placer.SpotPlacer] = (
             spot_placer.SpotPlacer.from_task(spec, task))
         # TODO(tian): Store launch/down pid in the replica table, to make the
