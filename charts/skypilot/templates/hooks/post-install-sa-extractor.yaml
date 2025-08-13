@@ -1,0 +1,109 @@
+{{- if include "skypilot.serviceAccountAuthEnabled" . | trim | eq "true" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-sa-extractor
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install, post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels:
+    skypilot.co/component: sa-extractor
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        skypilot.co/component: sa-extractor
+    spec:
+      serviceAccountName: {{ .Release.Name }}-sa-extractor
+      restartPolicy: Never
+      containers:
+      - name: sa-token-extractor
+        image: bitnami/kubectl:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: RELEASE_NAME
+          value: {{ .Release.Name | quote }}
+        - name: NAMESPACE
+          value: {{ .Release.Namespace | quote }}
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          # Check if Secret already exists
+          SECRET_NAME="${RELEASE_NAME}-initial-sa-token"
+
+          if kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+            echo "Secret $SECRET_NAME already exists, exiting..."
+            exit 0
+          fi
+          
+          echo "Looking for SkyPilot API server pod..."
+          
+          # Wait for API server pod to be ready
+          max_attempts=30
+          attempt=0
+          
+          while [ $attempt -lt $max_attempts ]; do
+            echo "Attempt $((attempt + 1))/$max_attempts: Searching for API server pod..."
+            
+            # Find API server Pod
+            POD_NAME=$(kubectl get pods -n "$NAMESPACE" \
+              -l "app=${RELEASE_NAME}-api" \
+              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            
+            if [ -n "$POD_NAME" ]; then
+              echo "Found API server pod: $POD_NAME"
+              
+              # Check if Pod is ready
+              POD_READY=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" \
+                -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
+              
+              if [ "$POD_READY" = "True" ]; then
+                echo "Pod is ready, proceeding with token extraction..."
+                break
+              else
+                echo "Pod found but not ready yet, waiting..."
+              fi
+            else
+              echo "API server pod not found yet, waiting..."
+            fi
+            
+            sleep 10
+            attempt=$((attempt + 1))
+          done
+          
+          if [ -z "$POD_NAME" ] || [ "$POD_READY" != "True" ]; then
+            echo "API server pod not found or not ready after $max_attempts attempts"
+            exit 1
+          fi
+          
+          echo "Extracting service account token from pod..."
+          
+          # Check if file exists
+          if ! kubectl exec "$POD_NAME" -n "$NAMESPACE" -- test -f /root/.sky/api_server/initial_system_sa_token; then
+            echo "Token file /root/.sky/api_server/initial_system_sa_token not found in pod"
+            exit 1
+          fi
+          
+          # Extract token content
+          TOKEN_CONTENT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- cat /root/.sky/api_server/initial_system_sa_token)
+          
+          if [ -z "$TOKEN_CONTENT" ]; then
+            echo "Token file is empty"
+            exit 1
+          fi
+          
+          echo "Token extracted successfully (length: ${#TOKEN_CONTENT} chars)"
+          
+          echo "Creating new secret: $SECRET_NAME"
+          kubectl create secret generic "$SECRET_NAME" -n "$NAMESPACE" \
+              --from-literal=token="$TOKEN_CONTENT"
+          
+          echo "Successfully created secret: $SECRET_NAME"
+{{- end }}

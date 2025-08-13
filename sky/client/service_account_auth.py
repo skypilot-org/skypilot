@@ -7,7 +7,7 @@ from sky import skypilot_config
 from sky.skylet import constants
 
 
-def _get_service_account_token() -> Optional[str]:
+def get_service_account_token() -> Optional[str]:
     """Get service account token from environment variable or config file.
 
     Priority order:
@@ -41,7 +41,7 @@ def get_service_account_headers() -> dict:
         Dictionary with Authorization header if token is available,
         empty dict otherwise.
     """
-    token = _get_service_account_token()
+    token = get_service_account_token()
     if token:
         return {'Authorization': f'Bearer {token}'}
     return {}

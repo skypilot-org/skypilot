@@ -1,11 +1,28 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import PropTypes from 'prop-types';
 import { TopBar, SidebarProvider } from './sidebar';
-import { useMobile } from '@/hooks/useMobile';
 import { WelcomeNotification } from './WelcomeNotification';
 import { TourButton } from './TourButton';
+import { apiClient } from '@/data/connectors/client';
 
-function LayoutContent({ children, highlighted }) {
-  const isMobile = useMobile();
+function LayoutContent({ children }) {
+  const [authed, setAuthed] = useState(false);
+
+  useEffect(() => {
+    let canceled = false;
+    const check = async () => {
+      try {
+        const res = await apiClient.get('/api/health');
+        if (!canceled) setAuthed(!!(res && res.ok));
+      } catch (_) {
+        if (!canceled) setAuthed(false);
+      }
+    };
+    check();
+    return () => {
+      canceled = true;
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -23,12 +40,16 @@ function LayoutContent({ children, highlighted }) {
       </div>
 
       {/* Welcome notification for first-time visitors */}
-      <WelcomeNotification />
+      <WelcomeNotification isAuthenticated={authed} />
 
       <TourButton />
     </div>
   );
 }
+
+LayoutContent.propTypes = {
+  children: PropTypes.node,
+};
 
 export function Layout(props) {
   return (

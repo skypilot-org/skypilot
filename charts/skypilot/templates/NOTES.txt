@@ -3,3 +3,35 @@
 {{- end }}
 {{- include "skypilot.checkUpgradeConfig" . }}
 {{- include "skypilot.validateOAuthConfig" . }}
+
+{{- /* Print post-install notes for service account token auth */ -}}
+{{- $saAuthEnabled := include "skypilot.serviceAccountAuthEnabled" . | trim -}}
+{{- if eq $saAuthEnabled "true" }}
+
+================================================================================
+Service Account Token Authentication
+================================================================================
+
+An initial admin token has been created in the Kubernetes Secret:
+  Namespace: {{ .Release.Namespace }}
+  Secret:    {{ .Release.Name }}-initial-sa-token
+
+Use the following commands to retrieve and use the token:
+
+1) Retrieve and decode the token
+
+  export SKYPILOT_SERVICE_ACCOUNT_TOKEN=$(kubectl -n {{ .Release.Namespace }} \
+    get secret {{ .Release.Name }}-initial-sa-token \
+    -o jsonpath='{.data.token}' | base64 -d)
+
+2) Login the API server with the token
+
+  sky api login -e <API_SERVER_ENDPOINT>
+
+3) Use this token to sign in to the Dashboard (Login → paste token)
+
+Notes:
+- Rotate or create per-user tokens in the Dashboard Users page after initial login.
+- Keep this token secure; it grants administrative access.
+
+{{- end }}

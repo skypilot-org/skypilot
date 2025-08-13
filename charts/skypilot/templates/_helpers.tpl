@@ -101,19 +101,21 @@ false
 http://{{ .Release.Name }}-oauth2-proxy:4180
 {{- end -}}
 
-{{- define "skypilot.serviceAccountAuthEnabled" -}}
-{{- if ne .Values.auth.serviceAccount.enabled nil -}}
-{{- .Values.auth.serviceAccount.enabled -}}
-{{- else -}}
-{{- .Values.apiService.enableServiceAccounts -}}
-{{- end -}}
-{{- end -}}
-
 {{- define "skypilot.ingressBasicAuthEnabled" -}}
 {{- if and .Values.ingress.enabled (or .Values.ingress.authSecret .Values.ingress.authCredentials) -}}
 true
 {{- else -}}
 false
+{{- end -}}
+{{- end -}}
+
+{{- define "skypilot.serviceAccountAuthEnabled" -}}
+{{- if include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" -}}
+false
+{{- else if and .Values.auth .Values.auth.serviceAccount (ne .Values.auth.serviceAccount.enabled nil) -}}
+{{- .Values.auth.serviceAccount.enabled -}}
+{{- else -}}
+{{- .Values.apiService.enableServiceAccounts -}}
 {{- end -}}
 {{- end -}}
 
@@ -127,7 +129,7 @@ false
 
 {{/* Validate the oauth config */}}
 {{- define "skypilot.validateOAuthConfig" -}}
-{{- $authOAuthEnabled := .Values.auth.oauth.enabled -}}
+{{- $authOAuthEnabled := (and .Values.auth .Values.auth.oauth .Values.auth.oauth.enabled) -}}
 {{- $ingressBasicAuthEnabled := include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" -}}
 {{- $ingressOAuthEnabled := include "skypilot.ingressOAuthEnabled" . | trim | eq "true" -}}
 

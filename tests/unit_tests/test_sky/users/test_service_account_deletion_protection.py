@@ -43,19 +43,15 @@ class TestServiceAccountDeletionProtection:
 
     @pytest.mark.asyncio
     @mock.patch('sky.users.server.global_user_state.get_service_account_token')
-    @mock.patch(
-        'sky.users.server.permission.permission_service.check_service_account_token_permission'
-    )
     @mock.patch('sky.users.server._delete_user')
     @mock.patch(
         'sky.users.server.global_user_state.delete_service_account_token')
     async def test_delete_service_account_token_success_no_active_resources(
-            self, mock_delete_token, mock_delete_user, mock_check_permission,
-            mock_get_token, mock_request, sample_service_account_token):
+            self, mock_delete_token, mock_delete_user, mock_get_token,
+            mock_request, sample_service_account_token):
         """Test successful service account token deletion when no active resources exist."""
         # Setup mocks
         mock_get_token.return_value = sample_service_account_token
-        mock_check_permission.return_value = True
         mock_delete_user.return_value = None  # No exception means no active resources
         mock_delete_token.return_value = True
 
@@ -69,28 +65,21 @@ class TestServiceAccountDeletionProtection:
 
         # Verify deletion flow
         mock_get_token.assert_called_once_with('token123')
-        mock_check_permission.assert_called_once_with('user123', 'user123',
-                                                      'delete')
         mock_delete_user.assert_called_once_with('sa-abc123def456')
-        mock_delete_token.assert_called_once_with('token123')
 
         assert result == {'message': 'Token deleted successfully'}
 
     @pytest.mark.asyncio
     @mock.patch('sky.users.server.global_user_state.get_service_account_token')
-    @mock.patch(
-        'sky.users.server.permission.permission_service.check_service_account_token_permission'
-    )
     @mock.patch('sky.users.server.global_user_state.get_user')
     @mock.patch('sky.utils.resource_checker.check_no_active_resources_for_users'
                )
     async def test_delete_service_account_token_blocked_by_active_clusters(
-            self, mock_check_resources, mock_get_user, mock_check_permission,
-            mock_get_token, mock_request, sample_service_account_token):
+            self, mock_check_resources, mock_get_user, mock_get_token,
+            mock_request, sample_service_account_token):
         """Test service account token deletion blocked by active clusters."""
         # Setup mocks
         mock_get_token.return_value = sample_service_account_token
-        mock_check_permission.return_value = True
 
         # Mock user exists
         mock_user = mock.Mock()
@@ -126,19 +115,15 @@ class TestServiceAccountDeletionProtection:
 
     @pytest.mark.asyncio
     @mock.patch('sky.users.server.global_user_state.get_service_account_token')
-    @mock.patch(
-        'sky.users.server.permission.permission_service.check_service_account_token_permission'
-    )
     @mock.patch('sky.users.server.global_user_state.get_user')
     @mock.patch('sky.utils.resource_checker.check_no_active_resources_for_users'
                )
     async def test_delete_service_account_token_blocked_by_active_jobs(
-            self, mock_check_resources, mock_get_user, mock_check_permission,
-            mock_get_token, mock_request, sample_service_account_token):
+            self, mock_check_resources, mock_get_user, mock_get_token,
+            mock_request, sample_service_account_token):
         """Test service account token deletion blocked by active managed jobs."""
         # Setup mocks
         mock_get_token.return_value = sample_service_account_token
-        mock_check_permission.return_value = True
 
         # Mock user exists
         mock_user = mock.Mock()
@@ -169,19 +154,15 @@ class TestServiceAccountDeletionProtection:
 
     @pytest.mark.asyncio
     @mock.patch('sky.users.server.global_user_state.get_service_account_token')
-    @mock.patch(
-        'sky.users.server.permission.permission_service.check_service_account_token_permission'
-    )
     @mock.patch('sky.users.server.global_user_state.get_user')
     @mock.patch('sky.utils.resource_checker.check_no_active_resources_for_users'
                )
     async def test_delete_service_account_token_blocked_by_mixed_resources(
-            self, mock_check_resources, mock_get_user, mock_check_permission,
-            mock_get_token, mock_request, sample_service_account_token):
+            self, mock_check_resources, mock_get_user, mock_get_token,
+            mock_request, sample_service_account_token):
         """Test service account token deletion blocked by both clusters and jobs."""
         # Setup mocks
         mock_get_token.return_value = sample_service_account_token
-        mock_check_permission.return_value = True
 
         # Mock user exists
         mock_user = mock.Mock()
@@ -212,32 +193,6 @@ class TestServiceAccountDeletionProtection:
         assert "production-cluster" in exc_info.value.detail
         assert "training-job" in exc_info.value.detail
         assert "inference-job" in exc_info.value.detail
-
-    @pytest.mark.asyncio
-    @mock.patch('sky.users.server.global_user_state.get_service_account_token')
-    @mock.patch(
-        'sky.users.server.permission.permission_service.check_service_account_token_permission'
-    )
-    async def test_delete_service_account_token_permission_denied(
-            self, mock_check_permission, mock_get_token, mock_request,
-            sample_service_account_token):
-        """Test service account token deletion with insufficient permissions."""
-        # Setup mocks - token exists but user doesn't have permission
-        mock_get_token.return_value = sample_service_account_token
-        mock_check_permission.return_value = False
-
-        # Create delete request
-        delete_body = payloads.ServiceAccountTokenDeleteBody(
-            token_id='token123')
-
-        # Execute deletion and expect permission error
-        with pytest.raises(fastapi.HTTPException) as exc_info:
-            await users_server.delete_service_account_token(
-                mock_request, delete_body)
-
-        # Verify permission error
-        assert exc_info.value.status_code == 403
-        assert "You can only delete your own tokens" in exc_info.value.detail
 
     @pytest.mark.asyncio
     @mock.patch('sky.users.server.global_user_state.get_service_account_token')
@@ -279,34 +234,3 @@ class TestServiceAccountDeletionProtection:
         # Verify authentication error
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail == 'Authentication required'
-
-    @pytest.mark.asyncio
-    @mock.patch('sky.users.server.global_user_state.get_service_account_token')
-    @mock.patch(
-        'sky.users.server.permission.permission_service.check_service_account_token_permission'
-    )
-    @mock.patch('sky.users.server._delete_user')
-    @mock.patch(
-        'sky.users.server.global_user_state.delete_service_account_token')
-    async def test_delete_service_account_token_db_deletion_fails(
-            self, mock_delete_token, mock_delete_user, mock_check_permission,
-            mock_get_token, mock_request, sample_service_account_token):
-        """Test service account token deletion when database deletion fails."""
-        # Setup mocks
-        mock_get_token.return_value = sample_service_account_token
-        mock_check_permission.return_value = True
-        mock_delete_user.return_value = None  # User deletion succeeds
-        mock_delete_token.return_value = False  # DB deletion fails
-
-        # Create delete request
-        delete_body = payloads.ServiceAccountTokenDeleteBody(
-            token_id='token123')
-
-        # Execute deletion and expect DB error
-        with pytest.raises(fastapi.HTTPException) as exc_info:
-            await users_server.delete_service_account_token(
-                mock_request, delete_body)
-
-        # Verify database error
-        assert exc_info.value.status_code == 404
-        assert exc_info.value.detail == 'Token not found'

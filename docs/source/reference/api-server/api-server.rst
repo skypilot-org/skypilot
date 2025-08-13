@@ -81,12 +81,15 @@ We recommend using a Python 3.9 or 3.10 environment for the SkyPilot client. See
 
     $ pip install -U skypilot-nightly
 
+After installation, a default token with `Admin` role will be created and saved to a secret named ``$RELEASE_NAME-initial-sa-token`` in the namespace where the API server is deployed. You can use this token to connect to the API server and then create new users.
+
 Run ``sky api login`` to connect to the API server.
 
 .. code-block:: console
 
+    $ export SKYPILOT_SERVICE_ACCOUNT_TOKEN=$(kubectl get secret -n $NAMESPACE $RELEASE_NAME-initial-sa-token -o jsonpath='{.data.token}' | base64 -d)
     $ sky api login
-    Enter your SkyPilot API server endpoint: http://skypilot:password@1.2.3.4:30050
+    Enter your SkyPilot API server endpoint: http://1.2.3.4:30050
 
 This will save the API server endpoint to your ``~/.sky/config.yaml`` file.
 
@@ -97,7 +100,7 @@ To verify that the API server is working, run ``sky api info``:
     $ sky api info
     Using SkyPilot API server: http://127.0.0.1:46580 Dashboard: http://127.0.0.1:46580/dashboard
     ├── Status: healthy, commit: xxxxx, version: 1.0.0-dev0
-    └── User: skypilot-user (xxxxxx)
+    └── User: sa-skypilot-system (sa-skypilot-system)
 
 
 .. tip::

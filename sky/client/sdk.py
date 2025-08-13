@@ -30,6 +30,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
+from sky.client import service_account_auth
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
@@ -2313,6 +2314,8 @@ def api_login(endpoint: Optional[str] = None,
             fg='green')
 
     # Handle service account token authentication
+    if not service_account_token:
+        service_account_token = service_account_auth.get_service_account_token()
     if service_account_token:
         if not service_account_token.startswith('sky_'):
             raise ValueError('Invalid service account token format. '

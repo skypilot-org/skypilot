@@ -26,6 +26,10 @@ import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
+import {
+  getAuthHeaders,
+  getContentTypeAuthHeaders,
+} from '@/data/connectors/client';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -46,9 +50,11 @@ export function SidebarProvider({ children }) {
 
   const baseUrl = window.location.origin;
   const fullEndpoint = `${baseUrl}${ENDPOINT}`;
+  const headers = getContentTypeAuthHeaders();
+
   useEffect(() => {
     // Fetch user info from health endpoint
-    fetch(`${fullEndpoint}/api/health`)
+    fetch(`${fullEndpoint}/api/health`, { headers })
       .then((res) => res.json())
       .then((data) => {
         if (data.user && data.user.name) {
@@ -59,7 +65,9 @@ export function SidebarProvider({ children }) {
           // behavior in workspaces and users page.
           const getUserRole = async () => {
             try {
-              const response = await fetch(`${fullEndpoint}/users/role`);
+              const response = await fetch(`${fullEndpoint}/users/role`, {
+                headers,
+              });
               if (response.ok) {
                 const roleData = await response.json();
                 if (roleData.role) {

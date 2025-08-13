@@ -132,6 +132,14 @@
                 "null"
             ],
             "properties": {
+                "anonymous": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "oauth": {
                     "type": [
                         "object",

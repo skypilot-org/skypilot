@@ -199,6 +199,12 @@ auth:
     # For backward compatibility, this can be used with OAuth2 Proxy on ingress at the same time.
     # @schema type: [boolean, null]
     enabled: null
+  # Anonymous access to the API server
+  anonymous:
+    # Enable/disable anonymous access to the API server
+    # If disabled, the API server will not allow anonymous access to the API.
+    # @schema type: [boolean]
+    enabled: false
 
 storage:
   # Enable/disable persistent storage

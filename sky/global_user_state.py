@@ -1768,6 +1768,25 @@ def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
 
 
 @_init_db
+def get_tokens_by_user_id(user_id: str) -> List[Dict[str, Any]]:
+    """Get all tokens for a user."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(service_account_token_table).filter_by(
+            service_account_user_id=user_id).all()
+    return [{
+        'token_id': row.token_id,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
+    } for row in rows]
+
+
+@_init_db
 def update_service_account_token_last_used(token_id: str) -> None:
     """Update the last_used_at timestamp for a service account token."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1791,6 +1810,21 @@ def delete_service_account_token(token_id: str) -> bool:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         result = session.query(service_account_token_table).filter_by(
             token_id=token_id).delete()
+        session.commit()
+    return result > 0
+
+
+@_init_db
+def delete_tokens_by_user_id(user_id: str) -> bool:
+    """Delete tokens by user id.
+
+    Returns:
+        True if token was found and deleted.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.query(service_account_token_table).filter_by(
+            service_account_user_id=user_id).delete()
         session.commit()
     return result > 0
 
