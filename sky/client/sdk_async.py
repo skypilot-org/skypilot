@@ -20,10 +20,10 @@ import colorama
 
 from sky import admin_policy
 from sky import backends
+from sky import catalog
 from sky import exceptions
 from sky import models
 from sky import sky_logging
-import sky.catalog
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -302,7 +302,7 @@ async def list_accelerators(
     require_price: bool = True,
     case_sensitive: bool = True,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Dict[str, List[sky.catalog.common.InstanceTypeInfo]]:
+) -> Dict[str, List[catalog.common.InstanceTypeInfo]]:
     """Async version of list_accelerators() that lists the names of all
     accelerators offered by Sky."""
     request_id = await context_utils.to_thread(sdk.list_accelerators, gpus_only,
@@ -346,7 +346,7 @@ async def optimize(
         admin_policy_request_options: Optional[
             admin_policy.RequestOptions] = None,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> sky.dag.Dag:
+) -> 'sky.Dag':
     """Async version of optimize() that finds the best execution plan for the
       given DAG."""
     request_id = await context_utils.to_thread(sdk.optimize, dag, minimize,
