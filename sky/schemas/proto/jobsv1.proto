@@ -118,13 +118,8 @@ message GetJobStatusRequest {
   repeated int64 job_ids = 1;
 }
 
-message JobStatusItem {
-  int64 job_id = 1;
-  JobStatus status = 2;
-}
-
 message GetJobStatusResponse {
-  repeated JobStatusItem job_statuses = 1;
+  map<int64, JobStatus> job_statuses = 1;
 }
 
 message GetJobSubmittedTimestampRequest {
@@ -147,11 +142,6 @@ message GetLogDirsForJobsRequest {
   repeated int64 job_ids = 1;
 }
 
-message JobLogDir {
-  int64 job_id = 1;
-  string log_path = 2;
-}
-
 message GetLogDirsForJobsResponse {
-  repeated JobLogDir job_log_dirs = 1;
+  map<int64, string> job_log_dirs = 1;
 }

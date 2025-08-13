@@ -14,15 +14,19 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"sky/schemas/generated/jobsv1.proto\x12\x07jobs.v1\"\x85\x01\n\rAddJobRequest\x12\x15\n\x08job_name\x18\x01 \x01(\tH\x00\x88\x01\x01\x12\x10\n\x08username\x18\x02 \x01(\t\x12\x15\n\rrun_timestamp\x18\x03 \x01(\t\x12\x15\n\rresources_str\x18\x04 \x01(\t\x12\x10\n\x08metadata\x18\x05 \x01(\tB\x0b\n\t_job_name\"1\n\x0e\x41\x64\x64JobResponse\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\x12\x0f\n\x07log_dir\x18\x02 \x01(\t\".\n\x0fQueueJobRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\x12\x0b\n\x03\x63md\x18\x02 \x01(\t\"\x12\n\x10QueueJobResponse\"\x15\n\x13UpdateStatusRequest\"\x16\n\x14UpdateStatusResponse\"L\n\x12GetJobQueueRequest\x12\x16\n\tuser_hash\x18\x01 \x01(\tH\x00\x88\x01\x01\x12\x10\n\x08\x61ll_jobs\x18\x02 \x01(\x08\x42\x0c\n\n_user_hash\"\xf4\x01\n\x07JobInfo\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\x12\x10\n\x08job_name\x18\x02 \x01(\t\x12\x10\n\x08username\x18\x03 \x01(\t\x12\x14\n\x0csubmitted_at\x18\x04 \x01(\x01\x12\"\n\x06status\x18\x05 \x01(\x0e\x32\x12.jobs.v1.JobStatus\x12\x15\n\rrun_timestamp\x18\x06 \x01(\t\x12\x10\n\x08start_at\x18\x07 \x01(\x01\x12\x0e\n\x06\x65nd_at\x18\x08 \x01(\x01\x12\x11\n\tresources\x18\t \x01(\t\x12\x0b\n\x03pid\x18\n \x01(\x03\x12\x10\n\x08log_path\x18\x0b \x01(\t\x12\x10\n\x08metadata\x18\x0c \x01(\t\"5\n\x13GetJobQueueResponse\x12\x1e\n\x04jobs\x18\x01 \x03(\x0b\x32\x10.jobs.v1.JobInfo\"^\n\x11\x43\x61ncelJobsRequest\x12\x0f\n\x07job_ids\x18\x01 \x03(\x03\x12\x12\n\ncancel_all\x18\x02 \x01(\x08\x12\x16\n\tuser_hash\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x0c\n\n_user_hash\"/\n\x12\x43\x61ncelJobsResponse\x12\x19\n\x11\x63\x61ncelled_job_ids\x18\x01 \x03(\x03\"\x1e\n\x1c\x46\x61ilAllInProgressJobsRequest\"\x1f\n\x1d\x46\x61ilAllInProgressJobsResponse\"\x7f\n\x0fTailLogsRequest\x12\x13\n\x06job_id\x18\x01 \x01(\x03H\x00\x88\x01\x01\x12\x1b\n\x0emanaged_job_id\x18\x02 \x01(\x03H\x01\x88\x01\x01\x12\x0e\n\x06\x66ollow\x18\x03 \x01(\x08\x12\x0c\n\x04tail\x18\x04 \x01(\x05\x42\t\n\x07_job_idB\x11\n\x0f_managed_job_id\"7\n\x10TailLogsResponse\x12\x10\n\x08log_line\x18\x01 \x01(\t\x12\x11\n\texit_code\x18\x02 \x01(\x05\"&\n\x13GetJobStatusRequest\x12\x0f\n\x07job_ids\x18\x01 \x03(\x03\"C\n\rJobStatusItem\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\x12\"\n\x06status\x18\x02 \x01(\x0e\x32\x12.jobs.v1.JobStatus\"D\n\x14GetJobStatusResponse\x12,\n\x0cjob_statuses\x18\x01 \x03(\x0b\x32\x16.jobs.v1.JobStatusItem\"1\n\x1fGetJobSubmittedTimestampRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\"H\n GetJobSubmittedTimestampResponse\x12\x16\n\ttimestamp\x18\x01 \x01(\x01H\x00\x88\x01\x01\x42\x0c\n\n_timestamp\"-\n\x1bGetJobEndedTimestampRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\"D\n\x1cGetJobEndedTimestampResponse\x12\x16\n\ttimestamp\x18\x01 \x01(\x01H\x00\x88\x01\x01\x42\x0c\n\n_timestamp\"+\n\x18GetLogDirsForJobsRequest\x12\x0f\n\x07job_ids\x18\x01 \x03(\x03\"-\n\tJobLogDir\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\x12\x10\n\x08log_path\x18\x02 \x01(\t\"E\n\x19GetLogDirsForJobsResponse\x12(\n\x0cjob_log_dirs\x18\x01 \x03(\x0b\x32\x12.jobs.v1.JobLogDir*\x8d\x02\n\tJobStatus\x12\x1a\n\x16JOB_STATUS_UNSPECIFIED\x10\x00\x12\x13\n\x0fJOB_STATUS_INIT\x10\x01\x12\x16\n\x12JOB_STATUS_PENDING\x10\x02\x12\x19\n\x15JOB_STATUS_SETTING_UP\x10\x03\x12\x16\n\x12JOB_STATUS_RUNNING\x10\x04\x12\x1c\n\x18JOB_STATUS_FAILED_DRIVER\x10\x05\x12\x18\n\x14JOB_STATUS_SUCCEEDED\x10\x06\x12\x15\n\x11JOB_STATUS_FAILED\x10\x07\x12\x1b\n\x17JOB_STATUS_FAILED_SETUP\x10\x08\x12\x18\n\x14JOB_STATUS_CANCELLED\x10\t2\x91\x07\n\x0bJobsService\x12\x39\n\x06\x41\x64\x64Job\x12\x16.jobs.v1.AddJobRequest\x1a\x17.jobs.v1.AddJobResponse\x12?\n\x08QueueJob\x12\x18.jobs.v1.QueueJobRequest\x1a\x19.jobs.v1.QueueJobResponse\x12K\n\x0cUpdateStatus\x12\x1c.jobs.v1.UpdateStatusRequest\x1a\x1d.jobs.v1.UpdateStatusResponse\x12H\n\x0bGetJobQueue\x12\x1b.jobs.v1.GetJobQueueRequest\x1a\x1c.jobs.v1.GetJobQueueResponse\x12\x45\n\nCancelJobs\x12\x1a.jobs.v1.CancelJobsRequest\x1a\x1b.jobs.v1.CancelJobsResponse\x12\x66\n\x15\x46\x61ilAllInProgressJobs\x12%.jobs.v1.FailAllInProgressJobsRequest\x1a&.jobs.v1.FailAllInProgressJobsResponse\x12\x41\n\x08TailLogs\x12\x18.jobs.v1.TailLogsRequest\x1a\x19.jobs.v1.TailLogsResponse0\x01\x12K\n\x0cGetJobStatus\x12\x1c.jobs.v1.GetJobStatusRequest\x1a\x1d.jobs.v1.GetJobStatusResponse\x12o\n\x18GetJobSubmittedTimestamp\x12(.jobs.v1.GetJobSubmittedTimestampRequest\x1a).jobs.v1.GetJobSubmittedTimestampResponse\x12\x63\n\x14GetJobEndedTimestamp\x12$.jobs.v1.GetJobEndedTimestampRequest\x1a%.jobs.v1.GetJobEndedTimestampResponse\x12Z\n\x11GetLogDirsForJobs\x12!.jobs.v1.GetLogDirsForJobsRequest\x1a\".jobs.v1.GetLogDirsForJobsResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"sky/schemas/generated/jobsv1.proto\x12\x07jobs.v1\"\x85\x01\n\rAddJobRequest\x12\x15\n\x08job_name\x18\x01 \x01(\tH\x00\x88\x01\x01\x12\x10\n\x08username\x18\x02 \x01(\t\x12\x15\n\rrun_timestamp\x18\x03 \x01(\t\x12\x15\n\rresources_str\x18\x04 \x01(\t\x12\x10\n\x08metadata\x18\x05 \x01(\tB\x0b\n\t_job_name\"1\n\x0e\x41\x64\x64JobResponse\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\x12\x0f\n\x07log_dir\x18\x02 \x01(\t\".\n\x0fQueueJobRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\x12\x0b\n\x03\x63md\x18\x02 \x01(\t\"\x12\n\x10QueueJobResponse\"\x15\n\x13UpdateStatusRequest\"\x16\n\x14UpdateStatusResponse\"L\n\x12GetJobQueueRequest\x12\x16\n\tuser_hash\x18\x01 \x01(\tH\x00\x88\x01\x01\x12\x10\n\x08\x61ll_jobs\x18\x02 \x01(\x08\x42\x0c\n\n_user_hash\"\xf4\x01\n\x07JobInfo\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\x12\x10\n\x08job_name\x18\x02 \x01(\t\x12\x10\n\x08username\x18\x03 \x01(\t\x12\x14\n\x0csubmitted_at\x18\x04 \x01(\x01\x12\"\n\x06status\x18\x05 \x01(\x0e\x32\x12.jobs.v1.JobStatus\x12\x15\n\rrun_timestamp\x18\x06 \x01(\t\x12\x10\n\x08start_at\x18\x07 \x01(\x01\x12\x0e\n\x06\x65nd_at\x18\x08 \x01(\x01\x12\x11\n\tresources\x18\t \x01(\t\x12\x0b\n\x03pid\x18\n \x01(\x03\x12\x10\n\x08log_path\x18\x0b \x01(\t\x12\x10\n\x08metadata\x18\x0c \x01(\t\"5\n\x13GetJobQueueResponse\x12\x1e\n\x04jobs\x18\x01 \x03(\x0b\x32\x10.jobs.v1.JobInfo\"^\n\x11\x43\x61ncelJobsRequest\x12\x0f\n\x07job_ids\x18\x01 \x03(\x03\x12\x12\n\ncancel_all\x18\x02 \x01(\x08\x12\x16\n\tuser_hash\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x0c\n\n_user_hash\"/\n\x12\x43\x61ncelJobsResponse\x12\x19\n\x11\x63\x61ncelled_job_ids\x18\x01 \x03(\x03\"\x1e\n\x1c\x46\x61ilAllInProgressJobsRequest\"\x1f\n\x1d\x46\x61ilAllInProgressJobsResponse\"\x7f\n\x0fTailLogsRequest\x12\x13\n\x06job_id\x18\x01 \x01(\x03H\x00\x88\x01\x01\x12\x1b\n\x0emanaged_job_id\x18\x02 \x01(\x03H\x01\x88\x01\x01\x12\x0e\n\x06\x66ollow\x18\x03 \x01(\x08\x12\x0c\n\x04tail\x18\x04 \x01(\x05\x42\t\n\x07_job_idB\x11\n\x0f_managed_job_id\"7\n\x10TailLogsResponse\x12\x10\n\x08log_line\x18\x01 \x01(\t\x12\x11\n\texit_code\x18\x02 \x01(\x05\"&\n\x13GetJobStatusRequest\x12\x0f\n\x07job_ids\x18\x01 \x03(\x03\"\xa4\x01\n\x14GetJobStatusResponse\x12\x44\n\x0cjob_statuses\x18\x01 \x03(\x0b\x32..jobs.v1.GetJobStatusResponse.JobStatusesEntry\x1a\x46\n\x10JobStatusesEntry\x12\x0b\n\x03key\x18\x01 \x01(\x03\x12!\n\x05value\x18\x02 \x01(\x0e\x32\x12.jobs.v1.JobStatus:\x02\x38\x01\"1\n\x1fGetJobSubmittedTimestampRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\"H\n GetJobSubmittedTimestampResponse\x12\x16\n\ttimestamp\x18\x01 \x01(\x01H\x00\x88\x01\x01\x42\x0c\n\n_timestamp\"-\n\x1bGetJobEndedTimestampRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\x03\"D\n\x1cGetJobEndedTimestampResponse\x12\x16\n\ttimestamp\x18\x01 \x01(\x01H\x00\x88\x01\x01\x42\x0c\n\n_timestamp\"+\n\x18GetLogDirsForJobsRequest\x12\x0f\n\x07job_ids\x18\x01 \x03(\x03\"\x98\x01\n\x19GetLogDirsForJobsResponse\x12H\n\x0cjob_log_dirs\x18\x01 \x03(\x0b\x32\x32.jobs.v1.GetLogDirsForJobsResponse.JobLogDirsEntry\x1a\x31\n\x0fJobLogDirsEntry\x12\x0b\n\x03key\x18\x01 \x01(\x03\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01*\x8d\x02\n\tJobStatus\x12\x1a\n\x16JOB_STATUS_UNSPECIFIED\x10\x00\x12\x13\n\x0fJOB_STATUS_INIT\x10\x01\x12\x16\n\x12JOB_STATUS_PENDING\x10\x02\x12\x19\n\x15JOB_STATUS_SETTING_UP\x10\x03\x12\x16\n\x12JOB_STATUS_RUNNING\x10\x04\x12\x1c\n\x18JOB_STATUS_FAILED_DRIVER\x10\x05\x12\x18\n\x14JOB_STATUS_SUCCEEDED\x10\x06\x12\x15\n\x11JOB_STATUS_FAILED\x10\x07\x12\x1b\n\x17JOB_STATUS_FAILED_SETUP\x10\x08\x12\x18\n\x14JOB_STATUS_CANCELLED\x10\t2\x91\x07\n\x0bJobsService\x12\x39\n\x06\x41\x64\x64Job\x12\x16.jobs.v1.AddJobRequest\x1a\x17.jobs.v1.AddJobResponse\x12?\n\x08QueueJob\x12\x18.jobs.v1.QueueJobRequest\x1a\x19.jobs.v1.QueueJobResponse\x12K\n\x0cUpdateStatus\x12\x1c.jobs.v1.UpdateStatusRequest\x1a\x1d.jobs.v1.UpdateStatusResponse\x12H\n\x0bGetJobQueue\x12\x1b.jobs.v1.GetJobQueueRequest\x1a\x1c.jobs.v1.GetJobQueueResponse\x12\x45\n\nCancelJobs\x12\x1a.jobs.v1.CancelJobsRequest\x1a\x1b.jobs.v1.CancelJobsResponse\x12\x66\n\x15\x46\x61ilAllInProgressJobs\x12%.jobs.v1.FailAllInProgressJobsRequest\x1a&.jobs.v1.FailAllInProgressJobsResponse\x12\x41\n\x08TailLogs\x12\x18.jobs.v1.TailLogsRequest\x1a\x19.jobs.v1.TailLogsResponse0\x01\x12K\n\x0cGetJobStatus\x12\x1c.jobs.v1.GetJobStatusRequest\x1a\x1d.jobs.v1.GetJobStatusResponse\x12o\n\x18GetJobSubmittedTimestamp\x12(.jobs.v1.GetJobSubmittedTimestampRequest\x1a).jobs.v1.GetJobSubmittedTimestampResponse\x12\x63\n\x14GetJobEndedTimestamp\x12$.jobs.v1.GetJobEndedTimestampRequest\x1a%.jobs.v1.GetJobEndedTimestampResponse\x12Z\n\x11GetLogDirsForJobs\x12!.jobs.v1.GetLogDirsForJobsRequest\x1a\".jobs.v1.GetLogDirsForJobsResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'sky.schemas.generated.jobsv1_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_JOBSTATUS']._serialized_start=1710
-  _globals['_JOBSTATUS']._serialized_end=1979
+  _globals['_GETJOBSTATUSRESPONSE_JOBSTATUSESENTRY']._loaded_options = None
+  _globals['_GETJOBSTATUSRESPONSE_JOBSTATUSESENTRY']._serialized_options = b'8\001'
+  _globals['_GETLOGDIRSFORJOBSRESPONSE_JOBLOGDIRSENTRY']._loaded_options = None
+  _globals['_GETLOGDIRSFORJOBSRESPONSE_JOBLOGDIRSENTRY']._serialized_options = b'8\001'
+  _globals['_JOBSTATUS']._serialized_start=1775
+  _globals['_JOBSTATUS']._serialized_end=2044
   _globals['_ADDJOBREQUEST']._serialized_start=48
   _globals['_ADDJOBREQUEST']._serialized_end=181
   _globals['_ADDJOBRESPONSE']._serialized_start=183
@@ -55,24 +59,24 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_TAILLOGSRESPONSE']._serialized_end=1123
   _globals['_GETJOBSTATUSREQUEST']._serialized_start=1125
   _globals['_GETJOBSTATUSREQUEST']._serialized_end=1163
-  _globals['_JOBSTATUSITEM']._serialized_start=1165
-  _globals['_JOBSTATUSITEM']._serialized_end=1232
-  _globals['_GETJOBSTATUSRESPONSE']._serialized_start=1234
-  _globals['_GETJOBSTATUSRESPONSE']._serialized_end=1302
-  _globals['_GETJOBSUBMITTEDTIMESTAMPREQUEST']._serialized_start=1304
-  _globals['_GETJOBSUBMITTEDTIMESTAMPREQUEST']._serialized_end=1353
-  _globals['_GETJOBSUBMITTEDTIMESTAMPRESPONSE']._serialized_start=1355
-  _globals['_GETJOBSUBMITTEDTIMESTAMPRESPONSE']._serialized_end=1427
-  _globals['_GETJOBENDEDTIMESTAMPREQUEST']._serialized_start=1429
-  _globals['_GETJOBENDEDTIMESTAMPREQUEST']._serialized_end=1474
-  _globals['_GETJOBENDEDTIMESTAMPRESPONSE']._serialized_start=1476
-  _globals['_GETJOBENDEDTIMESTAMPRESPONSE']._serialized_end=1544
-  _globals['_GETLOGDIRSFORJOBSREQUEST']._serialized_start=1546
-  _globals['_GETLOGDIRSFORJOBSREQUEST']._serialized_end=1589
-  _globals['_JOBLOGDIR']._serialized_start=1591
-  _globals['_JOBLOGDIR']._serialized_end=1636
-  _globals['_GETLOGDIRSFORJOBSRESPONSE']._serialized_start=1638
-  _globals['_GETLOGDIRSFORJOBSRESPONSE']._serialized_end=1707
-  _globals['_JOBSSERVICE']._serialized_start=1982
-  _globals['_JOBSSERVICE']._serialized_end=2895
+  _globals['_GETJOBSTATUSRESPONSE']._serialized_start=1166
+  _globals['_GETJOBSTATUSRESPONSE']._serialized_end=1330
+  _globals['_GETJOBSTATUSRESPONSE_JOBSTATUSESENTRY']._serialized_start=1260
+  _globals['_GETJOBSTATUSRESPONSE_JOBSTATUSESENTRY']._serialized_end=1330
+  _globals['_GETJOBSUBMITTEDTIMESTAMPREQUEST']._serialized_start=1332
+  _globals['_GETJOBSUBMITTEDTIMESTAMPREQUEST']._serialized_end=1381
+  _globals['_GETJOBSUBMITTEDTIMESTAMPRESPONSE']._serialized_start=1383
+  _globals['_GETJOBSUBMITTEDTIMESTAMPRESPONSE']._serialized_end=1455
+  _globals['_GETJOBENDEDTIMESTAMPREQUEST']._serialized_start=1457
+  _globals['_GETJOBENDEDTIMESTAMPREQUEST']._serialized_end=1502
+  _globals['_GETJOBENDEDTIMESTAMPRESPONSE']._serialized_start=1504
+  _globals['_GETJOBENDEDTIMESTAMPRESPONSE']._serialized_end=1572
+  _globals['_GETLOGDIRSFORJOBSREQUEST']._serialized_start=1574
+  _globals['_GETLOGDIRSFORJOBSREQUEST']._serialized_end=1617
+  _globals['_GETLOGDIRSFORJOBSRESPONSE']._serialized_start=1620
+  _globals['_GETLOGDIRSFORJOBSRESPONSE']._serialized_end=1772
+  _globals['_GETLOGDIRSFORJOBSRESPONSE_JOBLOGDIRSENTRY']._serialized_start=1723
+  _globals['_GETLOGDIRSFORJOBSRESPONSE_JOBLOGDIRSENTRY']._serialized_end=1772
+  _globals['_JOBSSERVICE']._serialized_start=2047
+  _globals['_JOBSSERVICE']._serialized_end=2960
 # @@protoc_insertion_point(module_scope)

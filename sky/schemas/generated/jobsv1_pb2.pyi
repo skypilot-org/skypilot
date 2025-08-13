@@ -163,19 +163,18 @@ class GetJobStatusRequest(_message.Message):
     job_ids: _containers.RepeatedScalarFieldContainer[int]
     def __init__(self, job_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
-class JobStatusItem(_message.Message):
-    __slots__ = ("job_id", "status")
-    JOB_ID_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    job_id: int
-    status: JobStatus
-    def __init__(self, job_id: _Optional[int] = ..., status: _Optional[_Union[JobStatus, str]] = ...) -> None: ...
-
 class GetJobStatusResponse(_message.Message):
     __slots__ = ("job_statuses",)
+    class JobStatusesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: int
+        value: JobStatus
+        def __init__(self, key: _Optional[int] = ..., value: _Optional[_Union[JobStatus, str]] = ...) -> None: ...
     JOB_STATUSES_FIELD_NUMBER: _ClassVar[int]
-    job_statuses: _containers.RepeatedCompositeFieldContainer[JobStatusItem]
-    def __init__(self, job_statuses: _Optional[_Iterable[_Union[JobStatusItem, _Mapping]]] = ...) -> None: ...
+    job_statuses: _containers.ScalarMap[int, JobStatus]
+    def __init__(self, job_statuses: _Optional[_Mapping[int, JobStatus]] = ...) -> None: ...
 
 class GetJobSubmittedTimestampRequest(_message.Message):
     __slots__ = ("job_id",)
@@ -207,16 +206,15 @@ class GetLogDirsForJobsRequest(_message.Message):
     job_ids: _containers.RepeatedScalarFieldContainer[int]
     def __init__(self, job_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
-class JobLogDir(_message.Message):
-    __slots__ = ("job_id", "log_path")
-    JOB_ID_FIELD_NUMBER: _ClassVar[int]
-    LOG_PATH_FIELD_NUMBER: _ClassVar[int]
-    job_id: int
-    log_path: str
-    def __init__(self, job_id: _Optional[int] = ..., log_path: _Optional[str] = ...) -> None: ...
-
 class GetLogDirsForJobsResponse(_message.Message):
     __slots__ = ("job_log_dirs",)
+    class JobLogDirsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: int
+        value: str
+        def __init__(self, key: _Optional[int] = ..., value: _Optional[str] = ...) -> None: ...
     JOB_LOG_DIRS_FIELD_NUMBER: _ClassVar[int]
-    job_log_dirs: _containers.RepeatedCompositeFieldContainer[JobLogDir]
-    def __init__(self, job_log_dirs: _Optional[_Iterable[_Union[JobLogDir, _Mapping]]] = ...) -> None: ...
+    job_log_dirs: _containers.ScalarMap[int, str]
+    def __init__(self, job_log_dirs: _Optional[_Mapping[int, str]] = ...) -> None: ...
