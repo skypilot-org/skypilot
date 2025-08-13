@@ -4,9 +4,10 @@ from unittest import mock
 
 import pytest
 
-from sky import resources as resources_lib
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import task
+from sky.utils import registry
 
 
 def test_validate_workdir():
@@ -560,7 +561,8 @@ def test_docker_login_config_all_in_envs_or_secrets():
                               'SKYPILOT_DOCKER_PASSWORD': 'secret-password'
                           })
 
-    task_obj2.set_resources(resources_lib.Resources(image_id='docker:ubuntu:latest'))
+    task_obj2.set_resources(
+        resources_lib.Resources(image_id='docker:ubuntu:latest'))
 
     # Test 3: Split across envs and secrets should fail
     with pytest.raises(
@@ -665,7 +667,8 @@ def test_docker_login_config_no_mixed_envs_secrets():
                 'SKYPILOT_DOCKER_SERVER': 'env-registry.com'
             },
             secrets={'SKYPILOT_DOCKER_PASSWORD': 'secret-password'})
-        task_obj.set_resources(resources_lib.Resources(image_id='docker:ubuntu:latest'))
+        task_obj.set_resources(
+            resources_lib.Resources(image_id='docker:ubuntu:latest'))
 
 
 def make_mock_volume_config(name='vol1',
@@ -739,7 +742,7 @@ def test_resolve_volumes_single_success():
         t.resolve_and_validate_volumes()
         # Should override resource topology
         for r in t.resources:
-            assert r.cloud == sky.CLOUD_REGISTRY.from_str('aws')
+            assert r.cloud == registry.CLOUD_REGISTRY.from_str('aws')
             assert r.region == 'us-west1'
             assert r.zone == 'a'
 
@@ -766,7 +769,7 @@ def test_resolve_volumes_dict_volume_success():
         }
         t.resolve_and_validate_volumes()
         for r in t.resources:
-            assert r.cloud == sky.CLOUD_REGISTRY.from_str('aws')
+            assert r.cloud == registry.CLOUD_REGISTRY.from_str('aws')
 
 
 def test_resolve_volumes_topology_conflict_between_volumes():
@@ -811,6 +814,6 @@ def test_resolve_volumes_override_topology():
         }
         t.resolve_and_validate_volumes()
         for r in t.resources:
-            assert r.cloud == sky.CLOUD_REGISTRY.from_str('aws')
+            assert r.cloud == registry.CLOUD_REGISTRY.from_str('aws')
             assert r.region == 'us-west1'
             assert r.zone == 'a'
