@@ -37,7 +37,7 @@ class TestRequestsCRUD:
 
         # Patch the database path to use our temporary database
         self.db_path_patcher = mock.patch(
-            'sky.server.requests.requests.server_constants.API_SERVER_REQUEST_DB_PATH',
+            'sky.server.constants.API_SERVER_REQUEST_DB_PATH',
             self.temp_db_path)
         self.db_path_patcher.start()
 
@@ -359,13 +359,13 @@ class TestRequestsCRUD:
 
 
 @mock.patch.dict('os.environ', {'IS_SKYPILOT_SERVER': '1'})
-@mock.patch('sky.skypilot_config.get_nested')
+@mock.patch('os.environ.get')
 class TestPostgreSQLSupport:
     """Test PostgreSQL-specific functionality."""
 
-    def test_postgresql_engine_creation(self, mock_get_nested):
+    def test_postgresql_engine_creation(self, mock_get_env):
         """Test that PostgreSQL engine is created when configured."""
-        mock_get_nested.return_value = 'postgresql://user:pass@localhost/test'
+        mock_get_env.return_value = 'postgresql://user:pass@localhost/test'
 
         with mock.patch.object(requests, '_SQLALCHEMY_ENGINE', None):
             with mock.patch('sqlalchemy.create_engine') as mock_create_engine:
@@ -373,11 +373,12 @@ class TestPostgreSQLSupport:
                     requests.initialize_and_get_db()
 
                     mock_create_engine.assert_called_once_with(
-                        'postgresql://user:pass@localhost/test')
+                        'postgresql://user:pass@localhost/test',
+                        poolclass=sqlalchemy.NullPool)
 
-    def test_dialect_detection_postgresql(self, mock_get_nested):
+    def test_dialect_detection_postgresql(self, mock_get_env):
         """Test dialect detection for PostgreSQL."""
-        mock_get_nested.return_value = 'postgresql://user:pass@localhost/test'
+        mock_get_env.return_value = 'postgresql://user:pass@localhost/test'
 
         # Mock PostgreSQL engine
         mock_engine = mock.Mock()
@@ -408,9 +409,9 @@ class TestPostgreSQLSupport:
                         # Verify PostgreSQL insert function was used
                         mock_pg.insert.assert_called_once()
 
-    def test_dialect_detection_sqlite(self, mock_get_nested):
+    def test_dialect_detection_sqlite(self, mock_get_env):
         """Test dialect detection for SQLite."""
-        mock_get_nested.return_value = None  # Use SQLite
+        mock_get_env.return_value = None  # Use SQLite
 
         # Mock SQLite engine
         mock_engine = mock.Mock()

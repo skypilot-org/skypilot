@@ -10,8 +10,8 @@ from sky.server import constants as server_constants
 from sky.server import state
 from sky.utils import common
 from sky.utils import env_options
-from sky.utils import ux_utils
 from sky.utils import locks
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 

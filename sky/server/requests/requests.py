@@ -27,10 +27,12 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -418,9 +420,24 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    migration_utils.safe_alembic_upgrade(
-        engine, migration_utils.REQUESTS_DB_NAME,
-        migration_utils.REQUESTS_VERSION)
+    migration_utils.safe_alembic_upgrade(engine,
+                                         migration_utils.REQUESTS_DB_NAME,
+                                         migration_utils.REQUESTS_VERSION)
+
+
+def _get_engine():
+    conn_string = None
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
+    if conn_string:
+        engine = sqlalchemy.create_engine(conn_string,
+                                          poolclass=sqlalchemy.NullPool)
+    else:
+        db_path = os.path.expanduser(
+            server_constants.API_SERVER_REQUEST_DB_PATH)
+        pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
+        engine = sqlalchemy.create_engine('sqlite:///' + db_path)
+    return engine
 
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
@@ -431,8 +448,7 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     with _DB_INIT_LOCK:
         if _SQLALCHEMY_ENGINE is not None:
             return _SQLALCHEMY_ENGINE
-        # get an engine to the db
-        engine = migration_utils.get_engine(migration_utils.REQUESTS_DB_NAME)
+        engine = _get_engine()
 
         # run migrations if needed
         create_table(engine)
