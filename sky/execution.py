@@ -476,11 +476,6 @@ def _execute_dag(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                if cluster_name is not None:
-                    global_user_state.add_cluster_event(
-                        cluster_name, status_lib.ClusterStatus.UP,
-                        'Starting job execution',
-                        global_user_state.ClusterEventType.STATUS_CHANGE)
                 job_id = backend.execute(handle,
                                          task,
                                          detach_run,

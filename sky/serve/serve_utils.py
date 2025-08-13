@@ -296,7 +296,11 @@ def is_consolidation_mode(pool: bool = False) -> bool:
     consolidation_mode = skypilot_config.get_nested(
         (controller.controller_type, 'controller', 'consolidation_mode'),
         default_value=False)
-    _validate_consolidation_mode_config(consolidation_mode, pool)
+    # We should only do this check on API server, as the controller will not
+    # have related config and will always seemingly disabled for consolidation
+    # mode. Check #6611 for more details.
+    if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        _validate_consolidation_mode_config(consolidation_mode, pool)
     return consolidation_mode
 
 
@@ -520,6 +524,8 @@ def generate_remote_tls_certfile_name(service_name: str) -> str:
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
+    # NOTE(dev): This format is used in sky/serve/service.py::_cleanup, for
+    # checking replica cluster existence. Be careful when changing it.
     return f'{service_name}-{replica_id}'
 
 

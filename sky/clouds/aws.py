@@ -65,6 +65,7 @@ _CREDENTIAL_FILES = [
 ]
 
 DEFAULT_AMI_GB = 45
+DEFAULT_SSH_USER = 'ubuntu'
 
 # Temporary measure, as deleting per-cluster SGs is too slow.
 # See https://github.com/skypilot-org/skypilot/pull/742.
@@ -466,6 +467,12 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       resources.instance_type)
 
+        ssh_user = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('ssh_user',),
+            default_value=DEFAULT_SSH_USER)
+
         disk_encrypted = skypilot_config.get_effective_region_config(
             cloud='aws',
             region=region_name,
@@ -509,6 +516,7 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
+            'ssh_user': ssh_user,
             'security_group': security_group,
             'security_group_managed_by_skypilot':
                 str(security_group != user_security_group).lower(),
@@ -1080,7 +1088,7 @@ class AWS(clouds.Cloud):
 
         image_name = f'skypilot-{cluster_name.display_name}-{int(time.time())}'
 
-        status = provision_lib.query_instances('AWS',
+        status = provision_lib.query_instances('AWS', cluster_name.display_name,
                                                cluster_name.name_on_cloud,
                                                {'region': region})
         instance_ids = list(status.keys())

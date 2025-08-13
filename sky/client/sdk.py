@@ -31,6 +31,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.client import service_account_auth
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server import versions
@@ -2060,7 +2061,7 @@ def api_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def api_info() -> Dict[str, Any]:
+def api_info() -> responses.APIHealthResponse:
     """Gets the server's status, commit and version.
 
     Returns:
@@ -2085,7 +2086,7 @@ def api_info() -> Dict[str, Any]:
     """
     response = server_common.make_authenticated_request('GET', '/api/health')
     response.raise_for_status()
-    return response.json()
+    return responses.APIHealthResponse(**response.json())
 
 
 @usage_lib.entrypoint

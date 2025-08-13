@@ -17,7 +17,7 @@ import resource
 import shutil
 import sys
 import threading
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple
+from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
@@ -42,6 +42,7 @@ from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
@@ -1568,8 +1569,12 @@ async def api_status(
         return encoded_request_tasks
 
 
-@app.get('/api/health')
-async def health(request: fastapi.Request) -> Dict[str, Any]:
+@app.get(
+    '/api/health',
+    # response_model_exclude_unset omits unset fields
+    # in the response JSON.
+    response_model_exclude_unset=True)
+async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
     Returns:
@@ -1607,7 +1612,8 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
             # - There is no harm when an malicious client calls /api/health
             #   without authentication since no sensitive information is
             #   returned.
-            return {'status': common.ApiServerStatus.HEALTHY}
+            return responses.APIHealthResponse(
+                status=common.ApiServerStatus.HEALTHY,)
         # TODO(aylei): remove this after min_compatible_api_version >= 14.
         if client_version < 14:
             # For Client with API version < 14, the NEEDS_AUTH status is not
@@ -1616,21 +1622,21 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
                                         detail='Authentication required')
 
     logger.debug(f'Health endpoint: request.state.auth_user = {user}')
-    return {
-        'status': server_status,
+    return responses.APIHealthResponse(
+        status=server_status,
         # Kept for backward compatibility, clients before 0.11.0 will read this
         # field to check compatibility and hint the user to upgrade the CLI.
         # TODO(aylei): remove this field after 0.13.0
-        'api_version': str(server_constants.API_VERSION),
-        'version': sky.__version__,
-        'version_on_disk': common.get_skypilot_version_on_disk(),
-        'commit': sky.__commit__,
-        'user': user.to_dict() if user is not None else None,
-        'basic_auth_enabled': os.environ.get(
-            constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
-        'service_account_token_enabled':
-            (common_utils.is_service_account_token_enabled()),
-    }
+        api_version=str(server_constants.API_VERSION),
+        version=sky.__version__,
+        version_on_disk=common.get_skypilot_version_on_disk(),
+        commit=sky.__commit__,
+        basic_auth_enabled=os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
+                                          'false').lower() == 'true',
+        user=user if user is not None else None,
+        service_account_token_enabled=(
+            common_utils.is_service_account_token_enabled()),
+    )
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')

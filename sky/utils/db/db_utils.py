@@ -32,6 +32,23 @@ if typing.TYPE_CHECKING:
 _DB_TIMEOUT_S = 60
 
 
+class UniqueConstraintViolationError(Exception):
+    """Exception raised for unique constraint violation.
+    Attributes:
+        value -- the input value that caused the error
+        message -- explanation of the error
+    """
+
+    def __init__(self, value, message='Unique constraint violation'):
+        self.value = value
+        self.message = message
+        super().__init__(self.message)
+
+    def __str__(self):
+        return (f'UniqueConstraintViolationError: {self.message} '
+                f'(Value: {self.value})')
+
+
 class SQLAlchemyDialect(enum.Enum):
     SQLITE = 'sqlite'
     POSTGRESQL = 'postgresql'
