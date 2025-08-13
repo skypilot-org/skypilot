@@ -169,7 +169,7 @@ def compute_embeddings_batch(chunks: List[Dict],
         batch = chunks[i:i + batch_size]
 
         # Create prompt for each chunk - simplified prompt
-        prompts = [chunk['content'] for chunk in batch]
+        prompts = [chunk['chunk_text'] for chunk in batch]
 
         try:
             # Print request payload for debugging
