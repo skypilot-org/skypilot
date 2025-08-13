@@ -56,11 +56,12 @@ def encode_status(
         clusters: List[responses.StatusResponse]) -> List[Dict[str, Any]]:
     response = []
     for cluster in clusters:
-        cluster['status'] = cluster['status'].value
-        cluster['handle'] = pickle_and_encode(cluster['handle'])
-        cluster['storage_mounts_metadata'] = pickle_and_encode(
-            cluster['storage_mounts_metadata'])
-        response.append(cluster.model_dump())
+        response_cluster = cluster.model_dump()
+        response_cluster['status'] = cluster['status'].value
+        response_cluster['handle'] = pickle_and_encode(cluster['handle'])
+        response_cluster['storage_mounts_metadata'] = pickle_and_encode(
+            response_cluster['storage_mounts_metadata'])
+        response.append(response_cluster)
     return response
 
 
