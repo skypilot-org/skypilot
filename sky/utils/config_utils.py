@@ -249,9 +249,7 @@ def merge_k8s_configs(
                     else:
                         base_config[key].append(override_item)
             else:
-                # Not a list field with patch strategy "merge", it is better to
-                # treat it as an atomic field, e.g. args, tolerations, etc.
-                base_config[key] = value
+                base_config[key].extend(value)
         else:
             base_config[key] = value
 
