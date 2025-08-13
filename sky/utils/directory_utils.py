@@ -1,3 +1,5 @@
+"""Directory utilities."""
+
 import os
 
 # This file is in '<project_root>/sky/utils/directory_utils.py'
