@@ -346,6 +346,7 @@ class AWS(clouds.Cloud):
         return image_size
 
     @classmethod
+    @annotations.lru_cache(scope='request', maxsize=1)
     def get_image_root_device_name(cls, image_id: str,
                                    region: Optional[str]) -> str:
         if image_id.startswith('skypilot:'):
@@ -353,7 +354,7 @@ class AWS(clouds.Cloud):
         assert region is not None, (image_id, region)
         image_not_found_message = (
             f'Image {image_id!r} not found in AWS region {region}.\n'
-            f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
             'Example: ami-0729d913a335efca7')
         try:
             client = aws.client('ec2', region_name=region)
