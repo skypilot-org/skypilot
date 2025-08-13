@@ -6,7 +6,6 @@ import time
 
 import pytest
 
-import sky
 from sky import backends
 from sky.resources import Resources
 from sky.utils import status_lib

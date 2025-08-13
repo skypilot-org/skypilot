@@ -7,12 +7,11 @@ import unittest.mock as mock
 
 import pytest
 
-import sky
 from sky import exceptions
+from sky import task as task_lib
 from sky.client.cli import command
 from sky.client.cli import git
 from sky.utils import git as git_utils
-from sky.utils import ux_utils
 
 
 class TestUpdateTaskWorkdir:
@@ -20,7 +19,7 @@ class TestUpdateTaskWorkdir:
 
     def test_update_task_workdir_none_workdir_with_git_url(self):
         """Test updating task workdir when workdir is None and git_url is provided."""
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = None
 
         command._update_task_workdir(task, None,
@@ -33,7 +32,7 @@ class TestUpdateTaskWorkdir:
 
     def test_update_task_workdir_none_workdir_no_git_url(self):
         """Test updating task workdir when workdir is None and no git_url is provided."""
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = None
 
         command._update_task_workdir(task, None, None, 'main')
@@ -42,7 +41,7 @@ class TestUpdateTaskWorkdir:
 
     def test_update_task_workdir_none_workdir_with_git_url_none_ref(self):
         """Test updating task workdir when workdir is None, git_url is provided, and ref is None."""
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = None
 
         command._update_task_workdir(task, None,
@@ -54,7 +53,7 @@ class TestUpdateTaskWorkdir:
 
     def test_update_task_workdir_dict_workdir_update_url(self):
         """Test updating task workdir when workdir is a dict and git_url is provided."""
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'https://github.com/old/repo.git',
             'ref': 'old_ref'
@@ -70,7 +69,7 @@ class TestUpdateTaskWorkdir:
 
     def test_update_task_workdir_dict_workdir_update_ref(self):
         """Test updating task workdir when workdir is a dict and git_ref is provided."""
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'https://github.com/test/repo.git',
             'ref': 'old_ref'
@@ -85,7 +84,7 @@ class TestUpdateTaskWorkdir:
 
     def test_update_task_workdir_dict_workdir_update_both(self):
         """Test updating task workdir when workdir is a dict and both git_url and git_ref are provided."""
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'https://github.com/old/repo.git',
             'ref': 'old_ref'
@@ -102,7 +101,7 @@ class TestUpdateTaskWorkdir:
 
     def test_update_task_workdir_string_workdir(self):
         """Test updating task workdir when workdir is a string."""
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = '/some/local/path'
 
         command._update_task_workdir(task, None,
@@ -115,7 +114,7 @@ class TestUpdateTaskWorkdir:
 
     def test_update_task_workdir_string_workdir_update(self):
         """Test updating task workdir when workdir is a string and override workdir is provided."""
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = '/some/local/path'
 
         command._update_task_workdir(task, "abcd",
@@ -125,7 +124,7 @@ class TestUpdateTaskWorkdir:
 
     def test_update_task_workdir_no_changes(self):
         """Test updating task workdir when no git_url or git_ref is provided."""
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'https://github.com/test/repo.git',
             'ref': 'main'
@@ -144,7 +143,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
 
     def test_update_task_workdir_and_secrets_none_workdir(self):
         """Test updating task secrets when workdir is None."""
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = None
 
         command._update_task_workdir_and_secrets_from_workdir(task)
@@ -154,7 +153,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
 
     def test_update_task_workdir_and_secrets_string_workdir(self):
         """Test updating task secrets when workdir is a string."""
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = '/some/local/path'
 
         command._update_task_workdir_and_secrets_from_workdir(task)
@@ -170,7 +169,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'https://github.com/test/repo.git',
             'ref': 'main'
@@ -208,7 +207,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         os.environ[git_utils.GIT_SSH_KEY_PATH_ENV_VAR] = '/path/to/ssh/key'
 
         # Set up task
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'ssh://git@github.com/test/repo.git',
             'ref': 'main'
@@ -248,7 +247,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'https://github.com/test/repo.git',
             'ref': 'a1b2c3d4e5f6'
@@ -281,7 +280,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'https://github.com/test/repo.git',
             'ref': 'v1.0.0'
@@ -314,7 +313,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {'url': 'https://github.com/test/repo.git'}
 
         # Mock GitRepo and clone info
@@ -345,7 +344,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'https://github.com/test/repo.git',
             'ref': 'main'
@@ -368,7 +367,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
     def test_update_task_workdir_and_secrets_no_auth(self, mock_git_repo):
         """Test updating task secrets when no authentication is available."""
         # Set up task
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'https://github.com/test/repo.git',
             'ref': 'main'
@@ -406,7 +405,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'https://github.com/test/repo.git',
             'ref': 'main'
@@ -431,7 +430,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         os.environ[git_utils.GIT_SSH_KEY_PATH_ENV_VAR] = '/path/to/ssh/key'
 
         # Set up task
-        task = sky.Task(name='test', run='echo hello')
+        task = task_lib.Task(name='test', run='echo hello')
         task.workdir = {
             'url': 'https://github.com/test/repo.git',
             'ref': 'main'
