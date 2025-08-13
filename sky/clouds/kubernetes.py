@@ -773,17 +773,15 @@ class Kubernetes(clouds.Cloud):
 
     def _warn_on_disk_size(self, resources: 'resources_lib.Resources'):
         if resources.disk_size is not None:
-            logger.info(
-                f'{colorama.Style.DIM}Disk size {resources.disk_size} '
-                'is not supported by Kubernetes. '
-                'To add additional disk, use volumes.'
-                f'{colorama.Style.RESET_ALL}')
+            logger.info(f'{colorama.Style.DIM}Disk size {resources.disk_size} '
+                        'is not supported by Kubernetes. '
+                        'To add additional disk, use volumes.'
+                        f'{colorama.Style.RESET_ALL}')
         if resources.disk_tier is not None:
-            logger.info(
-                f'{colorama.Style.DIM}Disk tier {resources.disk_tier} '
-                'is not supported by Kubernetes. '
-                'To add additional disk, use volumes.'
-                f'{colorama.Style.RESET_ALL}')
+            logger.info(f'{colorama.Style.DIM}Disk tier {resources.disk_tier} '
+                        'is not supported by Kubernetes. '
+                        'To add additional disk, use volumes.'
+                        f'{colorama.Style.RESET_ALL}')
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
