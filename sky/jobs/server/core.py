@@ -568,10 +568,18 @@ def _maybe_restart_controller(
 
 
 @usage_lib.entrypoint
-def queue(refresh: bool,
-          skip_finished: bool = False,
-          all_users: bool = False,
-          job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+def queue(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    job_ids: Optional[List[int]] = None,
+    user_prefix: Optional[str] = None,
+    workspace_prefix: Optional[str] = None,
+    name_prefix: Optional[str] = None,
+    pool_prefix: Optional[str] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs.
 
@@ -601,6 +609,17 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+
+    if offset is not None and limit is None:
+        raise ValueError('Limit must be specified when offset is specified')
+    if offset is None and limit is not None:
+        raise ValueError('Offset must be specified when limit is specified')
+    if offset is not None and limit is not None:
+        if offset < 1:
+            raise ValueError(f'Offset must be at least 1, got {offset}')
+        if limit < 1:
+            raise ValueError(f'Limit must be at least 1, got {limit}')
+
     handle = _maybe_restart_controller(refresh,
                                        stopped_message='No in-progress '
                                        'managed jobs.',
@@ -655,7 +674,71 @@ def queue(refresh: bool,
     if job_ids:
         jobs = [job for job in jobs if job['job_id'] in job_ids]
 
-    return jobs
+    return _filter_jobs(jobs, user_prefix, workspace_prefix, name_prefix,
+                        pool_prefix, offset, limit)
+
+
+def _filter_jobs(jobs: List[Dict[str, Any]], user_prefix: Optional[str],
+                 workspace_prefix: Optional[str], name_prefix: Optional[str],
+                 pool_prefix: Optional[str], offset: Optional[int],
+                 limit: Optional[int]) -> Tuple[List[Dict[str, Any]], int]:
+    """Filter jobs based on the given criteria.
+
+    Args:
+        jobs: List of jobs to filter.
+        user_prefix: User name prefix to filter.
+        workspace_prefix: Workspace name prefix to filter.
+        name_prefix: Job name prefix to filter.
+        pool_prefix: Pool name prefix to filter.
+        offset: Offset to filter.
+        limit: Limit to filter.
+
+    Returns:
+        List of filtered jobs.
+    """
+
+    # TODO(hailong): refactor the whole function including the
+    # `queue()` to use DB filtering.
+
+    def _prefix_matches(job: Dict[str, Any], key: str,
+                        prefix: Optional[str]) -> bool:
+        if prefix is None:
+            return True
+        if key not in job:
+            return False
+        value = job[key]
+        if not value:
+            return False
+        return str(value).startswith(prefix)
+
+    def _handle_offset_and_limit(
+        result: List[Dict[str, Any]],
+        offset: Optional[int],
+        limit: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        if offset is None and limit is None:
+            return result
+        assert offset is not None and limit is not None, (offset, limit)
+        # offset starts from 1
+        start = (offset - 1) * limit
+        end = min(start + limit, len(result))
+        return result[start:end]
+
+    result = []
+    for job in jobs:
+        checks = [
+            ('user_name', user_prefix),
+            ('workspace', workspace_prefix),
+            ('job_name', name_prefix),
+            ('pool', pool_prefix),
+        ]
+        if not all(_prefix_matches(job, key, prefix) for key, prefix in checks):
+            continue
+        result.append(job)
+
+    total = len(result)
+
+    return _handle_offset_and_limit(result, offset, limit), total
 
 
 @usage_lib.entrypoint

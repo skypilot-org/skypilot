@@ -497,6 +497,12 @@ class JobsQueueBody(RequestBody):
     skip_finished: bool = False
     all_users: bool = False
     job_ids: Optional[List[int]] = None
+    user_prefix: Optional[str] = None
+    workspace_prefix: Optional[str] = None
+    name_prefix: Optional[str] = None
+    pool_prefix: Optional[str] = None
+    offset: Optional[int] = None
+    limit: Optional[int] = None
 
 
 class JobsCancelBody(RequestBody):

@@ -12,12 +12,30 @@ import { apiClient } from './client';
 // Configuration
 const DEFAULT_TAIL_LINES = 10000;
 
-export async function getManagedJobs({ allUsers = true } = {}) {
+export async function getManagedJobs(options = {}) {
   try {
-    const response = await apiClient.post(`/jobs/queue`, {
+    const {
+      allUsers = true,
+      namePrefix,
+      userPrefix,
+      workspacePrefix,
+      poolPrefix,
+      offset,
+      limit,
+    } = options;
+
+    const body = {
       all_users: allUsers,
       verbose: true,
-    });
+    };
+    if (namePrefix !== undefined) body.name_prefix = namePrefix;
+    if (userPrefix !== undefined) body.user_prefix = userPrefix;
+    if (workspacePrefix !== undefined) body.workspace_prefix = workspacePrefix;
+    if (poolPrefix !== undefined) body.pool_prefix = poolPrefix;
+    if (offset !== undefined) body.offset = offset;
+    if (limit !== undefined) body.limit = limit;
+
+    const response = await apiClient.post(`/jobs/queue`, body);
     const id = response.headers.get('X-Skypilot-Request-ID');
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
@@ -41,7 +59,11 @@ export async function getManagedJobs({ allUsers = true } = {}) {
     }
     // print out the response for debugging
     const data = await fetchedData.json();
-    const managedJobs = data.return_value ? JSON.parse(data.return_value) : [];
+    const parsed = data.return_value ? JSON.parse(data.return_value) : [];
+    const managedJobs = Array.isArray(parsed) ? parsed : parsed?.jobs || [];
+    const total = Array.isArray(parsed)
+      ? managedJobs.length
+      : (parsed?.total ?? managedJobs.length);
 
     // Process jobs data
     const jobData = managedJobs.map((job) => {
@@ -136,7 +158,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
       };
     });
 
-    return { jobs: jobData, controllerStopped: false };
+    return { jobs: jobData, total, controllerStopped: false };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
     return { jobs: [], controllerStopped: false };
