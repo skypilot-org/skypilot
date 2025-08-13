@@ -96,7 +96,7 @@ def status(
     cluster_names: Optional[Union[str, List[str]]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> List[Dict[str, Any]]:
+) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
 
@@ -172,7 +172,10 @@ def status(
     clusters = backend_utils.get_clusters(refresh=refresh,
                                           cluster_names=cluster_names,
                                           all_users=all_users)
-    return clusters
+    return [
+        responses.StatusResponse.model_validate(cluster)
+        for cluster in clusters
+    ]
 
 
 def status_kubernetes(

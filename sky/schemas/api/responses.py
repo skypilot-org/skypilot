@@ -47,6 +47,9 @@ class ResponseBaseModel(pydantic.BaseModel):
     def __setitem__(self, key, value):
         setattr(self, key, value)
 
+    def get(self, key, default=None):
+        return getattr(self, key, default)
+
     def __contains__(self, key):
         return hasattr(self, key)
 
