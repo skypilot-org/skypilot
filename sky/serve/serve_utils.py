@@ -57,14 +57,6 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-
-@annotations.lru_cache(scope='request')
-def get_num_service_threshold():
-    """Get number of services threshold, calculating it only when needed."""
-    system_memory_gb = psutil.virtual_memory().total // (1024**3)
-    return system_memory_gb // constants.CONTROLLER_MEMORY_USAGE_GB
-
-
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 # NOTE(dev): We assume log are print with the hint 'sky api logs -l'. Be careful
@@ -798,9 +790,13 @@ def load_version_string(payload: str) -> str:
     return message_utils.decode_payload(payload)
 
 
-def num_replicas(service_name: str) -> int:
+def get_ready_replicas(
+        service_name: str) -> List['replica_managers.ReplicaInfo']:
     logger.info(f'Get number of replicas for pool {service_name!r}')
-    return len(serve_state.get_replica_infos(service_name))
+    return [
+        info for info in serve_state.get_replica_infos(service_name)
+        if info.status == serve_state.ReplicaStatus.READY
+    ]
 
 
 def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
@@ -825,12 +821,8 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         logger.error(f'Service {service_name!r} is not a cluster pool.')
         return None
     with filelock.FileLock(get_service_filelock_path(service_name)):
-
         logger.debug(f'Get next cluster name for pool {service_name!r}')
-        ready_replicas = [
-            info for info in serve_state.get_replica_infos(service_name)
-            if info.status == serve_state.ReplicaStatus.READY
-        ]
+        ready_replicas = get_ready_replicas(service_name)
         idle_replicas: List['replica_managers.ReplicaInfo'] = []
         for replica_info in ready_replicas:
             jobs_on_replica = managed_job_state.get_nonterminal_job_ids_by_pool(
@@ -1046,11 +1038,18 @@ def wait_service_registration(service_name: str, job_id: int,
             lb_port = record['load_balancer_port']
             if lb_port is not None:
                 return message_utils.encode_payload(lb_port)
-        elif len(serve_state.get_services()) >= get_num_service_threshold():
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Max number of services reached. '
-                                   'To spin up more services, please '
-                                   'tear down some existing services.')
+        else:
+            controller_log_path = os.path.expanduser(
+                generate_remote_controller_log_file_name(service_name))
+            if os.path.exists(controller_log_path):
+                with open(controller_log_path, 'r', encoding='utf-8') as f:
+                    log_content = f.read()
+                if (constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR
+                        in log_content):
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError('Max number of services reached. '
+                                           'To spin up more services, please '
+                                           'tear down some existing services.')
         elapsed = time.time() - start_time
         if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
             # Print the controller log to help user debug.

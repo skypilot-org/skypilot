@@ -73,13 +73,6 @@ CONTROLLER_AUTOSTOP = {
     'down': False,
 }
 
-# Due to the CPU/memory usage of the controller process launched with a job on
-# controller VM (use ray job under the hood), we need to reserve some CPU/memory
-# for each serve controller process.
-# Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
-# services.
-CONTROLLER_MEMORY_USAGE_GB = 1.0
-
 # A period of time to initialize your service. Any readiness probe failures
 # during this period will be ignored.
 DEFAULT_INITIAL_DELAY_SECONDS = 1200
@@ -115,3 +108,6 @@ TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
 
 # Dummy run command for cluster pool.
 POOL_DUMMY_RUN_COMMAND = 'echo "setup done"'
+
+# Error message for max number of services reached.
+MAX_NUMBER_OF_SERVICES_REACHED_ERROR = 'Max number of services reached.'

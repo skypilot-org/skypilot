@@ -108,10 +108,6 @@ def up(
     pool: bool = False,
 ) -> Tuple[str, str]:
     """Spins up a service or a pool."""
-    if pool and not serve_utils.is_consolidation_mode(pool):
-        raise ValueError(
-            'Pool is only supported in consolidation mode. To fix, set '
-            '`jobs.controller.consolidation_mode: true` in SkyPilot config.')
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
     assert task.service is not None
@@ -191,8 +187,7 @@ def up(
         controller_log_file = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
         controller_resources = controller_utils.get_controller_resources(
-            controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-            task_resources=task.resources)
+            controller=controller, task_resources=task.resources)
         controller_job_id = None
         if serve_utils.is_consolidation_mode(pool):
             # We need a unique integer per sky.serve.up call to avoid name
@@ -228,10 +223,11 @@ def up(
         # balancer port from the controller? So we don't need to open so many
         # ports here. Or, we should have a nginx traffic control to refuse
         # any connection to the unregistered ports.
-        controller_resources = {
-            r.copy(ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
-            for r in controller_resources
-        }
+        if not pool:
+            controller_resources = {
+                r.copy(ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
+                for r in controller_resources
+            }
         controller_task.set_resources(controller_resources)
 
         # # Set service_name so the backend will know to modify default ray
@@ -350,7 +346,7 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            if not serve_utils.is_consolidation_mode(pool):
+            if not serve_utils.is_consolidation_mode(pool) and not pool:
                 socket_endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     lb_port,
@@ -374,10 +370,10 @@ def up(
                 f'\n📋 Useful Commands'
                 f'\n{ux_utils.INDENT_SYMBOL}To submit jobs to the pool:\t'
                 f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
-                f'<run-command>{ux_utils.RESET_BOLD}'
+                f'<yaml_file>{ux_utils.RESET_BOLD}'
                 f'\n{ux_utils.INDENT_SYMBOL}To submit multiple jobs:\t'
                 f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
-                f'--num-jobs 10 <run-command>{ux_utils.RESET_BOLD}'
+                f'--num-jobs 10 <yaml_file>{ux_utils.RESET_BOLD}'
                 f'\n{ux_utils.INDENT_SYMBOL}To check the pool status:\t'
                 f'{ux_utils.BOLD}sky jobs pool status {service_name}'
                 f'{ux_utils.RESET_BOLD}'
