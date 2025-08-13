@@ -24,7 +24,6 @@ import colorama
 import psutil
 import yaml
 
-import sky
 from sky import backends
 from sky import catalog
 from sky import check as sky_check
@@ -65,6 +64,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import controller_utils
+from sky.utils import directory_utils
 from sky.utils import env_options
 from sky.utils import locks
 from sky.utils import log_utils
@@ -163,7 +163,7 @@ _LOG_DIR_PATTERN = re.compile(r'Log Dir: ([^ ]+)')
 # We don't do import then __file__ because that script needs to be filled in
 # (so import would fail).
 _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
-    pathlib.Path(sky.__file__).resolve().parent / 'backends' /
+    pathlib.Path(directory_utils.get_sky_dir()) / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
 # The maximum size of a command line arguments is 128 KB, i.e. the command
@@ -3925,7 +3925,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # In this case, we reset the resources for the task, so that the
             # detached setup does not need to wait for the task resources to be
             # ready (which is not used for setup anyway).
-            valid_resource = sky.Resources()
+            valid_resource = resources_lib.Resources()
         else:
             # Check the task resources vs the cluster resources. Since
             # `sky exec` will not run the provision and _check_existing_cluster
@@ -4771,8 +4771,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         else:
                             raise
 
-        sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
-            handle.cluster_name)
+        cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
 
         def _detect_abnormal_non_terminated_nodes(
                 handle: CloudVmRayResourceHandle) -> None:
