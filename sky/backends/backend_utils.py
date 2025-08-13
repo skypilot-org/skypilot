@@ -82,6 +82,7 @@ else:
     adapters = adaptors_common.LazyImport('requests.adapters')
     retry_lib = adaptors_common.LazyImport(
         'requests.packages.urllib3.util.retry')
+    # To avoid requiring grpcio to be installed on the client side.
     grpc = adaptors_common.LazyImport('grpc')
 
 logger = sky_logging.init_logger(__name__)
