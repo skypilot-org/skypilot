@@ -17,7 +17,7 @@ import resource
 import shutil
 import sys
 import threading
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple
+from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
@@ -42,14 +42,18 @@ from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import daemons
 from sky.server import metrics
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
+from sky.server.auth import authn
+from sky.server.auth import oauth2_proxy
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -117,41 +121,6 @@ def _basic_auth_401_response(content: str):
         status_code=401,
         headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
         content=content)
-
-
-# TODO(hailong): Remove this function and use request.state.auth_user instead.
-async def _override_user_info_in_request_body(request: fastapi.Request,
-                                              auth_user: Optional[models.User]):
-    if auth_user is None:
-        return
-
-    body = await request.body()
-    if body:
-        try:
-            original_json = await request.json()
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.error(f'Error parsing request JSON: {e}')
-        else:
-            logger.debug(f'Overriding user for {request.state.request_id}: '
-                         f'{auth_user.name}, {auth_user.id}')
-            if 'env_vars' in original_json:
-                if isinstance(original_json.get('env_vars'), dict):
-                    original_json['env_vars'][
-                        constants.USER_ID_ENV_VAR] = auth_user.id
-                    original_json['env_vars'][
-                        constants.USER_ENV_VAR] = auth_user.name
-                else:
-                    logger.warning(
-                        f'"env_vars" in request body is not a dictionary '
-                        f'for request {request.state.request_id}. '
-                        'Skipping user info injection into body.')
-            else:
-                original_json['env_vars'] = {}
-                original_json['env_vars'][
-                    constants.USER_ID_ENV_VAR] = auth_user.id
-                original_json['env_vars'][
-                    constants.USER_ENV_VAR] = auth_user.name
-            request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
 
 
 def _try_set_basic_auth_user(request: fastapi.Request):
@@ -280,7 +249,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     apr_md5_crypt.verify(password, user.password)):
                 valid_user = True
                 request.state.auth_user = user
-                await _override_user_info_in_request_body(request, user)
+                await authn.override_user_info_in_request_body(request, user)
                 break
         if not valid_user:
             return _basic_auth_401_response('Invalid credentials')
@@ -399,7 +368,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             request.state.auth_user = auth_user
 
             # Override user info in request body for service account requests
-            await _override_user_info_in_request_body(request, auth_user)
+            await authn.override_user_info_in_request_body(request, auth_user)
 
             logger.debug(f'Authenticated service account: {user_id}')
 
@@ -444,7 +413,7 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             request.state.auth_user = auth_user
 
-        await _override_user_info_in_request_body(request, auth_user)
+        await authn.override_user_info_in_request_body(request, auth_user)
         return await call_next(request)
 
 
@@ -482,7 +451,9 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     """FastAPI lifespan context manager."""
     del app  # unused
     # Startup: Run background tasks
-    for event in requests_lib.INTERNAL_REQUEST_DAEMONS:
+    for event in daemons.INTERNAL_REQUEST_DAEMONS:
+        if event.should_skip():
+            continue
         try:
             executor.schedule_request(
                 request_id=event.id,
@@ -624,6 +595,8 @@ app.add_middleware(
 # RBACMiddleware must precede all the auth middleware, so it can access
 # request.state.auth_user.
 app.add_middleware(RBACMiddleware)
+# Authentication based on oauth2-proxy.
+app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # AuthProxyMiddleware should precede BasicAuthMiddleware and
 # BearerTokenMiddleware, since it should be skipped if either of those set the
 # auth user.
@@ -882,10 +855,15 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
                                           _DEFAULT_UPLOAD_EXPIRATION_TIME)
+    # For anonymous access, use the user hash from client
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        # Otherwise, the authenticated identity should be used.
+        user_id = request.state.auth_user.id
 
     # TODO(SKY-1271): We need to double check security of uploading zip file.
     client_file_mounts_dir = (
-        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
+        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
         'file_mounts')
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1554,8 +1532,12 @@ async def api_status(
         return encoded_request_tasks
 
 
-@app.get('/api/health')
-async def health(request: fastapi.Request) -> Dict[str, Any]:
+@app.get(
+    '/api/health',
+    # response_model_exclude_unset omits unset fields
+    # in the response JSON.
+    response_model_exclude_unset=True)
+async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
     Returns:
@@ -1568,20 +1550,54 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         - commit: str; The commit hash of SkyPilot used for API server.
     """
     user = request.state.auth_user
-    logger.info(f'Health endpoint: request.state.auth_user = {user}')
-    return {
-        'status': common.ApiServerStatus.HEALTHY.value,
+    server_status = common.ApiServerStatus.HEALTHY
+    if getattr(request.state, 'anonymous_user', False):
+        # API server authentication is enabled, but the request is not
+        # authenticated. We still have to serve the request because the
+        # /api/health endpoint has two different usage:
+        # 1. For health check from `api start` and external ochestration
+        #    tools (k8s), which does not require authentication and user info.
+        # 2. Return server info to client and hint client to login if required.
+        # Separating these two usage to different APIs will break backward
+        # compatibility for existing ochestration solutions (e.g. helm chart).
+        # So we serve these two usages in a backward compatible manner below.
+        client_version = versions.get_remote_api_version()
+        # - For Client with API version >= 14, we return 200 response with
+        #   status=NEEDS_AUTH, new client will handle the login process.
+        # - For health check from `sky api start`, the client code always uses
+        #   the same API version with the server, thus there is no compatibility
+        #   issue.
+        server_status = common.ApiServerStatus.NEEDS_AUTH
+        if client_version is None:
+            # - For health check from ochestration tools (e.g. k8s), we also
+            #   return 200 with status=NEEDS_AUTH, which passes HTTP probe
+            #   check.
+            # - There is no harm when an malicious client calls /api/health
+            #   without authentication since no sensitive information is
+            #   returned.
+            return responses.APIHealthResponse(
+                status=common.ApiServerStatus.HEALTHY,)
+        # TODO(aylei): remove this after min_compatible_api_version >= 14.
+        if client_version < 14:
+            # For Client with API version < 14, the NEEDS_AUTH status is not
+            # honored. Return 401 to trigger the login process.
+            raise fastapi.HTTPException(status_code=401,
+                                        detail='Authentication required')
+
+    logger.debug(f'Health endpoint: request.state.auth_user = {user}')
+    return responses.APIHealthResponse(
+        status=server_status,
         # Kept for backward compatibility, clients before 0.11.0 will read this
         # field to check compatibility and hint the user to upgrade the CLI.
         # TODO(aylei): remove this field after 0.13.0
-        'api_version': str(server_constants.API_VERSION),
-        'version': sky.__version__,
-        'version_on_disk': common.get_skypilot_version_on_disk(),
-        'commit': sky.__commit__,
-        'user': user.to_dict() if user is not None else None,
-        'basic_auth_enabled': os.environ.get(
-            constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
-    }
+        api_version=str(server_constants.API_VERSION),
+        version=sky.__version__,
+        version_on_disk=common.get_skypilot_version_on_disk(),
+        commit=sky.__commit__,
+        basic_auth_enabled=os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
+                                          'false').lower() == 'true',
+        user=user if user is not None else None,
+    )
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')

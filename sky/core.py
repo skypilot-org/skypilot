@@ -25,6 +25,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -255,7 +256,7 @@ all_clusters, unmanaged_clusters, all_jobs, context
 
 
 def endpoints(cluster: str,
-              port: Optional[Union[int, str]] = None) -> Dict[int, str]:
+              port: Optional[Union[int, str]] = None) -> Dict[str, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -274,7 +275,10 @@ def endpoints(cluster: str,
     with rich_utils.safe_status(
             ux_utils.spinner_message(
                 f'Fetching endpoints for cluster {cluster}')):
-        return backend_utils.get_endpoints(cluster=cluster, port=port)
+        result = backend_utils.get_endpoints(cluster=cluster, port=port)
+        # Convert int keys to str keys.
+        # In JSON serialization, each key must be a string.
+        return {str(k): v for k, v in result.items()}
 
 
 @usage_lib.entrypoint
@@ -403,6 +407,8 @@ def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
 def _start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = (
+        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR),
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -473,7 +479,7 @@ def _start(
                              all_file_mounts=None,
                              storage_mounts=storage_mounts)
     if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop, down=down)
+        backend.set_autostop(handle, idle_minutes_to_autostop, wait_for, down)
     return handle
 
 
@@ -481,6 +487,8 @@ def _start(
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = (
+        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR),
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -535,6 +543,7 @@ def start(
             '`idle_minutes_to_autostop` must be set if `down` is True.')
     return _start(cluster_name,
                   idle_minutes_to_autostop,
+                  wait_for,
                   retry_until_up,
                   down,
                   force=force)
@@ -624,6 +633,11 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
 
+    global_user_state.add_cluster_event(
+        cluster_name, status_lib.ClusterStatus.STOPPED,
+        'Cluster was stopped by user.',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
+
     backend = backend_utils.get_backend_from_handle(handle)
 
     if isinstance(backend, backends.CloudVmRayBackend):
@@ -651,6 +665,8 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 def autostop(
         cluster_name: str,
         idle_minutes: int,
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = autostop_lib.
+    DEFAULT_AUTOSTOP_WAIT_FOR,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -740,7 +756,7 @@ def autostop(
                 f'see reason above.') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.set_autostop(handle, idle_minutes, down)
+    backend.set_autostop(handle, idle_minutes, wait_for, down)
 
 
 # ==================

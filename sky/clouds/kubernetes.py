@@ -734,7 +734,8 @@ class Kubernetes(clouds.Cloud):
                 (constants.PERSISTENT_RUN_SCRIPT_DIR),
             'k8s_high_availability_restarting_signal_file':
                 (constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE),
-            'ha_recovery_log_path': constants.HA_PERSISTENT_RECOVERY_LOG_PATH,
+            'ha_recovery_log_path':
+                constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(''),
             'sky_python_cmd': constants.SKY_PYTHON_CMD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
@@ -770,11 +771,25 @@ class Kubernetes(clouds.Cloud):
 
         return deploy_vars
 
+    @staticmethod
+    def _warn_on_disk_size(resources: 'resources_lib.Resources'):
+        if resources.disk_size is not None:
+            logger.info(f'{colorama.Style.DIM}Disk size {resources.disk_size} '
+                        'is not supported by Kubernetes. '
+                        'To add additional disk, use volumes.'
+                        f'{colorama.Style.RESET_ALL}')
+        if resources.disk_tier is not None:
+            logger.info(f'{colorama.Style.DIM}Disk tier {resources.disk_tier} '
+                        'is not supported by Kubernetes. '
+                        'To add additional disk, use volumes.'
+                        f'{colorama.Style.RESET_ALL}')
+
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
         # TODO(zhwu): This needs to be updated to return the correct region
         # (context) that has enough resources.
+        self._warn_on_disk_size(resources)
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -818,6 +833,10 @@ class Kubernetes(clouds.Cloud):
             assert len(accelerators) == 1, resources
             # GPUs requested - build instance type.
             acc_type, acc_count = list(accelerators.items())[0]
+            # If acc_type contains spaces, return empty list since Kubernetes
+            # does not support spaces in label values
+            if ' ' in acc_type:
+                return resources_utils.FeasibleResources([], [], None)
 
             # Parse into KubernetesInstanceType
             k8s_instance_type = (kubernetes_utils.KubernetesInstanceType.

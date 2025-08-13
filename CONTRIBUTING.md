@@ -52,6 +52,17 @@ pip install pre-commit
 pre-commit install
 ```
 
+### Generating Python files from protobuf
+Whenever any protobuf file is changed (in `sky/schemas/proto`), run this to regenerate the Python files:
+```bash
+python -m grpc_tools.protoc \
+        --proto_path=sky/schemas/generated=sky/schemas/proto \
+        --python_out=. \
+        --grpc_python_out=. \
+        --pyi_out=. \
+        sky/schemas/proto/*.proto
+```
+
 ### Testing
 
 To run smoke tests (NOTE: Running all smoke tests launches ~20 clusters):
@@ -283,6 +294,22 @@ def cli_entry_point(newflag: Optional[str] = None):
     if newflag is not None and versions.get_remote_api_version() < 12:
         logger.warning('The new flag is ignored because the server does not support it yet.')
 ```
+
+We should also be careful when adding new fields that are not directly visible in
+`sky/server/api/payloads.py`, but is also being sent from the client to the server. This
+is mainly for validating objects from the client.
+As an example, this request body contains a single field, the string representation of a DAG.
+
+```
+class ValidateBody(DagRequestBodyWithRequestOptions):
+    """The request body for the validate endpoint."""
+    dag: str
+```
+
+A DAG consists of Tasks, so when adding new fields to Task, we should also handle backwards
+compatibility in the serialization, otherwise the server may not recognize the new field
+from the client and return an error during validation.
+
 
 #### Refactoring existing APIs
 

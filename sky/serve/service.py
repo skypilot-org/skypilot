@@ -15,6 +15,7 @@ import filelock
 
 from sky import authentication
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -112,11 +113,24 @@ def cleanup_storage(task_yaml: str) -> bool:
 
 def _cleanup(service_name: str) -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
+    # Cleanup the HA recovery script first as it is possible that some error
+    # was raised when we construct the task object (e.g.,
+    # sky.exceptions.ResourcesUnavailableError).
+    serve_state.remove_ha_recovery_script(service_name)
     failed = False
     replica_infos = serve_state.get_replica_infos(service_name)
     info2proc: Dict[replica_managers.ReplicaInfo,
                     multiprocessing.Process] = dict()
+    # NOTE(dev): This relies on `sky/serve/serve_utils.py::
+    # generate_replica_cluster_name`. Change it if you change the function.
+    existing_cluster_names = global_user_state.get_cluster_names_start_with(
+        service_name)
     for info in replica_infos:
+        if info.cluster_name not in existing_cluster_names:
+            logger.info(f'Cluster {info.cluster_name} for replica '
+                        f'{info.replica_id} not found. Might be a failed '
+                        'cluster. Skipping.')
+            continue
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(info.cluster_name,))
         p.start()
@@ -172,7 +186,7 @@ def _cleanup_task_run_script(job_id: int) -> None:
             logger.warning(f'Task run script {this_task_run_script} not found')
 
 
-def _start(service_name: str, tmp_task_yaml: str, job_id: int):
+def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
     """Starts the service.
     This including the controller and load balancer.
     """
@@ -222,7 +236,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             requested_resources_str=backend_utils.get_task_resources_str(task),
             load_balancing_policy=service_spec.load_balancing_policy,
             status=serve_state.ServiceStatus.CONTROLLER_INIT,
-            tls_encrypted=service_spec.tls_credential is not None)
+            tls_encrypted=service_spec.tls_credential is not None,
+            pool=service_spec.pool,
+            controller_pid=os.getpid(),
+            entrypoint=entrypoint)
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:
@@ -240,6 +257,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         # sync to a tmp file first and then copy it to the final name
         # if there is no name conflict.
         shutil.copy(tmp_task_yaml, service_task_yaml)
+    else:
+        serve_state.update_service_controller_pid(service_name, os.getpid())
 
     controller_process = None
     load_balancer_process = None
@@ -292,14 +311,17 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             # TODO(tian): Probably we could enable multiple ports specified in
             # service spec and we could start multiple load balancers.
             # After that, we will have a mapping from replica port to endpoint.
-            load_balancer_process = multiprocessing.Process(
-                target=ux_utils.RedirectOutputForProcess(
-                    load_balancer.run_load_balancer,
-                    load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port,
-                      service_spec.load_balancing_policy,
-                      service_spec.tls_credential))
-            load_balancer_process.start()
+            # NOTE(tian): We don't need the load balancer for cluster pool.
+            # Skip the load balancer process for cluster pool.
+            if not service_spec.pool:
+                load_balancer_process = multiprocessing.Process(
+                    target=ux_utils.RedirectOutputForProcess(
+                        load_balancer.run_load_balancer,
+                        load_balancer_log_file).run,
+                    args=(controller_addr, load_balancer_port,
+                          service_spec.load_balancing_policy,
+                          service_spec.tls_credential))
+                load_balancer_process.start()
 
             if not is_recovery:
                 serve_state.set_service_load_balancer_port(
@@ -354,8 +376,12 @@ if __name__ == '__main__':
                         required=True,
                         type=int,
                         help='Job id for the service job.')
+    parser.add_argument('--entrypoint',
+                        type=str,
+                        help='Entrypoint to launch the service',
+                        required=True)
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    _start(args.service_name, args.task_yaml, args.job_id)
+    _start(args.service_name, args.task_yaml, args.job_id, args.entrypoint)

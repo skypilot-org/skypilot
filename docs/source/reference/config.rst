@@ -106,6 +106,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`security_group_name <config-yaml-aws-security-group-name>`: my-security-group
     :ref:`disk_encrypted <config-yaml-aws-disk-encrypted>`: false
+    :ref:`ssh_user <config-yaml-aws-ssh-user>`: ubuntu
     :ref:`prioritize_reservations <config-yaml-aws-prioritize-reservations>`: false
     :ref:`specific_reservations <config-yaml-aws-specific-reservations>`:
       - cr-a1234567
@@ -175,6 +176,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     gcp:
       project_id: my-project-id
 
+  :ref:`daemons <config-yaml-daemons>`:
+    skypilot-status-refresh-daemon:
+      log_level: DEBUG
 
 Fields
 ----------
@@ -606,6 +610,15 @@ Set to ``true`` to encrypt the boot disk of all AWS instances launched by
 SkyPilot. This is useful for compliance with data protection regulations.
 
 Default: ``false``.
+
+.. _config-yaml-aws-ssh-user:
+
+``aws.ssh_user``
+~~~~~~~~~~~~~~~~
+
+SSH user (optional) for the SkyPilot nodes.
+
+Default: ``ubuntu``.
 
 .. _config-yaml-aws-prioritize-reservations:
 
@@ -1410,7 +1423,9 @@ Default role for users (optional).  Either ``admin`` or ``user``.
 
 If not specified, the default role is ``admin``.
 
-Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` or :ref:`Basic Auth in API server <deploy-api-server-basic-auth>` is configured.
+.. TODO(aylei): Refine this after unified authentication.
+
+Note: RBAC is only functional when :ref:`OAuth <api-server-oauth>` is configured.
 
 .. _config-yaml-db:
 
@@ -1476,3 +1491,32 @@ The type of external logging storage to use. Each logging storage might have its
 
   logs:
     store: gcp
+
+.. _config-yaml-daemons:
+
+``daemons``
+~~~~~~~~~~~
+
+Daemon configuration (optional).
+
+Configuration for API server daemons. Not applicable to client side config.
+
+Valid daemon names are:
+
+- ``skypilot-status-refresh-daemon``
+- ``skypilot-volume-status-refresh-daemon``
+- ``managed-job-status-refresh-daemon``
+
+``log_level``
+    Log level to set for the daemon. Valid values are ``DEBUG``, ``INFO`` and ``WARNING``.
+
+.. code-block:: yaml
+
+  daemons:
+    skypilot-status-refresh-daemon:
+      log_level: DEBUG
+    skypilot-volume-status-refresh-daemon:
+      log_level: INFO
+    managed-job-status-refresh-daemon:
+      log_level: WARNING
+
