@@ -48,18 +48,17 @@ echo "Active GCC version: $(gcc --version | head -1)"
 
 # CRITICAL FIX: Use Ubuntu's patched drivers instead of NVIDIA's repository drivers
 # GCP's custom kernel 6.8.0-1033-gcp is incompatible with NVIDIA's generic drivers
-# Ubuntu patches their drivers specifically for GCP kernels
+# Ubuntu patches their drivers specifically for GCP kernels. Pin to a specific driver branch.
 echo ""
-echo "=== Installing Ubuntu's NVIDIA Drivers (patched for GCP kernels) ==="
+echo "=== Installing Ubuntu's NVIDIA Driver (pinned) ==="
 sudo apt-get install -y ubuntu-drivers-common
 
-# Show available drivers
-echo "Available GPU drivers:"
-sudo ubuntu-drivers devices
+# Pin the NVIDIA driver to the 575 branch rather than using ubuntu-drivers autoinstall
+echo "Installing NVIDIA driver 575 (pinned to branch) ..."
+sudo apt-get install -y nvidia-driver-575
 
-# Install recommended drivers automatically
-echo "Installing recommended NVIDIA drivers..."
-sudo ubuntu-drivers autoinstall
+# Prevent unintended upgrades of the NVIDIA driver branch
+sudo apt-mark hold nvidia-driver-575 || true
 
 echo ""
 echo "=== Installing CUDA Toolkit from NVIDIA Repository ==="
@@ -81,6 +80,7 @@ echo "=== Verifying Installation ==="
 echo "Kernel: $(uname -r)"
 echo "Active GCC: $(gcc --version | head -1)"
 echo ""
+# Packer builds typically have no GPU attached. Do not enforce runtime checks.
 echo "Installed NVIDIA packages:"
 sudo dpkg -l | grep -i nvidia | head -10 || echo "No NVIDIA packages found"
 
@@ -93,7 +93,7 @@ echo 'export LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH"' | sudo te
 
 echo ""
 echo "=== Installation Complete ==="
-echo "✅ Ubuntu NVIDIA drivers installed (compatible with GCP kernel)"
+echo "✅ Ubuntu NVIDIA driver 575 installed (compatible with GCP kernel)"
 echo "✅ CUDA Toolkit 12.4 installed"
 echo "✅ cuDNN installed"
 echo "✅ Environment configured"
