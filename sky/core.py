@@ -96,7 +96,7 @@ def status(
     cluster_names: Optional[Union[str, List[str]]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> List[responses.StatusResponse]:
+) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
 

@@ -4,7 +4,6 @@ from typing import Any, Dict, Optional
 
 import pydantic
 
-from sky import data
 from sky import models
 from sky.server import common
 from sky.utils import status_lib

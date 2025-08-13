@@ -1372,7 +1372,7 @@ def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> server_common.RequestId[responses.StatusResponse]:
+) -> server_common.RequestId[List[responses.StatusResponse]]:
     """Gets cluster statuses.
 
     If cluster_names is given, return those clusters. Otherwise, return all
