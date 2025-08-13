@@ -13,7 +13,7 @@ SkyPilot API server supports three authentication methods:
 .. TODO(aylei): replace basic auth with proxy auth for clarity after we support service account token based authentication to be used along.
 
 - **Basic auth in ingress**: Use an admin-configured username and password to authenticate.
-- **Service account token**: Use a JWT (JSON Web Token) to authenticate.
+- **Users and service accounts with tokens**: Use a JWT (JSON Web Token) to authenticate.
 - **SSO (recommended)**: Use an auth proxy (e.g.,
   `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__) to
   authenticate. For example, Okta, Google Workspace, or other SSO providers are supported.
@@ -21,7 +21,7 @@ SkyPilot API server supports three authentication methods:
 Comparison of the three methods:
 
 .. csv-table::
-    :header: "", "Basic Auth in ingress", "Service account token", "SSO (recommended)"
+    :header: "", "Basic Auth in ingress", "Users and service accounts with tokens", "SSO (recommended)"
     :widths: 20, 20, 30, 30
     :align: left
 
@@ -43,9 +43,9 @@ Example deployment command:
 .. code-block:: console
 
     # NAMESPACE is the namespace to deploy the API server in
-    NAMESPACE=default
+    NAMESPACE=skypilot
     # RELEASE_NAME is the name of the helm release, must be unique within the namespace
-    RELEASE_NAME=dan
+    RELEASE_NAME=skypilot
     # Set up basic username/password HTTP auth
     WEB_USERNAME=skypilot
     WEB_PASSWORD=skypilot
@@ -106,6 +106,8 @@ Create users
     :width: 70%
 
 6. The user can login the API server with the token.
+
+You can also create service accounts with tokens. See :ref:`service-accounts-create` for more details.
 
 Access the API server
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -511,7 +513,7 @@ SkyPilot provides basic RBAC (role-based access control) support. Two roles are 
 - **User**: Use SkyPilot as usual to launch and manage resources (clusters, jobs, etc.).
 - **Admin**: Manage SkyPilot API server settings, users, and workspaces.
 
-RBAC support is enabled when :ref:`SSO authentication <api-server-oauth>` or :ref:`service account token <api-server-users-service-accounts-with-tokens>` is used (not when using :ref:`basic auth in ingress <api-server-basic-auth>`).
+RBAC support is enabled when :ref:`SSO authentication <api-server-oauth>` or :ref:`users and service accounts with tokens <api-server-users-service-accounts-with-tokens>` is used (not when using :ref:`basic auth in ingress <api-server-basic-auth>`).
 
 Config :ref:`config-yaml-rbac-default-role` determines whether a new
 SkyPilot user is created with the ``user`` or ``admin`` role. By default, it is
@@ -520,15 +522,17 @@ set to ``admin`` to ease first-time setup.
 User management
 ~~~~~~~~~~~~~~~
 
-SkyPilot automatically creates a user for each authenticated user with SSO enabled. The user's email is used as the username.
+With SSO authentication enabled, SkyPilot automatically creates a user for each authenticated user and the user's email is used as the username.
 
-Admins can click on the **Users** tab in the SkyPilot dashboard to manage users and their roles.
+With users and service accounts with tokens enabled, the users with ``Admin`` role can create new users and service accounts with tokens.
 
-.. figure:: ../images/client-server/users.png
+Admins can click on the **Users** tab in the SkyPilot dashboard to manage users and their roles or the **Service Accounts** tab to manage service accounts.
+
+.. figure:: ../images/client-server/user-list.png
     :align: center
     :width: 80%
 
 Supported operations:
 
-* ``Admin`` role can update the role for all users, create new users, rotate the tokens for the users and delete users.
-* ``User`` role can view all users and their roles.
+* ``Admin``: can create and delete users and service accounts, update any user's or service account's role, and rotate user tokens.
+* ``User``: can view all users and their roles.
