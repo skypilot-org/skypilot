@@ -452,6 +452,180 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
   "sky-managed-2022-10-06-05-17-09-750781_pipeline_eval_8-1".
 
 
+.. _pool:
+
+Using worker pool
+-----------------
+
+SkyPilot supports spawning a **worker pool** for launching many jobs that share the same environment — for example, batch inference or large-scale data processing.
+
+The worker cluster is **reused** across job submissions, avoiding repeated setup and **saving cold start time**. This is ideal for workloads where many jobs need to run with the same software environment and dependencies.
+
+A centralized controller manages the worker cluster, tracks their status, and dispatches jobs to them. Worker clusters can be spread across regions or clouds to improve availability and cost efficiency. If a worker fails, it is automatically recovered or replaced.
+
+This design enables **efficient job launches** for large batches of work while still benefiting from Managed Job's failure recovery.
+
+
+.. tip::
+
+  To get started with Worker Pool, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
+
+Quick tour: LLM batch inference
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Here is a simple example of using a worker pool for LLM batch inference:
+
+.. code-block:: yaml
+  :emphasize-lines: 2-3
+
+  # pool.yaml
+  pool:
+    workers: 2
+
+  resources:
+    accelerators: {H100:1, H200:1}
+    disk_size: 512
+
+  envs:
+    MODEL_NAME: openai/gpt-oss-20b
+
+  setup: |
+    sudo apt-get update
+    sudo apt-get install -y python3-dev build-essential
+    uv venv --python 3.12 --seed
+    source .venv/bin/activate
+    uv pip install --pre vllm==0.10.1+gptoss \
+      --extra-index-url https://wheels.vllm.ai/gpt-oss/ \
+      --extra-index-url https://download.pytorch.org/whl/nightly/cu128 \
+      --index-strategy unsafe-best-match
+    uv pip install hf_xet openai==1.99.1
+    hf download $MODEL_NAME
+
+  run: |
+    # Use the job rank environment variable to determine job partition.
+    echo "Job rank: $SKYPILOT_JOB_RANK"
+    source .venv/bin/activate
+    rm openai_example_batch.jsonl || true
+    wget https://raw.githubusercontent.com/vllm-project/vllm/main/examples/offline_inference/openai_batch/openai_example_batch.jsonl
+    sed -i "s|meta-llama/Meta-Llama-3-8B-Instruct|$MODEL_NAME|g" openai_example_batch.jsonl
+    echo "========== Prompts =========="
+    cat openai_example_batch.jsonl
+    echo "============================="
+    python -m vllm.entrypoints.openai.run_batch \
+      -i openai_example_batch.jsonl \
+      -o results.jsonl \
+      --model $MODEL_NAME
+    echo "========== Results =========="
+    cat results.jsonl
+    echo "============================="
+
+Noticed that the :code:`pool` section is the only difference from a normal SkyPilot YAML.
+When creating a worker pool, the :code:`run` section is not executed during pool creation; however, we still included it in the YAML, as we will reuse the same YAML file when submitting jobs.
+
+To create a worker pool with 2 workers, use the following command:
+
+.. code-block:: console
+
+  $ sky jobs pool apply -p llm-pool pool.yaml
+  YAML to run: pool.yaml
+  Pool spec:
+  Worker policy:  Fixed-size (2 workers)
+
+  Each pool worker will use the following resources (estimated):
+  Considered resources (1 node):
+  -------------------------------------------------------------------------------------------------------
+  INFRA                 INSTANCE                         vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN 
+  -------------------------------------------------------------------------------------------------------
+  Nebius (eu-north1)    gpu-h100-sxm_1gpu-16vcpu-200gb   16      200       H100:1   2.95          ✔   
+  Nebius (eu-north1)    gpu-h200-sxm_1gpu-16vcpu-200gb   16      200       H200:1   3.50              
+  GCP (us-central1-a)   a3-highgpu-1g                    26      234       H100:1   5.38              
+  -------------------------------------------------------------------------------------------------------
+  Applying config to pool 'llm-pool'. Proceed? [Y/n]: 
+  The `run` section will be ignored for pool.
+  Launching controller for 'llm-pool'...
+  ...
+  ⚙︎ Job submitted, ID: 13
+
+  Pool name: llm-pool
+  📋 Useful Commands
+  ├── To submit jobs to the pool: sky jobs launch --pool llm-pool <yaml_file>
+  ├── To submit multiple jobs:    sky jobs launch --pool llm-pool --num-jobs 10 <yaml_file>
+  ├── To check the pool status:   sky jobs pool status llm-pool
+  └── To terminate the pool:      sky jobs pool down llm-pool
+
+  ✓ Successfully created pool 'llm-pool'.
+
+The pool will be created in the background. You can submit jobs to this pool immediately; jobs will remain in the PENDING state until the worker cluster is ready, and will start automatically once workers are available.
+
+To submit jobs to the pool, use the following command:
+
+.. code-block:: console
+
+  $ sky jobs launch --pool llm-pool --num-jobs 10 pool.yaml -n llm-batch-inference
+  YAML to run: pool.yaml
+  Submitting to pool 'llm-pool' with 10 jobs.
+  setup/file_mounts/storage_mounts will be ignored when submit jobs to pool. To update a pool, please use `sky jobs pool apply llm-pool new-pool.yaml`. 
+  Managed job 'llm-batch-inference' will be launched on (estimated):
+  Use resources from pool 'llm-pool': 1x[H200:1, H100:1].
+  Launching 10 managed jobs 'llm-batch-inference'. Proceed? [Y/n]: 
+  Launching managed job 'llm-batch-inference' (rank: 0) from jobs controller...
+  ...
+  Jobs submitted with IDs: 14,15,16,17,18,19,20,21,22,23.
+  📋 Useful Commands
+  ├── To stream job logs:                 sky jobs logs <job-id>
+  ├── To stream controller logs:          sky jobs logs --controller <job-id>
+  └── To cancel all jobs on the pool:     sky jobs cancel --pool llm-pool
+
+Each job will have a unique environment variable :code:`$SKYPILOT_JOB_RANK` to determine the job partition.  
+For example, if you have 1000 prompts to evaluate, each job can process prompts with sequence numbers  
+:code:`$SKYPILOT_JOB_RANK * 100` to :code:`($SKYPILOT_JOB_RANK + 1) * 100`.
+
+There are several things to note when submitting to a pool:
+
+- Any :code:`setup` commands or file mounts in the YAML are ignored.
+- The :code:`resources` requirements are still respected.
+- The :code:`run` command is executed for the job.
+
+You can use the job page in the dashboard to monitor the job status.
+
+.. image:: ../images/pool-dashboard.png
+  :width: 100%
+  :align: center
+
+In this example, we submit 10 jobs with IDs from 14 to 23.  
+Only one worker is currently ready due to a resource availability issue, but the pool continues to request additional workers in the background.  
+Since each job requires **the entire worker cluster**, only number of workers jobs can run at a time; in this case, 1 job can run at a time.
+As a result, one job is running on the available worker, while the remaining nine are in the PENDING state, waiting for the previous job to finish.
+
+Clicking on the pool name will show detailed information about the pool, including its resource specification, status of each worker node, and any job currently running on it:
+
+.. image:: ../images/pool-details.png
+  :width: 100%
+  :align: center
+
+In this example, one worker is ready in Nebius, and another is currently provisioning in the same cloud.  
+The ready worker is running the managed job with ID 16.
+The **Worker Details** section displays the current resource summary of the pool,
+while the **Jobs** section shows a live snapshot of all jobs associated with this pool, including their statuses and job IDs.
+
+You can use :code:`sky jobs cancel --pool llm-pool` to cancel all jobs currently running or pending on the pool.
+
+After usage, the pool can be terminated with the following command:
+
+.. code-block:: console
+
+  $ sky jobs pool down llm-pool
+  Terminating pool(s) 'llm-pool'. Proceed? [Y/n]: 
+  Pool 'llm-pool' is scheduled to be terminated.
+
+The pool will be torn down in the background, and any remaining resources will be automatically cleaned up.
+
+.. tip::
+
+  Autoscaling will be supported in the future, allowing the pool to automatically scale down to 0 workers when no jobs are running, and scale up to the desired concurrency level when new jobs are submitted.
+
+
+
 .. _intermediate-bucket:
 
 Setting the job files bucket
