@@ -32,7 +32,7 @@ if typing.TYPE_CHECKING:
     import requests
 
     import sky
-    import sky.dag as dag_lib
+    from sky import dag as dag_lib
 else:
     httpx = adaptors_common.LazyImport('httpx')
     requests = adaptors_common.LazyImport('requests')

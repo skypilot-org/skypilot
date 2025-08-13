@@ -4,7 +4,7 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.catalog import common
-import sky.provision.cudo.cudo_machine_type as cudo_mt
+from sky.provision.cudo import cudo_machine_type as cudo_mt
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

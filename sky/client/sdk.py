@@ -67,8 +67,8 @@ if typing.TYPE_CHECKING:
 
     import sky
     from sky import backends
+    from sky import catalog
     from sky import models
-    import sky.catalog
     from sky.provision.kubernetes import utils as kubernetes_utils
     from sky.skylet import job_lib
 else:
@@ -235,7 +235,7 @@ def list_accelerators(
     require_price: bool = True,
     case_sensitive: bool = True
 ) -> server_common.RequestId[Dict[str,
-                                  List['sky.catalog.common.InstanceTypeInfo']]]:
+                                  List['catalog.common.InstanceTypeInfo']]]:
     """Lists the names of all accelerators offered by Sky.
 
     This will include all accelerators offered by Sky, including those
