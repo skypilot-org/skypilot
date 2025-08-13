@@ -39,4 +39,3 @@ def upgrade():
 def downgrade():
     """No-op for backward compatibility."""
     pass
-

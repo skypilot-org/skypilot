@@ -1298,9 +1298,8 @@ async def provision_logs(cluster_body: payloads.ClusterNameBody,
     if not log_path_str:
         raise fastapi.HTTPException(
             status_code=404,
-            detail=(
-                'Provision log path is not recorded for this cluster. '
-                'Please relaunch to generate provisioning logs.'))
+            detail=('Provision log path is not recorded for this cluster. '
+                    'Please relaunch to generate provisioning logs.'))
 
     log_path = pathlib.Path(log_path_str).expanduser().resolve()
     if not log_path.exists():

@@ -102,7 +102,9 @@ cluster_table = sqlalchemy.Table(
                       sqlalchemy.Text,
                       server_default=None),
     sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
-    sqlalchemy.Column('provision_log_path', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('provision_log_path',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -162,7 +164,9 @@ cluster_history_table = sqlalchemy.Table(
                       sqlalchemy.Text,
                       server_default=None),
     sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
-    sqlalchemy.Column('provision_log_path', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('provision_log_path',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 
@@ -937,8 +941,7 @@ def get_cluster_provision_log_path(cluster_name: str) -> Optional[str]:
 
 
 @_init_db
-def get_cluster_history_provision_log_path(
-        cluster_name: str) -> Optional[str]:
+def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
     """Returns provision_log_path from cluster_history for this name.
 
     If the cluster currently exists, we use its hash. Otherwise, we look up
@@ -955,7 +958,8 @@ def get_cluster_history_provision_log_path(
             if row is not None:
                 return getattr(row, 'provision_log_path', None)
 
-        # Fallback: search history by name and pick the latest by usage_intervals
+        # Fallback: search history by name and pick the latest by
+        # usage_intervals
         rows = session.query(cluster_history_table).filter_by(
             name=cluster_name).all()
         if not rows:
@@ -975,6 +979,7 @@ def get_cluster_history_provision_log_path(
         latest_row = max(rows,
                          key=lambda r: latest_timestamp(r.usage_intervals))
         return getattr(latest_row, 'provision_log_path', None)
+
 
 @_init_db
 def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
