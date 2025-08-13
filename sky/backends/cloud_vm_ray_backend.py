@@ -2833,16 +2833,16 @@ class SkyletClient:
 
     def set_autostop(
         self,
-        request: autostopv1_pb2.SetAutostopRequest,
+        request: 'autostopv1_pb2.SetAutostopRequest',
         timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> autostopv1_pb2.SetAutostopResponse:
+    ) -> 'autostopv1_pb2.SetAutostopResponse':
         return self._autostop_stub.SetAutostop(request, timeout=timeout)
 
     def is_autostopping(
         self,
-        request: autostopv1_pb2.IsAutostoppingRequest,
+        request: 'autostopv1_pb2.IsAutostoppingRequest',
         timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> autostopv1_pb2.IsAutostoppingResponse:
+    ) -> 'autostopv1_pb2.IsAutostoppingResponse':
         return self._autostop_stub.IsAutostopping(request, timeout=timeout)
 
 

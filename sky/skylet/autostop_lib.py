@@ -9,7 +9,6 @@ from typing import List, Optional
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.schemas.generated import autostopv1_pb2
 from sky.skylet import configs
 from sky.skylet import constants
 from sky.utils import message_utils
@@ -17,8 +16,13 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import psutil
+
+    from sky.schemas.generated import autostopv1_pb2
 else:
     psutil = adaptors_common.LazyImport('psutil')
+    # To avoid requiring protobuf to be installed on the client side.
+    autostopv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.autostopv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -81,7 +85,7 @@ jobs or SSH connections."""
 
     @classmethod
     def from_protobuf(
-        cls, protobuf_value: autostopv1_pb2.AutostopWaitFor
+        cls, protobuf_value: 'autostopv1_pb2.AutostopWaitFor'
     ) -> Optional['AutostopWaitFor']:
         """Convert protobuf AutostopWaitFor enum to Python enum value."""
         protobuf_to_enum = {
@@ -96,7 +100,7 @@ jobs or SSH connections."""
                     f'Unknown protobuf AutostopWaitFor value: {protobuf_value}')
         return protobuf_to_enum[protobuf_value]
 
-    def to_protobuf(self) -> autostopv1_pb2.AutostopWaitFor:
+    def to_protobuf(self) -> 'autostopv1_pb2.AutostopWaitFor':
         """Convert this Python enum value to protobuf enum value."""
         enum_to_protobuf = {
             AutostopWaitFor.JOBS_AND_SSH:
