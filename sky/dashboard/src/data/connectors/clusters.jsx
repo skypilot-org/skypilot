@@ -153,6 +153,7 @@ export async function getClusterHistory() {
         total_cost: cluster.total_cost,
         workspace: cluster.workspace || 'default',
         autostop: -1,
+        last_event: cluster.last_event,
         to_down: false,
         usage_intervals: cluster.usage_intervals,
         command: cluster.last_creation_command || '',
