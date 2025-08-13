@@ -12,7 +12,8 @@ from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
-from sky.utils import ux_utils
+from sky.utils import ux_utils  
+from sky.utils import directory_utils
 
 if typing.TYPE_CHECKING:
     import jinja2
@@ -80,7 +81,7 @@ def get_networking_mode(
 def fill_loadbalancer_template(namespace: str, context: Optional[str],
                                service_name: str, ports: List[int],
                                selector_key: str, selector_value: str) -> Dict:
-    template_path = os.path.join(sky.__root_dir__, 'templates',
+    template_path = os.path.join(directory_utils.get_sky_dir(), 'templates',
                                  _LOADBALANCER_TEMPLATE_NAME)
     if not os.path.exists(template_path):
         raise FileNotFoundError(
@@ -116,7 +117,7 @@ def fill_ingress_template(namespace: str, context: Optional[str],
                           service_details: List[Tuple[str, int,
                                                       str]], ingress_name: str,
                           selector_key: str, selector_value: str) -> Dict:
-    template_path = os.path.join(sky.__root_dir__, 'templates',
+    template_path = os.path.join(directory_utils.get_sky_dir(), 'templates',
                                  _INGRESS_TEMPLATE_NAME)
     if not os.path.exists(template_path):
         raise FileNotFoundError(
