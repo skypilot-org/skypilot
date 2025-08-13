@@ -47,11 +47,11 @@ class TestGetImageRootDeviceName:
         mock_aws.client.return_value = client
         client.describe_images.return_value = {
             'Images': [{
-                'ImageId': 'ami-0123456789abcdef0',
+                'ImageId': 'ami-0123456789abcdef1',
                 # No 'RootDeviceName'
             }]
         }
-        result = aws_mod.AWS.get_image_root_device_name('ami-0123456789abcdef0',
+        result = aws_mod.AWS.get_image_root_device_name('ami-0123456789abcdef1',
                                                         'us-west-2')
         assert result == aws_mod.DEFAULT_ROOT_DEVICE_NAME
         assert mock_logger.warning.called
@@ -82,7 +82,7 @@ class TestGetImageRootDeviceName:
         client.describe_images.side_effect = DummyExceptions.NoCredentialsError(
         )
 
-        result = aws_mod.AWS.get_image_root_device_name('ami-0123456789abcdef0',
+        result = aws_mod.AWS.get_image_root_device_name('ami-0123456789abcdef2',
                                                         'eu-central-1')
         assert result == aws_mod.DEFAULT_ROOT_DEVICE_NAME
         assert mock_logger.warning.called
