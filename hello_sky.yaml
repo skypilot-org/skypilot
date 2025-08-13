@@ -2,7 +2,8 @@ resources:
   # Optional; if left out, automatically pick the cheapest cloud.
   infra: shadeform
   # 8x NVIDIA A100 GPU
-  accelerators: L4:1
+  accelerators: H100:1
+  instance_type: nebius_H100_sxm5
 
 # Working directory (optional) containing the project codebase.
 # Its contents are synced to ~/sky_workdir/ on the cluster.

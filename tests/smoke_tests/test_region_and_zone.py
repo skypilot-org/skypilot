@@ -239,6 +239,7 @@ def test_gcp_zone():
 # is running remotely. We should fix this.
 @pytest.mark.no_vast  # Requires AWS
 @pytest.mark.no_hyperbolic  # Requires AWS
+@pytest.mark.no_shadeform  # Requires AWS
 @pytest.mark.parametrize(
     'image_id',
     [

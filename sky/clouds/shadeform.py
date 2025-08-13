@@ -177,6 +177,9 @@ class Shadeform(clouds.Cloud):
         # No user identity support needed
         return None
 
+    def instance_type_exists(self, instance_type: str) -> bool:
+        return catalog.instance_type_exists(instance_type, 'shadeform')
+
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
                                      use_spot: bool,
@@ -197,36 +200,7 @@ class Shadeform(clouds.Cloud):
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
         """Get hourly cost for accelerators."""
-        if use_spot:
-            raise ValueError('Spot instances are not supported on Shadeform')
-
-        # Find instance type that matches the accelerator requirements
-        assert len(accelerators) == 1, accelerators
-        acc_name, acc_count = list(accelerators.items())[0]
-
-        # Use Shadeform-specific catalog instead of global catalog
-        instance_types, _ = shadeform_catalog.get_instance_type_for_accelerator(
-            acc_name, acc_count, use_spot=use_spot, region=region, zone=zone)
-
-        if not instance_types:
-            raise ValueError(f'No instance type found for {accelerators}')
-
-        # Return cost of the cheapest instance type
-        costs = []
-        for instance_type in instance_types:
-            try:
-                cost = shadeform_catalog.get_hourly_cost(instance_type,
-                                                         use_spot=use_spot,
-                                                         region=region,
-                                                         zone=zone)
-                costs.append(cost)
-            except ValueError:
-                continue
-
-        if not costs:
-            raise ValueError(f'No pricing found for {accelerators}')
-
-        return min(costs)
+        return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
         """Get egress cost."""
@@ -396,9 +370,21 @@ class Shadeform(clouds.Cloud):
                 f'Accelerator {list(accelerators.keys())[0]} not supported.')
 
         # No accelerators specified, return a default instance type
-        default_instance_type = 'datacrunch_V100'
-        return resources_utils.FeasibleResources(
-            _make_resources([default_instance_type]), [], None)
+        if accelerators is None:
+            # Return a default instance type
+            default_instance_type = Shadeform.get_default_instance_type(
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
+            if default_instance_type is None:
+                # TODO: Add hints to all return values in this method to help
+                #  users understand why the resources are not launchable.
+                return resources_utils.FeasibleResources([], [], None)
+            else:
+                return resources_utils.FeasibleResources(
+                    _make_resources([default_instance_type]), [], None)
 
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:

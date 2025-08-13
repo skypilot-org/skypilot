@@ -145,6 +145,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
 @pytest.mark.no_vast  # The pipeline.yaml uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_shadeform  # Shadeform does not support spot instances
 @pytest.mark.managed_jobs
 def test_job_pipeline(generic_cloud: str):
     """Test a job pipeline."""
@@ -191,6 +192,7 @@ def test_job_pipeline(generic_cloud: str):
 @pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_shadeform  # Shadeform does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_failed_setup(generic_cloud: str):
     """Test managed job with failed setup."""
@@ -223,6 +225,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
 @pytest.mark.no_vast  # Test fails to stay within a single cloud
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_shadeform  # Shadeform does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
     """Test managed job with failed setup for a pipeline."""
@@ -467,6 +470,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_shadeform  # Shadeform does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_recovery_default_resources(generic_cloud: str):
     """Test managed job recovery for default resources."""
@@ -766,6 +770,7 @@ def test_managed_jobs_cancellation_gcp():
 
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_hyperbolic  # Uses other clouds
+@pytest.mark.no_shadeform  # Uses other clouds
 @pytest.mark.managed_jobs
 def test_managed_jobs_retry_logs(generic_cloud: str):
     """Test managed job retry logs are properly displayed when a task fails."""
@@ -817,6 +822,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_shadeform  # Shadeform does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
@@ -1149,6 +1155,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
 
 @pytest.mark.no_vast  # The test uses other clouds
 @pytest.mark.no_hyperbolic  # The test uses other clouds
+@pytest.mark.no_shadeform  # The test uses other clouds
 @pytest.mark.managed_jobs
 def test_managed_jobs_logs_sync_down(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
