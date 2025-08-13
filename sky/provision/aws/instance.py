@@ -687,7 +687,7 @@ def terminate_instances(
                                   excluded_instances=None)
     default_sg = _get_sg_from_name(ec2, aws_cloud.DEFAULT_SECURITY_GROUP_NAME)
     if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
-        # Case 1: The default SG is used, we don't need to ensure instance are 
+        # Case 1: The default SG is used, we don't need to ensure instance are
         # terminated.
         instances.terminate()
     elif not managed_by_skypilot:
@@ -698,13 +698,12 @@ def terminate_instances(
         # Case 3: We are managing the non-default sg. The default SG exists
         # so we can move the instances to the default SG and terminate them
         # without blocking.
-        
+
         # Make this multithreaded: modify all instances' SGs in parallel.
         def modify_instance_sg(instance):
             instance.modify_attribute(Groups=[default_sg.id])
-            logger.debug(
-                f'Instance {instance.id} modified to use default SG:'
-                f'{default_sg.id} for quick deletion.')
+            logger.debug(f'Instance {instance.id} modified to use default SG:'
+                         f'{default_sg.id} for quick deletion.')
 
         with pool.ThreadPool() as thread_pool:
             thread_pool.map(modify_instance_sg, instances)
