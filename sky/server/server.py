@@ -1580,13 +1580,7 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
     Returns:
-        A dictionary with the following keys:
-        - status: str; The status of the API server.
-        - api_version: str; The API version of the API server.
-        - version: str; The version of SkyPilot used for API server.
-        - version_on_disk: str; The version of the SkyPilot installation on
-          disk, which can be used to warn about restarting the API server
-        - commit: str; The commit hash of SkyPilot used for API server.
+        responses.APIHealthResponse: The health response.
     """
     user = request.state.auth_user
     server_status = common.ApiServerStatus.HEALTHY

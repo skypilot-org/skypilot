@@ -1,11 +1,12 @@
 """Responses for the API server."""
 
-from typing import Optional
+from typing import Any, Optional
 
 import pydantic
 
 from sky import models
 from sky.server import common
+from sky.utils import status_lib
 
 
 class ResponseBaseModel(pydantic.BaseModel):
@@ -60,7 +61,18 @@ class ResponseBaseModel(pydantic.BaseModel):
 
 
 class APIHealthResponse(ResponseBaseModel):
-    """Response for the API health endpoint."""
+    """Response for the API health endpoint.
+    {
+        'status': (str) The status of the API server.
+        'api_version': (str) The API version of the API server.
+        'version': (str) The version of SkyPilot used for API server.
+        'version_on_disk': (str) The version of the SkyPilot installation on
+          disk, which can be used to warn about restarting the API server
+        'commit': (str) The commit hash of SkyPilot used for API server.
+        'basic_auth_enabled': (bool) Whether basic authentication is enabled.
+        'user': (User) Information about the user that made the request.
+    }
+    """
     status: common.ApiServerStatus
     api_version: str = ''
     version: str = ''
@@ -68,3 +80,38 @@ class APIHealthResponse(ResponseBaseModel):
     commit: str = ''
     basic_auth_enabled: bool = False
     user: Optional[models.User] = None
+
+
+class StatusResponse(ResponseBaseModel):
+    """Response for the status endpoint.
+    {
+        'name': (str) cluster name,
+        'launched_at': (int) timestamp of last launch on this cluster,
+        'handle': (ResourceHandle) an internal handle to the cluster,
+        'last_use': (str) the last command/entrypoint that affected this
+            cluster,
+        'status': (sky.ClusterStatus) cluster status,
+        'autostop': (int) idle time before autostop,
+        'to_down': (bool) whether autodown is used instead of autostop,
+        'metadata': (dict) metadata of the cluster,
+        'user_hash': (str) user hash of the cluster owner,
+        'user_name': (str) user name of the cluster owner,
+        'resources_str': (str) the resource string representation of the
+            cluster,
+    }
+    """
+    name: str
+    launched_at: int
+    # pydantic cannot generate the pydantic-core schema for
+    # backends.ResourceHandle, so we use Any here.
+    # This is an internally facing field anyway, so it's less
+    # of a problem that it's not typed.
+    handle: Any
+    last_use: str
+    status: status_lib.ClusterStatus
+    autostop: int
+    to_down: bool
+    metadata: dict
+    user_hash: str
+    user_name: str
+    resources_str: str

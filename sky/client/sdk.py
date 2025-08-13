@@ -1372,7 +1372,7 @@ def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> server_common.RequestId[List[Dict[str, Any]]]:
+) -> server_common.RequestId[responses.StatusResponse]:
     """Gets cluster statuses.
 
     If cluster_names is given, return those clusters. Otherwise, return all
@@ -1920,6 +1920,8 @@ def get(request_id: server_common.RequestId[T]) -> T:
                 f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
                 f'({request_task.request_id}) is cancelled by another process.'
                 f'{colorama.Style.RESET_ALL}')
+    # print(request_task.get_return_value())
+
     return request_task.get_return_value()
 
 
