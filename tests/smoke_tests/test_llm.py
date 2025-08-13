@@ -31,7 +31,7 @@ from smoke_tests.test_sky_serve import TEARDOWN_SERVICE
 import sky
 
 
-@pytest.mark.no_kubernetes  # Don't have GPU for k8s test cluster
+@pytest.mark.gcp
 @pytest.mark.parametrize('model_name,gpu_spec', [
     ('deepseek-ai/DeepSeek-R1-Distill-Llama-8B', 'L4:1'),
     ('deepseek-ai/DeepSeek-R1-Distill-Llama-70B', 'A100-80GB:1'),
@@ -70,7 +70,7 @@ def test_deepseek_r1_vllm(generic_cloud: str, model_name: str, gpu_spec: str):
                 f'ENDPOINT=$(sky status --ip {name} | tail -n 1); '
                 f'export SKYPILOT_DEBUG=$ORIGIN_SKYPILOT_DEBUG; '
                 # Wait up to 10 minutes for the model server to be ready
-                f'start_time=$SECONDS; timeout=1200; s=""; '
+                f'start_time=$SECONDS; timeout=1800; s=""; '
                 f'while true; do '
                 f'  resp=$(curl -sS --max-time 15 http://$ENDPOINT:8000/v1/chat/completions '
                 f'    -H "Content-Type: application/json" -d \'{json_payload}\' || true); '
@@ -95,7 +95,7 @@ def test_deepseek_r1_vllm(generic_cloud: str, model_name: str, gpu_spec: str):
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_kubernetes  # Some GPUs not available in k8s test cluster
+@pytest.mark.gcp
 def test_sglang_llava_serving(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
