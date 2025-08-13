@@ -172,10 +172,7 @@ def status(
     clusters = backend_utils.get_clusters(refresh=refresh,
                                           cluster_names=cluster_names,
                                           all_users=all_users)
-    print(clusters)
-    return [
-        responses.StatusResponse.model_validate(cluster) for cluster in clusters
-    ]
+    return clusters
 
 
 def status_kubernetes(

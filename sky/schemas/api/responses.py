@@ -1,9 +1,10 @@
 """Responses for the API server."""
 
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import pydantic
 
+from sky import data
 from sky import models
 from sky.server import common
 from sky.utils import status_lib
@@ -98,6 +99,8 @@ class StatusResponse(ResponseBaseModel):
         'user_name': (str) user name of the cluster owner,
         'resources_str': (str) the resource string representation of the
             cluster,
+        'storage_mounts_metadata': (dict) storage mounts
+            metadata of the cluster
     }
     """
     name: str
@@ -115,3 +118,5 @@ class StatusResponse(ResponseBaseModel):
     user_hash: str
     user_name: str
     resources_str: str
+    # TODO(syang): add the type for storage_mounts_metadata
+    storage_mounts_metadata: Optional[Dict[str, Any]]
