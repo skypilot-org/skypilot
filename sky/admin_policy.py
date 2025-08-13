@@ -7,8 +7,8 @@ from typing import Optional
 import colorama
 import pydantic
 
+import sky
 from sky import exceptions
-from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -16,8 +16,6 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import requests
-
-    import sky
 else:
     requests = adaptors_common.LazyImport('requests')
 
@@ -93,7 +91,7 @@ class UserRequest:
     def decode(cls, body: str) -> 'UserRequest':
         user_request_body = _UserRequestBody.model_validate_json(body)
         return cls(
-            task=task_lib.Task.from_yaml_config(
+            task=sky.Task.from_yaml_config(
                 common_utils.read_yaml_all_str(user_request_body.task)[0]),
             skypilot_config=config_utils.Config.from_dict(
                 common_utils.read_yaml_all_str(
@@ -127,7 +125,7 @@ class MutatedUserRequest:
                original_request: UserRequest) -> 'MutatedUserRequest':
         mutated_user_request_body = _MutatedUserRequestBody.model_validate_json(
             mutated_user_request_body)
-        task = task_lib.Task.from_yaml_config(
+        task = sky.Task.from_yaml_config(
             common_utils.read_yaml_all_str(mutated_user_request_body.task)[0])
         # Some internal Task fields are not serialized. We need to manually
         # restore them from the original request.
