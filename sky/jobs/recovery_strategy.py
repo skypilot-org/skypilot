@@ -10,13 +10,13 @@ import traceback
 import typing
 from typing import Optional
 
-import sky
 from sky import backends
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky import dag as dag_lib
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
@@ -61,7 +61,7 @@ class StrategyExecutor:
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
-        self.dag = sky.Dag()
+        self.dag = dag_lib.Dag()
         self.dag.add(task)
         # For jobs submitted to a pool, the cluster name might change after each
         # recovery. Initially this is set to an empty string to indicate that no
