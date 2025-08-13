@@ -1,5 +1,6 @@
 import re
 import unittest
+import unittest.mock as mock
 import uuid
 
 import boto3
@@ -13,11 +14,10 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
 from sky.catalog import aws_catalog
+from sky.clouds.aws import AWS
 from sky.provision.aws import instance as aws_instance
 from sky.utils import env_options
 from sky.utils.db import db_utils
-from sky.clouds.aws import AWS
-import unittest.mock as mock
 
 
 @pytest.fixture
@@ -91,17 +91,25 @@ def test_aws_region_failover(enable_all_clouds, _mock_db_conn, mock_aws_backend,
         return mock_instances
 
     with moto.mock_aws():
-        with mock.patch.object(AWS, 'get_image_root_device_name', return_value='/dev/sda1'):
-            monkeypatch.setattr(aws_instance, '_create_instances', mock_create_instances)
+        with mock.patch.object(AWS,
+                               'get_image_root_device_name',
+                               return_value='/dev/sda1'):
+            monkeypatch.setattr(aws_instance, '_create_instances',
+                                mock_create_instances)
             task = sky.Task(run='echo hi')
-            task.set_resources(sky.Resources(infra='aws', instance_type='t2.micro'))
+            task.set_resources(
+                sky.Resources(infra='aws', instance_type='t2.micro'))
 
             with unittest.mock.patch.object(
-                cloud_vm_ray_backend.FailoverCloudErrorHandlerV2, '_aws_handler',
-                wraps=cloud_vm_ray_backend.FailoverCloudErrorHandlerV2._aws_handler
-            ) as mock_handler:
+                    cloud_vm_ray_backend.FailoverCloudErrorHandlerV2,
+                    '_aws_handler',
+                    wraps=cloud_vm_ray_backend.FailoverCloudErrorHandlerV2.
+                    _aws_handler) as mock_handler:
                 try:
-                    sky.stream_and_get(sky.launch(task, cluster_name='test-failover', dryrun=False))
+                    sky.stream_and_get(
+                        sky.launch(task,
+                                   cluster_name='test-failover',
+                                   dryrun=False))
                     assert mock_handler.called, "Failover handler was not called"
                     assert region_attempt_count[
                         'count'] > 1, "Did not try multiple regions"
