@@ -11,12 +11,12 @@ import typing
 from typing import Optional
 
 from sky import backends
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
-from sky import dag as dag_lib
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils

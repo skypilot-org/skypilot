@@ -5,13 +5,13 @@ import shlex
 import signal
 import tempfile
 import threading
+import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
 import colorama
 import filelock
 
-import sky
 from sky import backends
 from sky import exceptions
 from sky import execution
@@ -25,6 +25,7 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
+from sky.skylet import job_lib
 from sky.utils import admin_policy_utils
 from sky.utils import command_runner
 from sky.utils import common
@@ -34,6 +35,9 @@ from sky.utils import dag_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import sky
 
 logger = sky_logging.init_logger(__name__)
 
@@ -325,7 +329,7 @@ def up(
                                               [controller_job_id],
                                               stream_logs=False)
             controller_job_status = list(statuses.values())[0]
-            if controller_job_status == sky.JobStatus.PENDING:
+            if controller_job_status == job_lib.JobStatus.PENDING:
                 # Max number of services reached due to vCPU constraint.
                 # The controller job is pending due to ray job scheduling.
                 # We manually cancel the job here.
