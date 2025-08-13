@@ -6,7 +6,7 @@ import enum
 import math
 import time
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Union, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -652,7 +652,7 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
         """
         if not isinstance(self.target_qps_per_replica, dict):
             # Fallback to original logic if not instance-aware
-            if not self._warned_non_instance_aware_scale_down: # warn once
+            if not self._warned_non_instance_aware_scale_down:  # warn once
                 logger.warning(
                     'Instance-aware scale-down by QPS is disabled because '
                     'target_qps_per_replica is not a dict; falling back to '
@@ -662,7 +662,8 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
                 num_replicas_to_scale_down, replica_infos)
 
         # Create a list of (replica_info, target_qps) tuples
-        replica_qps_pairs: List[Tuple['replica_managers.ReplicaInfo', float]] = []
+        replica_qps_pairs: List[Tuple['replica_managers.ReplicaInfo',
+                                      float]] = []
 
         for info in replica_infos:
             # Include old-version replicas as well so they also get a target_qps

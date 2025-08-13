@@ -211,10 +211,11 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy,
         # Load is normalized by target QPS
         normalized_load = current_load / target_qps
 
-        logger.debug('InstanceAwareLeastLoadPolicy: Replica %s - GPU type: %s, '
-                     'current load: %s, target QPS: %s, normalized load: %s',
-                     replica_url, accelerator_type, current_load, target_qps,
-                     normalized_load)
+        logger.debug(
+            'InstanceAwareLeastLoadPolicy: Replica %s - GPU type: %s, '
+            'current load: %s, target QPS: %s, normalized load: %s',
+            replica_url, accelerator_type, current_load, target_qps,
+            normalized_load)
 
         return normalized_load
 
