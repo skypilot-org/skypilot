@@ -52,6 +52,17 @@ pip install pre-commit
 pre-commit install
 ```
 
+### Generating Python files from protobuf
+Whenever any protobuf file is changed (in `sky/schemas/proto`), run this to regenerate the Python files:
+```bash
+python -m grpc_tools.protoc \
+        --proto_path=sky/schemas/generated=sky/schemas/proto \
+        --python_out=. \
+        --grpc_python_out=. \
+        --pyi_out=. \
+        sky/schemas/proto/*.proto
+```
+
 ### Testing
 
 To run smoke tests (NOTE: Running all smoke tests launches ~20 clusters):

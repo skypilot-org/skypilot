@@ -30,6 +30,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server import versions
@@ -66,8 +67,8 @@ if typing.TYPE_CHECKING:
 
     import sky
     from sky import backends
+    from sky import catalog
     from sky import models
-    import sky.catalog
     from sky.provision.kubernetes import utils as kubernetes_utils
     from sky.skylet import job_lib
 else:
@@ -234,7 +235,7 @@ def list_accelerators(
     require_price: bool = True,
     case_sensitive: bool = True
 ) -> server_common.RequestId[Dict[str,
-                                  List['sky.catalog.common.InstanceTypeInfo']]]:
+                                  List['catalog.common.InstanceTypeInfo']]]:
     """Lists the names of all accelerators offered by Sky.
 
     This will include all accelerators offered by Sky, including those
@@ -2059,7 +2060,7 @@ def api_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def api_info() -> Dict[str, Any]:
+def api_info() -> responses.APIHealthResponse:
     """Gets the server's status, commit and version.
 
     Returns:
@@ -2084,7 +2085,7 @@ def api_info() -> Dict[str, Any]:
     """
     response = server_common.make_authenticated_request('GET', '/api/health')
     response.raise_for_status()
-    return response.json()
+    return responses.APIHealthResponse(**response.json())
 
 
 @usage_lib.entrypoint

@@ -6212,16 +6212,15 @@ def api_info():
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
     api_server_info = sdk.api_info()
-    api_server_user = api_server_info.get('user')
+    api_server_user = api_server_info.user
     if api_server_user is not None:
-        user = models.User(id=api_server_user['id'],
-                           name=api_server_user['name'])
+        user = api_server_user
     else:
         user = models.User.get_current_user()
     click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
-               f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '
-               f'commit: {api_server_info["commit"]}, '
-               f'version: {api_server_info["version"]}\n'
+               f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
+               f'commit: {api_server_info.commit}, '
+               f'version: {api_server_info.version}\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}User: {user.name} ({user.id})')
 
 

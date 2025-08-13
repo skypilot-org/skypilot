@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sky import sky_logging
 from sky.adaptors import runpod
 from sky.provision import docker_utils
-import sky.provision.runpod.api.commands as runpod_commands
+from sky.provision.runpod.api import commands as runpod_commands
 from sky.skylet import constants
 from sky.utils import common_utils
 
