@@ -68,7 +68,7 @@ available_node_types:
       ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
       # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
       BlockDeviceMappings:
-        - DeviceName: /dev/sda1
+        - DeviceName: {{root_device_name}}
           Ebs:
             VolumeSize: {{disk_size}}
             VolumeType: {{disk_tier}}
