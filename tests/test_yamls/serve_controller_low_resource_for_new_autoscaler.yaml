@@ -1,0 +1,5 @@
+serve:
+  controller:
+    resources:
+      cpus: 1
+      memory: 2

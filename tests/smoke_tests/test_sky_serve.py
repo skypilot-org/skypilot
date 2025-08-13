@@ -958,7 +958,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
-        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV_FOR_NEW_AUTOSCALER,
     )
     smoke_tests_utils.run_one_test(test)
 
