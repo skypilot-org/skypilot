@@ -1175,12 +1175,27 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
 # Based on testing, assume a running job process uses 350MB memory. We use the
 # same estimation for service controller process.
-PROC_MEMORY_MB = 350
+JOB_MEMORY_MB = 350
+# Monitoring process for service is 1GB. This is based on an old estimation but
+# we keep it here for now.
+# TODO(tian): Remeasure this.
+SERVE_MONITORING_MEMORY_MB = 1024
+# The ratio of service controller process to job process. We will treat each
+# service as SERVE_PROC_RATIO job processes.
+SERVE_PROC_RATIO = SERVE_MONITORING_MEMORY_MB / JOB_MEMORY_MB
 # Past 2000 simultaneous jobs, we become unstable.
 # See https://github.com/skypilot-org/skypilot/issues/4649.
 MAX_JOB_LIMIT = 2000
-# Number of ongoing launches launches allowed per CPU.
-LAUNCHES_PER_CPU = 4
+# Number of ongoing launches launches allowed per CPU, for managed jobs.
+JOB_LAUNCHES_PER_CPU = 4
+# Number of ongoing launches launches allowed per CPU, for services. This is
+# also based on an old estimation, but SKyServe indeed spawn a new process
+# for each launch operation, so it should be slightly more resources demanding
+# than managed jobs.
+SERVE_LAUNCHES_PER_CPU = 2
+# The ratio of service launch to job launch. This is inverted as the parallelism
+# is determined by 1 / LAUNCHES_PER_CPU.
+SERVE_LAUNCH_RATIO = JOB_LAUNCHES_PER_CPU / SERVE_LAUNCHES_PER_CPU
 
 # The _RESOURCES_LOCK should be held whenever we are checking the parallelism
 # control or updating the schedule_state of any job or service. Any code that
@@ -1197,24 +1212,25 @@ def get_resources_lock_path() -> str:
 
 @annotations.lru_cache(scope='request')
 def _get_job_parallelism() -> int:
-    proc_memory = PROC_MEMORY_MB * 1024 * 1024
-    job_limit = min(psutil.virtual_memory().total // proc_memory, MAX_JOB_LIMIT)
+    job_memory = JOB_MEMORY_MB * 1024 * 1024
+    job_limit = min(psutil.virtual_memory().total // job_memory, MAX_JOB_LIMIT)
     return max(job_limit, 1)
 
 
 @annotations.lru_cache(scope='request')
 def _get_launch_parallelism() -> int:
     cpus = os.cpu_count()
-    return cpus * LAUNCHES_PER_CPU if cpus is not None else 1
+    return cpus * JOB_LAUNCHES_PER_CPU if cpus is not None else 1
 
 
 def can_provision() -> bool:
-    num_provision = (serve_state.total_number_provisioning_replicas() +
-                     managed_job_state.get_num_launching_jobs())
+    num_provision = (
+        serve_state.total_number_provisioning_replicas() * SERVE_LAUNCH_RATIO +
+        managed_job_state.get_num_launching_jobs())
     return num_provision < _get_launch_parallelism()
 
 
 def can_start_new_process() -> bool:
-    num_procs = (serve_state.get_num_services() +
+    num_procs = (serve_state.get_num_services() * SERVE_PROC_RATIO +
                  managed_job_state.get_num_alive_jobs())
     return num_procs < _get_job_parallelism()
