@@ -38,7 +38,7 @@ def _get_git_commit():
 
 __commit__ = _get_git_commit()
 __version__ = '1.0.0-dev0'
-__root_dir__ = directory_utils.get_project_root_dir()
+__root_dir__ = directory_utils.get_sky_dir()
 
 
 # ---------------------- Proxy Configuration ---------------------- #
