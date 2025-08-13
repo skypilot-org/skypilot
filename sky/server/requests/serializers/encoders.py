@@ -52,7 +52,8 @@ def default_encoder(return_value: Any) -> Any:
 
 
 @register_encoder('status')
-def encode_status(clusters: List[responses.StatusResponse]) -> List[Dict[str, Any]]:
+def encode_status(
+        clusters: List[responses.StatusResponse]) -> List[Dict[str, Any]]:
     response = []
     for cluster in clusters:
         cluster['status'] = cluster['status'].value

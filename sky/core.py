@@ -173,8 +173,7 @@ def status(
                                           cluster_names=cluster_names,
                                           all_users=all_users)
     return [
-        responses.StatusResponse.model_validate(cluster)
-        for cluster in clusters
+        responses.StatusResponse.model_validate(cluster) for cluster in clusters
     ]
 
 

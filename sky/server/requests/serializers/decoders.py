@@ -51,13 +51,15 @@ def default_decode_handler(return_value: Any) -> Any:
 
 
 @register_decoders('status')
-def decode_status(return_value: List[Dict[str, Any]]) -> List[responses.StatusResponse]:
+def decode_status(
+        return_value: List[Dict[str, Any]]) -> List[responses.StatusResponse]:
     clusters = return_value
     response = []
     for cluster in clusters:
         cluster['handle'] = decode_and_unpickle(cluster['handle'])
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
-        cluster['storage_mounts_metadata'] = decode_and_unpickle(cluster['storage_mounts_metadata'])
+        cluster['storage_mounts_metadata'] = decode_and_unpickle(
+            cluster['storage_mounts_metadata'])
         response.append(responses.StatusResponse.model_validate(cluster))
     return response
 
