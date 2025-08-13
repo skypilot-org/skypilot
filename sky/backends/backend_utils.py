@@ -18,7 +18,6 @@ from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
 import uuid
 
 import colorama
-import grpc
 from packaging import version
 import psutil
 from typing_extensions import Literal
@@ -64,6 +63,7 @@ from sky.utils import ux_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
+    import grpc
     import requests
     from requests import adapters
     from requests.packages.urllib3.util import retry as retry_lib
@@ -82,6 +82,7 @@ else:
     adapters = adaptors_common.LazyImport('requests.adapters')
     retry_lib = adaptors_common.LazyImport(
         'requests.packages.urllib3.util.retry')
+    grpc = adaptors_common.LazyImport('grpc')
 
 logger = sky_logging.init_logger(__name__)
 

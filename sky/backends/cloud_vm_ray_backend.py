@@ -21,7 +21,6 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
 import colorama
-import grpc
 import psutil
 import yaml
 
@@ -40,6 +39,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
@@ -51,8 +51,6 @@ from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.schemas.generated import autostopv1_pb2
-from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -81,7 +79,17 @@ from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
+    import grpc
+
     from sky import dag
+    from sky.schemas.generated import autostopv1_pb2
+    from sky.schemas.generated import autostopv1_pb2_grpc
+else:
+    grpc = adaptors_common.LazyImport('grpc')
+    autostopv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.autostopv1_pb2')
+    autostopv1_pb2_grpc = adaptors_common.LazyImport(
+        'sky.schemas.generated.autostopv1_pb2_grpc')
 
 Path = str
 
@@ -2617,7 +2625,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                                     cluster_config_file)
         self.docker_user = docker_user
 
-    def get_grpc_channel(self) -> grpc.Channel:
+    def get_grpc_channel(self) -> 'grpc.Channel':
         if self.skylet_ssh_tunnel is None:
             self.open_and_update_skylet_tunnel()
         assert self.skylet_ssh_tunnel is not None
@@ -2820,7 +2828,7 @@ class LocalResourcesHandle(CloudVmRayResourceHandle):
 class SkyletClient:
     """The client to interact with a remote cluster through Skylet."""
 
-    def __init__(self, channel: grpc.Channel):
+    def __init__(self, channel: 'grpc.Channel'):
         self._autostop_stub = autostopv1_pb2_grpc.AutostopServiceStub(channel)
 
     def set_autostop(
