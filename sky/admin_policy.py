@@ -7,13 +7,13 @@ from typing import Optional
 import colorama
 import pydantic
 
-import sky
 from sky import exceptions
 from sky.adaptors import common as adaptors_common
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+from sky import task as task_lib
 
 if typing.TYPE_CHECKING:
     import requests
@@ -74,8 +74,8 @@ class UserRequest:
         request_options: Request options. It is None for jobs and services.
         at_client_side: Is the request intercepted by the policy at client-side?
     """
-    task: 'sky.Task'
-    skypilot_config: 'sky.Config'
+    task: 'task_lib.Task'
+    skypilot_config: 'config_utils.Config'
     request_options: Optional['RequestOptions'] = None
     at_client_side: bool = False
 
@@ -92,7 +92,7 @@ class UserRequest:
     def decode(cls, body: str) -> 'UserRequest':
         user_request_body = _UserRequestBody.model_validate_json(body)
         return cls(
-            task=sky.Task.from_yaml_config(
+            task=task_lib.Task.from_yaml_config(
                 yaml_utils.read_yaml_all_str(user_request_body.task)[0]),
             skypilot_config=config_utils.Config.from_dict(
                 yaml_utils.read_yaml_all_str(
@@ -112,8 +112,8 @@ class _MutatedUserRequestBody(pydantic.BaseModel):
 class MutatedUserRequest:
     """Mutated user request."""
 
-    task: 'sky.Task'
-    skypilot_config: 'sky.Config'
+    task: 'task_lib.Task'
+    skypilot_config: 'config_utils.Config'
 
     def encode(self) -> str:
         return _MutatedUserRequestBody(
@@ -126,7 +126,7 @@ class MutatedUserRequest:
                original_request: UserRequest) -> 'MutatedUserRequest':
         mutated_user_request_body = _MutatedUserRequestBody.model_validate_json(
             mutated_user_request_body)
-        task = sky.Task.from_yaml_config(
+        task = task_lib.Task.from_yaml_config(
             yaml_utils.read_yaml_all_str(mutated_user_request_body.task)[0])
         # Some internal Task fields are not serialized. We need to manually
         # restore them from the original request.
