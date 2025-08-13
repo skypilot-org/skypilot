@@ -74,7 +74,7 @@ def test_deepseek_r1_vllm(generic_cloud: str, model_name: str, gpu_spec: str):
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_kubernetes  # GPU not available in k8s test cluster
+@pytest.mark.no_kubernetes  # Some GPUs not available in k8s test cluster
 def test_sglang_llama2_serving(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
