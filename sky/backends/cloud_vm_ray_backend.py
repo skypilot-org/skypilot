@@ -85,6 +85,7 @@ if typing.TYPE_CHECKING:
     from sky.schemas.generated import autostopv1_pb2
     from sky.schemas.generated import autostopv1_pb2_grpc
 else:
+    # To avoid requiring grpcio to be installed on the client side.
     grpc = adaptors_common.LazyImport('grpc')
     autostopv1_pb2 = adaptors_common.LazyImport(
         'sky.schemas.generated.autostopv1_pb2')
