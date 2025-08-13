@@ -43,7 +43,6 @@ import requests as requests_lib
 from rich import progress as rich_progress
 import yaml
 
-import sky
 from sky import backends
 from sky import catalog
 from sky import clouds
