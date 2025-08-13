@@ -653,6 +653,10 @@ class Task:
         if config.get('workdir') is not None:
             config['workdir'] = _fill_in_env_vars(config['workdir'],
                                                   env_and_secrets)
+        # Fill in any Task.envs into event_callback
+        if isinstance(config.get('event_callback'), list):
+            config['event_callback'] = _fill_in_env_vars(
+                config['event_callback'], env_and_secrets)
 
         task = Task(
             config.pop('name', None),
