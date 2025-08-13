@@ -32,20 +32,22 @@ There are two broad ways to use multiple Kubernetes clusters with SkyPilot. You 
 Using "exec"-based auth
 ^^^^^^^^^^^^^^^^^^^^^^^
 For managed-Kubernetes like GKE and EKS, a typical local ``~/.kube/config`` file will already contain exec-based auth information under ``users``:
+
 .. code-block:: yaml
 
+    apiVersion: v1
     contexts:
-    - name: <some context>
-        context:
-          cluster: <some cluster>
-          user: <some user>
+    - context:
+        cluster: <some cluster>
+        user: <some user>
+      name: <some context>          
     ...
     users:
     - name: <some user>
-        user:
-          exec:
-            apiVersion: client.authentication.k8s.io/v1beta1
-            command: gke-gcloud-auth-plugin # this is the exec-auth binary for GKE
+      user:
+        exec:
+          apiVersion: client.authentication.k8s.io/v1beta1
+          command: gke-gcloud-auth-plugin # this is the exec-auth binary for GKE
     ...
 
 
