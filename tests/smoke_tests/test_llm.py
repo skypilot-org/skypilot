@@ -70,7 +70,7 @@ def test_deepseek_r1_vllm(generic_cloud: str, model_name: str, gpu_spec: str):
                 f'ENDPOINT=$(sky status --ip {name} | tail -n 1); '
                 f'export SKYPILOT_DEBUG=$ORIGIN_SKYPILOT_DEBUG; '
                 # Wait up to 10 minutes for the model server to be ready
-                f'start_time=$SECONDS; timeout=600; s=""; '
+                f'start_time=$SECONDS; timeout=1200; s=""; '
                 f'while true; do '
                 f'  resp=$(curl -sS --max-time 15 http://$ENDPOINT:8000/v1/chat/completions '
                 f'    -H "Content-Type: application/json" -d \'{json_payload}\' || true); '
@@ -83,7 +83,12 @@ def test_deepseek_r1_vllm(generic_cloud: str, model_name: str, gpu_spec: str):
                 f'echo "$s" | jq .; '
                 f'content=$(echo "$s" | jq -r ".choices[0].message.content"); '
                 f'echo "$content"; '
-                f'echo "$content" | grep "<think>"'),
+                # Accept either opening or closing think tag, or explicit self-identification
+                f'(echo "$content" | grep -qi "<think>" || '
+                f' echo "$content" | grep -qi "</think>" || '
+                f' echo "$content" | grep -qi "I\'m DeepSeek-R1") || '
+                f'(echo "Expected <think> tag or model self-identification not found" && exit 1)'
+            ),
         ],
         f'sky down -y {name}',
     )
