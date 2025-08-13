@@ -63,9 +63,6 @@ LOW_RESOURCE_PARAM = {
 LOW_CONTROLLER_RESOURCE_ENV = {
     skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/test_yamls/low_resource_sky_config.yaml',
 }
-LOW_CONTROLLER_RESOURCE_ENV_FOR_NEW_AUTOSCALER = {
-    skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/test_yamls/serve_controller_low_resource_for_new_autoscaler.yaml',
-}
 LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'jobs': {
         'controller': {
