@@ -235,7 +235,7 @@ Example:
   api_server:
     requests_retention_hours: -1 # Disable requests GC
 
-.. _config-yaml-jobs:
+.. _config-yaml-api-server-cluster-event-retention-hours:
 
 ``api_server.cluster_event_retention_hours``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -244,7 +244,7 @@ Retention period for cluster events in hours (optional). Set to a negative value
 
 Cluster event GC will remove cluster event entries in `sky status -v`, i.e., the logs and status of the cluster events.
 
-Default: ``24`` (1 day).
+Default: ``24.0`` (1 day).
 
 Example:
 
