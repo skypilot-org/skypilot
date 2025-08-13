@@ -142,6 +142,8 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
+@mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+            return_value='/dev/sda1')
 @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
@@ -178,7 +180,8 @@ def test_aws_make_deploy_variables(*mocks) -> None:
         'docker_login_config': None,
         'docker_run_options': [],
         'initial_setup_commands': [],
-        'zones': 'fake-zone'
+        'zones': 'fake-zone',
+        'root_device_name': '/dev/sda1'
     }
 
     # test using defaults
@@ -226,6 +229,8 @@ def test_aws_make_deploy_variables(*mocks) -> None:
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
+@mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+            return_value='/dev/xvda')
 @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
@@ -262,7 +267,8 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
         'docker_login_config': None,
         'docker_run_options': [],
         'initial_setup_commands': [],
-        'zones': 'fake-zone'
+        'zones': 'fake-zone',
+        'root_device_name': '/dev/xvda'
     }
 
     # test using defaults
