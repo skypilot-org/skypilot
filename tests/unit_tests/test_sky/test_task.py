@@ -4,7 +4,7 @@ from unittest import mock
 
 import pytest
 
-import sky
+from sky import resources as resources_lib
 from sky import exceptions
 from sky import task
 
@@ -537,8 +537,6 @@ def test_from_yaml_config_env_and_secrets_overrides_independent():
 
 def test_docker_login_config_all_in_envs_or_secrets():
     """Test Docker login config when all variables are in envs OR all in secrets."""
-    import sky
-    from sky.skylet import constants
 
     # Test 1: All in envs (should work)
     task_obj1 = task.Task(name='test-docker-all-envs',
@@ -550,7 +548,7 @@ def test_docker_login_config_all_in_envs_or_secrets():
                           })
 
     # Verify Docker config validation passes
-    resources = sky.Resources(image_id='docker:nginx:latest')
+    resources = resources_lib.Resources(image_id='docker:nginx:latest')
     task_obj1.set_resources(resources)  # Should not raise an error
 
     # Test 2: All in secrets (should work)
@@ -562,7 +560,7 @@ def test_docker_login_config_all_in_envs_or_secrets():
                               'SKYPILOT_DOCKER_PASSWORD': 'secret-password'
                           })
 
-    task_obj2.set_resources(sky.Resources(image_id='docker:ubuntu:latest'))
+    task_obj2.set_resources(resources_lib.Resources(image_id='docker:ubuntu:latest'))
 
     # Test 3: Split across envs and secrets should fail
     with pytest.raises(
@@ -576,7 +574,7 @@ def test_docker_login_config_all_in_envs_or_secrets():
                 'SKYPILOT_DOCKER_SERVER': 'registry.com'
             },
             secrets={'SKYPILOT_DOCKER_PASSWORD': 'secret-password'})
-        task_obj3.set_resources(sky.Resources())
+        task_obj3.set_resources(resources_lib.Resources())
 
     # Test 4: Missing variables in envs should fail
     with pytest.raises(
@@ -590,7 +588,7 @@ def test_docker_login_config_all_in_envs_or_secrets():
                 'SKYPILOT_DOCKER_SERVER': 'registry.com'
                 # Missing SKYPILOT_DOCKER_PASSWORD
             })
-        task_obj4.set_resources(sky.Resources())
+        task_obj4.set_resources(resources_lib.Resources())
 
     # Test 5: Missing variables in secrets should fail
     with pytest.raises(
@@ -603,18 +601,16 @@ def test_docker_login_config_all_in_envs_or_secrets():
                 'SKYPILOT_DOCKER_USERNAME': 'user',
                 # Missing SKYPILOT_DOCKER_PASSWORD and SKYPILOT_DOCKER_SERVER
             })
-        task_obj5.set_resources(sky.Resources())
+        task_obj5.set_resources(resources_lib.Resources())
 
 
 def test_docker_login_config_update_methods():
     """Test Docker login config validation when using update_envs and update_secrets."""
-    import sky
-
     # Test 1: Add complete Docker config to envs all at once - should work
     task_obj = task.Task(name='test-docker-update-envs', run='echo hello')
 
     # Set resources first (no Docker config yet)
-    task_obj.set_resources(sky.Resources())
+    task_obj.set_resources(resources_lib.Resources())
 
     # Add all Docker vars to envs at once - should work
     task_obj.update_envs({
@@ -631,7 +627,7 @@ def test_docker_login_config_update_methods():
 
     # Test 2: Add complete Docker config to secrets all at once - should work
     task_obj2 = task.Task(name='test-docker-update-secrets', run='echo hello')
-    task_obj2.set_resources(sky.Resources())
+    task_obj2.set_resources(resources_lib.Resources())
 
     # Add all Docker vars to secrets at once - should work
     task_obj2.update_secrets({
@@ -642,7 +638,7 @@ def test_docker_login_config_update_methods():
 
     # Test 3: Updating incomplete Docker config should fail
     task_obj3 = task.Task(name='test-incomplete', run='echo hello')
-    task_obj3.set_resources(sky.Resources())
+    task_obj3.set_resources(resources_lib.Resources())
 
     # Add only some Docker vars - this should fail
     with pytest.raises(
@@ -657,8 +653,6 @@ def test_docker_login_config_update_methods():
 
 def test_docker_login_config_no_mixed_envs_secrets():
     """Test that Docker variables cannot be mixed between envs and secrets."""
-    import sky
-
     # This should fail because Docker variables are split between envs and secrets
     with pytest.raises(
             ValueError,
@@ -671,7 +665,7 @@ def test_docker_login_config_no_mixed_envs_secrets():
                 'SKYPILOT_DOCKER_SERVER': 'env-registry.com'
             },
             secrets={'SKYPILOT_DOCKER_PASSWORD': 'secret-password'})
-        task_obj.set_resources(sky.Resources(image_id='docker:ubuntu:latest'))
+        task_obj.set_resources(resources_lib.Resources(image_id='docker:ubuntu:latest'))
 
 
 def make_mock_volume_config(name='vol1',
