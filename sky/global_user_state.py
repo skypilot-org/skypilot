@@ -812,6 +812,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+    provision_log_path = get_cluster_provision_log_path(cluster_name)
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # usage_intervals is not None and not empty
@@ -821,6 +822,16 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
             end_time = int(time.time())
             usage_intervals.append((start_time, end_time))
             _set_cluster_usage_intervals(cluster_hash, usage_intervals)
+
+        if provision_log_path:
+            assert cluster_hash is not None, cluster_name
+            session.query(cluster_history_table).filter_by(
+                cluster_hash=cluster_hash).filter(
+                    cluster_history_table.c.provision_log_path.is_(None)
+                ).update({
+                    cluster_history_table.c.provision_log_path:
+                        provision_log_path
+                })
 
         if terminate:
             session.query(cluster_table).filter_by(name=cluster_name).delete()
