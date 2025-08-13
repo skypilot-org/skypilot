@@ -34,7 +34,7 @@ import sky
 @pytest.mark.gcp
 @pytest.mark.parametrize('model_name,gpu_spec', [
     ('deepseek-ai/DeepSeek-R1-Distill-Llama-8B', 'L4:1'),
-    ('deepseek-ai/DeepSeek-R1-Distill-Llama-70B', 'A100-80GB:1'),
+    ('deepseek-ai/DeepSeek-R1-Distill-Llama-70B', 'A100-80GB:2'),
 ])
 def test_deepseek_r1_vllm(generic_cloud: str, model_name: str, gpu_spec: str):
     name = smoke_tests_utils.get_cluster_name()
