@@ -2071,7 +2071,6 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
 
             cloud_name = repr(handle.launched_resources.cloud).lower()
-            attempted_ip_refresh = False
             for i in range(5):
                 try:
                     ready_head, ready_workers, output, stderr = (
@@ -2084,29 +2083,19 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                         # new IP addresses, making our cached IPs stale.
                         # Try refreshing (even though it's slow) cached IPs
                         # and retry.
-                        if not attempted_ip_refresh and (
-                                e.detailed_reason is not None and
+                        if (e.detailed_reason is not None and
                                 _SSH_CONNECTION_TIMED_OUT_PATTERN.search(
-                                    e.detailed_reason.strip())):
-                            logger.debug(
-                                f'SSH connection timed out ({cluster_name!r}). '
-                                'Refreshing cached IPs and retrying.')
-                            try:
-                                runners = handle.get_command_runners(
-                                    force_cached=False)
-                                if not runners:
-                                    raise exceptions.FetchClusterInfoError(
-                                        reason=exceptions.FetchClusterInfoError.
-                                        Reason.HEAD)
-                                head_runner = runners[0]
-                                attempted_ip_refresh = True
-                                time.sleep(1)
-                                continue
-                            except Exception as refresh_exc:  # pylint: disable=broad-except
-                                logger.debug(
-                                    f'Refreshing cached IPs ({cluster_name!r}) '
-                                    f'failed: {common_utils.format_exception(refresh_exc)}'
-                                )
+                                    e.detailed_reason.strip()) is not None):
+                            yellow = colorama.Fore.YELLOW
+                            bright = colorama.Style.BRIGHT
+                            reset = colorama.Style.RESET_ALL
+                            ux_utils.console_newline()
+                            logger.warning(
+                                f'{yellow}SSH connection timed out despite all nodes '
+                                f'being up ({cluster_name!r}). '
+                                f'If the cluster was restarted manually, try running: '
+                                f'{reset}{bright}sky start -f {cluster_name}{reset} '
+                                f'{yellow}to recover from INIT status.{reset}')
                         raise e
                     # We retry for kubernetes because coreweave can have a
                     # transient network issue.

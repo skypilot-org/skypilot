@@ -346,9 +346,13 @@ def test_aws_manual_restart_recovery():
                  f'aws ec2 wait instance-running --region {region} '
                  f'--instance-ids $id'),
                 skip_remote_server_check=True),
-            # Status refresh should refresh the IP address of the cluster,
-            # as it was restarted manually, which changes the IP address.
-            f'sky status -r {name} | grep -i "Refreshing cached IPs"',
+            # Status refresh should time out, as the restarted
+            # instance would get a new IP address.
+            # We should see a warning message on how to recover
+            # from this state.
+            f'sky status -r {name} | grep -i "SSH connection timed out" | grep -i "try running: sky start" | grep -i "to recover from INIT status."',
+            # Recover the cluster.
+            f'sky start -f {name}',
             # Wait for the cluster to be up.
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
