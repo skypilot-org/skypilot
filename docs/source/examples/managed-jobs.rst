@@ -498,7 +498,7 @@ To specify the number of workers in the pool, use the :code:`workers` field unde
 When creating a pool, the :code:`run` section is ignored.
 
 
-To create a pool, use the following command:
+To create a pool, use `sky jobs pool apply`:
 
 .. code-block:: console
 
@@ -550,7 +550,7 @@ To submit jobs to the pool, create a workload YAML file:
   run: |
     nvidia-smi
 
-Notice that the :code:`resources` specified in the job YAML should match those used in the pool YAML. Then, use the following command to submit jobs to the pool:
+Notice that the :code:`resources` specified in the job YAML should match those used in the pool YAML. Then, use ``sky jobs launch -p <pool-name>` to submit jobs to the pool:
 
 .. code-block:: console
 
@@ -646,7 +646,7 @@ There are several things to note when submitting to a pool:
 - The :code:`resources` requirements are still respected. This should be the same as the ones used in the pool YAML.
 - The :code:`run` command is executed for the job.
 
-Monitoring job status
+Monitor job statuses
 ~~~~~~~~~~~~~~~~~~~~~
 
 You can use the job page in the dashboard to monitor the job status.
@@ -716,7 +716,7 @@ Pools will automatically detect changes in the worker configuration. If only the
 Terminate a pool
 ~~~~~~~~~~~~~~~~
 
-After usage, the pool can be terminated with the following command:
+After usage, the pool can be terminated with ``sky jobs pool down``:
 
 .. code-block:: console
 
