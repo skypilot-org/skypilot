@@ -468,7 +468,7 @@ This design enables **efficient job launches** for large batches of work while s
 
 .. tip::
 
-  To get started with Worker Pool, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
+  To get started with pools, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
 
 Quick tour: LLM batch inference
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
