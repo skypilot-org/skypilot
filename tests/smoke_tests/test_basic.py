@@ -330,7 +330,7 @@ def test_aws_manual_restart_recovery():
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=120),
+                timeout=180),
             # Wait for the instance state to be updated on AWS' side.
             'sleep 30',
             # Restart the cluster manually.
