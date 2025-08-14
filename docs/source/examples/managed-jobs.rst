@@ -502,7 +502,7 @@ To create a pool, use :code:`sky jobs pool apply`:
 
 .. code-block:: console
 
-  $ sky jobs pool apply --pool gpu-pool pool.yaml
+  $ sky jobs pool apply -p gpu-pool pool.yaml
   YAML to run: pool.yaml
   Pool spec:
   Worker policy:  Fixed-size (3 workers)
@@ -550,11 +550,11 @@ To submit jobs to the pool, create a workload YAML file:
   run: |
     nvidia-smi
 
-Notice that the :code:`resources` specified in the job YAML should match those used in the pool YAML. Then, use :code:`sky jobs launch --pool <pool-name>` to submit jobs to the pool:
+Notice that the :code:`resources` specified in the job YAML should match those used in the pool YAML. Then, use :code:`sky jobs launch -p <pool-name>` to submit jobs to the pool:
 
 .. code-block:: console
 
-  $ sky jobs launch --pool gpu-pool workload.yaml
+  $ sky jobs launch -p gpu-pool workload.yaml
   YAML to run: workload.yaml
   Submitting to pool 'gpu-pool' with 1 job.
   Managed job 'simple-workload' will be launched on (estimated):
@@ -621,7 +621,7 @@ Use the following command to submit them to the pool:
 
 .. code-block:: console
 
-  $ sky jobs launch --pool gpu-pool --num-jobs 10 batch-workload.yaml
+  $ sky jobs launch -p gpu-pool --num-jobs 10 batch-workload.yaml
   YAML to run: batch-workload.yaml
   Submitting to pool 'gpu-pool' with 10 jobs.
   Managed job 'batch-workload' will be launched on (estimated):
@@ -672,7 +672,7 @@ The **Worker Details** section displays the current resource summary of the pool
 
 .. tip::
 
-  You can use :code:`sky jobs cancel --pool gpu-pool` to cancel all jobs currently running or pending on the pool.
+  You can use :code:`sky jobs cancel -p gpu-pool` to cancel all jobs currently running or pending on the pool.
 
 Update a pool
 ~~~~~~~~~~~~~
@@ -700,7 +700,7 @@ You can update the pool configuration with the following command:
 
 .. code-block:: console
 
-  $ sky jobs pool apply --pool gpu-pool new-pool.yaml
+  $ sky jobs pool apply -p gpu-pool new-pool.yaml
 
 The :code:`sky jobs pool apply` command can be used to update the configuration of an existing pool with the same name.  
 In this example, it updates the number of workers in the pool to 10.  
