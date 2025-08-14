@@ -640,7 +640,6 @@ Use the following command to submit them to the pool:
   ├── To stream controller logs:          sky jobs logs --controller <job-id>
   └── To cancel all jobs on the pool:     sky jobs cancel --pool gpu-pool
 
-All of the jobs will be launched in parallel.
 Note that the maximum concurrency is limited by the number of workers in the pool.
 To enable more jobs to run simultaneously, increase the number of workers when creating the pool.
 
