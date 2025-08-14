@@ -886,8 +886,6 @@ def tail_provision_logs(cluster_name: str,
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
-    request_id: server_common.RequestId[int] = server_common.get_request_id(
-        response)
     # Log request is idempotent when tail is 0, thus can resume previous
     # streaming point on retry.
     # request_id=None here because /provision_logs does not create an async
@@ -895,8 +893,8 @@ def tail_provision_logs(cluster_name: str,
     # violate the stream_response doc warning about None in multi-user
     # environments: we are not asking stream_response to select “the latest
     # request”. We already have the HTTP response to stream; request_id=None
-    # merely disables the follow-up GET. It is also necessary for --no-follow 
-    # to return cleanly after printing the tailed lines. If we provided a 
+    # merely disables the follow-up GET. It is also necessary for --no-follow
+    # to return cleanly after printing the tailed lines. If we provided a
     # non-None request_id here, the get(request_id) in stream_response(
     # would fail since /provision_logs does not create a request record.
     stream_response(request_id=None,
