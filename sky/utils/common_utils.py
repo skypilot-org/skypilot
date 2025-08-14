@@ -1,6 +1,7 @@
 """Utils shared between all of sky"""
 
 import difflib
+import enum
 import functools
 import getpass
 import hashlib
@@ -53,6 +54,25 @@ _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 _VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 
 logger = sky_logging.init_logger(__name__)
+
+
+class ProcessStatus(enum.Enum):
+    """Process status."""
+
+    # The process is scheduled to run, but not started yet.
+    SCHEDULED = 'SCHEDULED'
+
+    # The process is running
+    RUNNING = 'RUNNING'
+
+    # The process is finished and succeeded
+    SUCCEEDED = 'SUCCEEDED'
+
+    # The process is interrupted
+    INTERRUPTED = 'INTERRUPTED'
+
+    # The process failed
+    FAILED = 'FAILED'
 
 
 @annotations.lru_cache(scope='request')

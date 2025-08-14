@@ -17,7 +17,7 @@ import resource
 import shutil
 import sys
 import threading
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple
+from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
@@ -42,6 +42,7 @@ from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
@@ -791,8 +792,6 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     ctx.override_envs(validate_body.env_vars)
 
     def validate_dag(dag: dag_utils.dag_lib.Dag):
-        # Resolve the volumes before admin policy and validation.
-        dag.resolve_and_validate_volumes()
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
@@ -801,6 +800,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         with admin_policy_utils.apply_and_use_config_in_current_request(
                 dag,
                 request_options=validate_body.get_request_options()) as dag:
+            dag.resolve_and_validate_volumes()
             # Skip validating workdir and file_mounts, as those need to be
             # validated after the files are uploaded to the SkyPilot API server
             # with `upload_mounts_to_api_server`.
@@ -1531,8 +1531,12 @@ async def api_status(
         return encoded_request_tasks
 
 
-@app.get('/api/health')
-async def health(request: fastapi.Request) -> Dict[str, Any]:
+@app.get(
+    '/api/health',
+    # response_model_exclude_unset omits unset fields
+    # in the response JSON.
+    response_model_exclude_unset=True)
+async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
     Returns:
@@ -1570,7 +1574,8 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
             # - There is no harm when an malicious client calls /api/health
             #   without authentication since no sensitive information is
             #   returned.
-            return {'status': common.ApiServerStatus.HEALTHY}
+            return responses.APIHealthResponse(
+                status=common.ApiServerStatus.HEALTHY,)
         # TODO(aylei): remove this after min_compatible_api_version >= 14.
         if client_version < 14:
             # For Client with API version < 14, the NEEDS_AUTH status is not
@@ -1579,19 +1584,19 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
                                         detail='Authentication required')
 
     logger.debug(f'Health endpoint: request.state.auth_user = {user}')
-    return {
-        'status': server_status,
+    return responses.APIHealthResponse(
+        status=server_status,
         # Kept for backward compatibility, clients before 0.11.0 will read this
         # field to check compatibility and hint the user to upgrade the CLI.
         # TODO(aylei): remove this field after 0.13.0
-        'api_version': str(server_constants.API_VERSION),
-        'version': sky.__version__,
-        'version_on_disk': common.get_skypilot_version_on_disk(),
-        'commit': sky.__commit__,
-        'user': user.to_dict() if user is not None else None,
-        'basic_auth_enabled': os.environ.get(
-            constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
-    }
+        api_version=str(server_constants.API_VERSION),
+        version=sky.__version__,
+        version_on_disk=common.get_skypilot_version_on_disk(),
+        commit=sky.__commit__,
+        basic_auth_enabled=os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
+                                          'false').lower() == 'true',
+        user=user if user is not None else None,
+    )
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
@@ -1809,6 +1814,9 @@ if __name__ == '__main__':
             global_tasks.append(background.create_task(metrics_server.serve()))
         global_tasks.append(
             background.create_task(requests_lib.requests_gc_daemon()))
+        global_tasks.append(
+            background.create_task(
+                global_user_state.cluster_event_retention_daemon()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)

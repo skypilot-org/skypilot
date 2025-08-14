@@ -4471,8 +4471,8 @@ def jobs_launch(
         if print_setup_fm_warning:
             click.secho(
                 f'{colorama.Fore.YELLOW}setup/file_mounts/storage_mounts'
-                ' will be ignored in pool. To update a pool, please '
-                f'use `sky pool apply {pool} pool.yaml`. '
+                ' will be ignored when submit jobs to pool. To update a pool, '
+                f'please use `sky jobs pool apply {pool} new-pool.yaml`. '
                 f'{colorama.Style.RESET_ALL}')
 
     # Optimize info is only show if _need_confirmation.
@@ -4786,7 +4786,7 @@ def pool():
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@click.option('--pool-name',
+@click.option('--pool',
               '-p',
               default=None,
               type=str,
@@ -4808,7 +4808,7 @@ def pool():
 @usage_lib.entrypoint
 def jobs_pool_apply(
     pool_yaml: Tuple[str, ...],
-    pool_name: Optional[str],
+    pool: Optional[str],  # pylint: disable=redefined-outer-name
     workdir: Optional[str],
     infra: Optional[str],
     cloud: Optional[str],
@@ -4841,11 +4841,11 @@ def jobs_pool_apply(
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
-    if pool_name is None:
-        pool_name = serve_lib.generate_service_name(pool=True)
+    if pool is None:
+        pool = serve_lib.generate_service_name(pool=True)
 
     task = _generate_task_with_service(
-        service_name=pool_name,
+        service_name=pool,
         service_yaml_args=pool_yaml,
         workdir=workdir,
         cloud=cloud,
@@ -4882,7 +4882,7 @@ def jobs_pool_apply(
         dag.add(task)
 
     request_id = managed_jobs.pool_apply(task,
-                                         pool_name,
+                                         pool,
                                          mode=serve_lib.UpdateMode(mode),
                                          _need_confirmation=not yes)
     _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
@@ -5120,7 +5120,7 @@ def _handle_serve_logs(
 @usage_lib.entrypoint
 # TODO(tian): Add default argument for this CLI if none of the flags are
 # specified.
-def pool_logs(
+def jobs_pool_logs(
     pool_name: str,
     follow: bool,
     controller: bool,
@@ -6033,8 +6033,11 @@ def api_logs(request_id: Optional[str], server_logs: bool,
     if request_id is not None and log_path is not None:
         raise click.BadParameter(
             'Only one of request ID and log path can be provided.')
-    sdk.stream_and_get(server_common.RequestId[None](request_id), log_path,
-                       tail)
+    # Only wrap request_id when it is provided; otherwise pass None so the
+    # server accepts log_path-only streaming.
+    req_id = (server_common.RequestId[None](request_id)
+              if request_id is not None else None)
+    sdk.stream_and_get(req_id, log_path, tail, follow=follow)
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
@@ -6173,16 +6176,15 @@ def api_info():
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
     api_server_info = sdk.api_info()
-    api_server_user = api_server_info.get('user')
+    api_server_user = api_server_info.user
     if api_server_user is not None:
-        user = models.User(id=api_server_user['id'],
-                           name=api_server_user['name'])
+        user = api_server_user
     else:
         user = models.User.get_current_user()
     click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
-               f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '
-               f'commit: {api_server_info["commit"]}, '
-               f'version: {api_server_info["version"]}\n'
+               f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
+               f'commit: {api_server_info.commit}, '
+               f'version: {api_server_info.version}\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}User: {user.name} ({user.id})')
 
 

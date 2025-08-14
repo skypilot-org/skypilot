@@ -11,7 +11,6 @@ import uuid
 import colorama
 import filelock
 
-import sky
 from sky import backends
 from sky import exceptions
 from sky import execution
@@ -25,6 +24,7 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
+from sky.skylet import job_lib
 from sky.utils import admin_policy_utils
 from sky.utils import command_runner
 from sky.utils import common
@@ -39,7 +39,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 def _rewrite_tls_credential_paths_and_get_tls_env_vars(
-        service_name: str, task: 'sky.Task') -> Dict[str, Any]:
+        service_name: str, task: 'task_lib.Task') -> Dict[str, Any]:
     """Rewrite the paths of TLS credentials in the task.
 
     Args:
@@ -103,7 +103,7 @@ def _get_service_record(
 
 
 def up(
-    task: 'sky.Task',
+    task: 'task_lib.Task',
     service_name: Optional[str] = None,
     pool: bool = False,
 ) -> Tuple[str, str]:
@@ -321,7 +321,7 @@ def up(
                                               [controller_job_id],
                                               stream_logs=False)
             controller_job_status = list(statuses.values())[0]
-            if controller_job_status == sky.JobStatus.PENDING:
+            if controller_job_status == job_lib.JobStatus.PENDING:
                 # Max number of services reached due to vCPU constraint.
                 # The controller job is pending due to ray job scheduling.
                 # We manually cancel the job here.
@@ -370,10 +370,10 @@ def up(
                 f'\n📋 Useful Commands'
                 f'\n{ux_utils.INDENT_SYMBOL}To submit jobs to the pool:\t'
                 f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
-                f'<run-command>{ux_utils.RESET_BOLD}'
+                f'<yaml_file>{ux_utils.RESET_BOLD}'
                 f'\n{ux_utils.INDENT_SYMBOL}To submit multiple jobs:\t'
                 f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
-                f'--num-jobs 10 <run-command>{ux_utils.RESET_BOLD}'
+                f'--num-jobs 10 <yaml_file>{ux_utils.RESET_BOLD}'
                 f'\n{ux_utils.INDENT_SYMBOL}To check the pool status:\t'
                 f'{ux_utils.BOLD}sky jobs pool status {service_name}'
                 f'{ux_utils.RESET_BOLD}'
@@ -417,7 +417,7 @@ def up(
 
 
 def update(
-    task: 'sky.Task',
+    task: 'task_lib.Task',
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
@@ -572,7 +572,7 @@ def update(
 
 
 def apply(
-    task: 'sky.Task',
+    task: 'task_lib.Task',
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
