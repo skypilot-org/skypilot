@@ -93,7 +93,7 @@ def _start_controller(job_id: int, dag_yaml_path: str, env_file_path: str,
     logger.debug(f'Job {job_id} started with pid {pid}')
 
 
-def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
+def maybe_schedule_next_jobs() -> None:
     """Determine if any managed jobs can be scheduled, and if so, schedule them.
 
     Here, "schedule" means to select job that is waiting, and allow it to
@@ -139,7 +139,7 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
         with filelock.FileLock(controller_utils.get_resources_lock_path(),
                                blocking=False):
             while True:
-                maybe_next_job = state.get_waiting_job(pool)
+                maybe_next_job = state.get_waiting_job()
                 if maybe_next_job is None:
                     # Nothing left to start, break from scheduling loop
                     break
@@ -158,22 +158,11 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                 # an ALIVE_WAITING job, but we would be able to launch a WAITING
                 # job.
                 if current_state == state.ManagedJobScheduleState.ALIVE_WAITING:
-                    if not (controller_utils.can_provision() or
-                            actual_pool is not None):
+                    if not controller_utils.can_provision():
                         # Can't schedule anything, break from scheduling loop.
                         break
                 elif current_state == state.ManagedJobScheduleState.WAITING:
                     if not _can_start_new_job(actual_pool):
-                        # If there is no job can be scheduled in the pool, we
-                        # try to schedule another job regardless of the pool.
-                        # This is to avoid the case where the pool is scaled
-                        # down at the same time as a job is done. In this case,
-                        # we won't have any job to schedule in the pool, but
-                        # other jobs in other pool (or no pool) can still be
-                        # scheduled.
-                        if pool is not None:
-                            pool = None
-                            continue
                         # Can't schedule anything, break from scheduling loop.
                         break
 
@@ -218,7 +207,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
     if is_resume:
         _start_controller(job_id, dag_yaml_path, env_file_path, pool)
     else:
-        maybe_schedule_next_jobs(pool)
+        maybe_schedule_next_jobs()
 
 
 @contextlib.contextmanager
@@ -243,6 +232,13 @@ def scheduled_launch(job_id: int):
     multiple uses of this context are nested, behavior is undefined. Don't do
     that.
     """
+    pool = state.get_pool_from_job_id(job_id)
+    # For pool, since there is no execution.launch, we don't need to have all
+    # the ALIVE_WAITING state. The state transition will be
+    # WAITING -> ALIVE -> DONE without any intermediate transitions.
+    if pool is not None:
+        yield
+        return
 
     # If we're already in LAUNCHING schedule_state, we don't need to wait.
     # This may be the case for the first launch of a job.
@@ -254,7 +250,6 @@ def scheduled_launch(job_id: int):
         while (state.get_job_schedule_state(job_id) !=
                state.ManagedJobScheduleState.LAUNCHING):
             time.sleep(_ALIVE_JOB_LAUNCH_WAIT_INTERVAL)
-    pool = state.get_pool_from_job_id(job_id)
 
     try:
         yield
@@ -268,7 +263,7 @@ def scheduled_launch(job_id: int):
         with filelock.FileLock(controller_utils.get_resources_lock_path()):
             state.scheduler_set_alive(job_id)
     finally:
-        maybe_schedule_next_jobs(pool)
+        maybe_schedule_next_jobs()
 
 
 def job_done(job_id: int, idempotent: bool = False) -> None:
@@ -283,19 +278,17 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
     if idempotent and (state.get_job_schedule_state(job_id)
                        == state.ManagedJobScheduleState.DONE):
         return
-    pool = state.get_pool_from_job_id(job_id)
 
     with filelock.FileLock(controller_utils.get_resources_lock_path()):
         state.scheduler_set_done(job_id, idempotent)
-    maybe_schedule_next_jobs(pool)
+    maybe_schedule_next_jobs()
 
 
 def _set_alive_waiting(job_id: int) -> None:
     """Should use wait_until_launch_okay() to transition to this state."""
     with filelock.FileLock(controller_utils.get_resources_lock_path()):
         state.scheduler_set_alive_waiting(job_id)
-    pool = state.get_pool_from_job_id(job_id)
-    maybe_schedule_next_jobs(pool)
+    maybe_schedule_next_jobs()
 
 
 def _can_start_new_job(pool: Optional[str]) -> bool:
