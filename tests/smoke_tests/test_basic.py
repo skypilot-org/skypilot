@@ -282,7 +282,7 @@ def test_aws_stale_job_manual_restart():
         'aws_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            f'sky launch -y -c {name} --infra aws/us-east-2 {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -309,6 +309,52 @@ def test_aws_stale_job_manual_restart():
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_vast
+@pytest.mark.aws
+def test_aws_manual_restart_refresh_ip():
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.AWS.max_cluster_name_length())
+    region = 'us-east-2'
+    test = smoke_tests_utils.Test(
+        'test_aws_manual_restart_refresh_ip',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                'aws', name, skip_remote_server_check=True),
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky autostop {name} -y -i 1',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=120),
+            # Wait for the instance state to be updated on AWS' side.
+            'sleep 30',
+            # Restart the cluster manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f'id=`aws ec2 describe-instances --region {region} --filters '
+                 f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+                 f'--query Reservations[].Instances[].InstanceId '
+                 f'--output text` && '
+                 f'aws ec2 start-instances --region {region} '
+                 f'--instance-ids $id'),
+                skip_remote_server_check=True),
+            'sleep 60',
+            # Status refresh should refresh the IP address of the cluster,
+            # as it was restarted manually, which changes the IP address.
+            f'sky status -r {name}',
+            # Wait for the cluster to be up.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=120),
+        ],
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, force=True)}',
     )
     smoke_tests_utils.run_one_test(test)
 
