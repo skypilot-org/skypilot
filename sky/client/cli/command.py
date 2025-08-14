@@ -4786,7 +4786,7 @@ def pool():
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@click.option('--pool-name',
+@click.option('--pool',
               '-p',
               default=None,
               type=str,
@@ -5120,7 +5120,7 @@ def _handle_serve_logs(
 @usage_lib.entrypoint
 # TODO(tian): Add default argument for this CLI if none of the flags are
 # specified.
-def pool_logs(
+def jobs_pool_logs(
     pool_name: str,
     follow: bool,
     controller: bool,
