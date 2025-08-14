@@ -285,8 +285,8 @@ async def _launch_async(
                     id=fs['filesystem_id'])))
 
     service = nebius.vpc().SubnetServiceClient(nebius.sdk())
-    sub_net = service.list(nebius.vpc().ListSubnetsRequest(
-        parent_id=project_id,)).wait()
+    sub_net = await service.list(nebius.vpc().ListSubnetsRequest(
+        parent_id=project_id,))
 
     service = nebius.compute().InstanceServiceClient(nebius.sdk())
     await service.create(nebius.compute().CreateInstanceRequest(
@@ -363,8 +363,7 @@ async def _remove_async(instance_id: str) -> None:
     while retry_count < nebius.MAX_RETRIES_TO_DISK_DELETE:
         try:
             service = nebius.compute().DiskServiceClient(nebius.sdk())
-            service.delete(
-                nebius.compute().DeleteDiskRequest(id=disk_id)).wait()
+            await service.delete(nebius.compute().DeleteDiskRequest(id=disk_id))
             break
         except nebius.request_error():
             logger.debug('Waiting for disk deletion.')
