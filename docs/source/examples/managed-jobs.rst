@@ -459,7 +459,7 @@ Using worker pool
 
 SkyPilot supports spawning a **worker pool** for launching many jobs that share the same environment — for example, batch inference or large-scale data processing.
 
-The worker cluster is **reused** across job submissions, avoiding repeated setup and **saving cold start time**. This is ideal for workloads where many jobs need to run with the same software environment and dependencies.
+Workers are **reused** across job submissions, avoiding repeated setup and **saving cold start time**. This is ideal for workloads where many jobs need to run with the same software environment and dependencies.
 
 A centralized controller manages the worker cluster, tracks their status, and dispatches jobs to them. Worker clusters can be spread across regions or clouds to improve availability and cost efficiency. If a worker fails, it is automatically recovered or replaced.
 
