@@ -532,7 +532,7 @@ To create a pool, use :code:`sky jobs pool apply`:
   ✓ Successfully created pool 'gpu-pool'.
 
 The pool will be created in the background. You can submit jobs to this pool immediately. If there aren't any workers ready to run the jobs yet, the jobs will wait in the PENDING state.
-The jobs will start automatically once workers are provisioned and ready to run.
+Jobs will start automatically once some worker is provisioned and ready to run.
 
 Submit jobs to a pool
 ~~~~~~~~~~~~~~~~~~~~~
