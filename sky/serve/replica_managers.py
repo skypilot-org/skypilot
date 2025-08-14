@@ -13,16 +13,16 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
-import psutil
+import filelock
 import requests
 
-import sky
 from sky import backends
 from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import sky_logging
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -40,7 +40,6 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import resources
     from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
@@ -49,10 +48,6 @@ _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 _RETRY_INIT_GAP_SECONDS = 60
 _DEFAULT_DRAIN_SECONDS = 120
-
-# Since sky.launch is very resource demanding, we limit the number of
-# concurrent sky.launch process to avoid overloading the machine.
-_MAX_NUM_LAUNCH = psutil.cpu_count() * 2
 
 
 # TODO(tian): Combine this with
@@ -80,7 +75,7 @@ def launch_cluster(replica_id: int,
     try:
         config = common_utils.read_yaml(
             os.path.expanduser(service_task_yaml_path))
-        task = sky.Task.from_yaml_config(config)
+        task = task_lib.Task.from_yaml_config(config)
         if resources_override is not None:
             resources = task.resources
             overrided_resources = [
@@ -176,7 +171,7 @@ def terminate_cluster(cluster_name: str,
 
 def _get_resources_ports(service_task_yaml_path: str) -> str:
     """Get the resources ports used by the task."""
-    task = sky.Task.from_yaml(service_task_yaml_path)
+    task = task_lib.Task.from_yaml(service_task_yaml_path)
     # Already checked all ports are valid in sky.serve.core.up
     assert task.resources, task
     assert task.service is not None, task
@@ -194,7 +189,7 @@ def _should_use_spot(service_task_yaml_path: str,
         if use_spot_override is not None:
             assert isinstance(use_spot_override, bool)
             return use_spot_override
-    task = sky.Task.from_yaml(service_task_yaml_path)
+    task = task_lib.Task.from_yaml(service_task_yaml_path)
     spot_use_resources = [
         resources for resources in task.resources if resources.use_spot
     ]
@@ -687,7 +682,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                  service_task_yaml_path: str) -> None:
         super().__init__(service_name, spec)
         self.service_task_yaml_path = service_task_yaml_path
-        task = sky.Task.from_yaml(service_task_yaml_path)
+        task = task_lib.Task.from_yaml(service_task_yaml_path)
         self._spot_placer: Optional[spot_placer.SpotPlacer] = (
             spot_placer.SpotPlacer.from_task(spec, task))
         # TODO(tian): Store launch/down pid in the replica table, to make the
@@ -871,8 +866,9 @@ class SkyPilotReplicaManager(ReplicaManager):
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             replica_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                                 'replica_jobs')
-            job_log_file_name = (controller_utils.download_and_stream_job_log(
-                backend, handle, replica_job_logs_dir))
+            job_ids = ['1'] if self._is_pool else None
+            job_log_file_name = controller_utils.download_and_stream_job_log(
+                backend, handle, replica_job_logs_dir, job_ids)
             if job_log_file_name is not None:
                 logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
                 with open(log_file_name, 'a',
@@ -980,15 +976,16 @@ class SkyPilotReplicaManager(ReplicaManager):
         # To avoid `dictionary changed size during iteration` error.
         launch_process_pool_snapshot = list(self._launch_process_pool.items())
         for replica_id, p in launch_process_pool_snapshot:
-            if not p.is_alive():
+            if p.is_alive():
+                continue
+            with filelock.FileLock(controller_utils.get_resources_lock_path()):
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
                 assert info is not None, replica_id
                 error_in_sky_launch = False
                 if info.status == serve_state.ReplicaStatus.PENDING:
                     # sky.launch not started yet
-                    if (serve_state.total_number_provisioning_replicas() <
-                            _MAX_NUM_LAUNCH):
+                    if controller_utils.can_provision():
                         p.start()
                         info.status_property.sky_launch_status = (
                             ProcessStatus.RUNNING)

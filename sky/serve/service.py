@@ -29,6 +29,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -224,22 +225,24 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         service_name, version)
 
     if not is_recovery:
-        if (len(serve_state.get_services()) >=
-                serve_utils.get_num_service_threshold()):
-            cleanup_storage(tmp_task_yaml)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Max number of services reached.')
-        success = serve_state.add_service(
-            service_name,
-            controller_job_id=job_id,
-            policy=service_spec.autoscaling_policy_str(),
-            requested_resources_str=backend_utils.get_task_resources_str(task),
-            load_balancing_policy=service_spec.load_balancing_policy,
-            status=serve_state.ServiceStatus.CONTROLLER_INIT,
-            tls_encrypted=service_spec.tls_credential is not None,
-            pool=service_spec.pool,
-            controller_pid=os.getpid(),
-            entrypoint=entrypoint)
+        with filelock.FileLock(controller_utils.get_resources_lock_path()):
+            if not controller_utils.can_start_new_process():
+                cleanup_storage(tmp_task_yaml)
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR)
+            success = serve_state.add_service(
+                service_name,
+                controller_job_id=job_id,
+                policy=service_spec.autoscaling_policy_str(),
+                requested_resources_str=backend_utils.get_task_resources_str(
+                    task),
+                load_balancing_policy=service_spec.load_balancing_policy,
+                status=serve_state.ServiceStatus.CONTROLLER_INIT,
+                tls_encrypted=service_spec.tls_credential is not None,
+                pool=service_spec.pool,
+                controller_pid=os.getpid(),
+                entrypoint=entrypoint)
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:

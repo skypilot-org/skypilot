@@ -1,31 +1,32 @@
 """Unit tests for sky.dag."""
 import pytest
 
-import sky
+from sky import dag as dag_lib
+from sky import task as task_lib
 
 
 @pytest.fixture
 def empty_dag():
     """Fixture for an empty DAG."""
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         yield dag
 
 
 @pytest.fixture
 def single_task_dag():
     """Fixture for a DAG with single task."""
-    with sky.Dag() as dag:
-        sky.Task()
+    with dag_lib.Dag() as dag:
+        task_lib.Task()
         yield dag
 
 
 @pytest.fixture
 def linear_three_task_dag():
     """Fixture for a DAG with three tasks in a linear chain."""
-    with sky.Dag() as dag:
-        task1 = sky.Task()
-        task2 = sky.Task()
-        task3 = sky.Task()
+    with dag_lib.Dag() as dag:
+        task1 = task_lib.Task()
+        task2 = task_lib.Task()
+        task3 = task_lib.Task()
         dag.add_edge(task1, task2)
         dag.add_edge(task2, task3)
         yield dag
@@ -34,8 +35,8 @@ def linear_three_task_dag():
 @pytest.fixture
 def branching_dag():
     """Fixture for a DAG with one task branching into two tasks."""
-    with sky.Dag() as dag:
-        dag._tasks = [sky.Task() for _ in range(3)]
+    with dag_lib.Dag() as dag:
+        dag._tasks = [task_lib.Task() for _ in range(3)]
         dag.add_edge(dag.tasks[0], dag.tasks[1])
         dag.add_edge(dag.tasks[0], dag.tasks[2])
         yield dag
@@ -44,8 +45,8 @@ def branching_dag():
 @pytest.fixture
 def merging_dag():
     """Fixture for a DAG with two tasks merging into one task."""
-    with sky.Dag() as dag:
-        dag._tasks = [sky.Task() for _ in range(3)]
+    with dag_lib.Dag() as dag:
+        dag._tasks = [task_lib.Task() for _ in range(3)]
         dag.add_edge(dag.tasks[0], dag.tasks[2])
         dag.add_edge(dag.tasks[1], dag.tasks[2])
         yield dag
@@ -54,8 +55,8 @@ def merging_dag():
 @pytest.fixture
 def multi_parent_dag():
     """Fixture for a DAG with two tasks merging into one task."""
-    with sky.Dag() as dag:
-        dag._tasks = [sky.Task() for _ in range(3)]
+    with dag_lib.Dag() as dag:
+        dag._tasks = [task_lib.Task() for _ in range(3)]
         dag.add_edge(dag.tasks[0], dag.tasks[2])
         dag.add_edge(dag.tasks[1], dag.tasks[2])
         yield dag
@@ -64,8 +65,8 @@ def multi_parent_dag():
 @pytest.fixture
 def diamond_dag():
     """Fixture for a diamond-shaped DAG: A -> (B,C) -> D."""
-    with sky.Dag() as dag:
-        dag._tasks = [sky.Task() for _ in range(4)]
+    with dag_lib.Dag() as dag:
+        dag._tasks = [task_lib.Task() for _ in range(4)]
         dag.add_edge(dag.tasks[0], dag.tasks[1])
         dag.add_edge(dag.tasks[0], dag.tasks[2])
         dag.add_edge(dag.tasks[1], dag.tasks[3])
@@ -76,9 +77,9 @@ def diamond_dag():
 @pytest.fixture
 def cyclic_dag():
     """Fixture for a DAG with a cycle (invalid DAG)."""
-    with sky.Dag() as dag:
-        task1 = sky.Task()
-        task2 = sky.Task()
+    with dag_lib.Dag() as dag:
+        task1 = task_lib.Task()
+        task2 = task_lib.Task()
         dag.add_edge(task1, task2)
         dag.add_edge(task2, task1)  # Create cycle
         yield dag

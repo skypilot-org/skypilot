@@ -18,10 +18,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import aiohttp
 import colorama
 
+from sky import admin_policy
+from sky import catalog
 from sky import exceptions
 from sky import sky_logging
 from sky.client import common as client_common
 from sky.client import sdk
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
@@ -38,10 +41,8 @@ if typing.TYPE_CHECKING:
     import io
 
     import sky
-    from sky import admin_policy
     from sky import backends
     from sky import models
-    import sky.catalog
     from sky.provision.kubernetes import utils as kubernetes_utils
     from sky.skylet import autostop_lib
     from sky.skylet import job_lib
@@ -302,7 +303,7 @@ async def list_accelerators(
     require_price: bool = True,
     case_sensitive: bool = True,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Dict[str, List['sky.catalog.common.InstanceTypeInfo']]:
+) -> Dict[str, List[catalog.common.InstanceTypeInfo]]:
     """Async version of list_accelerators() that lists the names of all
     accelerators offered by Sky."""
     request_id = await context_utils.to_thread(sdk.list_accelerators, gpus_only,
@@ -341,12 +342,12 @@ async def list_accelerator_counts(
 @usage_lib.entrypoint
 @annotations.client_api
 async def optimize(
-    dag: 'sky.Dag',
-    minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
-    admin_policy_request_options: Optional[
-        'admin_policy.RequestOptions'] = None,
-    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> 'sky.dag.Dag':
+        dag: 'sky.Dag',
+        minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
+        admin_policy_request_options: Optional[
+            admin_policy.RequestOptions] = None,
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> 'sky.Dag':
     """Async version of optimize() that finds the best execution plan for the
       given DAG."""
     request_id = await context_utils.to_thread(sdk.optimize, dag, minimize,
@@ -788,7 +789,7 @@ async def dashboard(starting_page: Optional[str] = None) -> None:
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_info() -> Dict[str, Any]:
+async def api_info() -> responses.APIHealthResponse:
     """Async version of api_info() that gets the server's status, commit and
       version."""
     return await context_utils.to_thread(sdk.api_info)

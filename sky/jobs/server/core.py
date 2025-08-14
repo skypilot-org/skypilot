@@ -95,8 +95,8 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     return local_to_controller_file_mounts
 
 
-def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
-                              num_jobs: Optional[int]) -> Optional[List[int]]:
+def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
+                              num_jobs: int) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
 
     In normal mode the managed job submission is done in the ray job submission.
@@ -111,12 +111,13 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
     # Create local directory for the managed job.
     pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
     job_ids = []
+    pool = dag.pool
     pool_hash = None
     if pool is not None:
         pool_hash = serve_state.get_service_hash(pool)
         # Already checked in the sdk.
         assert pool_hash is not None, f'Pool {pool} not found'
-    for _ in range(num_jobs if num_jobs is not None else 1):
+    for _ in range(num_jobs):
         # TODO(tian): We should have a separate name for each job when
         # submitting multiple jobs. Current blocker is that we are sharing
         # the same dag object for all jobs. Maybe we can do copy.copy() for
@@ -174,9 +175,6 @@ def launch(
       handle: Optional[backends.ResourceHandle]; handle to the controller VM.
         None if dryrun.
     """
-    if pool is not None and not managed_job_utils.is_consolidation_mode():
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('pool is only supported in consolidation mode.')
     entrypoint = task
     # using hasattr instead of isinstance to avoid importing sky
     if hasattr(task, 'metadata'):
@@ -305,8 +303,13 @@ def launch(
         controller=controller,
         task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
+    num_jobs = num_jobs if num_jobs is not None else 1
+    # We do this assignment after applying the admin policy, so that we don't
+    # need to serialize the pool name in the dag. The dag object will be
+    # preserved. See sky/admin_policy.py::MutatedUserRequest::decode.
+    dag.pool = pool
     consolidation_mode_job_ids = _maybe_submit_job_locally(
-        prefix, dag, pool, num_jobs)
+        prefix, dag, num_jobs)
 
     # This is only needed for non-consolidation mode. For consolidation
     # mode, the controller uses the same catalog as API server.
@@ -383,8 +386,8 @@ def launch(
             controller_task._metadata = metadata
 
             job_identity = ''
-            if consolidation_mode_job_id is not None:
-                job_identity = f' (Job ID: {consolidation_mode_job_id})'
+            if job_rank is not None:
+                job_identity = f' (rank: {job_rank})'
             logger.info(f'{colorama.Fore.YELLOW}'
                         f'Launching managed job {dag.name!r}{job_identity} '
                         f'from jobs controller...{colorama.Style.RESET_ALL}')
@@ -438,14 +441,17 @@ def launch(
                     backend.run_on_head(local_handle, run_script)
                     return consolidation_mode_job_id, local_handle
 
-    if consolidation_mode_job_ids is None:
-        return _submit_one()
     if pool is None:
+        if consolidation_mode_job_ids is None:
+            return _submit_one()
         assert len(consolidation_mode_job_ids) == 1
         return _submit_one(consolidation_mode_job_ids[0])
+
     ids = []
     all_handle = None
-    for job_rank, job_id in enumerate(consolidation_mode_job_ids):
+    for job_rank in range(num_jobs):
+        job_id = (consolidation_mode_job_ids[job_rank]
+                  if consolidation_mode_job_ids is not None else None)
         jid, handle = _submit_one(job_id, job_rank)
         assert jid is not None, (job_id, handle)
         ids.append(jid)

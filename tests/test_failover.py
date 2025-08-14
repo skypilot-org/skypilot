@@ -1,5 +1,6 @@
 import re
 import unittest
+import unittest.mock as mock
 import uuid
 
 import boto3
@@ -13,6 +14,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
 from sky.catalog import aws_catalog
+from sky.clouds.aws import AWS
 from sky.provision.aws import instance as aws_instance
 from sky.utils import env_options
 from sky.utils.db import db_utils
@@ -89,33 +91,38 @@ def test_aws_region_failover(enable_all_clouds, _mock_db_conn, mock_aws_backend,
         return mock_instances
 
     with moto.mock_aws():
-        monkeypatch.setattr(aws_instance, '_create_instances',
-                            mock_create_instances)
-        task = sky.Task(run='echo hi')
-        task.set_resources(sky.Resources(infra='aws', instance_type='t2.micro'))
+        with mock.patch.object(AWS,
+                               'get_image_root_device_name',
+                               return_value='/dev/sda1'):
+            monkeypatch.setattr(aws_instance, '_create_instances',
+                                mock_create_instances)
+            task = sky.Task(run='echo hi')
+            task.set_resources(
+                sky.Resources(infra='aws', instance_type='t2.micro'))
 
-        with unittest.mock.patch.object(
-                cloud_vm_ray_backend.FailoverCloudErrorHandlerV2,
-                '_aws_handler',
-                wraps=cloud_vm_ray_backend.FailoverCloudErrorHandlerV2.
-                _aws_handler) as mock_handler:
-            try:
-                sky.stream_and_get(
-                    sky.launch(task, cluster_name='test-failover',
-                               dryrun=False))
-                assert mock_handler.called, "Failover handler was not called"
-                assert region_attempt_count[
-                    'count'] > 1, "Did not try multiple regions"
-                out, err = capfd.readouterr()
-                all_output = out + err
-                print("\n=== CAPTURED STDOUT ===")
-                print(out)
-                print("\n=== CAPTURED STDERR ===")
-                print(err)
-                assert "Insufficient capacity in us-east-1" in all_output
-                assert "Launching on AWS us-east-2" in all_output
-                assert re.search(
-                    r"Provisioning 'test-failover' took \d+\.\d+ seconds",
-                    all_output)
-            finally:
-                sky.down('test-failover')
+            with unittest.mock.patch.object(
+                    cloud_vm_ray_backend.FailoverCloudErrorHandlerV2,
+                    '_aws_handler',
+                    wraps=cloud_vm_ray_backend.FailoverCloudErrorHandlerV2.
+                    _aws_handler) as mock_handler:
+                try:
+                    sky.stream_and_get(
+                        sky.launch(task,
+                                   cluster_name='test-failover',
+                                   dryrun=False))
+                    assert mock_handler.called, "Failover handler was not called"
+                    assert region_attempt_count[
+                        'count'] > 1, "Did not try multiple regions"
+                    out, err = capfd.readouterr()
+                    all_output = out + err
+                    print("\n=== CAPTURED STDOUT ===")
+                    print(out)
+                    print("\n=== CAPTURED STDERR ===")
+                    print(err)
+                    assert "Insufficient capacity in us-east-1" in all_output
+                    assert "Launching on AWS us-east-2" in all_output
+                    assert re.search(
+                        r"Provisioning 'test-failover' took \d+\.\d+ seconds",
+                        all_output)
+                finally:
+                    sky.down('test-failover')

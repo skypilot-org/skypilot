@@ -556,7 +556,8 @@ class ManagedJobScheduleState(enum.Enum):
 
 # === Status transition functions ===
 @_init_db
-def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
+def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str,
+                 pool: Optional[str], pool_hash: Optional[str]):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -572,7 +573,10 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
             name=name,
             schedule_state=ManagedJobScheduleState.INACTIVE.value,
             workspace=workspace,
-            entrypoint=entrypoint)
+            entrypoint=entrypoint,
+            pool=pool,
+            pool_hash=pool_hash,
+        )
         session.execute(insert_stmt)
         session.commit()
 
@@ -1414,8 +1418,7 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
 @_init_db
 def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
                           original_user_yaml_path: str, env_file_path: str,
-                          user_hash: str, priority: int, pool: Optional[str],
-                          controller_pid: Optional[int]):
+                          user_hash: str, priority: int):
     """Do not call without holding the scheduler lock.
 
     Returns: Whether this is a recovery run or not.
@@ -1427,10 +1430,7 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         updated_count = session.query(job_info_table).filter(
-            sqlalchemy.and_(
-                job_info_table.c.spot_job_id == job_id,
-                job_info_table.c.controller_pid == controller_pid,
-            )
+            sqlalchemy.and_(job_info_table.c.spot_job_id == job_id,)
         ).update({
             job_info_table.c.schedule_state:
                 ManagedJobScheduleState.WAITING_NEW.value,
@@ -1439,7 +1439,6 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
             job_info_table.c.env_file_path: env_file_path,
             job_info_table.c.user_hash: user_hash,
             job_info_table.c.priority: priority,
-            job_info_table.c.pool: pool,
         })
         session.commit()
         assert updated_count <= 1, (job_id, updated_count)

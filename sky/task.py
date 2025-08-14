@@ -10,26 +10,25 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 
-import sky
 from sky import clouds
+from sky import dag as dag_lib
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import docker_utils
 from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     import yaml
-
-    from sky import resources as resources_lib
 else:
     yaml = adaptors_common.LazyImport('yaml')
 
@@ -382,26 +381,28 @@ class Task:
         self.estimated_inputs_size_gigabytes: Optional[float] = None
         self.estimated_outputs_size_gigabytes: Optional[float] = None
         # Default to CPU VM
-        self.resources: Union[List[sky.Resources],
-                              Set[sky.Resources]] = {sky.Resources()}
+        self.resources: Union[List['resources_lib.Resources'],
+                              Set['resources_lib.Resources']] = {
+                                  resources_lib.Resources()
+                              }
         self._service: Optional[service_spec.SkyServiceSpec] = None
 
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
-        self.time_estimator_func: Optional[Callable[['sky.Resources'],
+        self.time_estimator_func: Optional[Callable[['resources_lib.Resources'],
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
 
         # Only set when 'self' is a jobs controller task: 'self.managed_job_dag'
         # is the underlying managed job dag (sky.Dag object).
-        self.managed_job_dag: Optional['sky.Dag'] = None
+        self.managed_job_dag: Optional['dag_lib.Dag'] = None
 
         # Only set when 'self' is a sky serve controller task.
         self.service_name: Optional[str] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
-        self.best_resources: Optional[sky.Resources] = None
+        self.best_resources: Optional['resources_lib.Resources'] = None
 
         # For internal use only.
         self.file_mounts_mapping: Optional[Dict[str,
@@ -418,7 +419,7 @@ class Task:
         if file_mounts is not None:
             self.set_file_mounts(file_mounts)
 
-        dag = sky.dag.get_current_dag()
+        dag = dag_lib.get_current_dag()
         if dag is not None:
             dag.add(self)
 
@@ -783,7 +784,8 @@ class Task:
                 '_cluster_config_overrides'] = cluster_config_override
         if volumes:
             resources_config['volumes'] = volumes
-        task.set_resources(sky.Resources.from_yaml_config(resources_config))
+        task.set_resources(
+            resources_lib.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)
         pool = config.pop('pool', None)
@@ -931,7 +933,8 @@ class Task:
         for key, (vol_name, vol_req) in topology.items():
             if vol_req is not None:
                 if key == 'cloud':
-                    override_params[key] = sky.CLOUD_REGISTRY.from_str(vol_req)
+                    override_params[key] = registry.CLOUD_REGISTRY.from_str(
+                        vol_req)
                 else:
                     override_params[key] = vol_req
         self.set_resources_override(override_params)
@@ -1142,7 +1145,7 @@ class Task:
         Returns:
           self: The current task, with resources set.
         """
-        if isinstance(resources, sky.Resources):
+        if isinstance(resources, resources_lib.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs,
@@ -1187,8 +1190,8 @@ class Task:
         self._service = service
         return self
 
-    def set_time_estimator(self, func: Callable[['sky.Resources'],
-                                                int]) -> 'Task':
+    def set_time_estimator(
+            self, func: Callable[['resources_lib.Resources'], int]) -> 'Task':
         """Sets a func mapping resources to estimated time (secs).
 
         This is EXPERIMENTAL.
@@ -1712,7 +1715,7 @@ class Task:
         return required_features
 
     def __rshift__(self, b):
-        sky.dag.get_current_dag().add_edge(self, b)
+        dag_lib.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
         if isinstance(self.run, str):

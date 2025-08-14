@@ -579,7 +579,38 @@ export default function PoolDetailPage() {
                         <TableCell>
                           {(() => {
                             try {
-                              const cloudWithRegion = `${worker.cloud} (${worker.region})`;
+                              // Handle undefined/null values
+                              const hasCloud =
+                                worker.cloud &&
+                                worker.cloud.trim() !== '' &&
+                                worker.cloud !== 'undefined';
+                              const hasRegion =
+                                worker.region &&
+                                worker.region !== 'undefined' &&
+                                worker.region !== null &&
+                                worker.region.trim() !== '';
+
+                              // If both cloud and region are missing, show "-"
+                              if (!hasCloud && !hasRegion) {
+                                return '-';
+                              }
+
+                              const cloud = hasCloud ? worker.cloud : 'Unknown';
+                              const region = hasRegion ? worker.region : null;
+
+                              if (!region) {
+                                // No region, return cloud as link
+                                return (
+                                  <Link
+                                    href="/infra"
+                                    className="text-blue-600 hover:underline"
+                                  >
+                                    {cloud}
+                                  </Link>
+                                );
+                              }
+
+                              const cloudWithRegion = `${cloud} (${region})`;
                               const NAME_TRUNCATE_LENGTH =
                                 UI_CONFIG.NAME_TRUNCATE_LENGTH;
 
@@ -592,37 +623,28 @@ export default function PoolDetailPage() {
                                     href="/infra"
                                     className="text-blue-600 hover:underline"
                                   >
-                                    {worker.cloud}
+                                    {cloud}
                                   </Link>
                                 );
                               }
 
-                              const cloudName = cloudWithRegion
-                                .substring(0, parenIndex)
-                                .trim();
-                              const regionPart = cloudWithRegion.substring(
-                                parenIndex + 1,
-                                cloudWithRegion.length - 1
-                              );
-
                               // Only truncate the region part if it's longer than the truncate length
-                              if (regionPart.length <= NAME_TRUNCATE_LENGTH) {
+                              if (region.length <= NAME_TRUNCATE_LENGTH) {
                                 return (
                                   <span>
                                     <Link
                                       href="/infra"
                                       className="text-blue-600 hover:underline"
                                     >
-                                      {cloudName}
+                                      {cloud}
                                     </Link>
-                                    <span> ({regionPart})</span>
+                                    <span> ({region})</span>
                                   </span>
                                 );
                               }
 
                               // Truncate only the region part
-                              const truncatedRegion = `${regionPart.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionPart.substring(regionPart.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
-                              const displayText = `${cloudName} (${truncatedRegion})`;
+                              const truncatedRegion = `${region.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${region.substring(region.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
 
                               return (
                                 <NonCapitalizedTooltip
@@ -634,14 +656,14 @@ export default function PoolDetailPage() {
                                       href="/infra"
                                       className="text-blue-600 hover:underline"
                                     >
-                                      {cloudName}
+                                      {cloud}
                                     </Link>
                                     <span> ({truncatedRegion})</span>
                                   </span>
                                 </NonCapitalizedTooltip>
                               );
                             } catch (error) {
-                              return `Error: ${error.message}`;
+                              return '-';
                             }
                           })()}
                         </TableCell>

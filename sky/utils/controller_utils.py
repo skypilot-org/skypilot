@@ -23,11 +23,14 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import state as managed_job_state
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
+from sky.serve import serve_state
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -37,8 +40,13 @@ from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import psutil
+
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
+else:
+    from sky.adaptors import common as adaptors_common
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1166,3 +1174,68 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     task.update_storage_mounts(updated_mount_storages)
     if msg:
         logger.info(ux_utils.finishing_message('Uploaded local files/folders.'))
+
+
+# ======================= Resources Management Functions =======================
+
+# Based on testing, assume a running job process uses 350MB memory. We use the
+# same estimation for service controller process.
+JOB_MEMORY_MB = 350
+# Monitoring process for service is 1GB. This is based on an old estimation but
+# we keep it here for now.
+# TODO(tian): Remeasure this.
+SERVE_MONITORING_MEMORY_MB = 1024
+# The ratio of service controller process to job process. We will treat each
+# service as SERVE_PROC_RATIO job processes.
+SERVE_PROC_RATIO = SERVE_MONITORING_MEMORY_MB / JOB_MEMORY_MB
+# Past 2000 simultaneous jobs, we become unstable.
+# See https://github.com/skypilot-org/skypilot/issues/4649.
+MAX_JOB_LIMIT = 2000
+# Number of ongoing launches launches allowed per CPU, for managed jobs.
+JOB_LAUNCHES_PER_CPU = 4
+# Number of ongoing launches launches allowed per CPU, for services. This is
+# also based on an old estimation, but SKyServe indeed spawn a new process
+# for each launch operation, so it should be slightly more resources demanding
+# than managed jobs.
+SERVE_LAUNCHES_PER_CPU = 2
+# The ratio of service launch to job launch. This is inverted as the parallelism
+# is determined by 1 / LAUNCHES_PER_CPU.
+SERVE_LAUNCH_RATIO = JOB_LAUNCHES_PER_CPU / SERVE_LAUNCHES_PER_CPU
+
+# The _RESOURCES_LOCK should be held whenever we are checking the parallelism
+# control or updating the schedule_state of any job or service. Any code that
+# takes this lock must conclude by calling maybe_schedule_next_jobs.
+_RESOURCES_LOCK = '~/.sky/locks/controller_resources.lock'
+
+
+@annotations.lru_cache(scope='global', maxsize=1)
+def get_resources_lock_path() -> str:
+    path = os.path.expanduser(_RESOURCES_LOCK)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
+
+@annotations.lru_cache(scope='request')
+def _get_job_parallelism() -> int:
+    job_memory = JOB_MEMORY_MB * 1024 * 1024
+    job_limit = min(psutil.virtual_memory().total // job_memory, MAX_JOB_LIMIT)
+    return max(job_limit, 1)
+
+
+@annotations.lru_cache(scope='request')
+def _get_launch_parallelism() -> int:
+    cpus = os.cpu_count()
+    return cpus * JOB_LAUNCHES_PER_CPU if cpus is not None else 1
+
+
+def can_provision() -> bool:
+    num_provision = (
+        serve_state.total_number_provisioning_replicas() * SERVE_LAUNCH_RATIO +
+        managed_job_state.get_num_launching_jobs())
+    return num_provision < _get_launch_parallelism()
+
+
+def can_start_new_process() -> bool:
+    num_procs = (serve_state.get_num_services() * SERVE_PROC_RATIO +
+                 managed_job_state.get_num_alive_jobs())
+    return num_procs < _get_job_parallelism()

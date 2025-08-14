@@ -31,6 +31,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.jobs import scheduler
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server import versions
@@ -67,8 +68,8 @@ if typing.TYPE_CHECKING:
 
     import sky
     from sky import backends
+    from sky import catalog
     from sky import models
-    import sky.catalog
     from sky.provision.kubernetes import utils as kubernetes_utils
     from sky.skylet import job_lib
 else:
@@ -235,7 +236,7 @@ def list_accelerators(
     require_price: bool = True,
     case_sensitive: bool = True
 ) -> server_common.RequestId[Dict[str,
-                                  List['sky.catalog.common.InstanceTypeInfo']]]:
+                                  List['catalog.common.InstanceTypeInfo']]]:
     """Lists the names of all accelerators offered by Sky.
 
     This will include all accelerators offered by Sky, including those
@@ -480,11 +481,11 @@ def launch(
             This option works in conjunction with ``idle_minutes_to_autostop``.
             Choices:
 
-            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-               AND all SSH sessions to disconnect.
-            2. "jobs" - Wait for all jobs to complete.
-            3. "none" - Stop immediately after idle time expires,
-               regardless of running jobs or SSH connections.
+            1. "jobs_and_ssh" (default) - Wait for in-progress jobs and SSH
+               connections to finish.
+            2. "jobs" - Only wait for in-progress jobs.
+            3. "none" - Wait for nothing; autostop right after
+               ``idle_minutes_to_autostop``.
         dryrun: if True, do not actually launch the cluster.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
@@ -936,11 +937,11 @@ def start(
             This option works in conjunction with ``idle_minutes_to_autostop``.
             Choices:
 
-            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-               AND all SSH sessions to disconnect.
-            2. "jobs" - Wait for all jobs to complete.
-            3. "none" - Stop immediately after idle time expires,
-               regardless of running jobs or SSH connections.
+            1. "jobs_and_ssh" (default) - Wait for in-progress jobs and SSH
+               connections to finish.
+            2. "jobs" - Only wait for in-progress jobs.
+            3. "none" - Wait for nothing; autostop right after
+               ``idle_minutes_to_autostop``.
         retry_until_up: whether to retry launching the cluster until it is
             up.
         down: Autodown the cluster: tear down the cluster after specified
@@ -1119,11 +1120,10 @@ def autostop(
             This option works in conjunction with ``idle_minutes``.
             Choices:
 
-            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-               AND all SSH sessions to disconnect.
-            2. "jobs" - Wait for all jobs to complete.
-            3. "none" - Stop immediately after idle time expires,
-               regardless of running jobs or SSH connections.
+            1. "jobs_and_ssh" (default) - Wait for in-progress jobs and SSH
+               connections to finish.
+            2. "jobs" - Only wait for in-progress jobs.
+            3. "none" - Wait for nothing; autostop right after ``idle_minutes``.
         down: if true, use autodown (tear down the cluster; non-restartable),
             rather than autostop (restartable).
 
@@ -2060,7 +2060,7 @@ def api_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def api_info() -> Dict[str, Any]:
+def api_info() -> responses.APIHealthResponse:
     """Gets the server's status, commit and version.
 
     Returns:
@@ -2085,7 +2085,7 @@ def api_info() -> Dict[str, Any]:
     """
     response = server_common.make_authenticated_request('GET', '/api/health')
     response.raise_for_status()
-    return response.json()
+    return responses.APIHealthResponse(**response.json())
 
 
 @usage_lib.entrypoint

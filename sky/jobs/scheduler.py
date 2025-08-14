@@ -15,13 +15,14 @@ following section for more details).
 
 The scheduling logic limits #running jobs according to three limits:
 1. The number of jobs that can be launching (that is, STARTING or RECOVERING) at
-   once, based on the number of CPUs. (See _get_launch_parallelism.) This the
-   most compute-intensive part of the job lifecycle, which is why we have an
-   additional limit.
+   once, based on the number of CPUs. This the most compute-intensive part of
+   the job lifecycle, which is why we have an additional limit.
+   See sky/utils/controller_utils.py::_get_launch_parallelism.
 2. The number of jobs that can be running at any given time, based on the amount
-   of memory. (See _get_job_parallelism.) Since the job controller is doing very
-   little once a job starts (just checking its status periodically), the most
-   significant resource it consumes is memory.
+   of memory. Since the job controller is doing very little once a job starts
+   (just checking its status periodically), the most significant resource it
+   consumes is memory.
+   See sky/utils/controller_utils.py::_get_job_parallelism.
 3. The number of jobs that can be running in a pool at any given time, based on
    the number of ready workers in the pool. (See _can_start_new_job.)
 
@@ -46,7 +47,7 @@ import contextlib
 import os
 import sys
 import typing
-from typing import Optional, Set
+from typing import Set
 import uuid
 
 import filelock
@@ -207,7 +208,7 @@ def maybe_start_controllers() -> None:
 
 
 def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
-               env_file_path: str, priority: int, pool: Optional[str]) -> None:
+               env_file_path: str, priority: int) -> None:
     """Submit an existing job to the scheduler.
 
     This should be called after a job is created in the `spot` table as
@@ -223,8 +224,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
             return
     state.scheduler_set_waiting(job_id, dag_yaml_path,
                                 original_user_yaml_path, env_file_path,
-                                common_utils.get_user_hash(), priority, pool,
-                                controller_pid)
+                                common_utils.get_user_hash(), priority)
     maybe_start_controllers()
 
 
@@ -271,14 +271,6 @@ async def scheduled_launch(
     job_logger.info(f'Starting job {job_id}')
     starting.add(job_id)
 
-    # If we're already in LAUNCHING schedule_state, we don't need to wait.
-    # This may be the case for the first launch of a job.
-    if (await state.get_job_schedule_state_async(job_id) !=
-            state.ManagedJobScheduleState.LAUNCHING):
-        # Since we aren't LAUNCHING, we need to wait to be scheduled.
-        job_logger.info(await state.get_job_schedule_state_async(job_id))
-        await state.scheduler_set_alive_waiting_async(job_id)
-
     yield
 
     await state.scheduler_set_alive_async(job_id)
@@ -306,25 +298,13 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
     state.scheduler_set_done(job_id, idempotent)
 
 
-# === Async versions of functions called by controller.py ===
-
-
-async def job_done_async(job_id: int, idempotent: bool = False) -> None:
-    """Async version of job_done. Transition a job to DONE.
-
-    If idempotent is True, this will not raise an error if the job is already
-    DONE.
-
-    The job could be in any terminal ManagedJobStatus. However, once DONE, it
-    should never transition back to another state.
-
-    This is called by controller.py.
-    """
-    if idempotent and (await state.get_job_schedule_state_async(job_id)
+def job_done_async(job_id: int, idempotent: bool = False):
+    """Async version of job_done."""
+    if idempotent and (state.get_job_schedule_state(job_id)
                        == state.ManagedJobScheduleState.DONE):
         return
 
-    await state.scheduler_set_done_async(job_id, idempotent)
+    state.scheduler_set_done_async(job_id, idempotent)
 
 
 if __name__ == '__main__':
@@ -356,4 +336,4 @@ if __name__ == '__main__':
         f' Default: {constants.DEFAULT_PRIORITY}.')
     args = parser.parse_args()
     submit_job(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file,
-               args.priority, args.pool)
+               args.priority)

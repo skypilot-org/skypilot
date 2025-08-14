@@ -11,8 +11,8 @@ import traceback
 import typing
 from typing import Optional, Set
 
-import sky
 from sky import backends
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -80,7 +80,7 @@ class StrategyExecutor:
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
-        self.dag = sky.Dag()
+        self.dag = dag_lib.Dag()
         self.dag.add(task)
         # For jobs submitted to a pool, the cluster name might change after each
         # recovery. Initially this is set to an empty string to indicate that no
@@ -522,10 +522,8 @@ class StrategyExecutor:
                 # Update the status to PENDING during backoff.
                 state.set_backoff_pending_async(self.job_id, self.task_id)
                 # Calculate the backoff time and sleep.
-                # We retry immediately for worker pool, since no sky.launch()
-                # is called and the overhead is minimal.
                 gap_seconds = (backoff.current_backoff()
-                               if self.pool is None else 0)
+                               if self.pool is None else 1)
                 self._logger.info('Retrying to launch the cluster in '
                                   f'{gap_seconds:.1f} seconds.')
                 await asyncio.sleep(gap_seconds)
