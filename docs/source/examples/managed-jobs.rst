@@ -457,8 +457,8 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
 Using pools
 -----------
 
-SkyPilot supports spawning a **pool** for launching many jobs that share the same environment — for example, batch inference or large-scale data processing.  
-The pool consists of multiple individual **workers**, each of which is a SkyPilot cluster instance with identical configuration and setup.  
+SkyPilot supports spawning a **pool** for launching many jobs that share the same environment — for example, batch inference or large-scale data processing.
+The pool consists of multiple individual **workers**, each of which is a SkyPilot cluster instance with identical configuration and setup.
 All workers in the pool are provisioned with the same environment, ensuring consistency across jobs and reducing launch overhead.
 Workers in the pool are **reused** across job submissions, avoiding repeated setup and **saving cold start time**. This is ideal for workloads where many jobs need to run with the same software environment and dependencies.
 
@@ -493,8 +493,8 @@ Here is a simple example of creating a pool:
     # Setup commands for all workers
     echo "Setup complete!"
 
-Notice that the :code:`pool` section is the only difference from a normal SkyPilot YAML.  
-To specify the number of workers in the pool, use the :code:`workers` field under :code:`pool`.  
+Notice that the :code:`pool` section is the only difference from a normal SkyPilot YAML.
+To specify the number of workers in the pool, use the :code:`workers` field under :code:`pool`.
 When creating a pool, the :code:`run` section is ignored.
 
 
@@ -510,13 +510,13 @@ To create a pool, use :code:`sky jobs pool apply`:
   Each pool worker will use the following resources (estimated):
   Considered resources (1 node):
   -------------------------------------------------------------------------------------------------------
-  INFRA                 INSTANCE                         vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN   
+  INFRA                 INSTANCE                         vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
   -------------------------------------------------------------------------------------------------------
-  Nebius (eu-north1)    gpu-h100-sxm_1gpu-16vcpu-200gb   16      200       H100:1   2.95          ✔     
-  Nebius (eu-north1)    gpu-h200-sxm_1gpu-16vcpu-200gb   16      200       H200:1   3.50                
-  GCP (us-central1-a)   a3-highgpu-1g                    26      234       H100:1   5.38                
+  Nebius (eu-north1)    gpu-h100-sxm_1gpu-16vcpu-200gb   16      200       H100:1   2.95          ✔
+  Nebius (eu-north1)    gpu-h200-sxm_1gpu-16vcpu-200gb   16      200       H200:1   3.50
+  GCP (us-central1-a)   a3-highgpu-1g                    26      234       H100:1   5.38
   -------------------------------------------------------------------------------------------------------
-  Applying config to pool 'gpu-pool'. Proceed? [Y/n]: 
+  Applying config to pool 'gpu-pool'. Proceed? [Y/n]:
   Launching controller for 'gpu-pool'...
   ...
   ⚙︎ Job submitted, ID: 1
@@ -565,7 +565,7 @@ Notice that the :code:`resources` specified in the job YAML should match those u
   ⚙︎ Job submitted, ID: 2
   ├── Waiting for task resources on 1 node.
   └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
-  (simple-workload, pid=4150) Thu Aug 14 18:49:05 2025       
+  (simple-workload, pid=4150) Thu Aug 14 18:49:05 2025
   (simple-workload, pid=4150) +-----------------------------------------------------------------------------------------+
   (simple-workload, pid=4150) | NVIDIA-SMI 570.172.08             Driver Version: 570.172.08     CUDA Version: 12.8     |
   (simple-workload, pid=4150) |-----------------------------------------+------------------------+----------------------+
@@ -577,7 +577,7 @@ Notice that the :code:`resources` specified in the job YAML should match those u
   (simple-workload, pid=4150) | N/A   29C    P0             69W /  700W |       0MiB /  81559MiB |      0%      Default |
   (simple-workload, pid=4150) |                                         |                        |             Disabled |
   (simple-workload, pid=4150) +-----------------------------------------+------------------------+----------------------+
-  (simple-workload, pid=4150)                                                                                          
+  (simple-workload, pid=4150)
   (simple-workload, pid=4150) +-----------------------------------------------------------------------------------------+
   (simple-workload, pid=4150) | Processes:                                                                              |
   (simple-workload, pid=4150) |  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
@@ -588,17 +588,17 @@ Notice that the :code:`resources` specified in the job YAML should match those u
   ✓ Job finished (status: SUCCEEDED).
   ✓ Managed job finished: 2 (status: SUCCEEDED).
 
-The job will be launched on one of the available workers in the pool.  
-Currently, each worker is **exclusively occupied** by a single managed job at a time.  
+The job will be launched on one of the available workers in the pool.
+Currently, each worker is **exclusively occupied** by a single managed job at a time.
 Support for running multiple jobs concurrently on the same worker will be added in the future.
 
 Submit multiple jobs at once
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Pools support a :code:`--num-jobs` flag to conveniently submit multiple jobs at once.  
+Pools support a :code:`--num-jobs` flag to conveniently submit multiple jobs at once.
 Each job will be assigned a unique environment variable :code:`$SKYPILOT_JOB_RANK`, which can be used to determine the job partition.
 
-For example, if you have 1000 prompts to evaluate, each job can process prompts with sequence numbers  
+For example, if you have 1000 prompts to evaluate, each job can process prompts with sequence numbers
 :code:`$SKYPILOT_JOB_RANK * 100` to :code:`($SKYPILOT_JOB_RANK + 1) * 100`.
 
 Here is a simple example:
@@ -636,8 +636,8 @@ Use the following command to submit them to the pool:
   ├── To stream controller logs:          sky jobs logs --controller <job-id>
   └── To cancel all jobs on the pool:     sky jobs cancel --pool gpu-pool
 
-All of the jobs will be launched in parallel.  
-Note that the maximum concurrency is limited by the number of workers in the pool.  
+All of the jobs will be launched in parallel.
+Note that the maximum concurrency is limited by the number of workers in the pool.
 To enable more jobs to run simultaneously, increase the number of workers when creating the pool.
 
 There are several things to note when submitting to a pool:
@@ -655,8 +655,8 @@ You can use the job page in the dashboard to monitor the job status.
   :width: 100%
   :align: center
 
-In this example, we submit 10 jobs with IDs from 3 to 12.  
-Only one worker is currently ready due to a resource availability issue, but the pool continues to request additional workers in the background.  
+In this example, we submit 10 jobs with IDs from 3 to 12.
+Only one worker is currently ready due to a resource availability issue, but the pool continues to request additional workers in the background.
 Since each job requires **the entire worker cluster**, only number of workers jobs can run at a time; in this case, 1 job can run at a time.
 As a result, except for the 5 completed jobs, 1 job is running on the available worker, while the remaining 4 are in the PENDING state, waiting for the previous job to finish.
 
@@ -666,7 +666,7 @@ Clicking on the pool name will show detailed information about the pool, includi
   :width: 100%
   :align: center
 
-In this example, one worker is ready in Nebius, and another is currently provisioning.  
+In this example, one worker is ready in Nebius, and another is currently provisioning.
 The ready worker is running the managed job with ID 10.
 The **Worker Details** section displays the current resource summary of the pool, while the **Jobs** section shows a live snapshot of all jobs associated with this pool, including their statuses and job IDs.
 
@@ -702,8 +702,8 @@ You can update the pool configuration with the following command:
 
   $ sky jobs pool apply -p gpu-pool new-pool.yaml
 
-The :code:`sky jobs pool apply` command can be used to update the configuration of an existing pool with the same name.  
-In this example, it updates the number of workers in the pool to 10.  
+The :code:`sky jobs pool apply` command can be used to update the configuration of an existing pool with the same name.
+In this example, it updates the number of workers in the pool to 10.
 If no such pool exists, it will create a new one; this is equivalent to the behavior demonstrated in the previous example.
 
 Pools will automatically detect changes in the worker configuration. If only the pool configuration (e.g. number of workers) is changed, the pool will be updated in place to reuse the previous workers; otherwise, if the setup, file mounts, workdir, or resources configuration is changed, new worker clusters will be created and the old ones will be terminated gradually.
@@ -721,7 +721,7 @@ After usage, the pool can be terminated with :code:`sky jobs pool down`:
 .. code-block:: console
 
   $ sky jobs pool down gpu-pool
-  Terminating pool(s) 'gpu-pool'. Proceed? [Y/n]: 
+  Terminating pool(s) 'gpu-pool'. Proceed? [Y/n]:
   Pool 'gpu-pool' is scheduled to be terminated.
 
 The pool will be torn down in the background, and any remaining resources will be automatically cleaned up.
