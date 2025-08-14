@@ -106,6 +106,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`security_group_name <config-yaml-aws-security-group-name>`: my-security-group
     :ref:`disk_encrypted <config-yaml-aws-disk-encrypted>`: false
+    :ref:`ssh_user <config-yaml-aws-ssh-user>`: ubuntu
     :ref:`prioritize_reservations <config-yaml-aws-prioritize-reservations>`: false
     :ref:`specific_reservations <config-yaml-aws-specific-reservations>`:
       - cr-a1234567
@@ -609,6 +610,15 @@ Set to ``true`` to encrypt the boot disk of all AWS instances launched by
 SkyPilot. This is useful for compliance with data protection regulations.
 
 Default: ``false``.
+
+.. _config-yaml-aws-ssh-user:
+
+``aws.ssh_user``
+~~~~~~~~~~~~~~~~
+
+SSH user (optional) for the SkyPilot nodes.
+
+Default: ``ubuntu``.
 
 .. _config-yaml-aws-prioritize-reservations:
 

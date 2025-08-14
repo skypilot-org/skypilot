@@ -251,7 +251,7 @@ jobs:
 
       - name: Create release branch and PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
           TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
           RELEASE_BRANCH: ${{ needs.release-build.outputs.release_branch }}
           RELEASE_VERSION: ${{ needs.release-build.outputs.release_version }}

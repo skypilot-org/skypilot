@@ -65,6 +65,8 @@ _CREDENTIAL_FILES = [
 ]
 
 DEFAULT_AMI_GB = 45
+DEFAULT_SSH_USER = 'ubuntu'
+DEFAULT_ROOT_DEVICE_NAME = '/dev/sda1'
 
 # Temporary measure, as deleting per-cluster SGs is too slow.
 # See https://github.com/skypilot-org/skypilot/pull/742.
@@ -344,6 +346,44 @@ class AWS(clouds.Cloud):
         return image_size
 
     @classmethod
+    @annotations.lru_cache(scope='request', maxsize=1)
+    def get_image_root_device_name(cls, image_id: str,
+                                   region: Optional[str]) -> str:
+        if image_id.startswith('skypilot:'):
+            return DEFAULT_ROOT_DEVICE_NAME
+        assert region is not None, (image_id, region)
+        image_not_found_message = (
+            f'Image {image_id!r} not found in AWS region {region}.\n'
+            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+            'Example: ami-0729d913a335efca7')
+        try:
+            client = aws.client('ec2', region_name=region)
+            image_info = client.describe_images(ImageIds=[image_id]).get(
+                'Images', [])
+            if not image_info:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(image_not_found_message)
+            image = image_info[0]
+            if 'RootDeviceName' not in image:
+                logger.warning(f'Image {image_id!r} does not have a root '
+                               f'device name. '
+                               f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+                return DEFAULT_ROOT_DEVICE_NAME
+            return image['RootDeviceName']
+        except (aws.botocore_exceptions().NoCredentialsError,
+                aws.botocore_exceptions().ProfileNotFound):
+            # Fallback to default root device name if no credentials are
+            # available.
+            # The credentials issue will be caught when actually provisioning
+            # the instance and appropriate errors will be raised there.
+            logger.warning(f'No credentials available for region {region}. '
+                           f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+            return DEFAULT_ROOT_DEVICE_NAME
+        except aws.botocore_exceptions().ClientError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(image_not_found_message) from None
+
+    @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         # The command for getting the current zone is from:
         # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
@@ -466,6 +506,15 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       resources.instance_type)
 
+        root_device_name = self.get_image_root_device_name(
+            image_id, region_name)
+
+        ssh_user = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('ssh_user',),
+            default_value=DEFAULT_SSH_USER)
+
         disk_encrypted = skypilot_config.get_effective_region_config(
             cloud='aws',
             region=region_name,
@@ -509,6 +558,8 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
+            'root_device_name': root_device_name,
+            'ssh_user': ssh_user,
             'security_group': security_group,
             'security_group_managed_by_skypilot':
                 str(security_group != user_security_group).lower(),

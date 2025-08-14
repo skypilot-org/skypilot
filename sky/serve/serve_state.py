@@ -503,6 +503,16 @@ def get_services() -> List[Dict[str, Any]]:
 
 
 @init_db
+def get_num_services() -> int:
+    """Get the number of services."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        return session.execute(
+            sqlalchemy.select(sqlalchemy.func.count()  # pylint: disable=not-callable
+                             ).select_from(services_table)).fetchone()[0]
+
+
+@init_db
 def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     """Get all existing service records."""
     assert _SQLALCHEMY_ENGINE is not None

@@ -4,8 +4,7 @@ import textwrap
 import pytest
 import yaml
 
-import sky
-from sky import jobs
+from sky import task as task_lib
 from sky.utils import dag_utils
 from sky.utils import registry
 
@@ -17,7 +16,7 @@ def test_jobs_recovery_fill_default_values():
             cpus: 2+
         """)
     task_config = yaml.safe_load(task_str)
-    task = sky.Task.from_yaml_config(task_config)
+    task = task_lib.Task.from_yaml_config(task_config)
     dag = dag_utils.convert_entrypoint_to_dag(task)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
@@ -34,7 +33,7 @@ def test_jobs_recovery_fill_default_values():
         """)
 
     task_config = yaml.safe_load(task_str)
-    task = sky.Task.from_yaml_config(task_config)
+    task = task_lib.Task.from_yaml_config(task_config)
     dag = dag_utils.convert_entrypoint_to_dag(task)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
@@ -53,7 +52,7 @@ def test_jobs_recovery_fill_default_values():
         """)
 
     task_config = yaml.safe_load(task_str)
-    task = sky.Task.from_yaml_config(task_config)
+    task = task_lib.Task.from_yaml_config(task_config)
     dag = dag_utils.convert_entrypoint_to_dag(task)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
@@ -69,7 +68,7 @@ def test_jobs_recovery_fill_default_values():
         """)
 
     task_config = yaml.safe_load(task_str)
-    task = sky.Task.from_yaml_config(task_config)
+    task = task_lib.Task.from_yaml_config(task_config)
     dag = dag_utils.convert_entrypoint_to_dag(task)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
@@ -89,7 +88,7 @@ def test_jobs_recovery_fill_default_values():
         """)
 
     task_config = yaml.safe_load(task_str)
-    task = sky.Task.from_yaml_config(task_config)
+    task = task_lib.Task.from_yaml_config(task_config)
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with pytest.raises(ValueError):
         dag_utils.fill_default_config_in_dag_for_job_launch(dag)

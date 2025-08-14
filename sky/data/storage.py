@@ -4510,8 +4510,18 @@ class R2Store(S3CompatibleStore):
             extra_cli_args=['--checksum-algorithm', 'CRC32'],  # R2 specific
             cloud_name=cloudflare.NAME,
             default_region='auto',
-            mount_cmd_factory=mounting_utils.get_r2_mount_cmd,
+            mount_cmd_factory=cls._get_r2_mount_cmd,
         )
+
+    @classmethod
+    def _get_r2_mount_cmd(cls, bucket_name: str, mount_path: str,
+                          bucket_sub_path: Optional[str]) -> str:
+        """Factory method for R2 mount command."""
+        endpoint_url = cloudflare.create_endpoint()
+        return mounting_utils.get_r2_mount_cmd(cloudflare.R2_CREDENTIALS_PATH,
+                                               cloudflare.R2_PROFILE_NAME,
+                                               endpoint_url, bucket_name,
+                                               mount_path, bucket_sub_path)
 
     def mount_cached_command(self, mount_path: str) -> str:
         """R2-specific cached mount implementation using rclone."""

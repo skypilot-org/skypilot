@@ -2,7 +2,6 @@
 
 from typing import Callable, ForwardRef
 
-import sky
 from sky import catalog
 from sky import check
 from sky import core

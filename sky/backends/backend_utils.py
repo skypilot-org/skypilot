@@ -13,11 +13,13 @@ import sys
 import tempfile
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
+                    TypeVar, Union)
 import uuid
 
 import colorama
 from packaging import version
+import psutil
 from typing_extensions import Literal
 
 import sky
@@ -61,6 +63,7 @@ from sky.utils import ux_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
+    import grpc
     import requests
     from requests import adapters
     from requests.packages.urllib3.util import retry as retry_lib
@@ -79,6 +82,8 @@ else:
     adapters = adaptors_common.LazyImport('requests.adapters')
     retry_lib = adaptors_common.LazyImport(
         'requests.packages.urllib3.util.retry')
+    # To avoid requiring grpcio to be installed on the client side.
+    grpc = adaptors_common.LazyImport('grpc')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -2229,9 +2234,9 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             [status[1] for status in node_statuses if status[1] is not None])
 
         if some_nodes_terminated:
-            init_reason = f'one or more nodes terminated ({status_reason})'
+            init_reason = 'one or more nodes terminated'
         elif some_nodes_not_stopped:
-            init_reason = f'some nodes are up and some nodes are stopped ({status_reason})'
+            init_reason = 'some nodes are up and some nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
@@ -2315,12 +2320,22 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # represent that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
+        init_reason_regex = None
+        if not status_reason:
+            # If there is not a status reason, don't re-add (and overwrite) the
+            # event if there is already an event with the same reason which may
+            # have a status reason.
+            # Some status reason clears after a certain time (e.g. k8s events
+            # are only stored for an hour by default), so it is possible that
+            # the previous event has a status reason, but now it does not.
+            init_reason_regex = f'^Cluster is abnormal because {init_reason} .*'
         global_user_state.add_cluster_event(
             cluster_name,
             status_lib.ClusterStatus.INIT,
-            f'Cluster is abnormal because {init_reason}. Transitioned to INIT.',
+            f'Cluster is abnormal because {init_reason} ({status_reason}). Transitioned to INIT.',
             global_user_state.ClusterEventType.STATUS_CHANGE,
-            nop_if_duplicate=True)
+            nop_if_duplicate=True,
+            duplicate_regex=init_reason_regex)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -3363,3 +3378,49 @@ def cluster_file_mounts_lock_id(cluster_name: str) -> str:
 def workspace_lock_id(workspace_name: str) -> str:
     """Get the lock ID for workspace operations."""
     return f'{workspace_name}_workspace'
+
+
+T = TypeVar('T')
+
+
+def invoke_skylet_with_retries(
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+        func: Callable[..., T]) -> T:
+    """Generic helper for making Skylet gRPC requests.
+
+    This method handles the common pattern of:
+    1. Try the gRPC request
+    2. If SSH tunnel is closed, recreate it and retry
+    """
+    max_attempts = 3
+    backoff = common_utils.Backoff(initial_backoff=0.5)
+    last_exception: Optional[Exception] = None
+
+    for _ in range(max_attempts):
+        try:
+            return func()
+        except grpc.RpcError as e:
+            last_exception = e
+            if e.code() == grpc.StatusCode.INTERNAL:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.SkyletInternalError(e.details())
+            elif e.code() == grpc.StatusCode.UNAVAILABLE:
+                recreate_tunnel = True
+                try:
+                    if handle.skylet_ssh_tunnel is not None:
+                        proc = psutil.Process(handle.skylet_ssh_tunnel.pid)
+                        if proc.is_running(
+                        ) and proc.status() != psutil.STATUS_ZOMBIE:
+                            recreate_tunnel = False
+                except psutil.NoSuchProcess:
+                    pass
+
+                if recreate_tunnel:
+                    handle.open_and_update_skylet_tunnel()
+
+                time.sleep(backoff.current_backoff())
+            else:
+                raise e
+
+    raise RuntimeError(f'Failed to invoke Skylet after {max_attempts} attempts'
+                      ) from last_exception

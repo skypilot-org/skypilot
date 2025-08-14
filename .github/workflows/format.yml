@@ -38,7 +38,8 @@ jobs:
       run: |
         source ~/test-env/bin/activate
         yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' \
-            --exclude 'sky/skylet/providers/ibm/**'
+            --exclude 'sky/skylet/providers/ibm/**' \
+            --exclude 'sky/schemas/generated/**'
     - name: Running black
       run: |
         source ~/test-env/bin/activate
@@ -52,4 +53,5 @@ jobs:
       run: |
         source ~/test-env/bin/activate
         isort --diff --check ./ --sg 'sky/skylet/ray_patches/**' \
-            --sg 'sky/skylet/providers/ibm/**'
+            --sg 'sky/skylet/providers/ibm/**' \
+            --sg 'sky/schemas/generated/**'

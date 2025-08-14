@@ -1690,6 +1690,7 @@ class ManagedJobCodeGen:
     def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag',
                     workspace: str, entrypoint: str) -> str:
         dag_name = managed_job_dag.name
+        pool = managed_job_dag.pool
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
             set_job_info_kwargs = {{'workspace': {workspace!r}}}
@@ -1697,6 +1698,13 @@ class ManagedJobCodeGen:
                 set_job_info_kwargs = {{}}
             if managed_job_version >= 5:
                 set_job_info_kwargs['entrypoint'] = {entrypoint!r}
+            if managed_job_version >= 8:
+                from sky.serve import serve_state
+                pool_hash = None
+                if {pool!r} != None:
+                    pool_hash = serve_state.get_service_hash({pool!r})
+                set_job_info_kwargs['pool'] = {pool!r}
+                set_job_info_kwargs['pool_hash'] = pool_hash
             managed_job_state.set_job_info(
                 {job_id}, {dag_name!r}, **set_job_info_kwargs)
             """)

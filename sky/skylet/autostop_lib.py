@@ -16,8 +16,13 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import psutil
+
+    from sky.schemas.generated import autostopv1_pb2
 else:
     psutil = adaptors_common.LazyImport('psutil')
+    # To avoid requiring protobuf to be installed on the client side.
+    autostopv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.autostopv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -55,11 +60,9 @@ Determines the condition for resetting the idleness timer.
 This option works in conjunction with ``--{pair}``. Options:
 
 \b
-1. ``jobs_and_ssh`` (default): Wait for all jobs to complete AND all SSH
-sessions to disconnect.
-2. ``jobs``: Wait for all jobs to complete.
-3. ``none``: Stop immediately after idle time expires, regardless of running
-jobs or SSH connections."""
+1. ``jobs_and_ssh`` (default): Wait for in-progress jobs and SSH connections to finish.
+2. ``jobs``: Only wait for in-progress jobs.
+3. ``none``: Wait for nothing; autostop right after ``{pair}``."""
 
     @classmethod
     def from_str(cls, mode: str) -> 'AutostopWaitFor':
@@ -77,6 +80,36 @@ jobs or SSH connections."""
                                  f'\'{cls.JOBS_AND_SSH.value}\', '
                                  f'\'{cls.JOBS.value}\', or '
                                  f'\'{cls.NONE.value}\'. ')
+
+    @classmethod
+    def from_protobuf(
+        cls, protobuf_value: 'autostopv1_pb2.AutostopWaitFor'
+    ) -> Optional['AutostopWaitFor']:
+        """Convert protobuf AutostopWaitFor enum to Python enum value."""
+        protobuf_to_enum = {
+            autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS_AND_SSH: cls.JOBS_AND_SSH,
+            autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS: cls.JOBS,
+            autostopv1_pb2.AUTOSTOP_WAIT_FOR_NONE: cls.NONE,
+            autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED: None,
+        }
+        if protobuf_value not in protobuf_to_enum:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Unknown protobuf AutostopWaitFor value: {protobuf_value}')
+        return protobuf_to_enum[protobuf_value]
+
+    def to_protobuf(self) -> 'autostopv1_pb2.AutostopWaitFor':
+        """Convert this Python enum value to protobuf enum value."""
+        enum_to_protobuf = {
+            AutostopWaitFor.JOBS_AND_SSH:
+                autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS_AND_SSH,
+            AutostopWaitFor.JOBS: autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS,
+            AutostopWaitFor.NONE: autostopv1_pb2.AUTOSTOP_WAIT_FOR_NONE,
+        }
+        if self not in enum_to_protobuf:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unknown AutostopWaitFor value: {self}')
+        return enum_to_protobuf[self]
 
 
 DEFAULT_AUTOSTOP_WAIT_FOR: AutostopWaitFor = AutostopWaitFor.JOBS_AND_SSH
