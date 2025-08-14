@@ -348,7 +348,7 @@ def test_aws_manual_restart_recovery():
                 skip_remote_server_check=True),
             # Status refresh should refresh the IP address of the cluster,
             # as it was restarted manually, which changes the IP address.
-            f'sky status -r {name}',
+            f'sky status -r {name} | grep -i "Refreshing cached IPs"',
             # Wait for the cluster to be up.
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,

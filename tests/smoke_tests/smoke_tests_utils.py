@@ -646,6 +646,12 @@ _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 # without cloud credentials or cloud dependencies locally. To do this, we run
 # the cloud commands required in tests on a separate remote cluster with the
 # cloud credentials and dependencies setup.
+#
+# Set `skip_remote_server_check=True` to opt-in to using the remote helper
+# cluster regardless of whether the API server is local or remote. This is
+# useful for running cloud commands while the cluster being tested is
+# stopped and you need to run cloud commands.
+#
 # Example usage:
 # Test(
 #     'mytest',

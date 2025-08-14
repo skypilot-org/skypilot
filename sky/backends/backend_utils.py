@@ -106,6 +106,8 @@ _LAUNCHED_RESERVED_WORKER_PATTERN = re.compile(
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
+_SSH_CONNECTION_TIMED_OUT_PATTERN = re.compile(r'^ssh:.*timed out$',
+                                               re.IGNORECASE)
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We check network connection by going through _TEST_IP_LIST. We may need to
@@ -2039,11 +2041,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             require_outputs=True,
             separate_stderr=True)
         if rc:
-            raise RuntimeError(
-                f'Refreshing status ({cluster_name!r}): Failed to check '
-                f'ray cluster\'s healthiness with '
-                f'{instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
-                f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
+            raise exceptions.CommandError(
+                rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                f'Failed to check ray cluster\'s healthiness. \n'
+                f'-- stdout --\n{output}\n', stderr)
         return (*_count_healthy_nodes_from_ray(output), output, stderr)
 
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
@@ -2051,7 +2052,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             # NOTE: fetching the IPs is very slow as it calls into
             # `ray get head-ip/worker-ips`. Using cached IPs is safe because
             # in the worst case we time out in the `ray status` SSH command
-            # below.
+            # below, only then will we try to refresh the IPs.
             runners = handle.get_command_runners(force_cached=True)
             # This happens when user interrupt the `sky launch` process before
             # the first time resources handle is written back to local database.
@@ -2070,14 +2071,42 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
 
             cloud_name = repr(handle.launched_resources.cloud).lower()
+            attempted_ip_refresh = False
             for i in range(5):
                 try:
                     ready_head, ready_workers, output, stderr = (
                         get_node_counts_from_ray_status(head_runner))
-                except RuntimeError as e:
+                except exceptions.CommandError as e:
                     logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
                                  f' {i}: {common_utils.format_exception(e)}')
                     if cloud_name != 'kubernetes':
+                        # Non-k8s clusters can be manually restarted and get
+                        # new IP addresses, making our cached IPs stale.
+                        # Try refreshing (even though it's slow) cached IPs
+                        # and retry.
+                        if not attempted_ip_refresh and (
+                                e.detailed_reason is not None and
+                                _SSH_CONNECTION_TIMED_OUT_PATTERN.search(
+                                    e.detailed_reason.strip())):
+                            logger.debug(
+                                f'SSH connection timed out ({cluster_name!r}). '
+                                'Refreshing cached IPs and retrying.')
+                            try:
+                                runners = handle.get_command_runners(
+                                    force_cached=False)
+                                if not runners:
+                                    raise exceptions.FetchClusterInfoError(
+                                        reason=exceptions.FetchClusterInfoError.
+                                        Reason.HEAD)
+                                head_runner = runners[0]
+                                attempted_ip_refresh = True
+                                time.sleep(1)
+                                continue
+                            except Exception as refresh_exc:  # pylint: disable=broad-except
+                                logger.debug(
+                                    f'Refreshing cached IPs ({cluster_name!r}) '
+                                    f'failed: {common_utils.format_exception(refresh_exc)}'
+                                )
                         raise e
                     # We retry for kubernetes because coreweave can have a
                     # transient network issue.
