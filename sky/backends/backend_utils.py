@@ -2354,7 +2354,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     backend = backends.CloudVmRayBackend()
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     global_user_state.add_cluster_event(
-        cluster_name, None, 'All nodes stopped, terminating cluster.',
+        cluster_name, None, 'All nodes terminated, cleaning up the cluster.',
         global_user_state.ClusterEventType.STATUS_CHANGE)
     return global_user_state.get_cluster_from_name(cluster_name)
 

@@ -343,9 +343,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             if handle is not None:
                 try:
                     if pool is None:
-                        global_user_state.add_cluster_event(
-                            cluster_name, None, 'Cluster was cleaned up.',
-                            global_user_state.ClusterEventType.STATUS_CHANGE)
                         terminate_cluster(cluster_name)
                 except Exception as e:  # pylint: disable=broad-except
                     error_msg = (
