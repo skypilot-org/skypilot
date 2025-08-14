@@ -38,7 +38,7 @@ def _get_event_loop() -> asyncio.AbstractEventLoop:
 
 def sync_call(awaitable: Awaitable[Any]) -> Any:
     """Synchronously run an awaitable in coroutine.
-    
+
     This wrapper is used to workaround:
     https://github.com/nebius/pysdk/issues/76
     """
