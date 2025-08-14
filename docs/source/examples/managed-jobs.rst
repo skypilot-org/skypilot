@@ -481,7 +481,7 @@ Here is a simple example of creating a pool:
     workers: 3
 
   resources:
-    # Specify the resources for each worker, e.g.
+    # Specify the resources for each worker, e.g. use either H100 or H200.
     accelerators: {H100:1, H200:1}
 
   file_mounts:
