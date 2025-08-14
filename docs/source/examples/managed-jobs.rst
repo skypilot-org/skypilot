@@ -551,7 +551,7 @@ To submit jobs to the pool, create a workload YAML file:
   run: |
     nvidia-smi
 
-Notice that the :code:`resources` specified in the job YAML should match those used in the pool YAML. Then, use :code:`sky jobs launch -p <pool-name>` to submit jobs to the pool:
+This indicates that the job (1) requires the specified :code:`resources` to run, and (2) executes the given :code:`run` command when dispatched to a worker. Then, use :code:`sky jobs launch -p <pool-name>` to submit jobs to the pool:
 
 .. code-block:: console
 
@@ -590,8 +590,7 @@ Notice that the :code:`resources` specified in the job YAML should match those u
   ✓ Managed job finished: 2 (status: SUCCEEDED).
 
 The job will be launched on one of the available workers in the pool.
-Currently, each worker is **exclusively occupied** by a single managed job at a time.
-Support for running multiple jobs concurrently on the same worker will be added in the future.
+Currently, each worker is **exclusively occupied** by a single managed job at a time, so the :code:`resources` specified in the job YAML should match those used in the pool YAML. Support for running multiple jobs concurrently on the same worker will be added in the future.
 
 Submit multiple jobs at once
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
