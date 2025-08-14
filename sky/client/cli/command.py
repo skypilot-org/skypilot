@@ -4808,7 +4808,7 @@ def pool():
 @usage_lib.entrypoint
 def jobs_pool_apply(
     pool_yaml: Tuple[str, ...],
-    pool_name: Optional[str],
+    pool: Optional[str],  # pylint: disable=redefined-outer-name
     workdir: Optional[str],
     infra: Optional[str],
     cloud: Optional[str],
@@ -4841,11 +4841,11 @@ def jobs_pool_apply(
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
-    if pool_name is None:
-        pool_name = serve_lib.generate_service_name(pool=True)
+    if pool is None:
+        pool = serve_lib.generate_service_name(pool=True)
 
     task = _generate_task_with_service(
-        service_name=pool_name,
+        service_name=pool,
         service_yaml_args=pool_yaml,
         workdir=workdir,
         cloud=cloud,
@@ -4882,7 +4882,7 @@ def jobs_pool_apply(
         dag.add(task)
 
     request_id = managed_jobs.pool_apply(task,
-                                         pool_name,
+                                         pool,
                                          mode=serve_lib.UpdateMode(mode),
                                          _need_confirmation=not yes)
     _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
