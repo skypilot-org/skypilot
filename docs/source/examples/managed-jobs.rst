@@ -473,7 +473,7 @@ This design enables **efficient job launches** for large batches of work while s
 Quick tour: LLM batch inference
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Here is a simple example of using a worker pool for LLM batch inference:
+Here is a simple example of using a pool for LLM batch inference:
 
 .. code-block:: yaml
   :emphasize-lines: 2-3
