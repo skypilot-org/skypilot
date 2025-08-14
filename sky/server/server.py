@@ -1232,7 +1232,8 @@ async def download_logs(
 
 
 @app.post('/download')
-async def download(download_body: payloads.DownloadBody) -> None:
+async def download(download_body: payloads.DownloadBody,
+                   request: fastapi.Request) -> None:
     """Downloads a folder from the cluster to the local machine."""
     folder_paths = [
         pathlib.Path(folder_path) for folder_path in download_body.folder_paths
@@ -1261,7 +1262,14 @@ async def download(download_body: payloads.DownloadBody) -> None:
             str(folder_path.expanduser().resolve())
             for folder_path in folder_paths
         ]
-        storage_utils.zip_files_and_folders(folders, zip_path)
+        # Check for optional query parameter to control zip entry structure
+        relative = request.query_params.get('relative', 'home')
+        if relative == 'items':
+            # Dashboard-friendly: entries relative to selected folders
+            storage_utils.zip_files_and_folders(folders, zip_path, relative_to_items=True)
+        else:
+            # CLI-friendly (default): entries with full paths for mapping
+            storage_utils.zip_files_and_folders(folders, zip_path)
 
         # Add home path to the response headers, so that the client can replace
         # the remote path in the zip file to the local path.
