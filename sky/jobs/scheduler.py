@@ -124,7 +124,7 @@ def get_number_of_controllers() -> int:
     else:
         return max(
             1,
-            int(total_memory_mb /
+            int((total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB) /
                 ((LAUNCHES_PER_WORKER * server_config.LONG_WORKER_MEM_GB) * 1024
                  + JOB_MEMORY_MB)))
 
@@ -271,13 +271,18 @@ async def scheduled_launch(
     job_logger.info(f'Starting job {job_id}')
     starting.add(job_id)
 
-    yield
+    await state.scheduler_set_launching_async(job_id)
 
-    await state.scheduler_set_alive_async(job_id)
-
-    async with starting_lock:
-        starting.remove(job_id)
-        starting_signal.notify()
+    try:
+        yield
+    except Exception as e:
+        raise e
+    else:
+        await state.scheduler_set_alive_async(job_id)
+    finally:
+        async with starting_lock:
+            starting.remove(job_id)
+            starting_signal.notify()
 
 
 def job_done(job_id: int, idempotent: bool = False) -> None:

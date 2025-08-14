@@ -33,7 +33,8 @@ VERSION_HEADER = 'X-SkyPilot-Version'
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
 # The memory (GB) that SkyPilot tries to not use to prevent OOM.
-MIN_AVAIL_MEM_GB = 4
+MIN_AVAIL_MEM_GB = 2
+MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE = 4
 # Default encoder/decoder handler name.
 DEFAULT_HANDLER_NAME = 'default'
 # The path to the API request database.

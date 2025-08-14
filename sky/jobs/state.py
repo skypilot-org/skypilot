@@ -1508,22 +1508,18 @@ async def get_pool_submit_info_async(
         return info[0], info[1]
 
 
-@_init_db
-def scheduler_set_launching(job_id: int,
-                            current_state: ManagedJobScheduleState) -> None:
-    """Do not call without holding the scheduler lock."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        updated_count = session.query(job_info_table).filter(
-            sqlalchemy.and_(
-                job_info_table.c.spot_job_id == job_id,
-                job_info_table.c.schedule_state == current_state.value,
-            )).update({
-                job_info_table.c.schedule_state:
-                    ManagedJobScheduleState.LAUNCHING.value
-            })
-        session.commit()
-        assert updated_count == 1, (job_id, updated_count)
+@_init_db_async
+async def scheduler_set_launching_async(job_id: int):
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(job_info_table.c.spot_job_id == job_id)).values(
+                    {
+                        job_info_table.c.schedule_state:
+                            ManagedJobScheduleState.LAUNCHING.value
+                    }))
+        await session.commit()
 
 
 @_init_db_async
