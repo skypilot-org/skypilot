@@ -773,7 +773,7 @@ class Kubernetes(clouds.Cloud):
 
     @staticmethod
     def _warn_on_disk_size(resources: 'resources_lib.Resources'):
-        if resources.disk_size is not None:
+        if resources.disk_size_specified:
             logger.info(f'{colorama.Style.DIM}Disk size {resources.disk_size} '
                         'is not supported by Kubernetes. '
                         'To add additional disk, use volumes.'

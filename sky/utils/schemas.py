@@ -363,6 +363,9 @@ def _get_single_resources_schema():
             '_cluster_config_overrides': {
                 'type': 'object',
             },
+            '_disk_size_specified': {
+                'type': 'boolean',
+            },
         }
     }
 

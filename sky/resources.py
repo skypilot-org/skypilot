@@ -2,6 +2,7 @@
 import collections
 import dataclasses
 import re
+import traceback
 import textwrap
 import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
@@ -133,7 +134,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 28
+    _VERSION = 29
 
     def __init__(
         self,
@@ -315,11 +316,12 @@ class Resources:
                     job_recovery['strategy'] = strategy_name.upper()
                 self._job_recovery = job_recovery
 
+        self._disk_size_specified: bool = False
+        self._disk_size = _DEFAULT_DISK_SIZE_GB
         if disk_size is not None:
             self._disk_size = int(
                 resources_utils.parse_memory_resource(disk_size, 'disk_size'))
-        else:
-            self._disk_size = _DEFAULT_DISK_SIZE_GB
+            self._disk_size_specified = True
 
         self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
@@ -621,6 +623,10 @@ class Resources:
     @property
     def disk_size(self) -> int:
         return self._disk_size
+
+    @property
+    def disk_size_specified(self) -> bool:
+        return self._disk_size_specified
 
     @property
     def image_id(self) -> Optional[Dict[Optional[str], str]]:
@@ -1766,7 +1772,7 @@ class Resources:
             self._accelerators is None,
             self._accelerator_args is None,
             not self._use_spot_specified,
-            self._disk_size == _DEFAULT_DISK_SIZE_GB,
+            not self._disk_size_specified,
             self._disk_tier is None,
             self._network_tier is None,
             self._image_id is None,
@@ -1797,6 +1803,10 @@ class Resources:
             current_autostop_config = self.autostop_config.to_yaml_config()
 
         override_configs = dict(override_configs) if override_configs else None
+        override_disk_size = override.pop('disk_size', None)
+        override_disk_size_specified = override_disk_size is not None
+        if override_disk_size is None:
+            override_disk_size = self.disk_size
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
@@ -1807,7 +1817,7 @@ class Resources:
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
             job_recovery=override.pop('job_recovery', self.job_recovery),
-            disk_size=override.pop('disk_size', self.disk_size),
+            disk_size=override_disk_size,
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
@@ -1832,6 +1842,7 @@ class Resources:
                 'no_missing_accel_warnings', self._no_missing_accel_warnings),
         )
         assert not override
+        resources._disk_size_specified = override_disk_size_specified or self._disk_size_specified
         return resources
 
     def valid_on_region_zones(self, region: str, zones: List[str]) -> bool:
@@ -2164,9 +2175,16 @@ class Resources:
             resources_fields['disk_size'] = str(resources_fields['disk_size'])
         resources_fields['_no_missing_accel_warnings'] = config.pop(
             '_no_missing_accel_warnings', None)
-
+        disk_size_specified_str = config.pop('_disk_size_specified', None)
+        if disk_size_specified_str is None:
+            disk_size_specified = resources_fields[
+                'disk_size'] != _DEFAULT_DISK_SIZE_GB
+        else:
+            disk_size_specified = bool(disk_size_specified_str)
         assert not config, f'Invalid resource args: {config.keys()}'
-        return Resources(**resources_fields)
+        resources = Resources(**resources_fields)
+        resources._disk_size_specified = disk_size_specified
+        return resources
 
     def to_yaml_config(self) -> Dict[str, Union[str, int]]:
         """Returns a yaml-style dict of config for this resource bundle."""
@@ -2230,6 +2248,7 @@ class Resources:
             config['_is_image_managed'] = self._is_image_managed
         if self._requires_fuse is not None:
             config['_requires_fuse'] = self._requires_fuse
+        config['_disk_size_specified'] = self._disk_size_specified
         return config
 
     def __setstate__(self, state):
@@ -2392,6 +2411,12 @@ class Resources:
         if version < 28:
             self._no_missing_accel_warnings = state.get(
                 '_no_missing_accel_warnings', None)
+
+        if version < 29:
+            # without further clarifying details, we assume that the disk size
+            # was not specified by the user if it is the default value.
+            self._disk_size_specified = state.get(
+                '_disk_size', _DEFAULT_DISK_SIZE_GB) != _DEFAULT_DISK_SIZE_GB
 
         self.__dict__.update(state)
 
