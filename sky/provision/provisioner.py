@@ -495,8 +495,17 @@ def _post_provision_setup(
                                                     **ssh_credentials)
 
             def _check_internet_access(runner) -> bool:
-                # actual detection logic.
-                return True
+                # TODO (kyuds): add more network checkers
+                url = 'httpbin.org/get'
+                command = (
+                    'command -v curl >/dev/null && '
+                    f'(curl -s --connect-timeout 5 https://{url} >/dev/null && '
+                    f'curl -s --connect-timeout 5 http://{url} >/dev/null) || '
+                    'command -v wget >/dev/null && '
+                    f'(wget -q --timeout=5 --spider https://{url} && '
+                    f'wget -q --timeout=5 --spider http://{url}) || '
+                    'true')
+                return runner.run(command) == 0
 
             accesses = subprocess_utils.run_in_parallel(_check_internet_access,
                                                         runners)
