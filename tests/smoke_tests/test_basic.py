@@ -342,9 +342,10 @@ def test_aws_manual_restart_recovery():
                  f'--query Reservations[].Instances[].InstanceId '
                  f'--output text` && '
                  f'aws ec2 start-instances --region {region} '
+                 f'--instance-ids $id && '
+                 f'aws ec2 wait instance-running --region {region} '
                  f'--instance-ids $id'),
                 skip_remote_server_check=True),
-            'sleep 60',
             # Status refresh should refresh the IP address of the cluster,
             # as it was restarted manually, which changes the IP address.
             f'sky status -r {name}',
