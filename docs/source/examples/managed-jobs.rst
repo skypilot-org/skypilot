@@ -465,7 +465,7 @@ Workers in the pool are **reused** across job submissions, avoiding repeated set
 
 .. tip::
 
-  To get started with pools, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
+  To get started with pools, use the nightly build of SkyPilot: :code:`pip install -U skypilot-nightly`
 
 Create a pool
 ~~~~~~~~~~~~~
@@ -498,7 +498,7 @@ To specify the number of workers in the pool, use the :code:`workers` field unde
 When creating a pool, the :code:`run` section is ignored.
 
 
-To create a pool, use `sky jobs pool apply`:
+To create a pool, use :code:`sky jobs pool apply`:
 
 .. code-block:: console
 
@@ -550,7 +550,7 @@ To submit jobs to the pool, create a workload YAML file:
   run: |
     nvidia-smi
 
-Notice that the :code:`resources` specified in the job YAML should match those used in the pool YAML. Then, use ``sky jobs launch -p <pool-name>` to submit jobs to the pool:
+Notice that the :code:`resources` specified in the job YAML should match those used in the pool YAML. Then, use :code:`sky jobs launch --pool <pool-name>` to submit jobs to the pool:
 
 .. code-block:: console
 
@@ -716,7 +716,7 @@ Pools will automatically detect changes in the worker configuration. If only the
 Terminate a pool
 ~~~~~~~~~~~~~~~~
 
-After usage, the pool can be terminated with ``sky jobs pool down``:
+After usage, the pool can be terminated with :code:`sky jobs pool down`:
 
 .. code-block:: console
 
