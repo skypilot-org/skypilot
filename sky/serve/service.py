@@ -135,28 +135,48 @@ def _cleanup(service_name: str) -> bool:
             continue
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(info.cluster_name,))
-        p.start()
         info2proc[info] = p
         # Set replica status to `SHUTTING_DOWN`
         info.status_property.sky_launch_status = (
             replica_managers.common_utils.ProcessStatus.SUCCEEDED)
         info.status_property.sky_down_status = (
-            replica_managers.common_utils.ProcessStatus.RUNNING)
+            replica_managers.common_utils.ProcessStatus.SCHEDULED)
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
-        logger.info(f'Terminating replica {info.replica_id} ...')
-    for info, p in info2proc.items():
-        p.join()
-        if p.exitcode == 0:
-            serve_state.remove_replica(service_name, info.replica_id)
-            logger.info(f'Replica {info.replica_id} terminated successfully.')
-        else:
-            # Set replica status to `FAILED_CLEANUP`
-            info.status_property.sky_down_status = (
-                replica_managers.common_utils.ProcessStatus.FAILED)
-            serve_state.add_or_update_replica(service_name, info.replica_id,
-                                              info)
-            failed = True
-            logger.error(f'Replica {info.replica_id} failed to terminate.')
+        logger.info(f'Scheduling to terminate replica {info.replica_id} ...')
+
+    # Please reference to sky/serve/replica_managers.py::_refresh_process_pool.
+    # TODO(tian): Refactor to use the same logic and code.
+    while info2proc:
+        snapshot = list(info2proc.items())
+        for info, p in snapshot:
+            if p.is_alive():
+                continue
+            if (info.status_property.sky_down_status ==
+                    replica_managers.common_utils.ProcessStatus.SCHEDULED):
+                if controller_utils.can_terminate():
+                    p.start()
+                    info.status_property.sky_down_status = (
+                        common_utils.ProcessStatus.RUNNING)
+                    serve_state.add_or_update_replica(service_name,
+                                                      info.replica_id, info)
+            else:
+                logger.info('Terminate process for replica '
+                            f'{info.replica_id} finished.')
+                p.join()
+                if p.exitcode == 0:
+                    serve_state.remove_replica(service_name, info.replica_id)
+                    logger.info(
+                        f'Replica {info.replica_id} terminated successfully.')
+                else:
+                    # Set replica status to `FAILED_CLEANUP`
+                    info.status_property.sky_down_status = (
+                        replica_managers.common_utils.ProcessStatus.FAILED)
+                    serve_state.add_or_update_replica(service_name,
+                                                      info.replica_id, info)
+                    failed = True
+                    logger.error(
+                        f'Replica {info.replica_id} failed to terminate.')
+
     versions = serve_state.get_service_versions(service_name)
     serve_state.remove_service_versions(service_name)
 
