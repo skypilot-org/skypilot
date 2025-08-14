@@ -1,5 +1,4 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
-import collections
 import dataclasses
 import functools
 import multiprocessing
@@ -1420,12 +1419,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                 old_config_any_of = old_config.get('resources',
                                                    {}).pop('any_of', [])
 
-                def normalize_dict_list(lst):
-                    return collections.Counter(
-                        frozenset(d.items()) for d in lst)
-
-                if (normalize_dict_list(old_config_any_of) !=
-                        normalize_dict_list(new_config_any_of)):
+                if (resources_utils.normalize_any_of_resources_config(
+                        old_config_any_of) != resources_utils.
+                        normalize_any_of_resources_config(new_config_any_of)):
                     logger.info('Replica config changed (any_of), skipping. '
                                 f'old: {old_config_any_of}, '
                                 f'new: {new_config_any_of}')
