@@ -38,6 +38,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`jobs <config-yaml-jobs>`:
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
+    :ref:`force_disable_cloud_bucket <config-yaml-jobs-force-disable-cloud-bucket>`: false
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
@@ -284,6 +285,26 @@ Supported bucket types:
     # bucket: https://<azure_storage_account>.blob.core.windows.net/<container>
     # bucket: r2://my-bucket/
     # bucket: cos://<region>/<bucket>
+
+.. _config-yaml-jobs-force-disable-cloud-bucket:
+
+``jobs.force_disable_cloud_bucket``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Force-disable using a cloud bucket for storing intermediate job files (optional).
+
+If set to ``true``, SkyPilot will not use cloud object storage as an intermediate storage for files for managed jobs, even if cloud storage is available. 
+
+Files will be uploaded directly to the jobs controller and downloaded on to the job nodes from there (two-hop trasnfer). Useful in environments where use of cloud buckets must be avoided.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    force_disable_cloud_bucket: true
 
 .. _config-yaml-jobs-controller:
 .. _config-yaml-jobs-controller-resources:
