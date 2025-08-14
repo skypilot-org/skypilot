@@ -121,13 +121,19 @@ class StatusResponse(ResponseBaseModel):
     cluster_hash: str
     # pydantic cannot generate the pydantic-core schema for
     # storage_mounts_metadata, so we use Any here.
-    storage_mounts_metadata: Optional[Dict[str, Any]]
+    storage_mounts_metadata: Optional[Dict[str, Any]]    
     cluster_ever_up: bool
     status_updated_at: int
-    workspace: str
     user_hash: str
     user_name: str
+    config_hash: Optional[str]
+    workspace: str
+    last_creation_yaml: Optional[str]
+    last_creation_command: str
+    is_managed: bool
+    last_event: str
     resources_str: str
+    resources_str_full: str
     credentials: Optional[Dict[str, Any]]
     nodes: int
     cloud: str
@@ -135,4 +141,3 @@ class StatusResponse(ResponseBaseModel):
     cpus: float
     memory: Any
     accelerators: Any
-    last_event: str
