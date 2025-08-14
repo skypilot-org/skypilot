@@ -117,6 +117,7 @@ class StatusResponse(ResponseBaseModel):
     autostop: int
     to_down: bool
     metadata: dict
+    workspace: str
     user_hash: str
     user_name: str
     resources_str: str
