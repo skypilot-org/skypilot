@@ -315,13 +315,13 @@ def test_aws_stale_job_manual_restart():
 
 @pytest.mark.no_vast
 @pytest.mark.aws
-def test_aws_manual_restart_refresh_ip():
+def test_aws_manual_restart_recovery():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.AWS.max_cluster_name_length())
     region = 'us-east-2'
     test = smoke_tests_utils.Test(
-        'test_aws_manual_restart_refresh_ip',
+        'test_aws_manual_restart_recovery',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd(
                 'aws', name, skip_remote_server_check=True),
