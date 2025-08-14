@@ -532,7 +532,7 @@ To create a pool, use :code:`sky jobs pool apply`:
   ✓ Successfully created pool 'gpu-pool'.
 
 The pool will be created in the background. You can submit jobs to this pool immediately. If there aren't any workers ready to run the jobs yet, the jobs will wait in the PENDING state.
-The jobs will start automatically once workers are provisioned and ready to run.
+Jobs will start automatically once some worker is provisioned and ready to run.
 
 Submit jobs to a pool
 ~~~~~~~~~~~~~~~~~~~~~
@@ -662,7 +662,7 @@ You can use the job page in the dashboard to monitor the job status.
 In this example, we submit 10 jobs with IDs from 3 to 12.
 Only one worker is currently ready due to a resource availability issue, but the pool continues to request additional workers in the background.
 
-Since each job requires **the entire worker cluster**, only as many jobs as there are workers can run concurrently; additional jobs will remain in the **PENDING** state until a worker becomes available.
+Since each job requires **the entire worker cluster**, the number of concurrent jobs is limited to the number of workers. Additional jobs will remain in the **PENDING** state until a worker becomes available.
 
 As a result, except for the 5 completed jobs, 1 job is running on the available worker, while the remaining 4 are in the PENDING state, waiting for the previous job to finish.
 
