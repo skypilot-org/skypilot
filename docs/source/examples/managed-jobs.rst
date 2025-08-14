@@ -522,7 +522,7 @@ Here is a simple example of using a worker pool for LLM batch inference:
 Noticed that the :code:`pool` section is the only difference from a normal SkyPilot YAML.
 When creating a worker pool, the :code:`run` section is not executed during pool creation; however, we still included it in the YAML, as we will reuse the same YAML file when submitting jobs.
 
-To create a worker pool with 2 workers, use the following command:
+To create a pool with 2 workers, use the following command:
 
 .. code-block:: console
 
