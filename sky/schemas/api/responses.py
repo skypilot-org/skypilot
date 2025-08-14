@@ -131,7 +131,7 @@ class StatusResponse(ResponseBaseModel):
     last_creation_yaml: Optional[str]
     last_creation_command: str
     is_managed: bool
-    last_event: str
+    last_event: Optional[str]
     resources_str: str
     resources_str_full: str
     credentials: Optional[Dict[str, Any]]
