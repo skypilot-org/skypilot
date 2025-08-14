@@ -325,7 +325,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     def _teardown(self,
                   handle: LocalDockerResourceHandle,
                   terminate: bool,
-                  purge: bool = False):
+                  purge: bool = False,
+                  explicitly_requested: bool = False):
         """Teardown kills the container."""
         del purge  # Unused.
         if not terminate:
@@ -343,7 +344,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
 
         global_user_state.remove_cluster(cluster_name,
                                          terminate=True,
-                                         remove_events=False)
+                                         remove_events=explicitly_requested)
 
     # --- Utilities ---
 
