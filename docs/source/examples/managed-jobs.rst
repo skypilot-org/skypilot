@@ -458,8 +458,9 @@ Using pools
 -----------
 
 SkyPilot supports spawning a **pool** for launching many jobs that share the same environment — for example, batch inference or large-scale data processing.
-The pool consists of multiple individual **workers**, each of which is a SkyPilot cluster instance with identical configuration and setup.
-All workers in the pool are provisioned with the same environment, ensuring consistency across jobs and reducing launch overhead.
+
+The pool consists of multiple individual **workers**, each of which is a SkyPilot cluster instance with identical configuration and setup. All workers in the pool are provisioned with the same environment, ensuring consistency across jobs and reducing launch overhead.
+
 Workers in the pool are **reused** across job submissions, avoiding repeated setup and **saving cold start time**. This is ideal for workloads where many jobs need to run with the same software environment and dependencies.
 
 
