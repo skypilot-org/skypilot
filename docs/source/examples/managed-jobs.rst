@@ -587,6 +587,9 @@ The job will be launched on one of the available workers in the pool.
 Currently, each worker is **exclusively occupied** by a single managed job at a time.  
 Support for running multiple jobs concurrently on the same worker will be added in the future.
 
+Submit multiple jobs at once
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 Pools support a :code:`--num-jobs` flag to conveniently submit multiple jobs at once.  
 Each job will be assigned a unique environment variable :code:`$SKYPILOT_JOB_RANK`, which can be used to determine the job partition.
 
@@ -691,7 +694,14 @@ You can update the pool configuration with the following command:
 
 The :code:`sky jobs pool apply` command can be used to update the configuration of an existing pool with the same name.  
 In this example, it updates the number of workers in the pool to 10.  
-If no such pool exists, it will create a new one—this is equivalent to the behavior demonstrated in the previous example.
+If no such pool exists, it will create a new one; this is equivalent to the behavior demonstrated in the previous example.
+
+Pools will automatically detect changes in the worker configuration. If only the pool configuration (e.g. number of workers) is changed, the pool will be updated in place to reuse the previous workers; otherwise, if the setup, file mounts, workdir, or resources configuration is changed, new worker clusters will be created and the old ones will be terminated gradually.
+
+
+.. note::
+
+  If there is a :code:`workdir` or :code:`file_mounts` field in the worker configuration, workers will always be recreated when the pool is updated. This is to respect any data changes in them.
 
 Terminate a pool
 ~~~~~~~~~~~~~~~~
