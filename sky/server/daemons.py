@@ -7,8 +7,10 @@ from typing import Callable
 from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
+from sky.server import state
 from sky.utils import common
 from sky.utils import env_options
+from sky.utils import locks
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -52,7 +54,22 @@ class InternalRequestDaemon:
             logger.exception(f'Error refreshing log level for {self.id}: {e}')
             return logging.DEBUG
 
+    def get_unique_id(self) -> str:
+        """Get a global unique ID for the daemon.
+
+        This allows multiple API server replicas to run the same daemon
+        without conflicts.
+        """
+        if state.get_host_uuid():
+            return f'{self.id}-{state.get_host_uuid()}'
+        return self.id
+
     def run_event(self):
+        """Run the event."""
+        with locks.get_lock(self.id):
+            self._run_event()
+
+    def _run_event(self):
         """Run the event."""
 
         # Disable logging for periodic refresh to avoid the usage message being

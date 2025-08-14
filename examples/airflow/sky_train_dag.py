@@ -1,3 +1,4 @@
+"""Example to train a model using DAG on Airflow."""
 from typing import Optional
 import uuid
 

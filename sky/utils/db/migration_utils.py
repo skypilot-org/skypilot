@@ -30,6 +30,10 @@ SERVE_DB_NAME = 'serve_db'
 SERVE_VERSION = '001'
 SERVE_LOCK_PATH = '~/.sky/locks/.serve_db.lock'
 
+REQUESTS_DB_NAME = 'requests_db'
+REQUESTS_VERSION = '001'
+REQUESTS_LOCK_PATH = '~/.sky/locks/.requests_db.lock'
+
 
 def get_engine(db_name: str):
     conn_string = None
