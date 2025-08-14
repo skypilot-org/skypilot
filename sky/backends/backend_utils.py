@@ -2445,6 +2445,7 @@ def refresh_cluster_record(
             # Try to acquire the lock so we can fetch the status.
             try:
                 with lock.acquire(blocking=False):
+                    logger.info('Acquired lock in status refresh')
                     # Check the cluster status again, since it could have been
                     # updated between our last check and acquiring the lock.
                     record = global_user_state.get_cluster_from_name(
@@ -2453,7 +2454,10 @@ def refresh_cluster_record(
                             record, force_refresh_statuses):
                         return record
                     # Update and return the cluster status.
-                    return _update_cluster_status(cluster_name)
+                    record = _update_cluster_status(cluster_name)
+                    logger.info('Updated cluster status in status refresh, sleep 10s before releasing the lock')
+                    time.sleep(10)
+                    return record
 
             except locks.LockTimeout:
                 # lock.acquire() will throw a Timeout exception if the lock is not
