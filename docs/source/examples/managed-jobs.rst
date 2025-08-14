@@ -458,8 +458,9 @@ Using pools
 -----------
 
 SkyPilot supports spawning a **pool** for launching many jobs that share the same environment — for example, batch inference or large-scale data processing.
-The pool consists of multiple individual **workers**, each of which is a SkyPilot cluster instance with identical configuration and setup.
-All workers in the pool are provisioned with the same environment, ensuring consistency across jobs and reducing launch overhead.
+
+The pool consists of multiple individual **workers**, each of which is a SkyPilot cluster instance with identical configuration and setup. All workers in the pool are provisioned with the same environment, ensuring consistency across jobs and reducing launch overhead.
+
 Workers in the pool are **reused** across job submissions, avoiding repeated setup and **saving cold start time**. This is ideal for workloads where many jobs need to run with the same software environment and dependencies.
 
 
@@ -551,7 +552,7 @@ To submit jobs to the pool, create a job YAML file:
   run: |
     nvidia-smi
 
-Notice that the :code:`resources` specified in the job YAML should match those used in the pool YAML. Then, use :code:`sky jobs launch -p <pool-name>` to submit jobs to the pool:
+This indicates that the job (1) requires the specified :code:`resources` to run, and (2) executes the given :code:`run` command when dispatched to a worker. Then, use :code:`sky jobs launch -p <pool-name>` to submit jobs to the pool:
 
 .. code-block:: console
 
@@ -590,8 +591,10 @@ Notice that the :code:`resources` specified in the job YAML should match those u
   ✓ Managed job finished: 2 (status: SUCCEEDED).
 
 The job will be launched on one of the available workers in the pool.
-Currently, each worker is **exclusively occupied** by a single managed job at a time.
-Support for running multiple jobs concurrently on the same worker will be added in the future.
+
+.. note::
+
+  Currently, each worker is **exclusively occupied** by a single managed job at a time, so the :code:`resources` specified in the job YAML should match those used in the pool YAML. Support for running multiple jobs concurrently on the same worker will be added in the future.
 
 Submit multiple jobs at once
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
