@@ -603,7 +603,7 @@ Clicking on the pool name will show detailed information about the pool, includi
   :width: 100%
   :align: center
 
-In this example, one worker is ready in Nebius, and another is currently provisioning in the same cloud.  
+In this example, one worker is ready in Nebius, and another is currently provisioning.  
 The ready worker is running the managed job with ID 16.
 The **Worker Details** section displays the current resource summary of the pool,
 while the **Jobs** section shows a live snapshot of all jobs associated with this pool, including their statuses and job IDs.
