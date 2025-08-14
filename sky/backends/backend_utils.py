@@ -2329,10 +2329,14 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             # are only stored for an hour by default), so it is possible that
             # the previous event has a status reason, but now it does not.
             init_reason_regex = f'^Cluster is abnormal because {init_reason} .*'
+        log_message = f'Cluster is abnormal because {init_reason}'
+        if status_reason:
+            log_message += f' ({status_reason})'
+        log_message += '. Transitioned to INIT.'
         global_user_state.add_cluster_event(
             cluster_name,
             status_lib.ClusterStatus.INIT,
-            f'Cluster is abnormal because {init_reason} ({status_reason}). Transitioned to INIT.',
+            log_message,
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True,
             duplicate_regex=init_reason_regex)
