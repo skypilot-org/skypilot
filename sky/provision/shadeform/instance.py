@@ -10,7 +10,7 @@ from sky.provision.shadeform import shadeform_utils
 from sky.utils import status_lib
 
 POLL_INTERVAL = 10
-INSTANCE_READY_TIMEOUT = 3600  # 10 minutes
+INSTANCE_READY_TIMEOUT = 3600
 
 logger = sky_logging.init_logger(__name__)
 

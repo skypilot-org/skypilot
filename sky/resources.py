@@ -1120,6 +1120,7 @@ class Resources:
             # All regions are valid as the regions are not specified for the
             # ssh_proxy_command config.
             return regions
+
         # ssh_proxy_command_config: Dict[str, str], region_name -> command
         # This type check is done by skypilot_config at config load time.
         filtered_regions = []
@@ -1140,6 +1141,7 @@ class Resources:
                 f'{yellow}Request {self} cannot be satisfied by any feasible '
                 'region. To fix, check that ssh_proxy_command\'s region keys '
                 f'include the regions to use.{reset}')
+
         return filtered_regions
 
     def _try_validate_instance_type(self) -> None:

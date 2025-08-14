@@ -29,11 +29,8 @@ class Shadeform(clouds.Cloud):
     """Shadeform GPU Cloud
 
     Shadeform is a unified API for deploying and managing cloud GPUs across
-    multiple cloud providers. This implementation defaults to using datacrunch
-    as the underlying cloud provider.
+    multiple cloud providers.
     """
-
-    _REPR = 'Shadeform'
 
     # Shadeform doesn't have explicit cluster name limits, but conservative
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
@@ -165,7 +162,6 @@ class Shadeform(clouds.Cloud):
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         """Return shell command to get the zone of the instance."""
-        # Since we're using datacrunch, the zone is the same as region
         return None
 
     @classmethod
