@@ -1,5 +1,4 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
-import collections
 import dataclasses
 import functools
 import multiprocessing
