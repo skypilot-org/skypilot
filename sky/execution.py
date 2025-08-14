@@ -173,6 +173,18 @@ def _execute(
         if dryrun.
     """
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    for task in dag.tasks:
+        for resource in task.resources:
+            # For backward compatibility, we need to override the autostop
+            # config at server-side for legacy clients. This should be set
+            # before admin policy to make the admin policy get the final
+            # value of autostop config.
+            # TODO(aylei): remove this after we bump the API version.
+            resource.override_autostop_config(
+                down=down, idle_minutes=idle_minutes_to_autostop)
+            if resource.autostop_config is not None:
+                down = resource.autostop_config.down
+                idle_minutes_to_autostop = resource.autostop_config.idle_minutes
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
             request_options=admin_policy.RequestOptions(
@@ -191,15 +203,6 @@ def _execute(
                 for storage in task.storage_mounts.values():
                     # Ensure the storage is constructed.
                     storage.construct()
-            for resource in task.resources:
-                # For backward compatibility, we need to override the autostop
-                # config at server-side for legacy clients.
-                # TODO(aylei): remove this after we bump the API version.
-                resource.override_autostop_config(
-                    down=down, idle_minutes=idle_minutes_to_autostop)
-                if resource.autostop_config is not None:
-                    down = resource.autostop_config.down
-                    idle_minutes_to_autostop = resource.autostop_config.idle_minutes
         return _execute_dag(
             dag,
             dryrun=dryrun,
