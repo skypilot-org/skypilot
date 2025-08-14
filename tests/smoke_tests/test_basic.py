@@ -354,7 +354,7 @@ def test_aws_manual_restart_recovery():
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=120),
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, force=True)}',
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
     )
     smoke_tests_utils.run_one_test(test)
 
