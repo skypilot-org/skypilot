@@ -484,6 +484,11 @@ Here is a simple example of creating a pool:
     # Specify the resources for each worker, e.g.
     accelerators: {H100:1, H200:1}
 
+  file_mounts:
+    /my-data:
+      source: s3://my-dataset/
+      mode: MOUNT
+
   setup: |
     # Setup commands for all workers
     echo "Setup complete!"
@@ -683,6 +688,11 @@ You can update the pool configuration with the following command:
 
   resources:
     accelerators: {H100:1, H200:1}
+
+  file_mounts:
+    /my-data-2:
+      source: s3://my-dataset-2/
+      mode: MOUNT
 
   setup: |
     # Setup commands for all workers
