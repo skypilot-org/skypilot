@@ -2,7 +2,7 @@
 import asyncio
 import os
 import threading
-from typing import Any, Awaitable, Coroutine, List, Optional
+from typing import Any, Awaitable, List, Optional
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -10,30 +10,29 @@ from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import ux_utils
 
-# Deafult read timeout for nebius SDK
+# Default read timeout for nebius SDK
 READ_TIMEOUT = 10
 
 logger = sky_logging.init_logger(__name__)
 
 _loop_lock = threading.Lock()
+_loop = None
 
 
 def _get_event_loop() -> asyncio.AbstractEventLoop:
     """Get event loop for nebius sdk."""
-    try:
-        # Reuse the event loop if it exists.
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        # No running loop, create a new one.
-        with _loop_lock:
-            # Double-check in case another thread created a loop
-            try:
-                return asyncio.get_running_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                threading.Thread(target=loop.run_forever, daemon=True).start()
-                asyncio.set_event_loop(loop)
-                return loop
+    global _loop
+
+    if _loop is not None:
+        return _loop
+
+    with _loop_lock:
+        if _loop is None:
+            # Create a new event loop in a dedicated thread
+            _loop = asyncio.new_event_loop()
+            threading.Thread(target=_loop.run_forever, daemon=True).start()
+
+        return _loop
 
 
 def sync_call(awaitable: Awaitable[Any]) -> Any:
@@ -41,12 +40,17 @@ def sync_call(awaitable: Awaitable[Any]) -> Any:
 
     This wrapper is used to workaround:
     https://github.com/nebius/pysdk/issues/76
+
+    Uses a dedicated background event loop to avoid conflicts
+    with existing asyncio contexts and prevent BlockingIOError.
     """
-    return asyncio.run_coroutine_threadsafe(_coro(awaitable),
-                                            _get_event_loop()).result()
+    loop = _get_event_loop()
+    future = asyncio.run_coroutine_threadsafe(_coro(awaitable), loop)
+    return future.result()
 
 
-async def _coro(awaitable: Awaitable[Any]) -> Coroutine:
+async def _coro(awaitable: Awaitable[Any]) -> Any:
+    """Wrapper coroutine for awaitable."""
     return await awaitable
 
 
