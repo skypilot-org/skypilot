@@ -531,16 +531,17 @@ To create a pool, use :code:`sky jobs pool apply`:
 
   ✓ Successfully created pool 'gpu-pool'.
 
-The pool will be created in the background. You can submit jobs to this pool immediately; jobs will remain in the PENDING state until the worker cluster is ready, and will start automatically once workers are available.
+The pool will be created in the background. You can submit jobs to this pool immediately. If there aren't any workers ready to run the jobs yet, the jobs will wait in the PENDING state.
+The jobs will start automatically once workers are provisioned and ready to run.
 
 Submit jobs to a pool
 ~~~~~~~~~~~~~~~~~~~~~
 
-To submit jobs to the pool, create a workload YAML file:
+To submit jobs to the pool, create a job YAML file:
 
 .. code-block:: yaml
 
-  # workload.yaml
+  # job.yaml
   name: simple-workload
 
   # Specify the resources requirements for the job.
@@ -555,8 +556,8 @@ This indicates that the job (1) requires the specified :code:`resources` to run,
 
 .. code-block:: console
 
-  $ sky jobs launch -p gpu-pool workload.yaml
-  YAML to run: workload.yaml
+  $ sky jobs launch -p gpu-pool job.yaml
+  YAML to run: job.yaml
   Submitting to pool 'gpu-pool' with 1 job.
   Managed job 'simple-workload' will be launched on (estimated):
   Use resources from pool 'gpu-pool': 1x[H200:1, H100:1].
@@ -608,7 +609,7 @@ Here is a simple example:
 
 .. code-block:: yaml
 
-  # batch-workload.yaml
+  # batch-job.yaml
   name: batch-workload
 
   resources:
@@ -624,8 +625,8 @@ Use the following command to submit them to the pool:
 
 .. code-block:: console
 
-  $ sky jobs launch -p gpu-pool --num-jobs 10 batch-workload.yaml
-  YAML to run: batch-workload.yaml
+  $ sky jobs launch -p gpu-pool --num-jobs 10 batch-job.yaml
+  YAML to run: batch-job.yaml
   Submitting to pool 'gpu-pool' with 10 jobs.
   Managed job 'batch-workload' will be launched on (estimated):
   Use resources from pool 'gpu-pool': 1x[H200:1, H100:1].
