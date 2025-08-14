@@ -537,6 +537,7 @@ class ManagedJobScheduleState(enum.Enum):
     # scheduler should try to transition it, and when it does, it should start
     # the job controller.
     WAITING = 'WAITING'
+    WAITING_NEW = 'WAITING_NEW'
     # The job is already alive, but wants to transition back to LAUNCHING,
     # e.g. for recovery, or launching later tasks in the DAG. The scheduler
     # should try to transition it to LAUNCHING.
@@ -966,7 +967,7 @@ def set_pending_cancelled(job_id: int):
                 spot_table.c.status == ManagedJobStatus.PENDING.value,
                 sqlalchemy.or_(
                     job_info_table.c.schedule_state ==
-                    ManagedJobScheduleState.WAITING.value,
+                    ManagedJobScheduleState.WAITING_NEW.value,
                     job_info_table.c.schedule_state ==
                     ManagedJobScheduleState.INACTIVE.value,
                 ),
@@ -1078,7 +1079,7 @@ def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
             job_info_table.c.controller_pid,
         ).where(~job_info_table.c.schedule_state.in_([
             ManagedJobScheduleState.INACTIVE.value,
-            ManagedJobScheduleState.WAITING.value,
+            ManagedJobScheduleState.WAITING_NEW.value,
             ManagedJobScheduleState.DONE.value,
         ]))
 
@@ -1432,7 +1433,7 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
             )
         ).update({
             job_info_table.c.schedule_state:
-                ManagedJobScheduleState.WAITING.value,
+                ManagedJobScheduleState.WAITING_NEW.value,
             job_info_table.c.dag_yaml_path: dag_yaml_path,
             job_info_table.c.original_user_yaml_path: original_user_yaml_path,
             job_info_table.c.env_file_path: env_file_path,
@@ -1717,8 +1718,7 @@ async def get_waiting_job(pid: int) -> Optional[Dict[str, Any]]:
             job_info_table.c.pool,
         ).where(
             job_info_table.c.schedule_state.in_([
-                ManagedJobScheduleState.WAITING.value,
-                ManagedJobScheduleState.ALIVE_WAITING.value,
+                ManagedJobScheduleState.WAITING_NEW.value,
             ])).order_by(
                 job_info_table.c.priority.desc(),
                 job_info_table.c.spot_job_id.asc(),

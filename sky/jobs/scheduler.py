@@ -52,6 +52,7 @@ import uuid
 import filelock
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
@@ -102,19 +103,29 @@ MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
 
 
 def get_number_of_controllers() -> int:
-    config = server_config.compute_server_config(deploy=True, quiet=True)
-    free = common_utils.get_mem_size_gb() * 1024
+    consolidation_mode = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
 
-    used = 0.0
-    used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
-    used += (config.long_worker_config.garanteed_parallelism +
-                config.long_worker_config.burstable_parallelism) * \
-        server_config.LONG_WORKER_MEM_GB * 1024
-    used += (config.short_worker_config.garanteed_parallelism +
-                config.short_worker_config.burstable_parallelism) * \
-        server_config.SHORT_WORKER_MEM_GB * 1024
+    total_memory_mb = common_utils.get_mem_size_gb() * 1024
+    if consolidation_mode:
+        config = server_config.compute_server_config(deploy=True, quiet=True)
 
-    return max(1, int((free - used) // JOB_MEMORY_MB))
+        used = 0.0
+        used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
+        used += (config.long_worker_config.garanteed_parallelism +
+                    config.long_worker_config.burstable_parallelism) * \
+            server_config.LONG_WORKER_MEM_GB * 1024
+        used += (config.short_worker_config.garanteed_parallelism +
+                    config.short_worker_config.burstable_parallelism) * \
+            server_config.SHORT_WORKER_MEM_GB * 1024
+
+        return max(1, int((total_memory_mb - used) // JOB_MEMORY_MB))
+    else:
+        return max(
+            1,
+            int(total_memory_mb /
+                ((LAUNCHES_PER_WORKER * server_config.LONG_WORKER_MEM_GB) * 1024
+                 + JOB_MEMORY_MB)))
 
 
 def start_controller() -> None:

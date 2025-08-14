@@ -146,7 +146,10 @@ def compute_server_config(deploy: bool, quiet: bool = False) -> ServerConfig:
             f'SkyPilot API server will start {num_server_workers} server '
             f'processes with {max_parallel_for_long} background workers for '
             f'long requests and will allow at max {max_parallel_for_short} '
-            'short requests in parallel.')
+            'short requests in parallel. SkyPilot API server will start '
+            f'{burstable_parallel_for_long} burstable workers for long '
+            f' requests and {burstable_parallel_for_short} burstable workers '
+            'for short requests.')
     return ServerConfig(
         num_server_workers=num_server_workers,
         queue_backend=queue_backend,

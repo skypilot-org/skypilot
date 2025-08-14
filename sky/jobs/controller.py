@@ -1111,7 +1111,10 @@ class Controller:
                 await asyncio.sleep(10)
                 continue
 
-            if (waiting_job['schedule_state'] !=
+            schedule_state = waiting_job['schedule_state']
+            if (schedule_state !=
+                    managed_job_state.ManagedJobScheduleState.WAITING_NEW and
+                    schedule_state !=
                     managed_job_state.ManagedJobScheduleState.WAITING):
                 # in this case it is already currently being restarted
 

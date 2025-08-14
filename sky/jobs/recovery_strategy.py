@@ -375,6 +375,7 @@ class StrategyExecutor:
                             assert self.cluster_name is not None
 
                             log_file = _get_logger_file(self._logger)
+                            request_id = None
                             try:
                                 request_id = await managed_job_utils.to_thread(
                                     sdk.launch,
@@ -393,6 +394,10 @@ class StrategyExecutor:
                                         output_stream=f,
                                     )
                             except OSError as e:
+                                if not request_id:
+                                    raise RuntimeError(
+                                        'Failed to launch the cluster. '
+                                        'No request id is returned.') from e
                                 self._logger.error(
                                     f'Failed to stream logs: {e}')
                                 await managed_job_utils.to_thread(
