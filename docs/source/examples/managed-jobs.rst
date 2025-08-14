@@ -454,7 +454,7 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
 
 .. _pool:
 
-Using pool
+Using pools
 ----------
 
 SkyPilot supports spawning a **pool** for launching many jobs that share the same environment — for example, batch inference or large-scale data processing.  
@@ -493,7 +493,7 @@ Here is a simple example of creating a pool:
     # Setup commands for all workers
     echo "Setup complete!"
 
-Noticed that the :code:`pool` section is the only difference from a normal SkyPilot YAML.  
+Notice that the :code:`pool` section is the only difference from a normal SkyPilot YAML.  
 To specify the number of workers in the pool, use the :code:`workers` field under :code:`pool`.  
 When creating a pool, the :code:`run` section is ignored.
 
