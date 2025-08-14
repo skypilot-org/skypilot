@@ -731,10 +731,13 @@ After usage, the pool can be terminated with :code:`sky jobs pool down`:
 
 The pool will be torn down in the background, and any remaining resources will be automatically cleaned up.
 
-.. tip::
+.. admonition:: Coming Soon
 
-  Autoscaling will be supported in the future, allowing the pool to automatically scale down to 0 workers when no jobs are running, and scale up to the desired concurrency level when new jobs are submitted.
+  Some improved features are under development and will be available soon:
 
+  - **Autoscaling**: Automatically scale down to 0 workers when idle, and scale up when new jobs are submitted.
+  - **Multi-job per worker**: Support for running multiple jobs concurrently on the same worker.
+  - **Fractional GPU support**: Allow jobs to request and share fractional GPU resources.
 
 
 .. _intermediate-bucket:
