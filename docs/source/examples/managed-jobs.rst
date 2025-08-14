@@ -461,7 +461,7 @@ SkyPilot supports spawning a **worker pool** for launching many jobs that share 
 
 Workers are **reused** across job submissions, avoiding repeated setup and **saving cold start time**. This is ideal for workloads where many jobs need to run with the same software environment and dependencies.
 
-A centralized controller manages the worker cluster, tracks their status, and dispatches jobs to them. Worker clusters can be spread across regions or clouds to improve availability and cost efficiency. If a worker fails, it is automatically recovered or replaced.
+A centralized controller manages the worker clusters, tracks their statuses, and dispatches jobs to them. Worker clusters can be spread across regions or clouds to improve availability and cost efficiency. If a worker fails, it is automatically recovered or replaced.
 
 This design enables **efficient job launches** for large batches of work while still benefiting from Managed Job's failure recovery.
 
