@@ -670,6 +670,38 @@ def total_number_provisioning_replicas() -> int:
     return provisioning_count
 
 
+@init_db
+def total_number_terminating_replicas() -> int:
+    """Returns the total number of terminating replicas."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(sqlalchemy.select(
+            replicas_table.c.replica_info)).fetchall()
+    terminating_count = 0
+    for row in rows:
+        replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
+        if (replica_info.status_property.sky_down_status ==
+                common_utils.ProcessStatus.RUNNING):
+            terminating_count += 1
+    return terminating_count
+
+
+@init_db
+def total_number_scheduled_to_terminate_replicas() -> int:
+    """Returns the total number of terminating replicas."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(sqlalchemy.select(
+            replicas_table.c.replica_info)).fetchall()
+    terminating_count = 0
+    for row in rows:
+        replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
+        if (replica_info.status_property.sky_down_status ==
+                common_utils.ProcessStatus.SCHEDULED):
+            terminating_count += 1
+    return terminating_count
+
+
 def get_replicas_at_status(
     service_name: str,
     status: ReplicaStatus,
