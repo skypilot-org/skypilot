@@ -1224,13 +1224,26 @@ def _get_launch_parallelism() -> int:
 
 
 def can_provision() -> bool:
-    num_provision = (
-        serve_state.total_number_provisioning_replicas() * SERVE_LAUNCH_RATIO +
-        managed_job_state.get_num_launching_jobs())
-    return num_provision < _get_launch_parallelism()
+    # We always prioritize terminating over provisioning, to save the cost on
+    # idle resources.
+    if serve_state.total_number_scheduled_to_terminate_replicas() > 0:
+        return False
+    return can_terminate()
 
 
 def can_start_new_process() -> bool:
     num_procs = (serve_state.get_num_services() * SERVE_PROC_RATIO +
                  managed_job_state.get_num_alive_jobs())
     return num_procs < _get_job_parallelism()
+
+
+# We limit the number of terminating replicas to the number of CPUs. This is
+# just a temporary solution to avoid overwhelming the controller. After one job
+# controller PR, we should use API server to handle resources management.
+def can_terminate() -> bool:
+    num_terminating = (
+        serve_state.total_number_provisioning_replicas() * SERVE_LAUNCH_RATIO +
+        # Each terminate process will take roughly the same CPUs as job launch.
+        serve_state.total_number_terminating_replicas() +
+        managed_job_state.get_num_launching_jobs())
+    return num_terminating < _get_launch_parallelism()

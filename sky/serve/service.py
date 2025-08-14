@@ -139,9 +139,9 @@ def _cleanup(service_name: str) -> bool:
         info2proc[info] = p
         # Set replica status to `SHUTTING_DOWN`
         info.status_property.sky_launch_status = (
-            replica_managers.ProcessStatus.SUCCEEDED)
+            replica_managers.common_utils.ProcessStatus.SUCCEEDED)
         info.status_property.sky_down_status = (
-            replica_managers.ProcessStatus.RUNNING)
+            replica_managers.common_utils.ProcessStatus.RUNNING)
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
         logger.info(f'Terminating replica {info.replica_id} ...')
     for info, p in info2proc.items():
@@ -152,7 +152,7 @@ def _cleanup(service_name: str) -> bool:
         else:
             # Set replica status to `FAILED_CLEANUP`
             info.status_property.sky_down_status = (
-                replica_managers.ProcessStatus.FAILED)
+                replica_managers.common_utils.ProcessStatus.FAILED)
             serve_state.add_or_update_replica(service_name, info.replica_id,
                                               info)
             failed = True
