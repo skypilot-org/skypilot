@@ -1,6 +1,0 @@
-resources:
-  infra: shadeform
-  accelerators: L4:1
-
-run: |
-  echo 'Hello, SkyPilot\!'

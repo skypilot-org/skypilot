@@ -23,9 +23,6 @@ _CREDENTIAL_FILES = [
     'api_key',
 ]
 
-# Default cloud to use for Shadeform API
-_DEFAULT_CLOUD = 'datacrunch'
-
 
 @registry.CLOUD_REGISTRY.register
 class Shadeform(clouds.Cloud):
@@ -233,11 +230,16 @@ class Shadeform(clouds.Cloud):
         feasible_resources = self.get_feasible_launchable_resources(r,
                                                                     num_nodes=1)
         instance_type = feasible_resources.resources_list[0].instance_type
-        return {
-            'instance_type': instance_type,
-            'region': region.name,
-            'cloud': _DEFAULT_CLOUD,  # Always use datacrunch for now
-        }
+        if instance_type is not None:
+            instance_type_split = instance_type.split('_')
+            cloud = instance_type_split[0]
+            return {
+                'instance_type': instance_type,
+                'region': region.name,
+                'cloud': cloud,
+            }
+        else:
+            return {}
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Get credential files that need to be mounted."""

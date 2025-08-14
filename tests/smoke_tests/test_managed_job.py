@@ -46,6 +46,7 @@ from sky.utils import controller_utils
 # step.
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_basic(generic_cloud: str):
     """Test the managed jobs yaml."""
     name = smoke_tests_utils.get_cluster_name()
@@ -92,6 +93,7 @@ def test_managed_jobs_basic(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_cli_exit_codes(generic_cloud: str):
     """Test that managed jobs CLI commands properly return exit codes based on job success/failure."""
     name = smoke_tests_utils.get_cluster_name()

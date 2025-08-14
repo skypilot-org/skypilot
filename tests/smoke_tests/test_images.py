@@ -578,7 +578,8 @@ def private_docker_registry_setup(request):
     docker_password = request.param['docker_password']
     docker_server = request.param['docker_server']
     full_image_name = request.param['full_image_name']
-
+    print("THREE")
+    print(request)
     # Dynamically get passwords for cloud providers
     if 'ecr' in docker_server:
         # Get ECR login password
@@ -610,6 +611,7 @@ def private_docker_registry_setup(request):
 
 @pytest.mark.no_azure
 @pytest.mark.no_kubernetes
+@pytest.mark.no_shadeform
 @pytest.mark.parametrize(
     'private_docker_registry_setup,cloud_provider',
     [
@@ -653,10 +655,11 @@ def test_private_docker_registry(generic_cloud,
                                  cloud_provider: str):
     # Skip test if environment variables are not set
     if not os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_FULL_IMAGE_NAME'):
+        print("ONE")
         pytest.skip(
             'Skipping test as docker registry environment variables are not set'
         )
-
+    print("TWO")
     # Skip test if the required cloud provider is not available
     if cloud_provider != generic_cloud:
         pytest.skip(

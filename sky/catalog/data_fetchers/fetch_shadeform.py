@@ -46,7 +46,6 @@ def create_catalog(api_key: str, output_path: str) -> None:
     """Create Shadeform catalog by fetching from API."""
     headers = {'X-API-KEY': api_key}
 
-    # Filter for datacrunch cloud only and available instances
     params = {'available': 'true'}
 
     response = requests.get(ENDPOINT,

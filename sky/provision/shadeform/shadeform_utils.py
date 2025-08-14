@@ -1,7 +1,7 @@
 """Shadeform API utilities."""
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from sky.adaptors import common
 
@@ -41,7 +41,12 @@ def make_request(method: str, endpoint: str, **kwargs) -> Any:
     response = requests.request(method, url, headers=headers, **kwargs)
     response.raise_for_status()
 
-    return response.json()
+    # Some APIs (like delete) return empty responses with just 200 status
+    if response.text.strip():
+        return response.json()
+    else:
+        # Return empty dict for empty responses (e.g., delete operations)
+        return {}
 
 
 def get_instances() -> Dict[str, Any]:
@@ -60,7 +65,10 @@ def create_instance(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def delete_instance(instance_id: str) -> Dict[str, Any]:
-    """Delete an instance."""
+    """Delete an instance.
+
+    Note: Shadeform delete API returns empty response with 200 status.
+    """
     return make_request('POST', f'/instances/{instance_id}/delete')
 
 

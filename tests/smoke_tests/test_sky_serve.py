@@ -323,6 +323,7 @@ def test_skyserve_oci_http():
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.serve
 @pytest.mark.resource_heavy
+@pytest.mark.no_shadeform  # Shadeform does not support T4 GPUs
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
     accelerator = accelerator.get(generic_cloud, 'T4')
@@ -481,6 +482,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 @pytest.mark.serve
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_shadeform  # Shadeform does not support opening ports
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -1038,6 +1040,7 @@ def test_skyserve_failures(generic_cloud: str):
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_shadeform  # Shadeform does not support opening ports
 def test_skyserve_https(generic_cloud: str):
     """Test skyserve with https"""
     name = _get_service_name()
@@ -1104,6 +1107,7 @@ def test_skyserve_multi_ports(generic_cloud: str):
 
 # ------- Testing user dependencies --------
 @pytest.mark.no_vast  # Requires GCS
+@pytest.mark.no_shadeform  # Requires GCS
 def test_user_dependencies(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
