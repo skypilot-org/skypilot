@@ -189,7 +189,6 @@ def test_ssh_up_down_return_type():
 #     """Test that jobs_sdk.launch and core.launch return types match."""
 #     _check_return_type(jobs_sdk.launch, jobs_core.launch)
 
-
 # TODO(hailong): fix this test after the sdk for jobs queue is updated
 # def test_queue_return_type():
 #     """Test that jobs_sdk.queue and core.queue return types match."""
