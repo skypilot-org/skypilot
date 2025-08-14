@@ -16,10 +16,10 @@ export async function getManagedJobs(options = {}) {
   try {
     const {
       allUsers = true,
-      namePrefix,
-      userPrefix,
-      workspacePrefix,
-      poolPrefix,
+      nameMatch,
+      userMatch,
+      workspaceMatch,
+      poolMatch,
       offset,
       limit,
     } = options;
@@ -28,10 +28,10 @@ export async function getManagedJobs(options = {}) {
       all_users: allUsers,
       verbose: true,
     };
-    if (namePrefix !== undefined) body.name_prefix = namePrefix;
-    if (userPrefix !== undefined) body.user_prefix = userPrefix;
-    if (workspacePrefix !== undefined) body.workspace_prefix = workspacePrefix;
-    if (poolPrefix !== undefined) body.pool_prefix = poolPrefix;
+    if (nameMatch !== undefined) body.name_match = nameMatch;
+    if (userMatch !== undefined) body.user_match = userMatch;
+    if (workspaceMatch !== undefined) body.workspace_match = workspaceMatch;
+    if (poolMatch !== undefined) body.pool_match = poolMatch;
     if (offset !== undefined) body.offset = offset;
     if (limit !== undefined) body.limit = limit;
 
@@ -162,6 +162,76 @@ export async function getManagedJobs(options = {}) {
   } catch (error) {
     console.error('Error fetching managed job data:', error);
     return { jobs: [], controllerStopped: false };
+  }
+}
+
+/**
+ * Enhanced getManagedJobs function that supports client-side pagination
+ * This function fetches all jobs data once and caches it, then performs filtering and pagination on the client side
+ * @param {Object} options - Query options
+ * @param {boolean} options.allUsers - Whether to fetch jobs for all users
+ * @param {string} options.nameMatch - Filter by job name
+ * @param {string} options.userMatch - Filter by user
+ * @param {string} options.workspaceMatch - Filter by workspace
+ * @param {string} options.poolMatch - Filter by pool
+ * @param {number} options.offset - Page offset (1-based)
+ * @param {number} options.limit - Page size
+ * @param {boolean} options.useClientPagination - Whether to use client-side pagination (default: true)
+ * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean}>}
+ */
+export async function getManagedJobsWithClientPagination(options = {}) {
+  const {
+    allUsers = true,
+    nameMatch,
+    userMatch,
+    workspaceMatch,
+    poolMatch,
+    offset = 1,
+    limit = 10,
+    useClientPagination = true,
+  } = options;
+
+  try {
+    // If client pagination is disabled, fall back to server-side pagination
+    if (!useClientPagination) {
+      return await getManagedJobs(options);
+    }
+
+    // Create cache key for full dataset (without pagination params)
+    const cacheKey = {
+      allUsers,
+      nameMatch,
+      userMatch,
+      workspaceMatch,
+      poolMatch,
+    };
+
+    // Fetch all data without pagination parameters
+    const fullDataResponse = await getManagedJobs(cacheKey);
+
+    if (fullDataResponse.controllerStopped || !fullDataResponse.jobs) {
+      return fullDataResponse;
+    }
+
+    const allJobs = fullDataResponse.jobs;
+    const total = allJobs.length;
+
+    // Apply client-side pagination
+    const startIndex = (offset - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedJobs = allJobs.slice(startIndex, endIndex);
+
+    return {
+      jobs: paginatedJobs,
+      total: total,
+      controllerStopped: false,
+    };
+  } catch (error) {
+    console.error(
+      'Error fetching managed job data with client pagination:',
+      error
+    );
+    return { jobs: [], total: 0, controllerStopped: false };
   }
 }
 

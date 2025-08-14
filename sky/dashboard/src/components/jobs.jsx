@@ -25,7 +25,12 @@ import {
   renderPoolLink,
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
-import { getManagedJobs, getPoolStatus } from '@/data/connectors/jobs';
+import {
+  getManagedJobs,
+  getManagedJobsWithClientPagination,
+  getPoolStatus,
+} from '@/data/connectors/jobs';
+import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
@@ -202,7 +207,7 @@ export function ManagedJobs() {
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched for both jobs and pools
-    dashboardCache.invalidateFunction(getManagedJobs);
+    jobsCacheManager.invalidateCache();
     dashboardCache.invalidate(getPoolStatus, [{}]);
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
@@ -243,24 +248,6 @@ export function ManagedJobs() {
       updateFiltersByURLParams();
     }
   }, [router.isReady, router.query.tab, updateFiltersByURLParams]);
-
-  const handleJobAction = async (jobId, action) => {
-    try {
-      setConfirmationModal({
-        isOpen: true,
-        title: `${action.charAt(0).toUpperCase() + action.slice(1)} Job`,
-        message: `Are you sure you want to ${action} job ${jobId}?`,
-        onConfirm: async () => {
-          await handleJobAction(jobId, action);
-          if (jobsRefreshRef.current) {
-            jobsRefreshRef.current();
-          }
-        },
-      });
-    } catch (error) {
-      console.error(`Error ${action}ing job:`, error);
-    }
-  };
 
   return (
     <>
@@ -386,25 +373,30 @@ export function ManagedJobsTable({
         };
         const params = {
           allUsers: true,
-          namePrefix: getFilterValue('name'),
-          userPrefix: getFilterValue('user'),
-          workspacePrefix: getFilterValue('workspace'),
-          poolPrefix: getFilterValue('pool'),
+          nameMatch: getFilterValue('name'),
+          userMatch: getFilterValue('user'),
+          workspaceMatch: getFilterValue('workspace'),
+          poolMatch: getFilterValue('pool'),
           offset: currentPage, // page index starting from 1
           limit: pageSize,
         };
 
         let jobsResponse;
         let clustersData = null;
+
+        // Check cache status before making requests
+        const isDataCached = jobsCacheManager.isDataCached(params);
+        const isDataLoading = jobsCacheManager.isDataLoading(params);
+
         if (includeStatus) {
           const [jr, cd] = await Promise.all([
-            dashboardCache.get(getManagedJobs, [params]),
+            jobsCacheManager.getPaginatedJobs(params),
             dashboardCache.get(getClusters),
           ]);
           jobsResponse = jr;
           clustersData = cd;
         } else {
-          jobsResponse = await dashboardCache.get(getManagedJobs, [params]);
+          jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
         }
 
         // Always process the response, even if it's null
@@ -412,6 +404,7 @@ export function ManagedJobsTable({
           jobs = [],
           total = 0,
           controllerStopped = false,
+          cacheStatus = 'unknown',
         } = jobsResponse || {};
 
         let isControllerStopped = !!controllerStopped;
@@ -436,6 +429,17 @@ export function ManagedJobsTable({
         setControllerStopped(!!isControllerStopped);
         setControllerLaunching(!!isLaunching);
         setIsInitialLoad(false);
+
+        // Log cache status for debugging
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Jobs cache status:', {
+            cacheStatus,
+            isDataCached,
+            isDataLoading,
+            jobCount: jobs.length,
+            totalCount: total,
+          });
+        }
       } catch (err) {
         console.error('Error fetching data:', err);
         // Still set data to empty array on error to show proper UI
