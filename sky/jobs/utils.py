@@ -1697,7 +1697,7 @@ class ManagedJobCodeGen:
         user_hashes: Optional[List[Optional[str]]] = None,
     ) -> str:
         code = textwrap.dedent(f"""\
-        if managed_job_version < 8:
+        if managed_job_version < 9:
             job_table = utils.dump_managed_job_queue()
         else:
             job_table = utils.dump_managed_job_queue(
