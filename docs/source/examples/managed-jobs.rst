@@ -660,7 +660,9 @@ You can use the job page in the dashboard to monitor the job status.
 
 In this example, we submit 10 jobs with IDs from 3 to 12.
 Only one worker is currently ready due to a resource availability issue, but the pool continues to request additional workers in the background.
-Since each job requires **the entire worker cluster**, only number of workers jobs can run at a time; in this case, 1 job can run at a time.
+
+Since each job requires **the entire worker cluster**, only as many jobs as there are workers can run concurrently; additional jobs will remain in the **PENDING** state until a worker becomes available. In this case, 1 job can run at a time.
+
 As a result, except for the 5 completed jobs, 1 job is running on the available worker, while the remaining 4 are in the PENDING state, waiting for the previous job to finish.
 
 Clicking on the pool name will show detailed information about the pool, including its resource specification, status of each worker node, and any job currently running on it:
