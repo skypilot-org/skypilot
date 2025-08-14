@@ -40,6 +40,7 @@ class AcquireReturnProxy:
         return self.lock
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        logger.info(f'Releasing lock {self.lock.lock_id}')
         self.lock.release()
 
 
@@ -202,6 +203,7 @@ class PostgresLock(DistributedLock):
     def acquire(self, blocking: bool = True) -> AcquireReturnProxy:
         """Acquire the postgres advisory lock."""
         if self._acquired:
+            logger.info(f'Postgres lock {self.lock_id} already acquired, returning')
             return AcquireReturnProxy(self)
 
         self._connection = self._get_connection()
@@ -217,15 +219,18 @@ class PostgresLock(DistributedLock):
 
                 if result:
                     self._acquired = True
+                    logger.info(f'Acquired postgres lock {self.lock_id}')
                     return AcquireReturnProxy(self)
 
                 if not blocking:
+                    logger.info(f'Failed to immediately acquire postgres lock {self.lock_id}, raising LockTimeout')
                     raise LockTimeout(
                         f'Failed to immediately acquire postgres lock '
                         f'{self.lock_id}')
 
                 if (self.timeout is not None and
                         time.time() - start_time > self.timeout):
+                    logger.info(f'Failed to immediately acquire postgres lock {self.lock_id}, raising LockTimeout')
                     raise LockTimeout(
                         f'Failed to acquire postgres lock {self.lock_id} '
                         f'within {self.timeout} seconds')
