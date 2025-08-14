@@ -113,6 +113,9 @@ def cleanup_storage(task_yaml: str) -> bool:
     return not failed
 
 
+# NOTE(dev): We don't need to acquire the `with_lock` in replica manager here
+# because we killed all the processes (controller & replica manager) before
+# calling this function.
 def _cleanup(service_name: str) -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
     # Cleanup the HA recovery script first as it is possible that some error
@@ -144,6 +147,15 @@ def _cleanup(service_name: str) -> bool:
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
         logger.info(f'Scheduling to terminate replica {info.replica_id} ...')
 
+    def _set_to_failed_cleanup(info: replica_managers.ReplicaInfo) -> None:
+        nonlocal failed
+        # Set replica status to `FAILED_CLEANUP`
+        info.status_property.sky_down_status = (
+            replica_managers.common_utils.ProcessStatus.FAILED)
+        serve_state.add_or_update_replica(service_name, info.replica_id, info)
+        failed = True
+        logger.error(f'Replica {info.replica_id} failed to terminate.')
+
     # Please reference to sky/serve/replica_managers.py::_refresh_process_pool.
     # TODO(tian): Refactor to use the same logic and code.
     while info2proc:
@@ -154,11 +166,18 @@ def _cleanup(service_name: str) -> bool:
             if (info.status_property.sky_down_status ==
                     replica_managers.common_utils.ProcessStatus.SCHEDULED):
                 if controller_utils.can_terminate():
-                    p.start()
-                    info.status_property.sky_down_status = (
-                        common_utils.ProcessStatus.RUNNING)
-                    serve_state.add_or_update_replica(service_name,
-                                                      info.replica_id, info)
+                    try:
+                        p.start()
+                    except Exception as e:  # pylint: disable=broad-except
+                        _set_to_failed_cleanup(info)
+                        logger.error(f'Failed to start process for replica '
+                                     f'{info.replica_id}: {e}')
+                        del info2proc[info]
+                    else:
+                        info.status_property.sky_down_status = (
+                            common_utils.ProcessStatus.RUNNING)
+                        serve_state.add_or_update_replica(
+                            service_name, info.replica_id, info)
             else:
                 logger.info('Terminate process for replica '
                             f'{info.replica_id} finished.')
@@ -169,14 +188,8 @@ def _cleanup(service_name: str) -> bool:
                     logger.info(
                         f'Replica {info.replica_id} terminated successfully.')
                 else:
-                    # Set replica status to `FAILED_CLEANUP`
-                    info.status_property.sky_down_status = (
-                        replica_managers.common_utils.ProcessStatus.FAILED)
-                    serve_state.add_or_update_replica(service_name,
-                                                      info.replica_id, info)
-                    failed = True
-                    logger.error(
-                        f'Replica {info.replica_id} failed to terminate.')
+                    _set_to_failed_cleanup(info)
+        time.sleep(3)
 
     versions = serve_state.get_service_versions(service_name)
     serve_state.remove_service_versions(service_name)
