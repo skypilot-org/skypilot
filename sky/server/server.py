@@ -1283,6 +1283,46 @@ async def download(download_body: payloads.DownloadBody) -> None:
                                     detail=f'Error creating zip file: {str(e)}')
 
 
+@app.post('/provision_logs')
+async def provision_logs(cluster_body: payloads.ClusterNameBody,
+                         follow: bool = True,
+                         tail: int = 0) -> fastapi.responses.StreamingResponse:
+    """Streams the provision.log for the latest launch request of a cluster."""
+    # Prefer clusters table first, then cluster_history as fallback.
+    log_path_str = global_user_state.get_cluster_provision_log_path(
+        cluster_body.cluster_name)
+    if not log_path_str:
+        log_path_str = global_user_state.get_cluster_history_provision_log_path(
+            cluster_body.cluster_name)
+    if not log_path_str:
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=('Provision log path is not recorded for this cluster. '
+                    'Please relaunch to generate provisioning logs.'))
+
+    log_path = pathlib.Path(log_path_str).expanduser().resolve()
+    if not log_path.exists():
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=f'Provision log path does not exist: {str(log_path)}')
+
+    # Tail semantics: 0 means print all lines. Convert 0 -> None for streamer.
+    effective_tail = None if tail is None or tail <= 0 else tail
+
+    return fastapi.responses.StreamingResponse(
+        content=stream_utils.log_streamer(None,
+                                          log_path,
+                                          tail=effective_tail,
+                                          follow=follow),
+        media_type='text/plain',
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no',
+            'Transfer-Encoding': 'chunked',
+        },
+    )
+
+
 @app.post('/cost_report')
 async def cost_report(request: fastapi.Request,
                       cost_report_body: payloads.CostReportBody) -> None:
