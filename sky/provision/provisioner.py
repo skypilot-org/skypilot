@@ -482,6 +482,37 @@ def _post_provision_setup(
         logger.info(f'{indent_str}{colorama.Style.DIM}{vm_str}{plural} {verb} '
                     f'up.{colorama.Style.RESET_ALL}')
 
+        # Check if all k8s pods are able to access the public internet.
+        # Otherwise, cluster runtime setup will stall. Issue #6605.
+        # TODO (kyuds): Add checks for SSH Node Pools after that part is
+        # figured out.
+        if cloud_name.lower() == 'kubernetes':
+            status.update(
+                ux_utils.spinner_message('Checking network availability...',
+                                         provision_logging.config.log_path))
+
+            runners = provision.get_command_runners(cloud_name, cluster_info,
+                                                    **ssh_credentials)
+
+            def _check_internet_access(runner) -> bool:
+                # actual detection logic.
+                return True
+
+            accesses = subprocess_utils.run_in_parallel(_check_internet_access,
+                                                        runners)
+            if not all(accesses):
+                denied = ', '.join(
+                    [t[1].node_id for t in zip(accesses, runners) if not t[0]])
+                logger.debug(f'Cannot access network for pods: {denied}')
+
+                # TODO (kyuds): add link to documentation when it is published
+                ac = 'Some' if any(accesses) else 'All'
+                raise RuntimeError(f'{ac} pods cannot connect to the external'
+                                   'network. This can cause problems with '
+                                   'setup. If the cluster doesn\'t have '
+                                   'direct access to the network, consider '
+                                   'setting proxy environment variables.')
+
         # It's promised by the cluster config that docker_config does not
         # exist for docker-native clouds, i.e. they provide docker containers
         # instead of full VMs, like Kubernetes and RunPod, as it requires some
