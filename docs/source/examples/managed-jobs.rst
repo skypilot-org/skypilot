@@ -467,121 +467,179 @@ Workers in the pool are **reused** across job submissions, avoiding repeated set
 
   To get started with pools, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
 
-Quick tour: LLM batch inference
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Create a pool
+~~~~~~~~~~~~~
 
-Here is a simple example of using a pool for LLM batch inference:
+Here is a simple example of creating a pool:
 
 .. code-block:: yaml
-  :emphasize-lines: 2-3
+  :emphasize-lines: 2-4
 
   # pool.yaml
   pool:
-    workers: 2
+    # Specify the number of workers in the pool.
+    workers: 3
 
   resources:
+    # Specify the resources for each worker, e.g.
     accelerators: {H100:1, H200:1}
-    disk_size: 512
-
-  envs:
-    MODEL_NAME: openai/gpt-oss-20b
 
   setup: |
-    sudo apt-get update
-    sudo apt-get install -y python3-dev build-essential
-    uv venv --python 3.12 --seed
-    source .venv/bin/activate
-    uv pip install --pre vllm==0.10.1+gptoss \
-      --extra-index-url https://wheels.vllm.ai/gpt-oss/ \
-      --extra-index-url https://download.pytorch.org/whl/nightly/cu128 \
-      --index-strategy unsafe-best-match
-    uv pip install hf_xet openai==1.99.1
-    hf download $MODEL_NAME
+    # Setup commands for all workers
+    echo "Setup complete!"
 
-  run: |
-    # Use the job rank environment variable to determine job partition.
-    echo "Job rank: $SKYPILOT_JOB_RANK"
-    source .venv/bin/activate
-    rm openai_example_batch.jsonl || true
-    wget https://raw.githubusercontent.com/vllm-project/vllm/main/examples/offline_inference/openai_batch/openai_example_batch.jsonl
-    sed -i "s|meta-llama/Meta-Llama-3-8B-Instruct|$MODEL_NAME|g" openai_example_batch.jsonl
-    echo "========== Prompts =========="
-    cat openai_example_batch.jsonl
-    echo "============================="
-    python -m vllm.entrypoints.openai.run_batch \
-      -i openai_example_batch.jsonl \
-      -o results.jsonl \
-      --model $MODEL_NAME
-    echo "========== Results =========="
-    cat results.jsonl
-    echo "============================="
+Noticed that the :code:`pool` section is the only difference from a normal SkyPilot YAML.  
+To specify the number of workers in the pool, use the :code:`workers` field under :code:`pool`.  
+When creating a pool, the :code:`run` section is ignored.
 
-Noticed that the :code:`pool` section is the only difference from a normal SkyPilot YAML.
-When creating a pool, the :code:`run` section is ignored; however, we still included it in the YAML, as we will reuse the same YAML file when submitting jobs.
 
-To create a pool with 2 workers, use the following command:
+To create a pool, use the following command:
 
 .. code-block:: console
 
-  $ sky jobs pool apply --pool llm-pool pool.yaml
+  $ sky jobs pool apply --pool gpu-pool pool.yaml
   YAML to run: pool.yaml
   Pool spec:
-  Worker policy:  Fixed-size (2 workers)
+  Worker policy:  Fixed-size (3 workers)
 
   Each pool worker will use the following resources (estimated):
   Considered resources (1 node):
   -------------------------------------------------------------------------------------------------------
-  INFRA                 INSTANCE                         vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN 
+  INFRA                 INSTANCE                         vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN   
   -------------------------------------------------------------------------------------------------------
-  Nebius (eu-north1)    gpu-h100-sxm_1gpu-16vcpu-200gb   16      200       H100:1   2.95          ✔   
-  Nebius (eu-north1)    gpu-h200-sxm_1gpu-16vcpu-200gb   16      200       H200:1   3.50              
-  GCP (us-central1-a)   a3-highgpu-1g                    26      234       H100:1   5.38              
+  Nebius (eu-north1)    gpu-h100-sxm_1gpu-16vcpu-200gb   16      200       H100:1   2.95          ✔     
+  Nebius (eu-north1)    gpu-h200-sxm_1gpu-16vcpu-200gb   16      200       H200:1   3.50                
+  GCP (us-central1-a)   a3-highgpu-1g                    26      234       H100:1   5.38                
   -------------------------------------------------------------------------------------------------------
-  Applying config to pool 'llm-pool'. Proceed? [Y/n]: 
-  The `run` section will be ignored for pool.
-  Launching controller for 'llm-pool'...
+  Applying config to pool 'gpu-pool'. Proceed? [Y/n]: 
+  Launching controller for 'gpu-pool'...
   ...
-  ⚙︎ Job submitted, ID: 13
+  ⚙︎ Job submitted, ID: 1
 
-  Pool name: llm-pool
+  Pool name: gpu-pool
   📋 Useful Commands
-  ├── To submit jobs to the pool: sky jobs launch --pool llm-pool <yaml_file>
-  ├── To submit multiple jobs:    sky jobs launch --pool llm-pool --num-jobs 10 <yaml_file>
-  ├── To check the pool status:   sky jobs pool status llm-pool
-  └── To terminate the pool:      sky jobs pool down llm-pool
+  ├── To submit jobs to the pool: sky jobs launch --pool gpu-pool <yaml_file>
+  ├── To submit multiple jobs:    sky jobs launch --pool gpu-pool --num-jobs 10 <yaml_file>
+  ├── To check the pool status:   sky jobs pool status gpu-pool
+  └── To terminate the pool:      sky jobs pool down gpu-pool
 
-  ✓ Successfully created pool 'llm-pool'.
+  ✓ Successfully created pool 'gpu-pool'.
 
 The pool will be created in the background. You can submit jobs to this pool immediately; jobs will remain in the PENDING state until the worker cluster is ready, and will start automatically once workers are available.
 
-To submit jobs to the pool, use the following command:
+Submit jobs to a pool
+~~~~~~~~~~~~~~~~~~~~~
+
+To submit jobs to the pool, create a workload YAML file:
+
+.. code-block:: yaml
+
+  # workload.yaml
+  name: simple-workload
+
+  # Specify the resources requirements for the job.
+  # This should be the same as the resources configuration in the pool YAML.
+  resources:
+    accelerators: {H100:1, H200:1}
+
+  run: |
+    nvidia-smi
+
+Notice that the :code:`resources` specified in the job YAML should match those used in the pool YAML. Then, use the following command to submit jobs to the pool:
 
 .. code-block:: console
 
-  $ sky jobs launch --pool llm-pool --num-jobs 10 pool.yaml -n llm-batch-inference
-  YAML to run: pool.yaml
-  Submitting to pool 'llm-pool' with 10 jobs.
-  setup/file_mounts/storage_mounts will be ignored when submit jobs to pool. To update a pool, please use `sky jobs pool apply llm-pool new-pool.yaml`. 
-  Managed job 'llm-batch-inference' will be launched on (estimated):
-  Use resources from pool 'llm-pool': 1x[H200:1, H100:1].
-  Launching 10 managed jobs 'llm-batch-inference'. Proceed? [Y/n]: 
-  Launching managed job 'llm-batch-inference' (rank: 0) from jobs controller...
+  $ sky jobs launch --pool gpu-pool workload.yaml
+  YAML to run: workload.yaml
+  Submitting to pool 'gpu-pool' with 1 job.
+  Managed job 'simple-workload' will be launched on (estimated):
+  Use resources from pool 'gpu-pool': 1x[H200:1, H100:1].
+  Launching a managed job 'simple-workload'. Proceed? [Y/n]: Y
+  Launching managed job 'simple-workload' (rank: 0) from jobs controller...
   ...
-  Jobs submitted with IDs: 14,15,16,17,18,19,20,21,22,23.
+  ⚙︎ Job submitted, ID: 2
+  ├── Waiting for task resources on 1 node.
+  └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
+  (simple-workload, pid=4150) Thu Aug 14 18:49:05 2025       
+  (simple-workload, pid=4150) +-----------------------------------------------------------------------------------------+
+  (simple-workload, pid=4150) | NVIDIA-SMI 570.172.08             Driver Version: 570.172.08     CUDA Version: 12.8     |
+  (simple-workload, pid=4150) |-----------------------------------------+------------------------+----------------------+
+  (simple-workload, pid=4150) | GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+  (simple-workload, pid=4150) | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+  (simple-workload, pid=4150) |                                         |                        |               MIG M. |
+  (simple-workload, pid=4150) |=========================================+========================+======================|
+  (simple-workload, pid=4150) |   0  NVIDIA H100 80GB HBM3          On  |   00000000:0F:00.0 Off |                    0 |
+  (simple-workload, pid=4150) | N/A   29C    P0             69W /  700W |       0MiB /  81559MiB |      0%      Default |
+  (simple-workload, pid=4150) |                                         |                        |             Disabled |
+  (simple-workload, pid=4150) +-----------------------------------------+------------------------+----------------------+
+  (simple-workload, pid=4150)                                                                                          
+  (simple-workload, pid=4150) +-----------------------------------------------------------------------------------------+
+  (simple-workload, pid=4150) | Processes:                                                                              |
+  (simple-workload, pid=4150) |  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+  (simple-workload, pid=4150) |        ID   ID                                                               Usage      |
+  (simple-workload, pid=4150) |=========================================================================================|
+  (simple-workload, pid=4150) |  No running processes found                                                             |
+  (simple-workload, pid=4150) +-----------------------------------------------------------------------------------------+
+  ✓ Job finished (status: SUCCEEDED).
+  ✓ Managed job finished: 2 (status: SUCCEEDED).
+
+The job will be launched on one of the available workers in the pool.  
+Currently, each worker is **exclusively occupied** by a single managed job at a time.  
+Support for running multiple jobs concurrently on the same worker will be added in the future.
+
+Pools support a :code:`--num-jobs` flag to conveniently submit multiple jobs at once.  
+Each job will be assigned a unique environment variable :code:`$SKYPILOT_JOB_RANK`, which can be used to determine the job partition.
+
+For example, if you have 1000 prompts to evaluate, each job can process prompts with sequence numbers  
+:code:`$SKYPILOT_JOB_RANK * 100` to :code:`($SKYPILOT_JOB_RANK + 1) * 100`.
+
+Here is a simple example:
+
+.. code-block:: yaml
+
+  # batch-workload.yaml
+  name: batch-workload
+
+  resources:
+    accelerators: {H100:1, H200:1}
+
+  run: |
+    echo "Job rank: $SKYPILOT_JOB_RANK"
+    echo "Processing prompts from $(($SKYPILOT_JOB_RANK * 100)) to $((($SKYPILOT_JOB_RANK + 1) * 100))"
+    # Actual business logic here...
+    echo "Job $SKYPILOT_JOB_RANK finished"
+
+Use the following command to submit them to the pool:
+
+.. code-block:: console
+
+  $ sky jobs launch --pool gpu-pool --num-jobs 10 batch-workload.yaml
+  YAML to run: batch-workload.yaml
+  Submitting to pool 'gpu-pool' with 10 jobs.
+  Managed job 'batch-workload' will be launched on (estimated):
+  Use resources from pool 'gpu-pool': 1x[H200:1, H100:1].
+  Launching 10 managed jobs 'batch-workload'. Proceed? [Y/n]: Y
+  Launching managed job 'batch-workload' (rank: 0) from jobs controller...
+  ...
+  Launching managed job 'batch-workload' (rank: 9) from jobs controller...
+  Jobs submitted with IDs: 3,4,5,6,7,8,9,10,11,12.
   📋 Useful Commands
   ├── To stream job logs:                 sky jobs logs <job-id>
   ├── To stream controller logs:          sky jobs logs --controller <job-id>
-  └── To cancel all jobs on the pool:     sky jobs cancel --pool llm-pool
+  └── To cancel all jobs on the pool:     sky jobs cancel --pool gpu-pool
 
-Each job will have a unique environment variable :code:`$SKYPILOT_JOB_RANK` to determine the job partition.  
-For example, if you have 1000 prompts to evaluate, each job can process prompts with sequence numbers  
-:code:`$SKYPILOT_JOB_RANK * 100` to :code:`($SKYPILOT_JOB_RANK + 1) * 100`.
+All of the jobs will be launched in parallel.  
+Note that the maximum concurrency is limited by the number of workers in the pool.  
+To enable more jobs to run simultaneously, increase the number of workers when creating the pool.
 
 There are several things to note when submitting to a pool:
 
 - Any :code:`setup` commands or file mounts in the YAML are ignored.
-- The :code:`resources` requirements are still respected.
+- The :code:`resources` requirements are still respected. This should be the same as the ones used in the pool YAML.
 - The :code:`run` command is executed for the job.
+
+Monitoring job status
+~~~~~~~~~~~~~~~~~~~~~
 
 You can use the job page in the dashboard to monitor the job status.
 
@@ -589,10 +647,10 @@ You can use the job page in the dashboard to monitor the job status.
   :width: 100%
   :align: center
 
-In this example, we submit 10 jobs with IDs from 14 to 23.  
+In this example, we submit 10 jobs with IDs from 3 to 12.  
 Only one worker is currently ready due to a resource availability issue, but the pool continues to request additional workers in the background.  
 Since each job requires **the entire worker cluster**, only number of workers jobs can run at a time; in this case, 1 job can run at a time.
-As a result, one job is running on the available worker, while the remaining nine are in the PENDING state, waiting for the previous job to finish.
+As a result, except for the 5 completed jobs, 1 job is running on the available worker, while the remaining 4 are in the PENDING state, waiting for the previous job to finish.
 
 Clicking on the pool name will show detailed information about the pool, including its resource specification, status of each worker node, and any job currently running on it:
 
@@ -601,19 +659,50 @@ Clicking on the pool name will show detailed information about the pool, includi
   :align: center
 
 In this example, one worker is ready in Nebius, and another is currently provisioning.  
-The ready worker is running the managed job with ID 16.
-The **Worker Details** section displays the current resource summary of the pool,
-while the **Jobs** section shows a live snapshot of all jobs associated with this pool, including their statuses and job IDs.
+The ready worker is running the managed job with ID 10.
+The **Worker Details** section displays the current resource summary of the pool, while the **Jobs** section shows a live snapshot of all jobs associated with this pool, including their statuses and job IDs.
 
-You can use :code:`sky jobs cancel --pool llm-pool` to cancel all jobs currently running or pending on the pool.
+.. tip::
+
+  You can use :code:`sky jobs cancel --pool gpu-pool` to cancel all jobs currently running or pending on the pool.
+
+Update a pool
+~~~~~~~~~~~~~
+
+You can update the pool configuration with the following command:
+
+.. code-block:: yaml
+  :emphasize-lines: 3
+
+  # new-pool.yaml
+  pool:
+    workers: 10
+
+  resources:
+    accelerators: {H100:1, H200:1}
+
+  setup: |
+    # Setup commands for all workers
+    echo "Setup complete!"
+
+.. code-block:: console
+
+  $ sky jobs pool apply --pool gpu-pool new-pool.yaml
+
+The :code:`sky jobs pool apply` command can be used to update the configuration of an existing pool with the same name.  
+In this example, it updates the number of workers in the pool to 10.  
+If no such pool exists, it will create a new one—this is equivalent to the behavior demonstrated in the previous example.
+
+Terminate a pool
+~~~~~~~~~~~~~~~~
 
 After usage, the pool can be terminated with the following command:
 
 .. code-block:: console
 
-  $ sky jobs pool down llm-pool
-  Terminating pool(s) 'llm-pool'. Proceed? [Y/n]: 
-  Pool 'llm-pool' is scheduled to be terminated.
+  $ sky jobs pool down gpu-pool
+  Terminating pool(s) 'gpu-pool'. Proceed? [Y/n]: 
+  Pool 'gpu-pool' is scheduled to be terminated.
 
 The pool will be torn down in the background, and any remaining resources will be automatically cleaned up.
 
