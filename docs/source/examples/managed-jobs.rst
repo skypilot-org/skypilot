@@ -488,7 +488,7 @@ Here is a simple example of creating a pool:
     # Setup commands for all workers
     echo "Setup complete!"
 
-Noticed that the :code:`pool` section is the only difference from a normal SkyPilot YAML.  
+Notice that the :code:`pool` section is the only difference from a normal SkyPilot YAML.  
 To specify the number of workers in the pool, use the :code:`workers` field under :code:`pool`.  
 When creating a pool, the :code:`run` section is ignored.
 
