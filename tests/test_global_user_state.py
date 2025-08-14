@@ -13,6 +13,7 @@ def test_enabled_clouds_empty():
     assert sky.global_user_state.get_cached_enabled_clouds(
         sky.clouds.cloud.CloudCapability.COMPUTE, workspace='default') == []
 
+
 @pytest.mark.asyncio
 async def test_cluster_event_retention_daemon():
     """Test the cluster event retention daemon runs correctly."""
