@@ -516,7 +516,7 @@ def _post_provision_setup(
 
                 # TODO (kyuds): add link to documentation when it is published
                 ac = 'Some' if any(accesses) else 'All'
-                raise RuntimeError(f'{ac} pods cannot connect to the external'
+                raise RuntimeError(f'{ac} pods cannot connect to the external '
                                    'network. This can cause problems with '
                                    'setup. If the cluster doesn\'t have '
                                    'direct access to the network, consider '
