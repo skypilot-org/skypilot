@@ -1266,7 +1266,9 @@ async def download(download_body: payloads.DownloadBody,
         relative = request.query_params.get('relative', 'home')
         if relative == 'items':
             # Dashboard-friendly: entries relative to selected folders
-            storage_utils.zip_files_and_folders(folders, zip_path, relative_to_items=True)
+            storage_utils.zip_files_and_folders(folders,
+                                                zip_path,
+                                                relative_to_items=True)
         else:
             # CLI-friendly (default): entries with full paths for mapping
             storage_utils.zip_files_and_folders(folders, zip_path)

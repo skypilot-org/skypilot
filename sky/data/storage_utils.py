@@ -272,7 +272,8 @@ def zip_files_and_folders(items: List[str],
         if os.path.isabs(target):
             target = os.path.relpath(target, os.path.dirname(path))
         # Create a ZipInfo instance using the archive name
-        zi = zipfile.ZipInfo(archive_name + '/') if is_dir else zipfile.ZipInfo(archive_name)
+        zi = zipfile.ZipInfo(archive_name +
+                             '/') if is_dir else zipfile.ZipInfo(archive_name)
         # Set external attributes to mark as symlink
         zi.external_attr = 0xA1ED0000
         # Write symlink target as content
@@ -318,7 +319,10 @@ def zip_files_and_folders(items: List[str],
                             archive_name = _get_archive_name(dir_path, item)
                             # If it's a symlink, store it as a symlink
                             if os.path.islink(dir_path):
-                                _store_symlink(zipf, dir_path, archive_name, is_dir=True)
+                                _store_symlink(zipf,
+                                               dir_path,
+                                               archive_name,
+                                               is_dir=True)
                             else:
                                 zipf.write(dir_path, archive_name)
 
@@ -328,7 +332,10 @@ def zip_files_and_folders(items: List[str],
                                 continue
                             archive_name = _get_archive_name(file_path, item)
                             if os.path.islink(file_path):
-                                _store_symlink(zipf, file_path, archive_name, is_dir=False)
+                                _store_symlink(zipf,
+                                               file_path,
+                                               archive_name,
+                                               is_dir=False)
                                 continue
                             if stat.S_ISSOCK(os.stat(file_path).st_mode):
                                 continue

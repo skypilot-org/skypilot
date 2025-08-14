@@ -208,7 +208,11 @@ export async function streamClusterJobLogs({
  * 1) POST /download_logs to fetch logs from the remote cluster to API server
  * 2) POST /download to stream a zip back to the browser and trigger download
  */
-export async function downloadJobLogs({ clusterName, jobIds = null, workspace }) {
+export async function downloadJobLogs({
+  clusterName,
+  jobIds = null,
+  workspace,
+}) {
   try {
     // Step 1: schedule server-side download; result is a mapping job_id -> folder path on API server
     const mapping = await apiClient.fetch('/download_logs', {
@@ -241,7 +245,8 @@ export async function downloadJobLogs({ clusterName, jobIds = null, workspace })
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const namePart = jobIds && jobIds.length === 1 ? `job-${jobIds[0]}` : 'jobs';
+    const namePart =
+      jobIds && jobIds.length === 1 ? `job-${jobIds[0]}` : 'jobs';
     a.href = url;
     a.download = `${clusterName}-${namePart}-logs-${ts}.zip`;
     document.body.appendChild(a);

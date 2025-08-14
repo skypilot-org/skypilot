@@ -10,7 +10,10 @@ import {
 } from '@/components/utils';
 import { RotateCwIcon, Download } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
-import { streamClusterJobLogs, downloadJobLogs } from '@/data/connectors/clusters';
+import {
+  streamClusterJobLogs,
+  downloadJobLogs,
+} from '@/data/connectors/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { LogFilter, formatLogs, stripAnsiCodes } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
@@ -390,19 +393,27 @@ export function JobDetailPage() {
                     </span>
                   </div>
                   <div className="flex items-center space-x-3">
-                    <Tooltip content="Download full logs" className="text-muted-foreground">
+                    <Tooltip
+                      content="Download full logs"
+                      className="text-muted-foreground"
+                    >
                       <button
-                        onClick={() => downloadJobLogs({
-                          clusterName: cluster,
-                          jobIds: job ? [job] : null,
-                          workspace: clusterData?.workspace,
-                        })}
+                        onClick={() =>
+                          downloadJobLogs({
+                            clusterName: cluster,
+                            jobIds: job ? [job] : null,
+                            workspace: clusterData?.workspace,
+                          })
+                        }
                         className="text-sky-blue hover:text-sky-blue-bright flex items-center"
                       >
                         <Download className="w-4 h-4" />
                       </button>
                     </Tooltip>
-                    <Tooltip content="Refresh logs" className="text-muted-foreground">
+                    <Tooltip
+                      content="Refresh logs"
+                      className="text-muted-foreground"
+                    >
                       <button
                         onClick={handleRefreshLogs}
                         disabled={isLoadingLogs}
