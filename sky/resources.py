@@ -2,7 +2,6 @@
 import collections
 import dataclasses
 import re
-import traceback
 import textwrap
 import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
@@ -1842,7 +1841,10 @@ class Resources:
                 'no_missing_accel_warnings', self._no_missing_accel_warnings),
         )
         assert not override
-        resources._disk_size_specified = override_disk_size_specified or self._disk_size_specified
+        resources.__dict__.update({
+            '_disk_size_specified': (override_disk_size_specified or
+                                     self._disk_size_specified)
+        })
         return resources
 
     def valid_on_region_zones(self, region: str, zones: List[str]) -> bool:
