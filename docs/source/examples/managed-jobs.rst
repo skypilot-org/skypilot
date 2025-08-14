@@ -590,7 +590,10 @@ This indicates that the job (1) requires the specified :code:`resources` to run,
   ✓ Managed job finished: 2 (status: SUCCEEDED).
 
 The job will be launched on one of the available workers in the pool.
-Currently, each worker is **exclusively occupied** by a single managed job at a time, so the :code:`resources` specified in the job YAML should match those used in the pool YAML. Support for running multiple jobs concurrently on the same worker will be added in the future.
+
+.. note::
+
+  Currently, each worker is **exclusively occupied** by a single managed job at a time, so the :code:`resources` specified in the job YAML should match those used in the pool YAML. Support for running multiple jobs concurrently on the same worker will be added in the future.
 
 Submit multiple jobs at once
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
