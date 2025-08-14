@@ -163,6 +163,7 @@ def _cleanup(service_name: str) -> bool:
                 logger.info('Terminate process for replica '
                             f'{info.replica_id} finished.')
                 p.join()
+                del info2proc[info]
                 if p.exitcode == 0:
                     serve_state.remove_replica(service_name, info.replica_id)
                     logger.info(
