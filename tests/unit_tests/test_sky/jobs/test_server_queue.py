@@ -40,8 +40,8 @@ class TestFilterJobs:
 
     def test_filter_jobs_no_filters_returns_all_and_total(self):
         jobs = [_make_job(i) for i in range(5)]
-        filtered, total = jobs_utils._filter_jobs(jobs, None, None, None, None,
-                                                  None)
+        filtered, total = jobs_utils.filter_jobs(jobs, None, None, None, None,
+                                                 None)
         assert total == 5
         assert len(filtered) == 5
         assert [j['job_id'] for j in filtered] == list(range(0, 5))
@@ -54,39 +54,39 @@ class TestFilterJobs:
         ]
 
         # workspace match
-        filtered, total = jobs_utils._filter_jobs(jobs, '-b', None, None, None,
-                                                  None)
+        filtered, total = jobs_utils.filter_jobs(jobs, '-b', None, None, None,
+                                                 None)
         assert total == 2
         assert [j['job_id'] for j in filtered] == [2, 3]
 
         # job name match
-        filtered, total = jobs_utils._filter_jobs(jobs, None, 'a', None, None,
-                                                  None)
+        filtered, total = jobs_utils.filter_jobs(jobs, None, 'a', None, None,
+                                                 None)
         assert total == 3
         assert [j['job_id'] for j in filtered] == [1, 2, 3]
 
         # pool match
-        filtered, total = jobs_utils._filter_jobs(jobs, None, None, '2', None,
-                                                  None)
+        filtered, total = jobs_utils.filter_jobs(jobs, None, None, '2', None,
+                                                 None)
         assert total == 2
         assert [j['job_id'] for j in filtered] == [2, 3]
 
     def test_filter_jobs_pagination(self):
         jobs = [_make_job(i) for i in range(1, 26)]
         # page 1, limit 10
-        page1, total = jobs_utils._filter_jobs(jobs, None, None, None, 1, 10)
+        page1, total = jobs_utils.filter_jobs(jobs, None, None, None, 1, 10)
         assert total == 25
         assert [j['job_id'] for j in page1] == list(range(1, 11))
 
         # page 3, limit 10
-        page3, total = jobs_utils._filter_jobs(jobs, None, None, None, 3, 10)
+        page3, total = jobs_utils.filter_jobs(jobs, None, None, None, 3, 10)
         assert total == 25
         # Remaining 5 items
         assert [j['job_id'] for j in page3] == list(range(21, 26))
 
         # invalid offset/limit combinations in helper should raise assertion
         with pytest.raises(AssertionError):
-            jobs_utils._filter_jobs(jobs, None, None, None, 1, None)
+            jobs_utils.filter_jobs(jobs, None, None, None, 1, None)
 
     def test_filter_jobs_missing_keys_and_empty_values(self):
         jobs = [
@@ -112,18 +112,18 @@ class TestFilterJobs:
         ]
 
         # With workspace match
-        filtered, total = jobs_utils._filter_jobs(jobs, None, 'ws', None, None,
-                                                  None)
+        filtered, total = jobs_utils.filter_jobs(jobs, None, 'ws', None, None,
+                                                 None)
         assert total == 0
 
         # With pool match
-        filtered, total = jobs_utils._filter_jobs(jobs, None, None, 'p2', None,
-                                                  None)
+        filtered, total = jobs_utils.filter_jobs(jobs, None, None, 'p2', None,
+                                                 None)
         assert total == 0
 
         # With job name match
-        filtered, total = jobs_utils._filter_jobs(jobs, None, 'tr', None, None,
-                                                  None)
+        filtered, total = jobs_utils.filter_jobs(jobs, None, 'tr', None, None,
+                                                 None)
         assert total == 1
         assert [j['job_id'] for j in filtered] == [4]
 
@@ -145,8 +145,8 @@ class TestFilterJobs:
             },
         ]
         # pool as int should be cast to str and matched by startswith
-        filtered, total = jobs_utils._filter_jobs(jobs, None, None, '12', None,
-                                                  None)
+        filtered, total = jobs_utils.filter_jobs(jobs, None, None, '12', None,
+                                                 None)
         assert total == 1
         assert [j['job_id'] for j in filtered] == [1]
 
@@ -247,12 +247,12 @@ class TestQueue:
             offset = payload.get('offset')
             limit = payload.get('limit')
 
-            filtered, total = jobs_utils._filter_jobs(result, workspace_match,
-                                                      name_match, pool_match,
-                                                      offset, limit)
+            filtered, total = jobs_utils.filter_jobs(result, workspace_match,
+                                                     name_match, pool_match,
+                                                     offset, limit)
 
             # Return as server queue() does: (jobs, total)
-            return filtered, total
+            return filtered, total, jobs_utils.ManagedJobQueueResultType.DICT
 
         # Patch symbols used by queue()
         monkeypatch.setattr(jobs_core.backends,

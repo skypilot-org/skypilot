@@ -85,6 +85,12 @@ _JOB_CANCELLED_MESSAGE = (
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 40
 
 
+class ManagedJobQueueResultType(enum.Enum):
+    """The type of the managed job queue result."""
+    DICT = 'DICT'
+    LIST = 'LIST'
+
+
 class UserSignal(enum.Enum):
     """The signal to be sent to the user."""
     CANCEL = 'CANCEL'
@@ -1180,8 +1186,8 @@ def dump_managed_job_queue(
     if job_ids:
         jobs = [job for job in jobs if job['job_id'] in job_ids]
 
-    jobs, total = _filter_jobs(jobs, workspace_match, name_match, pool_match,
-                               offset, limit)
+    jobs, total = filter_jobs(jobs, workspace_match, name_match, pool_match,
+                              offset, limit)
     for job in jobs:
         end_at = job['end_at']
         if end_at is None:
@@ -1258,10 +1264,16 @@ def dump_managed_job_queue(
     return message_utils.encode_payload({'jobs': jobs, 'total': total})
 
 
-def _filter_jobs(jobs: List[Dict[str, Any]], workspace_match: Optional[str],
-                 name_match: Optional[str], pool_match: Optional[str],
-                 offset: Optional[int],
-                 limit: Optional[int]) -> Tuple[List[Dict[str, Any]], int]:
+def filter_jobs(
+    jobs: List[Dict[str, Any]],
+    workspace_match: Optional[str],
+    name_match: Optional[str],
+    pool_match: Optional[str],
+    offset: Optional[int],
+    limit: Optional[int],
+    user_match: Optional[str] = None,
+    enable_user_match: bool = False,
+) -> Tuple[List[Dict[str, Any]], int]:
     """Filter jobs based on the given criteria.
 
     Args:
@@ -1304,12 +1316,15 @@ def _filter_jobs(jobs: List[Dict[str, Any]], workspace_match: Optional[str],
         return result[start:end]
 
     result = []
+    checks = [
+        ('workspace', workspace_match),
+        ('job_name', name_match),
+        ('pool', pool_match),
+    ]
+    if enable_user_match:
+        checks.append(('user_name', user_match))
+
     for job in jobs:
-        checks = [
-            ('workspace', workspace_match),
-            ('job_name', name_match),
-            ('pool', pool_match),
-        ]
         if not all(
                 _pattern_matches(job, key, pattern) for key, pattern in checks):
             continue
@@ -1320,15 +1335,19 @@ def _filter_jobs(jobs: List[Dict[str, Any]], workspace_match: Optional[str],
     return _handle_offset_and_limit(result, offset, limit), total
 
 
-def load_managed_job_queue(payload: str) -> Tuple[List[Dict[str, Any]], int]:
+def load_managed_job_queue(
+    payload: str
+) -> Tuple[List[Dict[str, Any]], int, ManagedJobQueueResultType]:
     """Load job queue from json string."""
     result = message_utils.decode_payload(payload)
+    result_type = ManagedJobQueueResultType.DICT
     if isinstance(result, dict):
         jobs = result['jobs']
         total = result['total']
     else:
         jobs = result
         total = len(jobs)
+        result_type = ManagedJobQueueResultType.LIST
 
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
@@ -1337,7 +1356,7 @@ def load_managed_job_queue(payload: str) -> Tuple[List[Dict[str, Any]], int]:
             # TODO(cooperc): Remove check before 0.12.0.
             user = global_user_state.get_user(job['user_hash'])
             job['user_name'] = user.name if user is not None else None
-    return jobs, total
+    return jobs, total, result_type
 
 
 def _get_job_status_from_tasks(
@@ -1698,6 +1717,9 @@ class ManagedJobCodeGen:
     ) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 9:
+            # For backward compatibility, since filtering is not supported
+            # before #6652.
+            # TODO(hailong): Remove compatibility before 0.12.0
             job_table = utils.dump_managed_job_queue()
         else:
             job_table = utils.dump_managed_job_queue(
