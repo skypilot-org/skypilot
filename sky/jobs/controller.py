@@ -1,6 +1,4 @@
-"""Controller: handles the life cycle of a managed job.
-
-TODO(cooperc): Document lifecycle, and multiprocess layout.
+"""Controller: handles scheduling and the life cycle of a managed job.
 """
 import asyncio
 import logging
@@ -77,7 +75,38 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
 
 
 class JobsController:
-    """Each jobs controller manages the life cycle of one managed job."""
+    """Controls the lifecycle of a single managed job.
+
+    This controller executes a chain DAG defined in ``dag_yaml`` by:
+    - Loading the DAG and preparing per-task environment variables so each task
+      has a stable global job identifier across recoveries.
+    - Launching the task on the configured backend (``CloudVmRayBackend``),
+      optionally via a cluster pool.
+    - Persisting state transitions to the managed jobs state store
+      (e.g., STARTING → RUNNING → SUCCEEDED/FAILED/CANCELLED).
+    - Monitoring execution, downloading/streaming logs, detecting failures or
+      preemptions, and invoking recovery through
+      ``recovery_strategy.StrategyExecutor``.
+    - Cleaning up clusters and ephemeral resources when tasks finish.
+
+    Concurrency and coordination:
+    - Runs inside an ``asyncio`` event loop.
+    - Shares a ``starting`` set, guarded by ``starting_lock`` and signaled via
+      ``starting_signal``, to throttle concurrent launches across jobs that the
+      top-level ``Controller`` manages.
+
+    Key attributes:
+    - ``_job_id``: Integer identifier of this managed job.
+    - ``_dag_yaml`` / ``_dag`` / ``_dag_name``: The job definition and metadata.
+    - ``_backend``: Backend used to launch and manage clusters.
+    - ``_pool``: Optional pool name if using a cluster pool.
+    - ``_logger``: Job-scoped logger for progress and diagnostics.
+    - ``starting`` / ``starting_lock`` / ``starting_signal``: Shared scheduler
+      coordination primitives. ``starting_lock`` must be used for accessing
+      ``starting_signal`` and ``starting``
+    - ``_strategy_executor``: Recovery/launch strategy executor (created per
+      task).
+    """
 
     def __init__(
         self,
@@ -89,15 +118,21 @@ class JobsController:
         starting_signal: asyncio.Condition,
         pool: Optional[str] = None,
     ) -> None:
-        """Initialize a JobsController.
+        """Initialize a ``JobsController``.
 
         Args:
-            job_id: The ID of the job to control.
-            dag_yaml: Path to the YAML file containing the DAG definition.
-            job_logger: Logger instance for this specific job.
-            starting: Set of job IDs that are currently starting.
-            job_tasks_lock: Lock for synchronizing access to the job tasks
-            dictionary.
+            job_id: Integer ID of the managed job.
+            dag_yaml: Path to the YAML file containing the chain DAG to run.
+            job_logger: Logger instance dedicated to this job.
+            starting: Shared set of job IDs currently in the STARTING phase,
+                used to limit concurrent launches.
+            starting_lock: ``asyncio.Lock`` guarding access to the shared
+                scheduler state (e.g., the ``starting`` set).
+            starting_signal: ``asyncio.Condition`` used to notify when a job
+                exits STARTING so more jobs can be admitted.
+            pool: Optional cluster pool name. When provided, the job is
+                submitted to the pool rather than launching a dedicated
+                cluster.
         """
 
         self.starting = starting
@@ -355,8 +390,6 @@ class JobsController:
                 # removed from the set then we would get a key error.
                 self.starting_signal.notify()
             except KeyError:
-                # should not happen except maybe in a weird case, but either
-                # we doesn't matter, since its no longer in the set
                 pass
 
         while True:

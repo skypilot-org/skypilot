@@ -269,7 +269,9 @@ async def scheduled_launch(
             await starting_signal.wait()
 
     job_logger.info(f'Starting job {job_id}')
-    starting.add(job_id)
+
+    async with starting_lock:
+        starting.add(job_id)
 
     await state.scheduler_set_launching_async(job_id)
 

@@ -764,16 +764,18 @@ def exec(  # pylint: disable=redefined-builtin
         operation='executing tasks',
         check_cloud_vm_ray_backend=False,
         dryrun=dryrun)
-    return _execute(entrypoint=entrypoint,
-                    dryrun=dryrun,
-                    down=down,
-                    stream_logs=stream_logs,
-                    handle=handle,
-                    backend=backend,
-                    stages=[
-                        Stage.SYNC_WORKDIR,
-                        Stage.EXEC,
-                    ],
-                    cluster_name=cluster_name,
-                    detach_run=True,
-                    job_logger=job_logger)
+    return _execute(
+        entrypoint=entrypoint,
+        dryrun=dryrun,
+        down=down,
+        stream_logs=stream_logs,
+        handle=handle,
+        backend=backend,
+        stages=[
+            Stage.SYNC_WORKDIR,
+            Stage.EXEC,
+        ],
+        cluster_name=cluster_name,
+        detach_run=True,
+        job_logger=job_logger,
+    )
