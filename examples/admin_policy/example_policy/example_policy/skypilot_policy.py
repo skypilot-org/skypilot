@@ -1,8 +1,9 @@
 """Example prebuilt admin policies."""
 import subprocess
-from typing import Any, Dict, List
+from typing import List
 
 import sky
+from sky.schemas.api import responses
 from sky.utils import common
 
 
@@ -104,7 +105,7 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
 
         # Get the cluster record to operate on.
         cluster_name = request_options.cluster_name
-        cluster_records: List[Dict[str, Any]] = []
+        cluster_records: List[responses.StatusResponse] = []
         if cluster_name is not None:
             try:
                 cluster_records = sky.get(
