@@ -14,7 +14,6 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
-import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -31,6 +30,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import directory_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
@@ -2444,7 +2444,7 @@ def clean_zombie_ssh_jump_pod(namespace: str, context: Optional[str],
 
 def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
                            ssh_jump_name: str, service_type: str) -> Dict:
-    template_path = os.path.join(sky.__root_dir__, 'templates',
+    template_path = os.path.join(directory_utils.get_sky_dir(), 'templates',
                                  'kubernetes-ssh-jump.yml.j2')
     if not os.path.exists(template_path):
         raise FileNotFoundError(
