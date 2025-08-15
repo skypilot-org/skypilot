@@ -1,6 +1,6 @@
 """Responses for the API server."""
 
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import pydantic
 
@@ -87,8 +87,8 @@ class StatusResponse(ResponseBaseModel):
     status: status_lib.ClusterStatus
     autostop: int
     to_down: bool
-    owner: Any
-    metadata: dict
+    owner: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = None
     cluster_hash: str
     # pydantic cannot generate the pydantic-core schema for
     # storage_mounts_metadata, so we use Any here.
