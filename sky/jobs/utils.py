@@ -1283,9 +1283,11 @@ def filter_jobs(
         pool_match: Pool name to filter.
         offset: Offset to filter.
         limit: Limit to filter.
+        user_match: User name to filter.
+        enable_user_match: Whether to enable user match.
 
     Returns:
-        List of filtered jobs.
+        List of filtered jobs and total number of jobs.
     """
 
     # TODO(hailong): refactor the whole function including the
