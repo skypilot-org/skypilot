@@ -107,6 +107,7 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('job_id_on_pool_cluster',
                       sqlalchemy.Integer,
                       server_default=None),
+    sqlalchemy.Column('pool_hash', sqlalchemy.Text, server_default=None),
 )
 
 ha_recovery_script_table = sqlalchemy.Table(
@@ -225,6 +226,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'pool': r['pool'],
         'current_cluster_name': r['current_cluster_name'],
         'job_id_on_pool_cluster': r['job_id_on_pool_cluster'],
+        'pool_hash': r['pool_hash'],
     }
 
 
@@ -439,7 +441,8 @@ class ManagedJobScheduleState(enum.Enum):
 
 # === Status transition functions ===
 @_init_db
-def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
+def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str,
+                 pool: Optional[str], pool_hash: Optional[str]):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -455,14 +458,18 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
             name=name,
             schedule_state=ManagedJobScheduleState.INACTIVE.value,
             workspace=workspace,
-            entrypoint=entrypoint)
+            entrypoint=entrypoint,
+            pool=pool,
+            pool_hash=pool_hash,
+        )
         session.execute(insert_stmt)
         session.commit()
 
 
 @_init_db
 def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
-                                pool: Optional[str]) -> int:
+                                pool: Optional[str],
+                                pool_hash: Optional[str]) -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -480,6 +487,7 @@ def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
             workspace=workspace,
             entrypoint=entrypoint,
             pool=pool,
+            pool_hash=pool_hash,
         )
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -1520,7 +1528,7 @@ def get_nonterminal_job_ids_by_pool(pool: str,
 
 
 @_init_db
-def get_waiting_job(pool: Optional[str]) -> Optional[Dict[str, Any]]:
+def get_waiting_job() -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job, provided its
@@ -1551,8 +1559,6 @@ def get_waiting_job(pool: Optional[str]) -> Optional[Dict[str, Any]]:
             job_info_table.c.priority >= sqlalchemy.func.coalesce(
                 max_priority_subquery, 0),
         ]
-        if pool is not None:
-            select_conds.append(job_info_table.c.pool == pool)
         query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,

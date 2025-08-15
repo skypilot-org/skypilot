@@ -47,13 +47,16 @@ class RayUpLineProcessor(LineProcessor):
         RUNTIME_SETUP = 1
         PULLING_DOCKER_IMAGES = 2
 
-    def __init__(self, log_path: str):
+    def __init__(self, log_path: str, cluster_name: Optional[str] = None):
         self.log_path = log_path
+        self.cluster_name = cluster_name
 
     def __enter__(self) -> None:
         self.state = self.ProvisionStatus.LAUNCH
         self.status_display = rich_utils.safe_status(
-            ux_utils.spinner_message('Launching', self.log_path))
+            ux_utils.spinner_message('Launching',
+                                     self.log_path,
+                                     cluster_name=self.cluster_name))
         self.status_display.start()
 
     def process_line(self, log_line: str) -> None:
@@ -62,19 +65,25 @@ class RayUpLineProcessor(LineProcessor):
             logger.info('  Head VM is up.')
             self.status_display.update(
                 ux_utils.spinner_message(
-                    'Launching - Preparing SkyPilot runtime', self.log_path))
+                    'Launching - Preparing SkyPilot runtime',
+                    self.log_path,
+                    cluster_name=self.cluster_name))
             self.state = self.ProvisionStatus.RUNTIME_SETUP
         if ('Pulling from' in log_line and
                 self.state == self.ProvisionStatus.RUNTIME_SETUP):
             self.status_display.update(
                 ux_utils.spinner_message(
-                    'Launching - Initializing docker container', self.log_path))
+                    'Launching - Initializing docker container',
+                    self.log_path,
+                    cluster_name=self.cluster_name))
             self.state = self.ProvisionStatus.PULLING_DOCKER_IMAGES
         if ('Status: Downloaded newer image' in log_line and
                 self.state == self.ProvisionStatus.PULLING_DOCKER_IMAGES):
             self.status_display.update(
                 ux_utils.spinner_message(
-                    'Launching - Preparing SkyPilot runtime', self.log_path))
+                    'Launching - Preparing SkyPilot runtime',
+                    self.log_path,
+                    cluster_name=self.cluster_name))
             self.state = self.ProvisionStatus.RUNTIME_SETUP
 
     def __exit__(self, except_type: Optional[Type[BaseException]],

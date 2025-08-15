@@ -1,9 +1,8 @@
 """SDK for SkyServe."""
 import json
 import typing
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-from sky.client import common as client_common
 from sky.serve.client import impl
 from sky.server import common as server_common
 from sky.server import rest
@@ -27,7 +26,7 @@ def up(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[Tuple[str, str]]:
     """Spins up a service.
 
     Please refer to the sky.cli.serve_up for the document.
@@ -62,7 +61,7 @@ def update(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     """Updates an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -95,7 +94,7 @@ def down(
     service_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     """Tears down a service.
 
     Please refer to the sky.cli.serve_down for the docs.
@@ -123,7 +122,7 @@ def down(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def terminate_replica(service_name: str, replica_id: int,
-                      purge: bool) -> server_common.RequestId:
+                      purge: bool) -> server_common.RequestId[None]:
     """Tears down a specific replica for the given service.
 
     Args:
@@ -157,8 +156,8 @@ def terminate_replica(service_name: str, replica_id: int,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def status(
-        service_names: Optional[Union[str,
-                                      List[str]]]) -> server_common.RequestId:
+    service_names: Optional[Union[str, List[str]]]
+) -> server_common.RequestId[List[Dict[str, Any]]]:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
@@ -290,27 +289,13 @@ def tail_logs(service_name: str,
         sky.exceptions.ClusterNotUpError: the sky serve controller is not up.
         ValueError: arguments not valid, or failed to tail the logs.
     """
-    # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
-
-    body = payloads.ServeLogsBody(
-        service_name=service_name,
-        target=target,
-        replica_id=replica_id,
-        follow=follow,
-        tail=tail,
-    )
-    response = server_common.make_authenticated_request(
-        'POST',
-        '/serve/logs',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        stream=True)
-    request_id = server_common.get_request_id(response)
-    return sdk.stream_response(request_id=request_id,
-                               response=response,
-                               output_stream=output_stream,
-                               resumable=True)
+    return impl.tail_logs(service_name,
+                          target,
+                          replica_id,
+                          follow,
+                          output_stream,
+                          tail,
+                          pool=False)
 
 
 @usage_lib.entrypoint
@@ -320,8 +305,8 @@ def sync_down_logs(service_name: str,
                    *,
                    targets: Optional[Union[
                        str, 'serve_utils.ServiceComponent',
-                       List[Union[str,
-                                  'serve_utils.ServiceComponent']]]] = None,
+                       Sequence[Union[str,
+                                      'serve_utils.ServiceComponent']]]] = None,
                    replica_ids: Optional[List[int]] = None,
                    tail: Optional[int] = None) -> None:
     """Sync down logs from the service components to a local directory.
@@ -352,25 +337,9 @@ def sync_down_logs(service_name: str,
         sky.exceptions.ClusterNotUpError: If the controller is not up.
         ValueError: Arguments not valid.
     """
-    # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
-
-    body = payloads.ServeDownloadLogsBody(
-        service_name=service_name,
-        # No need to set here, since the server will override it
-        # to a directory on the API server.
-        local_dir=local_dir,
-        targets=targets,
-        replica_ids=replica_ids,
-        tail=tail,
-    )
-    response = server_common.make_authenticated_request(
-        'POST',
-        '/serve/sync-down-logs',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None))
-    remote_dir = sdk.stream_and_get(server_common.get_request_id(response))
-
-    # Download from API server paths to the client's local_dir
-    client_common.download_logs_from_api_server([remote_dir], remote_dir,
-                                                local_dir)
+    return impl.sync_down_logs(service_name,
+                               local_dir,
+                               targets=targets,
+                               replica_ids=replica_ids,
+                               tail=tail,
+                               pool=False)

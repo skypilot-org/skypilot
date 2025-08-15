@@ -575,8 +575,8 @@ def _reload_config_as_server() -> None:
         with _DB_USE_LOCK:
             sqlalchemy_engine = sqlalchemy.create_engine(db_url,
                                                          poolclass=NullPool)
-            db_utils.add_tables_to_db_sqlalchemy(Base.metadata,
-                                                 sqlalchemy_engine)
+            db_utils.add_all_tables_to_db_sqlalchemy(Base.metadata,
+                                                     sqlalchemy_engine)
 
             def _get_config_yaml_from_db(
                     key: str) -> Optional[config_utils.Config]:
@@ -867,8 +867,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             with _DB_USE_LOCK:
                 sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
                                                              poolclass=NullPool)
-                db_utils.add_tables_to_db_sqlalchemy(Base.metadata,
-                                                     sqlalchemy_engine)
+                db_utils.add_all_tables_to_db_sqlalchemy(
+                    Base.metadata, sqlalchemy_engine)
 
                 def _set_config_yaml_to_db(key: str,
                                            config: config_utils.Config):

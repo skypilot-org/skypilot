@@ -52,6 +52,59 @@ Log in and approve the request in your web browser. Then back in the CLI, comple
 If everything is set up correctly, :code:`sky check aws` should succeed!
 
 
+.. _aws-ssm:
+
+Using AWS Systems Manager (SSM)
+--------------------------------
+
+`AWS Systems Manager Session Manager <https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html>`_ provides secure shell access to EC2 instances without requiring direct network access through SSH ports or bastion hosts.
+
+SkyPilot can be configured to use SSM for SSH connections by setting the ``ssh_proxy_command`` in your :ref:`config.yaml <config-yaml>` file.
+
+Prerequisites
+~~~~~~~~~~~~~
+
+Before using SSM with SkyPilot, ensure the following:
+
+1. **AWS CLI v2** and **Session Manager plugin** are installed. Follow the `installation guide <https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html>`_ for your operating system.
+
+   .. note::
+      If using a :ref:`remote API server <sky-api-server>`, install the Session Manager plugin on the API server instead of your local machine.
+
+2. **IAM permissions** are configured to allow SSM access:
+
+   - Your user/role needs ``ssm:StartSession`` permission
+   - The ``skypilot-v1`` IAM role (used by EC2 instances) needs the ``AmazonSSMManagedInstanceCore`` managed policy attached
+
+   To attach the SSM policy to the SkyPilot role:
+
+   a. Open the `IAM console <https://console.aws.amazon.com/iam/>`_ and go to **Roles**
+   b. Search for and select the ``skypilot-v1`` role
+   c. Click **Add permissions** → **Attach policies**
+   d. Search for ``AmazonSSMManagedInstanceCore`` and select it
+   e. Click **Add permissions**
+
+Configuration
+~~~~~~~~~~~~~
+
+Add the following to your ``~/.sky/config.yaml`` file:
+
+.. code-block:: yaml
+
+    aws:
+      ssh_proxy_command:
+        us-east-1: aws ssm start-session --target "$(aws ec2 describe-instances --filter Name=ip-address,Values=%h --region us-east-1 --profile sky | jq -r '.Reservations[].Instances[]|.InstanceId')" --region us-east-1 --profile sky --document-name AWS-StartSSHSession --parameters portNumber=%p
+        us-east-2: aws ssm start-session --target "$(aws ec2 describe-instances --filter Name=ip-address,Values=%h --region us-east-2 --profile sky | jq -r '.Reservations[].Instances[]|.InstanceId')" --region us-east-2 --profile sky --document-name AWS-StartSSHSession --parameters portNumber=%p
+
+.. note::
+
+    - Replace ``sky`` with your actual AWS profile name if different.
+    - Add additional regions as needed following the same pattern.
+    - The ``jq`` command-line JSON processor must be installed on your system.
+
+Once configured, SkyPilot will automatically use SSM for all SSH connections to your AWS instances in the specified regions.
+
+
 .. _sso-feature-compat:
 
 Multi-cloud access with SSO login

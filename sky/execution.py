@@ -173,19 +173,12 @@ def _execute(
         if dryrun.
     """
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag.resolve_and_validate_volumes()
-    if (not _is_launched_by_jobs_controller and
-            not _is_launched_by_sky_serve_controller):
-        # Only process pre-mount operations on API server.
-        dag.pre_mount_volumes()
     for task in dag.tasks:
-        if task.storage_mounts is not None:
-            for storage in task.storage_mounts.values():
-                # Ensure the storage is constructed.
-                storage.construct()
         for resource in task.resources:
             # For backward compatibility, we need to override the autostop
-            # config at server-side for legacy clients.
+            # config at server-side for legacy clients. This should be set
+            # before admin policy to make the admin policy get the final
+            # value of autostop config.
             # TODO(aylei): remove this after we bump the API version.
             resource.override_autostop_config(
                 down=down, idle_minutes=idle_minutes_to_autostop)
@@ -200,6 +193,16 @@ def _execute(
                 down=down,
                 dryrun=dryrun,
             )) as dag:
+        dag.resolve_and_validate_volumes()
+        if (not _is_launched_by_jobs_controller and
+                not _is_launched_by_sky_serve_controller):
+            # Only process pre-mount operations on API server.
+            dag.pre_mount_volumes()
+        for task in dag.tasks:
+            if task.storage_mounts is not None:
+                for storage in task.storage_mounts.values():
+                    # Ensure the storage is constructed.
+                    storage.construct()
         return _execute_dag(
             dag,
             dryrun=dryrun,
@@ -353,12 +356,13 @@ def _execute_dag(
         task = _maybe_clone_disk_from_cluster(clone_disk_from, cluster_name,
                                               task)
 
+    is_managed = (_is_launched_by_jobs_controller or
+                  _is_launched_by_sky_serve_controller)
+
     if not cluster_exists:
         # If spot is launched on serve or jobs controller, we don't need to
         # print out the hint.
-        if (Stage.PROVISION in stages and task.use_spot and
-                not _is_launched_by_jobs_controller and
-                not _is_launched_by_sky_serve_controller):
+        if (Stage.PROVISION in stages and task.use_spot and not is_managed):
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
             reset = colorama.Style.RESET_ALL
@@ -397,7 +401,8 @@ def _execute_dag(
         # That's because we want to do commands in task.setup and task.run again
         # after K8S pod recovers from a crash.
         # See `kubernetes-ray.yml.j2` for more details.
-        dump_final_script=is_controller_high_availability_supported)
+        dump_final_script=is_controller_high_availability_supported,
+        is_managed=is_managed)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -434,9 +439,19 @@ def _execute_dag(
             logger.info(ux_utils.starting_message('Syncing files.'))
 
         if do_workdir:
+            if cluster_name is not None:
+                global_user_state.add_cluster_event(
+                    cluster_name, status_lib.ClusterStatus.INIT,
+                    'Syncing files to cluster',
+                    global_user_state.ClusterEventType.STATUS_CHANGE)
             backend.sync_workdir(handle, task.workdir, task.envs_and_secrets)
 
         if do_file_mounts:
+            if cluster_name is not None:
+                global_user_state.add_cluster_event(
+                    cluster_name, status_lib.ClusterStatus.UP,
+                    'Syncing file mounts',
+                    global_user_state.ClusterEventType.STATUS_CHANGE)
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
@@ -447,6 +462,11 @@ def _execute_dag(
                 logger.debug('Unnecessary provisioning was skipped, so '
                              'skipping setup as well.')
             else:
+                if cluster_name is not None:
+                    global_user_state.add_cluster_event(
+                        cluster_name, status_lib.ClusterStatus.UP,
+                        'Running setup commands to install dependencies',
+                        global_user_state.ClusterEventType.STATUS_CHANGE)
                 backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:

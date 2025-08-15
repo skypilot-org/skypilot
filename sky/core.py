@@ -256,7 +256,7 @@ all_clusters, unmanaged_clusters, all_jobs, context
 
 
 def endpoints(cluster: str,
-              port: Optional[Union[int, str]] = None) -> Dict[int, str]:
+              port: Optional[Union[int, str]] = None) -> Dict[str, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -275,7 +275,10 @@ def endpoints(cluster: str,
     with rich_utils.safe_status(
             ux_utils.spinner_message(
                 f'Fetching endpoints for cluster {cluster}')):
-        return backend_utils.get_endpoints(cluster=cluster, port=port)
+        result = backend_utils.get_endpoints(cluster=cluster, port=port)
+        # Convert int keys to str keys.
+        # In JSON serialization, each key must be a string.
+        return {str(k): v for k, v in result.items()}
 
 
 @usage_lib.entrypoint
@@ -629,6 +632,11 @@ def stop(cluster_name: str, purge: bool = False) -> None:
     if handle is None:
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
+
+    global_user_state.add_cluster_event(
+        cluster_name, status_lib.ClusterStatus.STOPPED,
+        'Cluster was stopped by user.',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
 
     backend = backend_utils.get_backend_from_handle(handle)
 

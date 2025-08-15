@@ -10,14 +10,32 @@ import dashboardCache from '@/lib/cache';
 import { apiClient } from './client';
 
 // Configuration
-const DEFAULT_TAIL_LINES = 1000;
+const DEFAULT_TAIL_LINES = 10000;
 
-export async function getManagedJobs({ allUsers = true } = {}) {
+export async function getManagedJobs(options = {}) {
   try {
-    const response = await apiClient.post(`/jobs/queue`, {
+    const {
+      allUsers = true,
+      nameMatch,
+      userMatch,
+      workspaceMatch,
+      poolMatch,
+      page,
+      limit,
+    } = options;
+
+    const body = {
       all_users: allUsers,
       verbose: true,
-    });
+    };
+    if (nameMatch !== undefined) body.name_match = nameMatch;
+    if (userMatch !== undefined) body.user_match = userMatch;
+    if (workspaceMatch !== undefined) body.workspace_match = workspaceMatch;
+    if (poolMatch !== undefined) body.pool_match = poolMatch;
+    if (page !== undefined) body.page = page;
+    if (limit !== undefined) body.limit = limit;
+
+    const response = await apiClient.post(`/jobs/queue`, body);
     const id = response.headers.get('X-Skypilot-Request-ID');
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
@@ -28,7 +46,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
             const error = JSON.parse(data.detail.error);
             // Handle specific error types
             if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
-              return { jobs: [], controllerStopped: true };
+              return { jobs: [], total: 0, controllerStopped: true };
             }
           } catch (jsonError) {
             console.error('Error parsing JSON:', jsonError);
@@ -37,96 +55,74 @@ export async function getManagedJobs({ allUsers = true } = {}) {
       } catch (parseError) {
         console.error('Error parsing JSON:', parseError);
       }
-      return { jobs: [], controllerStopped: false };
+      return { jobs: [], total: 0, controllerStopped: false };
     }
     // print out the response for debugging
     const data = await fetchedData.json();
-    const managedJobs = data.return_value ? JSON.parse(data.return_value) : [];
+    const parsed = data.return_value ? JSON.parse(data.return_value) : [];
+    const managedJobs = Array.isArray(parsed) ? parsed : parsed?.jobs || [];
+    const total = Array.isArray(parsed)
+      ? managedJobs.length
+      : (parsed?.total ?? managedJobs.length);
+
+    // Process jobs data
     const jobData = managedJobs.map((job) => {
-      // Create events array correctly
+      let total_duration = 0;
+      if (job.end_at && job.submitted_at) {
+        total_duration = job.end_at - job.submitted_at;
+      } else if (job.submitted_at) {
+        total_duration = Date.now() / 1000 - job.submitted_at;
+      }
+
       const events = [];
       if (job.submitted_at) {
         events.push({
-          time: new Date(job.submitted_at * 1000),
-          event: 'Job submitted.',
+          type: 'PENDING',
+          timestamp: job.submitted_at,
         });
       }
       if (job.start_at) {
         events.push({
-          time: new Date(job.start_at * 1000),
-          event: 'Job started.',
+          type: 'RUNNING',
+          timestamp: job.start_at,
         });
       }
-
-      // Add completed event if end_at exists
       if (job.end_at) {
-        if (job.status == 'CANCELLING' || job.status == 'CANCELLED') {
-          events.push({
-            time: new Date(job.end_at * 1000),
-            event: 'Job cancelled.',
-          });
-        } else {
-          events.push({
-            time: new Date(job.end_at * 1000),
-            event: 'Job completed.',
-          });
-        }
-      }
-      if (job.last_recovered_at && job.last_recovered_at != job.start_at) {
         events.push({
-          time: new Date(job.last_recovered_at * 1000),
-          event: 'Job recovered.',
+          type: job.status,
+          timestamp: job.end_at,
         });
       }
 
-      let endTime = job.end_at ? job.end_at : Date.now() / 1000;
-      const total_duration = endTime - job.submitted_at;
+      let cloud = '';
+      let region = '';
+      let cluster_resources = '';
+      let infra = '';
+      let full_infra = '';
 
-      // Extract cloud name if not available (backward compatibility)
-      // TODO(zhwu): remove this after 0.12.0
-      let cloud = job.cloud;
-      let cluster_resources = job.cluster_resources;
-      if (!cloud) {
-        // Backward compatibility for old jobs controller without cloud info
-        // Similar to the logic in sky/jobs/utils.py
-        if (job.cluster_resources && job.cluster_resources !== '-') {
-          try {
-            cloud = job.cluster_resources.split('(')[0].split('x').pop().trim();
-            cluster_resources = job.cluster_resources
-              .replace(`${cloud}(`, '(')
-              .replace('x ', 'x');
-          } catch (error) {
-            // If parsing fails, set a default value
-            cloud = 'Unknown';
+      try {
+        cloud = job.cloud || '';
+        cluster_resources = job.cluster_resources;
+        region = job.region || '';
+
+        if (cloud) {
+          infra = cloud;
+          if (region) {
+            infra += `/${region}`;
           }
-        } else {
-          cloud = 'Unknown';
         }
-      }
 
-      let region_or_zone = '';
-      if (job.zone) {
-        region_or_zone = job.zone;
-      } else {
-        region_or_zone = job.region;
-      }
-
-      const full_region_or_zone = region_or_zone;
-      if (region_or_zone && region_or_zone.length > 15) {
-        // Use head-and-tail truncation like the cluster page
-        const truncateLength = 15;
-        const startLength = Math.floor((truncateLength - 3) / 2);
-        const endLength = Math.ceil((truncateLength - 3) / 2);
-        region_or_zone = `${region_or_zone.substring(0, startLength)}...${region_or_zone.substring(region_or_zone.length - endLength)}`;
-      }
-
-      let infra = cloud + ' (' + region_or_zone + ')';
-      if (region_or_zone === '-') {
-        infra = cloud;
-      }
-      let full_infra = cloud + ' (' + full_region_or_zone + ')';
-      if (full_region_or_zone === '-') {
-        full_infra = cloud;
+        full_infra = infra;
+        if (job.accelerators) {
+          const accel_str = Object.entries(job.accelerators)
+            .map(([key, value]) => `${value}x${key}`)
+            .join(', ');
+          if (accel_str) {
+            full_infra += ` (${accel_str})`;
+          }
+        }
+      } catch (e) {
+        cluster_resources = job.cluster_resources;
       }
 
       return {
@@ -155,13 +151,169 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
         git_commit: job.metadata?.git_commit || '-',
+        pool: job.pool,
+        pool_hash: job.pool_hash,
+        current_cluster_name: job.current_cluster_name,
+        job_id_on_pool_cluster: job.job_id_on_pool_cluster,
       };
     });
 
-    return { jobs: jobData, controllerStopped: false };
+    return { jobs: jobData, total, controllerStopped: false };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
-    return { jobs: [], controllerStopped: false };
+    return { jobs: [], total: 0, controllerStopped: false };
+  }
+}
+
+/**
+ * Enhanced getManagedJobs function that supports client-side pagination
+ * This function fetches all jobs data once and caches it, then performs filtering and pagination on the client side
+ * @param {Object} options - Query options
+ * @param {boolean} options.allUsers - Whether to fetch jobs for all users
+ * @param {string} options.nameMatch - Filter by job name
+ * @param {string} options.userMatch - Filter by user
+ * @param {string} options.workspaceMatch - Filter by workspace
+ * @param {string} options.poolMatch - Filter by pool
+ * @param {number} options.page - Page page (1-based)
+ * @param {number} options.limit - Page size
+ * @param {boolean} options.useClientPagination - Whether to use client-side pagination (default: true)
+ * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean}>}
+ */
+export async function getManagedJobsWithClientPagination(options = {}) {
+  const {
+    allUsers = true,
+    nameMatch,
+    userMatch,
+    workspaceMatch,
+    poolMatch,
+    page = 1,
+    limit = 10,
+    useClientPagination = true,
+  } = options;
+
+  try {
+    // If client pagination is disabled, fall back to server-side pagination
+    if (!useClientPagination) {
+      return await getManagedJobs(options);
+    }
+
+    // Create cache key for full dataset (without pagination params)
+    const cacheKey = {
+      allUsers,
+      nameMatch,
+      userMatch,
+      workspaceMatch,
+      poolMatch,
+    };
+
+    // Fetch all data without pagination parameters
+    const fullDataResponse = await getManagedJobs(cacheKey);
+
+    if (fullDataResponse.controllerStopped || !fullDataResponse.jobs) {
+      return fullDataResponse;
+    }
+
+    const allJobs = fullDataResponse.jobs;
+    const total = allJobs.length;
+
+    // Apply client-side pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedJobs = allJobs.slice(startIndex, endIndex);
+
+    return {
+      jobs: paginatedJobs,
+      total: total,
+      controllerStopped: false,
+    };
+  } catch (error) {
+    console.error(
+      'Error fetching managed job data with client pagination:',
+      error
+    );
+    return { jobs: [], total: 0, controllerStopped: false };
+  }
+}
+
+export async function getPoolStatus() {
+  try {
+    const response = await apiClient.post(`/jobs/pool_status`, {
+      pool_names: null, // null means get all pools
+    });
+    const id = response.headers.get('X-Skypilot-Request-ID');
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+
+    if (fetchedData.status === 500) {
+      try {
+        const data = await fetchedData.json();
+        if (data.detail && data.detail.error) {
+          try {
+            const error = JSON.parse(data.detail.error);
+            if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
+              return { pools: [], controllerStopped: true };
+            }
+          } catch (jsonError) {
+            console.error('Failed to parse error JSON:', jsonError);
+          }
+        }
+      } catch (dataError) {
+        console.error('Failed to parse response JSON:', dataError);
+      }
+      throw new Error('Server error');
+    }
+
+    // Parse the pools data from the response
+    const data = await fetchedData.json();
+    const poolData = data.return_value ? JSON.parse(data.return_value) : [];
+
+    // Also fetch managed jobs to get job counts by pool
+    let jobsData = { jobs: [] };
+    try {
+      const jobsResponse = await getManagedJobs({ allUsers: true });
+      if (!jobsResponse.controllerStopped) {
+        jobsData = jobsResponse;
+      }
+    } catch (jobsError) {
+      console.warn('Failed to fetch jobs for pool job counts:', jobsError);
+    }
+
+    // Process job counts by pool and status
+    const jobCountsByPool = {};
+    const terminalStatuses = [
+      'SUCCEEDED',
+      'FAILED',
+      'FAILED_SETUP',
+      'FAILED_PRECHECKS',
+      'FAILED_NO_RESOURCE',
+      'FAILED_CONTROLLER',
+      'CANCELLED',
+    ];
+
+    if (jobsData.jobs && Array.isArray(jobsData.jobs)) {
+      jobsData.jobs.forEach((job) => {
+        const poolName = job.pool;
+        const status = job.status;
+
+        if (poolName && !terminalStatuses.includes(status)) {
+          if (!jobCountsByPool[poolName]) {
+            jobCountsByPool[poolName] = {};
+          }
+          jobCountsByPool[poolName][status] =
+            (jobCountsByPool[poolName][status] || 0) + 1;
+        }
+      });
+    }
+
+    // Add job counts to each pool
+    const pools = poolData.map((pool) => ({
+      ...pool,
+      jobCounts: jobCountsByPool[pool.name] || {},
+    }));
+
+    return { pools, controllerStopped: false };
+  } catch (error) {
+    console.error('Error fetching pools:', error);
+    throw error;
   }
 }
 

@@ -1205,6 +1205,9 @@ def get_config_schema():
                 'disk_encrypted': {
                     'type': 'boolean',
                 },
+                'ssh_user': {
+                    'type': 'string',
+                },
                 'security_group_name':
                     (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'vpc_name': {
@@ -1531,6 +1534,9 @@ def get_config_schema():
             },
             'requests_retention_hours': {
                 'type': 'integer',
+            },
+            'cluster_event_retention_hours': {
+                'type': 'number',
             },
         }
     }

@@ -1,6 +1,7 @@
 """Utils shared between all of sky"""
 
 import difflib
+import enum
 import functools
 import getpass
 import hashlib
@@ -53,6 +54,25 @@ _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 _VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 
 logger = sky_logging.init_logger(__name__)
+
+
+class ProcessStatus(enum.Enum):
+    """Process status."""
+
+    # The process is scheduled to run, but not started yet.
+    SCHEDULED = 'SCHEDULED'
+
+    # The process is running
+    RUNNING = 'RUNNING'
+
+    # The process is finished and succeeded
+    SUCCEEDED = 'SUCCEEDED'
+
+    # The process is interrupted
+    INTERRUPTED = 'INTERRUPTED'
+
+    # The process failed
+    FAILED = 'FAILED'
 
 
 @annotations.lru_cache(scope='request')
@@ -271,12 +291,13 @@ _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
 _using_remote_api_server: Optional[bool] = None
 _current_user: Optional['models.User'] = None
+_current_request_id: Optional[str] = None
 
 
 def set_request_context(client_entrypoint: Optional[str],
                         client_command: Optional[str],
                         using_remote_api_server: bool,
-                        user: Optional['models.User']):
+                        user: Optional['models.User'], request_id: str) -> None:
     """Override the current client entrypoint and command.
 
     This is useful when we are on the SkyPilot API server side and we have a
@@ -286,10 +307,19 @@ def set_request_context(client_entrypoint: Optional[str],
     global _current_client_entrypoint
     global _using_remote_api_server
     global _current_user
+    global _current_request_id
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
     _using_remote_api_server = using_remote_api_server
     _current_user = user
+    _current_request_id = request_id
+
+
+def get_current_request_id() -> str:
+    """Returns the current request id."""
+    if _current_request_id is not None:
+        return _current_request_id
+    return 'dummy-request-id'
 
 
 def get_current_command() -> str:

@@ -11,13 +11,13 @@ export function useFirstVisit() {
   useEffect(() => {
     setIsClient(true);
 
-    // Check if this is the first visit using sessionStorage for incognito compatibility
-    const hasVisited = sessionStorage.getItem(FIRST_VISIT_KEY);
+    // Check if this is the first visit using localStorage to share across tabs
+    const hasVisited = localStorage.getItem(FIRST_VISIT_KEY);
     const hasTourCompleted = localStorage.getItem(TOUR_COMPLETED_KEY);
 
     if (!hasVisited) {
       setIsFirstVisit(true);
-      sessionStorage.setItem(FIRST_VISIT_KEY, 'true');
+      localStorage.setItem(FIRST_VISIT_KEY, 'true');
     }
 
     if (hasTourCompleted) {
@@ -31,7 +31,7 @@ export function useFirstVisit() {
   };
 
   const resetFirstVisit = () => {
-    sessionStorage.removeItem(FIRST_VISIT_KEY);
+    localStorage.removeItem(FIRST_VISIT_KEY);
     localStorage.removeItem(TOUR_COMPLETED_KEY);
     setIsFirstVisit(true);
     setTourCompleted(false);
