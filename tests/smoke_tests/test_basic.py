@@ -352,7 +352,7 @@ def test_aws_manual_restart_recovery():
             # from this state.
             f'sky status -r {name} | grep -i "SSH connection timed out" | grep -i "sky start" | grep -i "to recover from INIT status."',
             # Recover the cluster.
-            f'sky start -f {name}',
+            f'sky start -y {name}',
             # Wait for the cluster to be up.
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
