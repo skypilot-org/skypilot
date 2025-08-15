@@ -113,7 +113,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def FailAllJobsInProgress(  # type: ignore[return]
+    def FailAllInProgressJobs(  # type: ignore[return]
         self, _: jobsv1_pb2.FailAllInProgressJobsRequest,
         context: grpc.ServicerContext
     ) -> jobsv1_pb2.FailAllInProgressJobsResponse:
