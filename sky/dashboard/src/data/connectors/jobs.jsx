@@ -46,7 +46,7 @@ export async function getManagedJobs(options = {}) {
             const error = JSON.parse(data.detail.error);
             // Handle specific error types
             if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
-              return { jobs: [], controllerStopped: true };
+              return { jobs: [], total: 0, controllerStopped: true };
             }
           } catch (jsonError) {
             console.error('Error parsing JSON:', jsonError);
@@ -55,7 +55,7 @@ export async function getManagedJobs(options = {}) {
       } catch (parseError) {
         console.error('Error parsing JSON:', parseError);
       }
-      return { jobs: [], controllerStopped: false };
+      return { jobs: [], total: 0, controllerStopped: false };
     }
     // print out the response for debugging
     const data = await fetchedData.json();
@@ -161,7 +161,7 @@ export async function getManagedJobs(options = {}) {
     return { jobs: jobData, total, controllerStopped: false };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
-    return { jobs: [], controllerStopped: false };
+    return { jobs: [], total: 0, controllerStopped: false };
   }
 }
 
