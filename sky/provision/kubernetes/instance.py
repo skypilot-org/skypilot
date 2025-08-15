@@ -1456,16 +1456,16 @@ def query_instances(
             for service in provider_config.get('services', [])
         ]))
 
-    if not non_terminated_only:
-        for target_pod_name in target_pod_names:
-            if target_pod_name not in cluster_status:
-                # If the pod is not in the cluster_status, it means it's not
-                # running.
-                # Analyze what happened to the pod based on events.
-                reason = _get_pod_missing_reason(context, namespace, cluster_name,
-                                                target_pod_name)
-                reason = (f'{target_pod_name}: {reason}'
-                        if reason is not None else None)
+    for target_pod_name in target_pod_names:
+        if target_pod_name not in cluster_status:
+            # If the pod is not in the cluster_status, it means it's not
+            # running.
+            # Analyze what happened to the pod based on events.
+            reason = _get_pod_missing_reason(context, namespace, cluster_name,
+                                             target_pod_name)
+            reason = (f'{target_pod_name}: {reason}'
+                      if reason is not None else None)
+            if not non_terminated_only:
                 cluster_status[target_pod_name] = (None, reason)
 
     return cluster_status
