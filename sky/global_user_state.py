@@ -435,8 +435,6 @@ def get_user_by_name_match(username_match: str) -> List[models.User]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).filter(
             user_table.c.name.like(f'%{username_match}%')).all()
-    if len(rows) == 0:
-        return []
     return [
         models.User(id=row.id, name=row.name, created_at=row.created_at)
         for row in rows
