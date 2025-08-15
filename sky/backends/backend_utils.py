@@ -2339,9 +2339,12 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                             -1,
                             autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
                             stream_logs=False)
-                    except exceptions.CommandError as e:
+                    except (exceptions.CommandError,
+                            grpc.FutureTimeoutError) as e:
                         success = False
-                        if e.returncode == 255:
+                        if isinstance(e, grpc.FutureTimeoutError) or (
+                                isinstance(e, exceptions.CommandError) and
+                                e.returncode == 255):
                             word = 'autostopped' if noun == 'autostop' else 'autodowned'
                             logger.debug(f'The cluster is likely {word}.')
                             reset_local_autostop = False

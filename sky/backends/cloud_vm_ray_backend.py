@@ -4938,11 +4938,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # We cannot check if the cluster is autostopping.
             return False
         if handle.is_grpc_enabled:
-            request = autostopv1_pb2.IsAutostoppingRequest()
-            response = backend_utils.invoke_skylet_with_retries(
-                handle, lambda: SkyletClient(handle.get_grpc_channel()).
-                is_autostopping(request))
-            return response.is_autostopping
+            try:
+                request = autostopv1_pb2.IsAutostoppingRequest()
+                response = backend_utils.invoke_skylet_with_retries(
+                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                    is_autostopping(request))
+                return response.is_autostopping
+            except Exception as e:  # pylint: disable=broad-except
+                # The cluster may have been terminated, causing the gRPC call
+                # to timeout and fail.
+                logger.debug(f'Failed to check if cluster is autostopping: {e}')
+                return False
         else:
             logger.info(
                 'Using legacy remote execution for is_autostopping on '
