@@ -462,6 +462,51 @@ def test_resources_ordered_preference():
     assert resources_list[2].infra.region == 'eastus'
 
 
+def test_resources_any_of_dump_in_serve_version_bump():
+    any_of_1 = [
+        {
+            'accelerators': {
+                'H200': 1
+            },
+            'disk_size': 256,
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'H100': 1
+            },
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'L4': 4
+            },
+        },
+    ]
+    any_of_2 = [
+        {
+            'accelerators': {
+                'H100': 1
+            },
+            'disk_size': 256,
+        },
+        {
+            'accelerators': {
+                'L4': 4
+            },
+            'disk_size': 256,
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'H200': 1
+            },
+        },
+    ]
+    assert (resources_utils.normalize_any_of_resources_config(any_of_1) ==
+            resources_utils.normalize_any_of_resources_config(any_of_2))
+
+
 def test_resources_any_of_ordered_exclusive():
     """Test that Resources raises ValueError if both any_of and ordered are specified."""
     config = {'any_of': [{'cpus': 8}], 'ordered': [{'cpus': 4}]}

@@ -63,7 +63,10 @@ _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 # when changing UX as this assumption is used to expand some log files while
 # ignoring others.
 _SKYPILOT_LOG_HINT = r'.*sky api logs -l'
-_SKYPILOT_PROVISION_LOG_PATTERN = (fr'{_SKYPILOT_LOG_HINT} (.*/provision\.log)')
+_SKYPILOT_PROVISION_API_LOG_PATTERN = (
+    fr'{_SKYPILOT_LOG_HINT} (.*/provision\.log)')
+# New hint pattern for provision logs
+_SKYPILOT_PROVISION_LOG_CMD_PATTERN = r'.*sky logs --provision\s+(\S+)'
 _SKYPILOT_LOG_PATTERN = fr'{_SKYPILOT_LOG_HINT} (.*\.log)'
 
 # TODO(tian): Find all existing replica id and print here.
@@ -1114,31 +1117,49 @@ def _process_line(line: str,
             return False
         return cluster_record['status'] == status_lib.ClusterStatus.UP
 
-    provision_log_prompt = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
+    provision_api_log_prompt = re.match(_SKYPILOT_PROVISION_API_LOG_PATTERN,
+                                        line)
+    provision_log_cmd_prompt = re.match(_SKYPILOT_PROVISION_LOG_CMD_PATTERN,
+                                        line)
     log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
 
-    if provision_log_prompt is not None:
-        log_path = provision_log_prompt.group(1)
-        nested_log_path = pathlib.Path(
-            skylet_constants.SKY_LOGS_DIRECTORY).expanduser().joinpath(
-                log_path).resolve()
-
+    def _stream_provision_path(p: pathlib.Path) -> Iterator[str]:
         try:
-            with open(nested_log_path, 'r', newline='', encoding='utf-8') as f:
-                # We still exit if more than 10 seconds without new content
-                # to avoid any internal bug that causes the launch to fail
-                # while cluster status remains INIT.
+            with open(p, 'r', newline='', encoding='utf-8') as f:
+                # Exit if >10s without new content to avoid hanging when INIT
                 yield from log_utils.follow_logs(f,
                                                  should_stop=cluster_is_up,
                                                  stop_on_eof=stop_on_eof,
                                                  idle_timeout_seconds=10)
         except FileNotFoundError:
+            # Fall back cleanly if the hinted path doesn't exist
             yield line
-
             yield (f'{colorama.Fore.YELLOW}{colorama.Style.BRIGHT}'
-                   f'Try to expand log file {nested_log_path} but not '
-                   f'found. Skipping...{colorama.Style.RESET_ALL}')
-            pass
+                   f'Try to expand log file {p} but not found. Skipping...'
+                   f'{colorama.Style.RESET_ALL}')
+        return
+
+    if provision_api_log_prompt is not None:
+        rel_path = provision_api_log_prompt.group(1)
+        nested_log_path = pathlib.Path(
+            skylet_constants.SKY_LOGS_DIRECTORY).expanduser().joinpath(
+                rel_path).resolve()
+        yield from _stream_provision_path(nested_log_path)
+        return
+
+    if provision_log_cmd_prompt is not None:
+        # Resolve provision log via cluster table first, then history.
+        log_path_str = global_user_state.get_cluster_provision_log_path(
+            cluster_name)
+        if not log_path_str:
+            log_path_str = (
+                global_user_state.get_cluster_history_provision_log_path(
+                    cluster_name))
+        if not log_path_str:
+            yield line
+            return
+        yield from _stream_provision_path(
+            pathlib.Path(log_path_str).expanduser().resolve())
         return
 
     if log_prompt is not None:

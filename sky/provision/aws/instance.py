@@ -713,7 +713,8 @@ def terminate_instances(
         instances.terminate()
     else:
         # Case 4: We are managing the non-default sg. The default SG does not
-        # exist. We must block on instance termination.
+        # exist. We must block on instance termination so that we can
+        # delete the security group.
         instances.terminate()
         for instance in instances:
             instance.wait_until_terminated()

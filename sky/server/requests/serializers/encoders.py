@@ -106,10 +106,18 @@ def encode_status_kubernetes(
 
 
 @register_encoder('jobs.queue')
-def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
+def encode_jobs_queue(jobs_or_tuple):
+    # Support returning either a plain jobs list or a (jobs, total) tuple
+    if isinstance(jobs_or_tuple, tuple) and len(jobs_or_tuple) == 2:
+        jobs, total = jobs_or_tuple
+    else:
+        jobs = jobs_or_tuple
+        total = None
     for job in jobs:
         job['status'] = job['status'].value
-    return jobs
+    if total is None:
+        return jobs
+    return {'jobs': jobs, 'total': total}
 
 
 def _encode_serve_status(
