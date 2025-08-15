@@ -64,18 +64,7 @@ class ResponseBaseModel(pydantic.BaseModel):
 
 
 class APIHealthResponse(ResponseBaseModel):
-    """Response for the API health endpoint.
-    {
-        'status': (str) The status of the API server.
-        'api_version': (str) The API version of the API server.
-        'version': (str) The version of SkyPilot used for API server.
-        'version_on_disk': (str) The version of the SkyPilot installation on
-          disk, which can be used to warn about restarting the API server
-        'commit': (str) The commit hash of SkyPilot used for API server.
-        'basic_auth_enabled': (bool) Whether basic authentication is enabled.
-        'user': (User) Information about the user that made the request.
-    }
-    """
+    """Response for the API health endpoint."""
     status: common.ApiServerStatus
     api_version: str = ''
     version: str = ''
@@ -86,25 +75,7 @@ class APIHealthResponse(ResponseBaseModel):
 
 
 class StatusResponse(ResponseBaseModel):
-    """Response for the status endpoint.
-    {
-        'name': (str) cluster name,
-        'launched_at': (int) timestamp of last launch on this cluster,
-        'handle': (ResourceHandle) an internal handle to the cluster,
-        'last_use': (str) the last command/entrypoint that affected this
-            cluster,
-        'status': (sky.ClusterStatus) cluster status,
-        'autostop': (int) idle time before autostop,
-        'to_down': (bool) whether autodown is used instead of autostop,
-        'metadata': (dict) metadata of the cluster,
-        'user_hash': (str) user hash of the cluster owner,
-        'user_name': (str) user name of the cluster owner,
-        'resources_str': (str) the resource string representation of the
-            cluster,
-        'storage_mounts_metadata': (dict) storage mounts
-            metadata of the cluster
-    }
-    """
+    """Response for the status endpoint."""
     name: str
     launched_at: int
     # pydantic cannot generate the pydantic-core schema for
@@ -129,15 +100,16 @@ class StatusResponse(ResponseBaseModel):
     config_hash: Optional[str]
     workspace: str
     last_creation_yaml: Optional[str]
-    last_creation_command: str
+    last_creation_command: Optional[str]
     is_managed: bool
     last_event: Optional[str]
-    resources_str: str
-    resources_str_full: str
+    resources_str: Optional[str]
+    resources_str_full: Optional[str]
     credentials: Optional[Dict[str, Any]]
     nodes: int
     cloud: str
     region: str
+    # could be '2' or '2+'
     cpus: str
     memory: Any
     accelerators: Any
