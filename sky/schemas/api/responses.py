@@ -62,6 +62,9 @@ class ResponseBaseModel(pydantic.BaseModel):
     def items(self):
         return self.model_dump().items()
 
+    def __repr__(self):
+        return self.__dict__.__repr__()
+
 
 class APIHealthResponse(ResponseBaseModel):
     """Response for the API health endpoint."""
