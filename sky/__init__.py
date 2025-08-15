@@ -35,7 +35,7 @@ def _get_git_commit():
 
 
 __commit__ = _get_git_commit()
-__version__ = '0.10.1'
+__version__ = '0.10.1.post1'
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
 
