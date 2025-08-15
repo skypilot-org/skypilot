@@ -17,8 +17,8 @@ import textwrap
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Optional,
+                    Set, Tuple, Union)
 
 import colorama
 import psutil
@@ -2847,77 +2847,77 @@ class SkyletClient:
     def set_autostop(
         self,
         request: 'autostopv1_pb2.SetAutostopRequest',
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'autostopv1_pb2.SetAutostopResponse':
         return self._autostop_stub.SetAutostop(request, timeout=timeout)
 
     def is_autostopping(
         self,
         request: 'autostopv1_pb2.IsAutostoppingRequest',
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'autostopv1_pb2.IsAutostoppingResponse':
         return self._autostop_stub.IsAutostopping(request, timeout=timeout)
 
     def add_job(
         self,
         request: jobsv1_pb2.AddJobRequest,
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> jobsv1_pb2.AddJobResponse:
         return self._jobs_stub.AddJob(request, timeout=timeout)
 
     def queue_job(
         self,
         request: jobsv1_pb2.QueueJobRequest,
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> jobsv1_pb2.QueueJobResponse:
         return self._jobs_stub.QueueJob(request, timeout=timeout)
 
     def update_status(
         self,
         request: jobsv1_pb2.UpdateStatusRequest,
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> jobsv1_pb2.UpdateStatusResponse:
         return self._jobs_stub.UpdateStatus(request, timeout=timeout)
 
     def get_job_queue(
         self,
         request: jobsv1_pb2.GetJobQueueRequest,
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> jobsv1_pb2.GetJobQueueResponse:
         return self._jobs_stub.GetJobQueue(request, timeout=timeout)
 
     def cancel_jobs(
         self,
         request: jobsv1_pb2.CancelJobsRequest,
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> jobsv1_pb2.CancelJobsResponse:
         return self._jobs_stub.CancelJobs(request, timeout=timeout)
 
     def fail_all_in_progress_jobs(
         self,
         request: jobsv1_pb2.FailAllInProgressJobsRequest,
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> jobsv1_pb2.FailAllInProgressJobsResponse:
         return self._jobs_stub.FailAllInProgressJobs(request, timeout=timeout)
 
     def tail_logs(
         self,
         request: jobsv1_pb2.TailLogsRequest,
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.TailLogsResponse:
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> Iterator[jobsv1_pb2.TailLogsResponse]:
         return self._jobs_stub.TailLogs(request, timeout=timeout)
 
     def get_job_status(
         self,
         request: jobsv1_pb2.GetJobStatusRequest,
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> jobsv1_pb2.GetJobStatusResponse:
         return self._jobs_stub.GetJobStatus(request, timeout=timeout)
 
     def get_job_submitted_timestamp(
         self,
         request: jobsv1_pb2.GetJobSubmittedTimestampRequest,
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> jobsv1_pb2.GetJobSubmittedTimestampResponse:
         return self._jobs_stub.GetJobSubmittedTimestamp(request,
                                                         timeout=timeout)
@@ -2925,14 +2925,14 @@ class SkyletClient:
     def get_job_ended_timestamp(
         self,
         request: jobsv1_pb2.GetJobEndedTimestampRequest,
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> jobsv1_pb2.GetJobEndedTimestampResponse:
         return self._jobs_stub.GetJobEndedTimestamp(request, timeout=timeout)
 
     def get_log_dirs_for_jobs(
         self,
         request: jobsv1_pb2.GetLogDirsForJobsRequest,
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> jobsv1_pb2.GetLogDirsForJobsResponse:
         return self._jobs_stub.GetLogDirsForJobs(request, timeout=timeout)
 
@@ -4351,11 +4351,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             The exit code of the tail command. Returns code 100 if the job has
             failed. See exceptions.JobExitCode for possible return codes.
         """
-        # TODO(kevin): Move to gRPC
-        code = job_lib.JobLibCodeGen.tail_logs(job_id,
-                                               managed_job_id=managed_job_id,
-                                               follow=follow,
-                                               tail=tail)
         if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
@@ -4365,20 +4360,46 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
             signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
-        try:
-            final = self.run_on_head(
-                handle,
-                code,
-                stream_logs=stream_logs,
-                process_stream=process_stream,
-                require_outputs=require_outputs,
-                # Allocate a pseudo-terminal to disable output buffering.
-                # Otherwise, there may be 5 minutes delay in logging.
-                ssh_mode=command_runner.SshMode.INTERACTIVE,
-            )
-        except SystemExit as e:
-            final = e.code
-        return final
+        if handle.is_grpc_enabled:
+            last_exit_code = 0
+            try:
+                request = jobsv1_pb2.TailLogsRequest(
+                    job_id=job_id,
+                    managed_job_id=managed_job_id,
+                    follow=follow,
+                    tail=tail)
+                for resp in backend_utils.invoke_skylet_streaming_with_retries(
+                        handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                        tail_logs(request, timeout=None)):
+                    if resp.log_line:
+                        sys.stdout.write(resp.log_line)
+                        sys.stdout.flush()
+                    last_exit_code = resp.exit_code
+                return last_exit_code
+            except grpc.RpcError as e:
+                if e.code() == grpc.StatusCode.CANCELLED:
+                    return last_exit_code
+                raise e
+        else:
+            try:
+                code = job_lib.JobLibCodeGen.tail_logs(
+                    job_id,
+                    managed_job_id=managed_job_id,
+                    follow=follow,
+                    tail=tail)
+                final = self.run_on_head(
+                    handle,
+                    code,
+                    stream_logs=stream_logs,
+                    process_stream=process_stream,
+                    require_outputs=require_outputs,
+                    # Allocate a pseudo-terminal to disable output buffering.
+                    # Otherwise, there may be 5 minutes delay in logging.
+                    ssh_mode=command_runner.SshMode.INTERACTIVE,
+                )
+            except SystemExit as e:
+                final = e.code
+            return final
 
     def tail_managed_job_logs(self,
                               handle: CloudVmRayResourceHandle,

@@ -13,8 +13,8 @@ import sys
 import tempfile
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
-                    TypeVar, Union)
+from typing import (Any, Callable, Dict, Iterator, List, Optional, Sequence,
+                    Set, Tuple, TypeVar, Union)
 import uuid
 
 import colorama
@@ -3408,26 +3408,52 @@ def invoke_skylet_with_retries(
             return func()
         except grpc.RpcError as e:
             last_exception = e
-            if e.code() == grpc.StatusCode.INTERNAL:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.SkyletInternalError(e.details())
-            elif e.code() == grpc.StatusCode.UNAVAILABLE:
-                recreate_tunnel = True
-                try:
-                    if handle.skylet_ssh_tunnel is not None:
-                        proc = psutil.Process(handle.skylet_ssh_tunnel.pid)
-                        if proc.is_running(
-                        ) and proc.status() != psutil.STATUS_ZOMBIE:
-                            recreate_tunnel = False
-                except psutil.NoSuchProcess:
-                    pass
-
-                if recreate_tunnel:
-                    handle.open_and_update_skylet_tunnel()
-
-                time.sleep(backoff.current_backoff())
-            else:
-                raise e
+            _handle_grpc_error(e, handle, backoff.current_backoff())
 
     raise RuntimeError(f'Failed to invoke Skylet after {max_attempts} attempts'
                       ) from last_exception
+
+
+def invoke_skylet_streaming_with_retries(
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+        stream_func: Callable[..., Iterator[T]]) -> Iterator[T]:
+    """Generic helper for making Skylet streaming gRPC requests."""
+    max_attempts = 3
+    backoff = common_utils.Backoff(initial_backoff=0.5)
+    last_exception: Optional[Exception] = None
+
+    for _ in range(max_attempts):
+        try:
+            for response in stream_func():
+                yield response
+            return
+        except grpc.RpcError as e:
+            last_exception = e
+            _handle_grpc_error(e, handle, backoff.current_backoff())
+
+    raise RuntimeError(
+        f'Failed to stream Skylet response after {max_attempts} attempts'
+    ) from last_exception
+
+
+def _handle_grpc_error(e: grpc.RpcError,
+                       handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+                       current_backoff: float) -> None:
+    if e.code() == grpc.StatusCode.INTERNAL:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.SkyletInternalError(e.details())
+    elif e.code() == grpc.StatusCode.UNAVAILABLE:
+        recreate_tunnel = True
+        try:
+            if handle.skylet_ssh_tunnel is not None:
+                proc = psutil.Process(handle.skylet_ssh_tunnel.pid)
+                if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+                    recreate_tunnel = False
+        except psutil.NoSuchProcess:
+            pass
+
+        if recreate_tunnel:
+            handle.open_and_update_skylet_tunnel()
+        time.sleep(current_backoff)
+    else:
+        raise e
