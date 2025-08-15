@@ -88,6 +88,7 @@ class StatusResponse(ResponseBaseModel):
     autostop: int
     to_down: bool
     owner: Optional[List[str]] = None
+    # metadata is a JSON, so we use Any here.
     metadata: Optional[Dict[str, Any]] = None
     cluster_hash: str
     # pydantic cannot generate the pydantic-core schema for
@@ -105,6 +106,7 @@ class StatusResponse(ResponseBaseModel):
     last_event: Optional[str] = None
     resources_str: Optional[str] = None
     resources_str_full: Optional[str] = None
+    # credentials is a JSON, so we use Any here.
     credentials: Optional[Dict[str, Any]] = None
     nodes: int
     cloud: Optional[str] = None
