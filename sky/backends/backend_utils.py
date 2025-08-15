@@ -2052,7 +2052,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             # NOTE: fetching the IPs is very slow as it calls into
             # `ray get head-ip/worker-ips`. Using cached IPs is safe because
             # in the worst case we time out in the `ray status` SSH command
-            # below, only then will we try to refresh the IPs.
+            # below.
             runners = handle.get_command_runners(force_cached=True)
             # This happens when user interrupt the `sky launch` process before
             # the first time resources handle is written back to local database.
