@@ -1465,7 +1465,8 @@ def query_instances(
                                              target_pod_name)
             reason = (f'{target_pod_name}: {reason}'
                       if reason is not None else None)
-            cluster_status[target_pod_name] = (None, reason)
+            if not non_terminated_only:
+                cluster_status[target_pod_name] = (None, reason)
 
     return cluster_status
 
