@@ -25,7 +25,12 @@ import {
   renderPoolLink,
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
-import { getManagedJobs, getPoolStatus } from '@/data/connectors/jobs';
+import {
+  getManagedJobs,
+  getManagedJobsWithClientPagination,
+  getPoolStatus,
+} from '@/data/connectors/jobs';
+import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
@@ -39,8 +44,6 @@ import {
   RotateCwIcon,
   MonitorPlay,
   RefreshCcw,
-  ChevronDown,
-  ChevronRight,
 } from 'lucide-react';
 import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
@@ -48,19 +51,10 @@ import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
-import cachePreloader from '@/lib/cache-preloader';
 import {
   FilterDropdown,
   Filters,
-  filterData,
   updateURLParams as sharedUpdateURLParams,
   updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
 } from '@/components/shared/FilterSystem';
@@ -164,27 +158,6 @@ export function filterJobsByPool(jobs, poolFilter) {
   });
 }
 
-// Helper function to format username for display (reuse from clusters.jsx)
-const formatUserDisplay = (username, userId) => {
-  if (username && username.includes('@')) {
-    const emailPrefix = username.split('@')[0];
-    // Show email prefix with userId if they're different
-    if (userId && userId !== emailPrefix) {
-      return `${emailPrefix} (${userId})`;
-    }
-    return emailPrefix;
-  }
-  // If no email, show username with userId in parentheses only if they're different
-  const usernameBase = username || userId || 'N/A';
-
-  // Skip showing userId if it's the same as username
-  if (userId && userId !== usernameBase) {
-    return `${usernameBase} (${userId})`;
-  }
-
-  return usernameBase;
-};
-
 // Helper function to format submitted time with abbreviated units (now uses TimestampWithTooltip)
 const formatSubmittedTime = (timestamp) => {
   if (!timestamp) return '-';
@@ -196,91 +169,6 @@ const formatSubmittedTime = (timestamp) => {
   return <TimestampWithTooltip date={date} />;
 };
 
-// Helper function to shorten time strings for jobs
-function shortenTimeForJobs(timeString) {
-  if (!timeString || typeof timeString !== 'string') {
-    return timeString;
-  }
-
-  // Handle "just now" case
-  if (timeString === 'just now') {
-    return 'now';
-  }
-
-  // Handle "less than a minute ago" case
-  if (timeString.toLowerCase() === 'less than a minute ago') {
-    return 'Less than 1m ago';
-  }
-
-  // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "1h ago"
-  const aboutMatch = timeString.match(/^About\s+(\d+)\s+(\w+)\s+ago$/);
-  if (aboutMatch) {
-    const num = aboutMatch[1];
-    const unit = aboutMatch[2];
-    const unitMap = {
-      second: 's',
-      seconds: 's',
-      minute: 'm',
-      minutes: 'm',
-      hour: 'h',
-      hours: 'h',
-      day: 'd',
-      days: 'd',
-      month: 'mo',
-      months: 'mo',
-      year: 'yr',
-      years: 'yr',
-    };
-    if (unitMap[unit]) {
-      return `${num}${unitMap[unit]} ago`;
-    }
-  }
-
-  // Handle "a minute ago", "an hour ago", etc.
-  const singleUnitMatch = timeString.match(/^a[n]?\s+(\w+)\s+ago$/);
-  if (singleUnitMatch) {
-    const unit = singleUnitMatch[1];
-    const unitMap = {
-      second: 's',
-      minute: 'm',
-      hour: 'h',
-      day: 'd',
-      month: 'mo',
-      year: 'yr',
-    };
-    if (unitMap[unit]) {
-      return `1${unitMap[unit]} ago`;
-    }
-  }
-
-  // Handle "X units ago"
-  const multiUnitMatch = timeString.match(/^(\d+)\s+(\w+)\s+ago$/);
-  if (multiUnitMatch) {
-    const num = multiUnitMatch[1];
-    const unit = multiUnitMatch[2];
-    const unitMap = {
-      second: 's',
-      seconds: 's',
-      minute: 'm',
-      minutes: 'm',
-      hour: 'h',
-      hours: 'h',
-      day: 'd',
-      days: 'd',
-      month: 'mo',
-      months: 'mo',
-      year: 'yr',
-      years: 'yr',
-    };
-    if (unitMap[unit]) {
-      return `${num}${unitMap[unit]} ago`;
-    }
-  }
-
-  // Fallback if no specific regex match (e.g., for dates beyond 7 days or other formats)
-  return timeString;
-}
-
 export function ManagedJobs() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -288,22 +176,8 @@ export function ManagedJobs() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const jobsRefreshRef = React.useRef(null);
   const poolsRefreshRef = React.useRef(null);
-  const [jobsData, setJobsData] = useState([]);
   const [poolsData, setPoolsData] = useState([]);
-  const [confirmationModal, setConfirmationModal] = useState({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: null,
-  });
-  const isMobile = useMobile();
   const [filters, setFilters] = useState([]);
-  const [optionValues, setOptionValues] = useState({
-    name: [],
-    user: [],
-    workspace: [],
-    pool: [],
-  }); // Option values for properties
 
   const fetchData = async (isRefreshButton = false) => {
     setLoading(true);
@@ -312,11 +186,9 @@ export function ManagedJobs() {
       setPoolsLoading(true);
     }
     try {
-      const [jobsResponse, poolsResponse] = await Promise.all([
-        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+      const [poolsResponse] = await Promise.all([
         dashboardCache.get(getPoolStatus, [{}]),
       ]);
-      setJobsData(jobsResponse.jobs || []);
       setPoolsData(poolsResponse.pools || []);
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -335,7 +207,7 @@ export function ManagedJobs() {
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched for both jobs and pools
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    jobsCacheManager.invalidateCache();
     dashboardCache.invalidate(getPoolStatus, [{}]);
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
@@ -377,24 +249,6 @@ export function ManagedJobs() {
     }
   }, [router.isReady, router.query.tab, updateFiltersByURLParams]);
 
-  const handleJobAction = async (jobId, action) => {
-    try {
-      setConfirmationModal({
-        isOpen: true,
-        title: `${action.charAt(0).toUpperCase() + action.slice(1)} Job`,
-        message: `Are you sure you want to ${action} job ${jobId}?`,
-        onConfirm: async () => {
-          await handleJobAction(jobId, action);
-          if (jobsRefreshRef.current) {
-            jobsRefreshRef.current();
-          }
-        },
-      });
-    } catch (error) {
-      console.error(`Error ${action}ing job:`, error);
-    }
-  };
-
   return (
     <>
       {/* Jobs section */}
@@ -410,7 +264,7 @@ export function ManagedJobs() {
         <div className="w-full sm:w-auto">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
-            valueList={optionValues}
+            valueList={{}}
             setFilters={setFilters}
             updateURLParams={updateURLParams}
             placeholder="Filter jobs"
@@ -429,7 +283,6 @@ export function ManagedJobs() {
         setLoading={setLoading}
         refreshDataRef={jobsRefreshRef}
         filters={filters}
-        setOptionValues={setOptionValues}
         onRefresh={handleRefresh}
         poolsData={poolsData}
         poolsLoading={poolsLoading}
@@ -452,12 +305,12 @@ export function ManagedJobsTable({
   setLoading,
   refreshDataRef,
   filters,
-  setOptionValues,
   onRefresh,
   poolsData,
   poolsLoading,
 }) {
   const [data, setData] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -505,51 +358,101 @@ export function ManagedJobsTable({
     });
   };
 
-  const fetchData = React.useCallback(async () => {
-    setLocalLoading(true);
-    setLoading(true); // Set parent loading state
-    try {
-      // Fetch both jobs and clusters data in parallel
-      const [jobsResponse, clustersData] = await Promise.all([
-        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
-        dashboardCache.get(getClusters),
-      ]);
+  const fetchData = React.useCallback(
+    async (options = {}) => {
+      const includeStatus = options.includeStatus !== false;
+      setLocalLoading(true);
+      setLoading(true); // Set parent loading state
+      try {
+        // Build server-side filter params from UI filters
+        const getFilterValue = (prop) => {
+          const f = (filters || []).find(
+            (fi) => (fi.property || '').toLowerCase() === prop
+          );
+          return f && f.value ? String(f.value) : undefined;
+        };
+        const params = {
+          allUsers: true,
+          nameMatch: getFilterValue('name'),
+          userMatch: getFilterValue('user'),
+          workspaceMatch: getFilterValue('workspace'),
+          poolMatch: getFilterValue('pool'),
+          page: currentPage, // page index starting from 1
+          limit: pageSize,
+        };
 
-      // Always process the response, even if it's null
-      const { jobs = [], controllerStopped = false } = jobsResponse || {};
+        let jobsResponse;
+        let clustersData = null;
 
-      // for the clusters, check if there is a cluster that `isJobController`
-      const jobControllerCluster = clustersData?.find((c) =>
-        isJobController(c.cluster)
-      );
-      const jobControllerClusterStatus = jobControllerCluster
-        ? jobControllerCluster.status
-        : 'NOT_FOUND';
-      let isControllerStopped = false;
-      if (jobControllerClusterStatus == 'STOPPED' && controllerStopped) {
-        isControllerStopped = true;
+        // Check cache status before making requests
+        const isDataCached = jobsCacheManager.isDataCached(params);
+        const isDataLoading = jobsCacheManager.isDataLoading(params);
+
+        if (includeStatus) {
+          const [jr, cd] = await Promise.all([
+            jobsCacheManager.getPaginatedJobs(params),
+            dashboardCache.get(getClusters),
+          ]);
+          jobsResponse = jr;
+          clustersData = cd;
+        } else {
+          jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
+        }
+
+        // Always process the response, even if it's null
+        const {
+          jobs = [],
+          total = 0,
+          controllerStopped = false,
+          cacheStatus = 'unknown',
+        } = jobsResponse || {};
+
+        let isControllerStopped = !!controllerStopped;
+        let isLaunching = false;
+        if (includeStatus && clustersData) {
+          const jobControllerCluster = clustersData?.find((c) =>
+            isJobController(c.cluster)
+          );
+          const jobControllerClusterStatus = jobControllerCluster
+            ? jobControllerCluster.status
+            : 'NOT_FOUND';
+          if (jobControllerClusterStatus == 'STOPPED' && controllerStopped) {
+            isControllerStopped = true;
+          }
+          if (jobControllerClusterStatus == 'LAUNCHING') {
+            isLaunching = true;
+          }
+        }
+
+        setData(jobs);
+        setTotalCount(total || 0);
+        setControllerStopped(!!isControllerStopped);
+        setControllerLaunching(!!isLaunching);
+        setIsInitialLoad(false);
+
+        // Log cache status for debugging
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Jobs cache status:', {
+            cacheStatus,
+            isDataCached,
+            isDataLoading,
+            jobCount: jobs.length,
+            totalCount: total,
+          });
+        }
+      } catch (err) {
+        console.error('Error fetching data:', err);
+        // Still set data to empty array on error to show proper UI
+        setData([]);
+        setControllerStopped(false);
+        setIsInitialLoad(false);
+      } finally {
+        setLocalLoading(false);
+        setLoading(false); // Clear parent loading state
       }
-      if (jobControllerClusterStatus == 'LAUNCHING') {
-        setControllerLaunching(true);
-      } else {
-        setControllerLaunching(false);
-      }
-
-      setData(jobs);
-      setOptionValues(fetchOptionValuesFromJobs(jobs));
-      setControllerStopped(isControllerStopped);
-      setIsInitialLoad(false);
-    } catch (err) {
-      console.error('Error fetching data:', err);
-      // Still set data to empty array on error to show proper UI
-      setData([]);
-      setControllerStopped(false);
-      setIsInitialLoad(false);
-    } finally {
-      setLocalLoading(false);
-      setLoading(false); // Clear parent loading state
-    }
-  }, [setLoading, setOptionValues]);
+    },
+    [setLoading, filters, currentPage, pageSize]
+  );
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -558,30 +461,50 @@ export function ManagedJobsTable({
     }
   }, [refreshDataRef, fetchData]);
 
+  // Keep a ref to latest fetchData to avoid stale closures in interval
+  const fetchDataRef = React.useRef(fetchData);
+  React.useEffect(() => {
+    fetchDataRef.current = fetchData;
+  }, [fetchData]);
+
+  // Initial load
+  React.useEffect(() => {
+    fetchData({ includeStatus: true });
+  }, []);
+
+  // Fetch on pagination (page) changes without status request
+  React.useEffect(() => {
+    fetchData({ includeStatus: false });
+  }, [currentPage]);
+
+  // Fetch on filters or page size changes with status request
+  React.useEffect(() => {
+    fetchData({ includeStatus: true });
+  }, [filters, pageSize]);
+
   useEffect(() => {
-    setData([]);
-    let isCurrent = true;
-
-    fetchData();
-
     const interval = setInterval(() => {
-      if (isCurrent) {
-        fetchData();
+      if (fetchDataRef.current) {
+        fetchDataRef.current({ includeStatus: true });
       }
     }, refreshInterval);
 
     return () => {
-      isCurrent = false;
       clearInterval(interval);
       // Don't invalidate cache on component unmount - this causes premature cache invalidation
       // Cache should only be invalidated on manual refresh or TTL expiration
     };
-  }, [refreshInterval, fetchData]);
+  }, [refreshInterval]);
 
-  // Reset to first page when activeTab changes or when data changes
+  // Reset to first page when activeTab changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, data?.length]);
+  }, [activeTab]);
+
+  // Reset to first page when filters or page size changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters, pageSize]);
 
   // Reset status filter when activeTab changes
   useEffect(() => {
@@ -632,39 +555,10 @@ export function ManagedJobsTable({
     return statusGroups[activeTab].includes(status);
   };
 
-  // Helper function to extract option values from jobs data
-  const fetchOptionValuesFromJobs = (jobs) => {
-    let optionValues = {
-      status: [],
-      name: [],
-      user: [],
-      workspace: [],
-      pool: [],
-    };
-
-    const pushWithoutDuplication = (array, item) => {
-      if (array.includes(item)) return;
-      array.push(item);
-    };
-
-    jobs.map((job) => {
-      pushWithoutDuplication(optionValues.status, job.status);
-      pushWithoutDuplication(optionValues.name, job.name);
-      pushWithoutDuplication(optionValues.user, job.user);
-      pushWithoutDuplication(
-        optionValues.workspace,
-        job.workspace || 'default'
-      );
-      pushWithoutDuplication(optionValues.pool, job.pool);
-    });
-
-    return optionValues;
-  };
-
   // Filter data based on filters and selected statuses
   const filteredData = React.useMemo(() => {
-    // First apply shared filters
-    let filtered = filterData(data, filters);
+    // Server already applied name/user/workspace/pool filters.
+    let filtered = data;
 
     // If specific statuses are selected, show jobs with any of those statuses
     if (selectedStatuses.length > 0) {
@@ -684,7 +578,7 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [data, filters, activeTab, selectedStatuses, showAllMode]); // Removed poolFilter from dependency array
+  }, [data, activeTab, selectedStatuses, showAllMode]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -701,11 +595,12 @@ export function ManagedJobsTable({
     });
   }, [filteredData, sortConfig]);
 
-  // Calculate pagination based on sorted data
-  const totalPages = Math.ceil(sortedData.length / pageSize);
+  // Pagination is performed server-side; derive display indices and end-of-list
   const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedData = sortedData.slice(startIndex, endIndex);
+  const paginatedData = sortedData; // already paginated by server
+  const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
+  const endIndexDisplay =
+    totalCount > 0 ? Math.min(startIndex + sortedData.length, totalCount) : 0;
 
   // Handle status selection
   const handleStatusClick = (status) => {
@@ -748,7 +643,9 @@ export function ManagedJobsTable({
   };
 
   const goToNextPage = () => {
-    setCurrentPage((page) => Math.min(page + 1, totalPages));
+    if (totalPages > 0 && currentPage < totalPages) {
+      setCurrentPage((page) => page + 1);
+    }
   };
 
   const handlePageSizeChange = (e) => {
@@ -1243,8 +1140,8 @@ export function ManagedJobsTable({
             </div>
           </div>
           <div>
-            {sortedData && sortedData.length > 0
-              ? `${startIndex + 1} – ${Math.min(endIndex, sortedData.length)} of ${sortedData.length}`
+            {totalCount > 0
+              ? `${startIndex + 1} – ${endIndexDisplay} of ${totalCount}`
               : '0 – 0 of 0'}
           </div>
           <div className="flex items-center space-x-2">
@@ -1277,8 +1174,8 @@ export function ManagedJobsTable({
               size="icon"
               onClick={goToNextPage}
               disabled={
-                currentPage === totalPages ||
                 totalPages === 0 ||
+                currentPage >= totalPages ||
                 !sortedData ||
                 sortedData.length === 0
               }
