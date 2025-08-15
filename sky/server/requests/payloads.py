@@ -453,6 +453,7 @@ class VolumeApplyBody(RequestBody):
     zone: Optional[str] = None
     size: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
+    labels: Optional[Dict[str, Any]] = None
 
 
 class VolumeDeleteBody(RequestBody):
