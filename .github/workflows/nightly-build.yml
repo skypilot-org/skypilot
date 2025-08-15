@@ -167,7 +167,7 @@ jobs:
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi --kubernetes --no-resource-heavy on test_cluster_job.py"
       pipeline: "smoke-tests"
-      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy", "FILE_PATTERN": "test_cluster_job.py"}'
+      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy", "FILE_PATTERN": "test_cluster_job.py,test_region_and_zone.py"}'
       timeout_minutes: 40
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
