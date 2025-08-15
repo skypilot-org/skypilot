@@ -2079,10 +2079,12 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                     logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
                                  f' {i}: {common_utils.format_exception(e)}')
                     if cloud_name != 'kubernetes':
-                        # Non-k8s clusters can be manually restarted and get
-                        # new IP addresses, making our cached IPs stale.
-                        # Try refreshing (even though it's slow) cached IPs
-                        # and retry.
+                        # Non-k8s clusters can be manually restarted and:
+                        # 1. Get new IP addresses
+                        # 2. Not have the SkyPilot runtime setup
+                        #
+                        # So we should surface a message to the user to
+                        # help them recover from this inconsistent state.
                         if (e.detailed_reason is not None and
                                 _SSH_CONNECTION_TIMED_OUT_PATTERN.search(
                                     e.detailed_reason.strip()) is not None):
@@ -2096,6 +2098,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                                 f'If the cluster was restarted manually, try running: '
                                 f'{reset}{bright}sky start -f {cluster_name}{reset} '
                                 f'{yellow}to recover from INIT status.{reset}')
+                            return False
                         raise e
                     # We retry for kubernetes because coreweave can have a
                     # transient network issue.
