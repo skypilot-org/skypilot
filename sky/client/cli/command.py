@@ -2171,6 +2171,10 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 
 @cli.command()
 @flags.config_option(expose_value=False)
+@click.option('--provision',
+              is_flag=True,
+              default=False,
+              help='Stream the cluster provisioning logs (provision.log).')
 @click.option(
     '--sync-down',
     '-s',
@@ -2207,6 +2211,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
+    provision: bool,
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2236,6 +2241,11 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
     """
+    if provision and (sync_down or status or job_ids):
+        raise click.UsageError(
+            '--provision cannot be combined with job log options '
+            '(--sync-down/--status/job IDs).')
+
     if sync_down and status:
         raise click.UsageError(
             'Both --sync_down and --status are specified '
@@ -2247,6 +2257,10 @@ def logs(
             '\nPass -s/--sync-down to download the logs instead.')
 
     job_ids = None if not job_ids else job_ids
+
+    if provision:
+        # Stream provision logs
+        sys.exit(sdk.tail_provision_logs(cluster, follow=follow, tail=tail))
 
     if sync_down:
         with rich_utils.client_status(
@@ -4786,7 +4800,7 @@ def pool():
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@click.option('--pool-name',
+@click.option('--pool',
               '-p',
               default=None,
               type=str,
@@ -4808,7 +4822,7 @@ def pool():
 @usage_lib.entrypoint
 def jobs_pool_apply(
     pool_yaml: Tuple[str, ...],
-    pool_name: Optional[str],
+    pool: Optional[str],  # pylint: disable=redefined-outer-name
     workdir: Optional[str],
     infra: Optional[str],
     cloud: Optional[str],
@@ -4841,11 +4855,11 @@ def jobs_pool_apply(
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
-    if pool_name is None:
-        pool_name = serve_lib.generate_service_name(pool=True)
+    if pool is None:
+        pool = serve_lib.generate_service_name(pool=True)
 
     task = _generate_task_with_service(
-        service_name=pool_name,
+        service_name=pool,
         service_yaml_args=pool_yaml,
         workdir=workdir,
         cloud=cloud,
@@ -4882,7 +4896,7 @@ def jobs_pool_apply(
         dag.add(task)
 
     request_id = managed_jobs.pool_apply(task,
-                                         pool_name,
+                                         pool,
                                          mode=serve_lib.UpdateMode(mode),
                                          _need_confirmation=not yes)
     _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
@@ -5120,7 +5134,7 @@ def _handle_serve_logs(
 @usage_lib.entrypoint
 # TODO(tian): Add default argument for this CLI if none of the flags are
 # specified.
-def pool_logs(
+def jobs_pool_logs(
     pool_name: str,
     follow: bool,
     controller: bool,
@@ -6037,7 +6051,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
     # server accepts log_path-only streaming.
     req_id = (server_common.RequestId[None](request_id)
               if request_id is not None else None)
-    sdk.stream_and_get(req_id, log_path, tail, follow=follow)
+    sdk.stream_and_get(req_id, log_path, tail, follow)
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)

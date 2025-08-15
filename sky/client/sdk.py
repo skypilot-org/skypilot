@@ -858,6 +858,56 @@ def tail_logs(cluster_name: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(17)
+@annotations.client_api
+@rest.retry_transient_errors()
+def tail_provision_logs(cluster_name: str,
+                        follow: bool = True,
+                        tail: int = 0,
+                        output_stream: Optional['io.TextIOBase'] = None) -> int:
+    """Tails the provisioning logs (provision.log) for a cluster.
+
+    Args:
+        cluster_name: name of the cluster.
+        follow: follow the logs.
+        tail: lines from end to tail.
+        output_stream: optional stream to write logs.
+    Returns:
+        Exit code 0 on streaming success; raises on HTTP error.
+    """
+    body = payloads.ClusterNameBody(cluster_name=cluster_name)
+    params = {
+        'follow': str(follow).lower(),
+        'tail': tail,
+    }
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/provision_logs',
+        json=json.loads(body.model_dump_json()),
+        params=params,
+        stream=True,
+        timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
+                 None))
+    # Log request is idempotent when tail is 0, thus can resume previous
+    # streaming point on retry.
+    # request_id=None here because /provision_logs does not create an async
+    # request. Instead, it streams a plain file from the server. This does NOT
+    # violate the stream_response doc warning about None in multi-user
+    # environments: we are not asking stream_response to select “the latest
+    # request”. We already have the HTTP response to stream; request_id=None
+    # merely disables the follow-up GET. It is also necessary for --no-follow
+    # to return cleanly after printing the tailed lines. If we provided a
+    # non-None request_id here, the get(request_id) in stream_response(
+    # would fail since /provision_logs does not create a request record.
+    stream_response(request_id=None,
+                    response=response,
+                    output_stream=output_stream,
+                    resumable=(tail == 0))
+    return 0
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
 @annotations.client_api
 def download_logs(cluster_name: str,
                   job_ids: Optional[List[str]]) -> Dict[str, str]:

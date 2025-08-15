@@ -507,7 +507,8 @@ def queue_from_kubernetes_pod(
     managed_jobs_runner = provision_lib.get_command_runners(
         'kubernetes', cluster_info)[0]
 
-    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
+    code = managed_job_utils.ManagedJobCodeGen.get_job_table(
+        skip_finished=skip_finished)
     returncode, job_table_payload, stderr = managed_jobs_runner.run(
         code,
         require_outputs=True,
@@ -523,7 +524,14 @@ def queue_from_kubernetes_pod(
     except exceptions.CommandError as e:
         raise RuntimeError(str(e)) from e
 
-    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+    jobs, _, result_type = managed_job_utils.load_managed_job_queue(
+        job_table_payload)
+
+    if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
+        return jobs
+
+    # Backward compatibility for old jobs controller without filtering
+    # TODO(hailong): remove this after 0.12.0
     if skip_finished:
         # Filter out the finished jobs. If a multi-task job is partially
         # finished, we will include all its tasks.
@@ -578,10 +586,18 @@ def _maybe_restart_controller(
 
 
 @usage_lib.entrypoint
-def queue(refresh: bool,
-          skip_finished: bool = False,
-          all_users: bool = False,
-          job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+def queue(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    job_ids: Optional[List[int]] = None,
+    user_match: Optional[str] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs.
 
@@ -611,6 +627,17 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    if limit is not None:
+        if limit < 1:
+            raise ValueError(f'Limit must be at least 1, got {limit}')
+        if page is None:
+            page = 1
+        if page < 1:
+            raise ValueError(f'Page must be at least 1, got {page}')
+    else:
+        if page is not None:
+            raise ValueError('Limit must be specified when page is specified')
+
     handle = _maybe_restart_controller(refresh,
                                        stopped_message='No in-progress '
                                        'managed jobs.',
@@ -619,7 +646,22 @@ def queue(refresh: bool,
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
+    user_hashes: Optional[List[Optional[str]]] = None
+    if not all_users:
+        user_hashes = [common_utils.get_user_hash()]
+        # For backwards compatibility, we show jobs that do not have a
+        # user_hash. TODO(cooperc): Remove before 0.12.0.
+        user_hashes.append(None)
+    elif user_match is not None:
+        users = global_user_state.get_user_by_name_match(user_match)
+        if not users:
+            return [], 0
+        user_hashes = [user.id for user in users]
+
+    accessible_workspaces = list(workspaces_core.get_workspaces().keys())
+    code = managed_job_utils.ManagedJobCodeGen.get_job_table(
+        skip_finished, accessible_workspaces, job_ids, workspace_match,
+        name_match, pool_match, page, limit, user_hashes)
     returncode, job_table_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -632,8 +674,14 @@ def queue(refresh: bool,
         raise RuntimeError('Failed to fetch managed jobs with returncode: '
                            f'{returncode}.\n{job_table_payload + stderr}')
 
-    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+    jobs, total, result_type = managed_job_utils.load_managed_job_queue(
+        job_table_payload)
 
+    if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
+        return jobs, total
+
+    # Backward compatibility for old jobs controller without filtering
+    # TODO(hailong): remove this after 0.12.0
     if not all_users:
 
         def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
@@ -646,7 +694,6 @@ def queue(refresh: bool,
 
         jobs = list(filter(user_hash_matches_or_missing, jobs))
 
-    accessible_workspaces = workspaces_core.get_workspaces()
     jobs = list(
         filter(
             lambda job: job.get('workspace', skylet_constants.
@@ -665,7 +712,14 @@ def queue(refresh: bool,
     if job_ids:
         jobs = [job for job in jobs if job['job_id'] in job_ids]
 
-    return jobs
+    return managed_job_utils.filter_jobs(jobs,
+                                         workspace_match,
+                                         name_match,
+                                         pool_match,
+                                         page=page,
+                                         limit=limit,
+                                         user_match=user_match,
+                                         enable_user_match=True)
 
 
 @usage_lib.entrypoint

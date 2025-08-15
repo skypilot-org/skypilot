@@ -175,19 +175,12 @@ def _execute(
         if dryrun.
     """
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag.resolve_and_validate_volumes()
-    if (not _is_launched_by_jobs_controller and
-            not _is_launched_by_sky_serve_controller):
-        # Only process pre-mount operations on API server.
-        dag.pre_mount_volumes()
     for task in dag.tasks:
-        if task.storage_mounts is not None:
-            for storage in task.storage_mounts.values():
-                # Ensure the storage is constructed.
-                storage.construct()
         for resource in task.resources:
             # For backward compatibility, we need to override the autostop
-            # config at server-side for legacy clients.
+            # config at server-side for legacy clients. This should be set
+            # before admin policy to make the admin policy get the final
+            # value of autostop config.
             # TODO(aylei): remove this after we bump the API version.
             resource.override_autostop_config(
                 down=down, idle_minutes=idle_minutes_to_autostop)
@@ -202,6 +195,16 @@ def _execute(
                 down=down,
                 dryrun=dryrun,
             )) as dag:
+        dag.resolve_and_validate_volumes()
+        if (not _is_launched_by_jobs_controller and
+                not _is_launched_by_sky_serve_controller):
+            # Only process pre-mount operations on API server.
+            dag.pre_mount_volumes()
+        for task in dag.tasks:
+            if task.storage_mounts is not None:
+                for storage in task.storage_mounts.values():
+                    # Ensure the storage is constructed.
+                    storage.construct()
         return _execute_dag(
             dag,
             dryrun=dryrun,

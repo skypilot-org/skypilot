@@ -256,6 +256,13 @@ async def scheduled_launch(
     multiple uses of this context are nested, behavior is undefined. Don't do
     that.
     """
+    pool = state.get_pool_from_job_id(job_id)
+    # For pool, since there is no execution.launch, we don't need to have all
+    # the ALIVE_WAITING state. The state transition will be
+    # WAITING -> ALIVE -> DONE without any intermediate transitions.
+    if pool is not None:
+        yield
+        return
 
     assert starting_lock == starting_signal._lock, (  # type: ignore #pylint: disable=protected-access
         'starting_lock and starting_signal must use the same lock')
