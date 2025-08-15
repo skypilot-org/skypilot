@@ -47,7 +47,7 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # The version of the lib files that jobs/utils use. Whenever there is an API
 # change for the jobs/utils, we need to bump this version and update
 # job.utils.ManagedJobCodeGen to handle the version update.
-MANAGED_JOBS_VERSION = 7
+MANAGED_JOBS_VERSION = 9
 
 # The command for setting up the jobs dashboard on the controller. It firstly
 # checks if the systemd services are available, and if not (e.g., Kubernetes

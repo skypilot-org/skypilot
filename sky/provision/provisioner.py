@@ -76,7 +76,8 @@ def _bulk_provision(
     logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
     rich_utils.force_update_status(
         ux_utils.spinner_message('Launching - Checking instance status',
-                                 str(provision_logging.config.log_path)))
+                                 str(provision_logging.config.log_path),
+                                 cluster_name=str(cluster_name)))
     # AWS would take a very short time (<<1s) updating the state of the
     # instance.
     time.sleep(1)
@@ -462,9 +463,9 @@ def _post_provision_setup(
     docker_config = config_from_yaml.get('docker', {})
 
     with rich_utils.safe_status(
-            ux_utils.spinner_message(
-                'Launching - Waiting for SSH access',
-                provision_logging.config.log_path)) as status:
+            ux_utils.spinner_message('Launching - Waiting for SSH access',
+                                     provision_logging.config.log_path,
+                                     cluster_name=str(cluster_name))) as status:
         # If on Kubernetes, skip SSH check since the pods are guaranteed to be
         # ready by the provisioner, and we use kubectl instead of SSH to run the
         # commands and rsync on the pods. SSH will still be ready after a while
@@ -493,7 +494,8 @@ def _post_provision_setup(
             status.update(
                 ux_utils.spinner_message(
                     'Launching - Initializing docker container',
-                    provision_logging.config.log_path))
+                    provision_logging.config.log_path,
+                    cluster_name=str(cluster_name)))
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
@@ -541,7 +543,8 @@ def _post_provision_setup(
 
         runtime_preparation_str = (ux_utils.spinner_message(
             'Preparing SkyPilot runtime ({step}/3 - {step_name})',
-            provision_logging.config.log_path))
+            provision_logging.config.log_path,
+            cluster_name=str(cluster_name)))
         status.update(
             runtime_preparation_str.format(step=1, step_name='initializing'))
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
@@ -679,7 +682,8 @@ def _post_provision_setup(
         if logging_agent:
             status.update(
                 ux_utils.spinner_message('Setting up logging agent',
-                                         provision_logging.config.log_path))
+                                         provision_logging.config.log_path,
+                                         cluster_name=str(cluster_name)))
             instance_setup.setup_logging_on_cluster(logging_agent, cluster_name,
                                                     cluster_info,
                                                     ssh_credentials)
@@ -689,7 +693,8 @@ def _post_provision_setup(
 
     logger.info(
         ux_utils.finishing_message(f'Cluster launched: {cluster_name}.',
-                                   provision_logging.config.log_path))
+                                   provision_logging.config.log_path,
+                                   cluster_name=str(cluster_name)))
     return cluster_info
 
 

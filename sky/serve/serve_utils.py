@@ -57,21 +57,16 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-
-@annotations.lru_cache(scope='request')
-def get_num_service_threshold():
-    """Get number of services threshold, calculating it only when needed."""
-    system_memory_gb = psutil.virtual_memory().total // (1024**3)
-    return system_memory_gb // constants.CONTROLLER_MEMORY_USAGE_GB
-
-
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 # NOTE(dev): We assume log are print with the hint 'sky api logs -l'. Be careful
 # when changing UX as this assumption is used to expand some log files while
 # ignoring others.
 _SKYPILOT_LOG_HINT = r'.*sky api logs -l'
-_SKYPILOT_PROVISION_LOG_PATTERN = (fr'{_SKYPILOT_LOG_HINT} (.*/provision\.log)')
+_SKYPILOT_PROVISION_API_LOG_PATTERN = (
+    fr'{_SKYPILOT_LOG_HINT} (.*/provision\.log)')
+# New hint pattern for provision logs
+_SKYPILOT_PROVISION_LOG_CMD_PATTERN = r'.*sky logs --provision\s+(\S+)'
 _SKYPILOT_LOG_PATTERN = fr'{_SKYPILOT_LOG_HINT} (.*\.log)'
 
 # TODO(tian): Find all existing replica id and print here.
@@ -798,9 +793,13 @@ def load_version_string(payload: str) -> str:
     return message_utils.decode_payload(payload)
 
 
-def num_replicas(service_name: str) -> int:
+def get_ready_replicas(
+        service_name: str) -> List['replica_managers.ReplicaInfo']:
     logger.info(f'Get number of replicas for pool {service_name!r}')
-    return len(serve_state.get_replica_infos(service_name))
+    return [
+        info for info in serve_state.get_replica_infos(service_name)
+        if info.status == serve_state.ReplicaStatus.READY
+    ]
 
 
 def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
@@ -825,12 +824,8 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         logger.error(f'Service {service_name!r} is not a cluster pool.')
         return None
     with filelock.FileLock(get_service_filelock_path(service_name)):
-
         logger.debug(f'Get next cluster name for pool {service_name!r}')
-        ready_replicas = [
-            info for info in serve_state.get_replica_infos(service_name)
-            if info.status == serve_state.ReplicaStatus.READY
-        ]
+        ready_replicas = get_ready_replicas(service_name)
         idle_replicas: List['replica_managers.ReplicaInfo'] = []
         for replica_info in ready_replicas:
             jobs_on_replica = managed_job_state.get_nonterminal_job_ids_by_pool(
@@ -1046,11 +1041,18 @@ def wait_service_registration(service_name: str, job_id: int,
             lb_port = record['load_balancer_port']
             if lb_port is not None:
                 return message_utils.encode_payload(lb_port)
-        elif len(serve_state.get_services()) >= get_num_service_threshold():
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Max number of services reached. '
-                                   'To spin up more services, please '
-                                   'tear down some existing services.')
+        else:
+            controller_log_path = os.path.expanduser(
+                generate_remote_controller_log_file_name(service_name))
+            if os.path.exists(controller_log_path):
+                with open(controller_log_path, 'r', encoding='utf-8') as f:
+                    log_content = f.read()
+                if (constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR
+                        in log_content):
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError('Max number of services reached. '
+                                           'To spin up more services, please '
+                                           'tear down some existing services.')
         elapsed = time.time() - start_time
         if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
             # Print the controller log to help user debug.
@@ -1115,31 +1117,49 @@ def _process_line(line: str,
             return False
         return cluster_record['status'] == status_lib.ClusterStatus.UP
 
-    provision_log_prompt = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
+    provision_api_log_prompt = re.match(_SKYPILOT_PROVISION_API_LOG_PATTERN,
+                                        line)
+    provision_log_cmd_prompt = re.match(_SKYPILOT_PROVISION_LOG_CMD_PATTERN,
+                                        line)
     log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
 
-    if provision_log_prompt is not None:
-        log_path = provision_log_prompt.group(1)
-        nested_log_path = pathlib.Path(
-            skylet_constants.SKY_LOGS_DIRECTORY).expanduser().joinpath(
-                log_path).resolve()
-
+    def _stream_provision_path(p: pathlib.Path) -> Iterator[str]:
         try:
-            with open(nested_log_path, 'r', newline='', encoding='utf-8') as f:
-                # We still exit if more than 10 seconds without new content
-                # to avoid any internal bug that causes the launch to fail
-                # while cluster status remains INIT.
+            with open(p, 'r', newline='', encoding='utf-8') as f:
+                # Exit if >10s without new content to avoid hanging when INIT
                 yield from log_utils.follow_logs(f,
                                                  should_stop=cluster_is_up,
                                                  stop_on_eof=stop_on_eof,
                                                  idle_timeout_seconds=10)
         except FileNotFoundError:
+            # Fall back cleanly if the hinted path doesn't exist
             yield line
-
             yield (f'{colorama.Fore.YELLOW}{colorama.Style.BRIGHT}'
-                   f'Try to expand log file {nested_log_path} but not '
-                   f'found. Skipping...{colorama.Style.RESET_ALL}')
-            pass
+                   f'Try to expand log file {p} but not found. Skipping...'
+                   f'{colorama.Style.RESET_ALL}')
+        return
+
+    if provision_api_log_prompt is not None:
+        rel_path = provision_api_log_prompt.group(1)
+        nested_log_path = pathlib.Path(
+            skylet_constants.SKY_LOGS_DIRECTORY).expanduser().joinpath(
+                rel_path).resolve()
+        yield from _stream_provision_path(nested_log_path)
+        return
+
+    if provision_log_cmd_prompt is not None:
+        # Resolve provision log via cluster table first, then history.
+        log_path_str = global_user_state.get_cluster_provision_log_path(
+            cluster_name)
+        if not log_path_str:
+            log_path_str = (
+                global_user_state.get_cluster_history_provision_log_path(
+                    cluster_name))
+        if not log_path_str:
+            yield line
+            return
+        yield from _stream_provision_path(
+            pathlib.Path(log_path_str).expanduser().resolve())
         return
 
     if log_prompt is not None:

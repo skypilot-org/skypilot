@@ -275,65 +275,6 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     return list(env_dict.items())
 
 
-def _format_job_ids_str(job_ids: List[int], max_length: int = 30) -> str:
-    """Format job IDs string with ellipsis if too long.
-
-    Args:
-        job_ids: List of job IDs to format.
-        max_length: Maximum length of the output string.
-
-    Returns:
-        Formatted string like "11,12,...,2017,2018" if truncated,
-        or the full string if it fits within max_length.
-    """
-    if not job_ids:
-        return ''
-
-    # Convert all to strings
-    job_strs = [str(job_id) for job_id in job_ids]
-    full_str = ','.join(job_strs)
-
-    # If it fits, return as is
-    if len(full_str) <= max_length:
-        return full_str
-
-    if len(job_strs) <= 2:
-        return full_str  # Can't truncate further
-
-    # Need to truncate with ellipsis
-    ellipsis = '...'
-
-    # Start with minimum: first and last
-    start_count = 1
-    end_count = 1
-
-    while start_count + end_count < len(job_strs):
-        # Try adding one more to start
-        if start_count + 1 + end_count < len(job_strs):
-            start_part = ','.join(job_strs[:start_count + 1])
-            end_part = ','.join(job_strs[-end_count:])
-            candidate = f'{start_part},{ellipsis},{end_part}'
-            if len(candidate) <= max_length:
-                start_count += 1
-                continue
-
-        # Try adding one more to end
-        if start_count + end_count + 1 < len(job_strs):
-            start_part = ','.join(job_strs[:start_count])
-            end_part = ','.join(job_strs[-(end_count + 1):])
-            candidate = f'{start_part},{ellipsis},{end_part}'
-            if len(candidate) <= max_length:
-                end_count += 1
-                continue
-
-        # Can't add more
-        break
-
-    start_part = ','.join(job_strs[:start_count])
-    end_part = ','.join(job_strs[-end_count:])
-    return f'{start_part},{ellipsis},{end_part}'
-
-
 def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for cluster names."""
@@ -1187,11 +1128,15 @@ def launch(
             raise ValueError(f'{backend_name} backend is not supported.')
 
     if task.service is not None:
+        noun = 'pool' if task.service.pool else 'service'
+        capnoun = noun.capitalize()
+        sysname = 'Jobs Worker Pool' if task.service.pool else 'SkyServe'
+        cmd = 'sky jobs pool apply' if task.service.pool else 'sky serve up'
         logger.info(
-            f'{colorama.Fore.YELLOW}Service section will be ignored when using '
-            f'`sky launch`. {colorama.Style.RESET_ALL}\n{colorama.Fore.YELLOW}'
-            'To spin up a service, use SkyServe CLI: '
-            f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}sky serve up'
+            f'{colorama.Fore.YELLOW}{capnoun} section will be ignored when '
+            f'using `sky launch`. {colorama.Style.RESET_ALL}\n'
+            f'{colorama.Fore.YELLOW}To spin up a {noun}, use {sysname} CLI: '
+            f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}{cmd}'
             f'{colorama.Style.RESET_ALL}')
 
     request_id = sdk.launch(
@@ -2226,6 +2171,10 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 
 @cli.command()
 @flags.config_option(expose_value=False)
+@click.option('--provision',
+              is_flag=True,
+              default=False,
+              help='Stream the cluster provisioning logs (provision.log).')
 @click.option(
     '--sync-down',
     '-s',
@@ -2262,6 +2211,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
+    provision: bool,
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2291,6 +2241,11 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
     """
+    if provision and (sync_down or status or job_ids):
+        raise click.UsageError(
+            '--provision cannot be combined with job log options '
+            '(--sync-down/--status/job IDs).')
+
     if sync_down and status:
         raise click.UsageError(
             'Both --sync_down and --status are specified '
@@ -2302,6 +2257,10 @@ def logs(
             '\nPass -s/--sync-down to download the logs instead.')
 
     job_ids = None if not job_ids else job_ids
+
+    if provision:
+        # Stream provision logs
+        sys.exit(sdk.tail_provision_logs(cluster, follow=follow, tail=tail))
 
     if sync_down:
         with rich_utils.client_status(
@@ -2981,15 +2940,15 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
-    # TODO(tian): We also need to check pools after we allow running pools on
-    # jobs controller.
     with rich_utils.client_status(
-            '[bold cyan]Checking for in-progress managed jobs[/]'):
+            '[bold cyan]Checking for in-progress managed jobs and pools[/]'):
         try:
             request_id = managed_jobs.queue(refresh=False,
                                             skip_finished=True,
                                             all_users=True)
             managed_jobs_ = sdk.stream_and_get(request_id)
+            request_id_pools = managed_jobs.pool_status(pool_names=None)
+            pools_ = sdk.stream_and_get(request_id_pools)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -3004,6 +2963,7 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             # the controller being STOPPED or being firstly launched, i.e.,
             # there is no in-prgress managed jobs.
             managed_jobs_ = []
+            pools_ = []
         except exceptions.InconsistentConsolidationModeError:
             # If this error is raised, it means the user switched to the
             # consolidation mode but the previous controller cluster is still
@@ -3021,6 +2981,8 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
                                                 skip_finished=True,
                                                 all_users=True)
                 managed_jobs_ = sdk.stream_and_get(request_id)
+                request_id_pools = managed_jobs.pool_status(pool_names=None)
+                pools_ = sdk.stream_and_get(request_id_pools)
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'jobs controller. Please be aware of the following:'
@@ -3042,9 +3004,23 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
         else:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(msg)
+    elif pools_:
+        pool_names = ', '.join([pool['name'] for pool in pools_])
+        if purge:
+            logger.warning('--purge is set, ignoring the in-progress pools. '
+                           'This could cause leaked clusters!')
+        else:
+            msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
+                   'jobs controller is not supported, as it is currently '
+                   f'hosting the following pools: {pool_names}. Please '
+                   'terminate the pools first with '
+                   f'{colorama.Style.BRIGHT}sky jobs pool down -a'
+                   f'{colorama.Style.RESET_ALL}.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(msg)
     else:
-        click.echo(' * No in-progress managed jobs found. It should be safe to '
-                   'terminate (see caveats above).')
+        click.echo(' * No in-progress managed jobs or running pools found. It '
+                   'should be safe to terminate (see caveats above).')
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
@@ -4509,8 +4485,8 @@ def jobs_launch(
         if print_setup_fm_warning:
             click.secho(
                 f'{colorama.Fore.YELLOW}setup/file_mounts/storage_mounts'
-                ' will be ignored in pool. To update a pool, please '
-                f'use `sky pool apply {pool} pool.yaml`. '
+                ' will be ignored when submit jobs to pool. To update a pool, '
+                f'please use `sky jobs pool apply {pool} new-pool.yaml`. '
                 f'{colorama.Style.RESET_ALL}')
 
     # Optimize info is only show if _need_confirmation.
@@ -4537,7 +4513,9 @@ def jobs_launch(
                                                 controller=False)
             sys.exit(returncode)
         else:
-            job_ids_str = _format_job_ids_str(job_ids)
+            # TODO(tian): This can be very long. Considering have a "group id"
+            # and query all job ids with the same group id.
+            job_ids_str = ','.join(map(str, job_ids))
             click.secho(
                 f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                 f'{job_ids_str}{colorama.Style.RESET_ALL}.'
@@ -4822,7 +4800,7 @@ def pool():
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@click.option('--pool-name',
+@click.option('--pool',
               '-p',
               default=None,
               type=str,
@@ -4844,7 +4822,7 @@ def pool():
 @usage_lib.entrypoint
 def jobs_pool_apply(
     pool_yaml: Tuple[str, ...],
-    pool_name: Optional[str],
+    pool: Optional[str],  # pylint: disable=redefined-outer-name
     workdir: Optional[str],
     infra: Optional[str],
     cloud: Optional[str],
@@ -4877,11 +4855,11 @@ def jobs_pool_apply(
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
-    if pool_name is None:
-        pool_name = serve_lib.generate_service_name(pool=True)
+    if pool is None:
+        pool = serve_lib.generate_service_name(pool=True)
 
     task = _generate_task_with_service(
-        service_name=pool_name,
+        service_name=pool,
         service_yaml_args=pool_yaml,
         workdir=workdir,
         cloud=cloud,
@@ -4918,7 +4896,7 @@ def jobs_pool_apply(
         dag.add(task)
 
     request_id = managed_jobs.pool_apply(task,
-                                         pool_name,
+                                         pool,
                                          mode=serve_lib.UpdateMode(mode),
                                          _need_confirmation=not yes)
     _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
@@ -5156,7 +5134,7 @@ def _handle_serve_logs(
 @usage_lib.entrypoint
 # TODO(tian): Add default argument for this CLI if none of the flags are
 # specified.
-def pool_logs(
+def jobs_pool_logs(
     pool_name: str,
     follow: bool,
     controller: bool,
@@ -6073,7 +6051,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
     # server accepts log_path-only streaming.
     req_id = (server_common.RequestId[None](request_id)
               if request_id is not None else None)
-    sdk.stream_and_get(req_id, log_path, tail, follow=follow)
+    sdk.stream_and_get(req_id, log_path, tail, follow)
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)

@@ -378,6 +378,7 @@ available_node_types:
         {% if volume_mounts %}
         securityContext:
           fsGroup: 1000
+          fsGroupChangePolicy: OnRootMismatch
         {% endif %}
 
         # Add node selector if GPU/TPUs are requested:
