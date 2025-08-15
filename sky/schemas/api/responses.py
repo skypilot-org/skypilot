@@ -1,6 +1,6 @@
 """Responses for the API server."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 import pydantic
 
@@ -107,9 +107,8 @@ class StatusResponse(ResponseBaseModel):
     resources_str_full: Optional[str] = None
     credentials: Optional[Dict[str, Any]] = None
     nodes: int
-    cloud: str
-    region: str
-    # could be '2' or '2+'
-    cpus: str
-    memory: Any
-    accelerators: Any
+    cloud: Optional[str] = None
+    region: Optional[str] = None
+    cpus: Optional[str] = None
+    memory: Optional[str] = None
+    accelerators: Optional[str] = None
