@@ -134,3 +134,11 @@ def tail_logs(job_id: int,
               managed_job_id: Optional[int] = ...,
               follow: bool = ...) -> None:
     ...
+
+
+def tail_logs_iter(job_id: Optional[int],
+                   log_dir: Optional[str],
+                   managed_job_id: Optional[int] = ...,
+                   follow: bool = ...,
+                   tail: int = ...) -> typing.Iterator[str]:
+    ...

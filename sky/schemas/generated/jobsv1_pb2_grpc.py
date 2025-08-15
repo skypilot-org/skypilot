@@ -135,7 +135,7 @@ class JobsServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def FailAllInProgressJobs(self, request, context):
-        """Fail all jobs in progress.
+        """Fail all in-progress jobs.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

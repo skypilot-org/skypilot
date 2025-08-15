@@ -13,7 +13,7 @@ service JobsService {
   rpc GetJobQueue(GetJobQueueRequest) returns (GetJobQueueResponse);
   // Cancel jobs.
   rpc CancelJobs(CancelJobsRequest) returns (CancelJobsResponse);
-  // Fail all jobs in progress.
+  // Fail all in-progress jobs.
   rpc FailAllInProgressJobs(FailAllInProgressJobsRequest) returns (FailAllInProgressJobsResponse);
   // Tail job logs.
   rpc TailLogs(TailLogsRequest) returns (stream TailLogsResponse);

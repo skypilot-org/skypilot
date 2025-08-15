@@ -21,10 +21,12 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.generated import jobsv1_pb2
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -805,7 +807,6 @@ def queue(cluster_name: str,
         user_hash = None
     else:
         user_hash = common_utils.get_current_user().id
-    code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
 
     handle = backend_utils.check_cluster_available(
         cluster_name,
@@ -813,17 +814,41 @@ def queue(cluster_name: str,
     )
     backend = backend_utils.get_backend_from_handle(handle)
 
-    returncode, jobs_payload, stderr = backend.run_on_head(handle,
-                                                           code,
-                                                           require_outputs=True,
-                                                           separate_stderr=True)
-    subprocess_utils.handle_returncode(
-        returncode,
-        command=code,
-        error_msg=f'Failed to get job queue on cluster {cluster_name}.',
-        stderr=f'{jobs_payload + stderr}',
-        stream_logs=True)
-    jobs = job_lib.load_job_queue(jobs_payload)
+    if handle.is_grpc_enabled:
+        request = jobsv1_pb2.GetJobQueueRequest(user_hash=user_hash,
+                                                all_jobs=all_jobs)
+        response = backend_utils.invoke_skylet_with_retries(
+            handle, lambda: cloud_vm_ray_backend.SkyletClient(
+                handle.get_grpc_channel()).get_job_queue(request))
+        jobs = []
+        for job_info in response.jobs:
+            job_dict = {
+                'job_id': job_info.job_id,
+                'job_name': job_info.job_name,
+                'submitted_at': job_info.submitted_at,
+                'status': job_lib.JobStatus.from_protobuf(job_info.status),
+                'run_timestamp': job_info.run_timestamp,
+                'start_at': job_info.start_at,
+                'end_at': job_info.end_at,
+                'resources': job_info.resources,
+                'log_path': job_info.log_path,
+                'user_hash': job_info.username,
+            }
+            # Copied from job_lib.load_job_queue.
+            user = global_user_state.get_user(job_dict['user_hash'])
+            job_dict['username'] = user.name if user is not None else None
+            jobs.append(job_dict)
+    else:
+        code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
+        returncode, jobs_payload, stderr = backend.run_on_head(
+            handle, code, require_outputs=True, separate_stderr=True)
+        subprocess_utils.handle_returncode(
+            returncode,
+            command=code,
+            error_msg=f'Failed to get job queue on cluster {cluster_name}.',
+            stderr=f'{jobs_payload + stderr}',
+            stream_logs=True)
+        jobs = job_lib.load_job_queue(jobs_payload)
     return jobs
 
 
