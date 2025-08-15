@@ -1,8 +1,10 @@
 """Unit tests for the jobs server queue."""
+import time
 from typing import Any, Dict, List, Optional
 
 import pytest
 
+from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 # Target under test
 from sky.jobs.server import core as jobs_core
@@ -111,6 +113,11 @@ class TestFilterJobs:
 
         # With workspace match
         filtered, total = jobs_utils._filter_jobs(jobs, None, 'ws', None, None,
+                                                  None)
+        assert total == 0
+
+        # With pool match
+        filtered, total = jobs_utils._filter_jobs(jobs, None, None, 'p2', None,
                                                   None)
         assert total == 0
 
@@ -293,12 +300,36 @@ class TestQueue:
             workspace_match=None,
             name_match=None,
             pool_match=None,
-            offset=1,
+            offset=None,
             limit=10,
         )
         # queue() returns Tuple[List[Dict], int]
         assert total == 2
         assert [j['job_id'] for j in filtered] == [1, 3]
+
+    def test_queue_user_match_none(self, monkeypatch):
+        jobs = [_make_job(i, workspace='ws') for i in range(1, 31)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+
+        # Patch get_user_by_name_match to return empty list
+        monkeypatch.setattr(jobs_core.global_user_state,
+                            'get_user_by_name_match', lambda pattern: [])
+
+        filtered, total = jobs_core.queue(
+            refresh=False,
+            skip_finished=False,
+            all_users=True,
+            job_ids=None,
+            user_match="test",
+            workspace_match=None,
+            name_match=None,
+            pool_match=None,
+            offset=None,
+            limit=10,
+        )
+        # When user_match returns no users, should return empty list and total 0
+        assert total == 0
+        assert len(filtered) == 0
 
     def test_queue_pagination(self, monkeypatch):
         jobs = [_make_job(i, workspace='ws') for i in range(1, 31)]
@@ -508,3 +539,303 @@ class TestQueue:
                                           limit=None)
         assert total == 2
         assert sorted([j['job_id'] for j in filtered]) == [2, 3]
+
+
+class TestDumpManagedJobQueue:
+
+    def _make_test_job(self, job_id: int, **kwargs) -> Dict[str, Any]:
+        """Create a test job with default values."""
+        defaults = {
+            'job_id': job_id,
+            'task_name': f'task_{job_id}',
+            'job_name': f'job_{job_id}',
+            'workspace': 'default',
+            'pool': 'default',
+            'status': managed_job_state.ManagedJobStatus.PENDING,
+            'schedule_state': managed_job_state.ManagedJobScheduleState.WAITING,
+            'priority': 1,
+            'user_hash': 'user1',
+            'last_recovered_at': time.time(),
+            'job_duration': 0,
+            'end_at': None,
+            'failure_reason': None,
+        }
+        defaults.update(kwargs)
+        return defaults
+
+    def _patch_dependencies(self, monkeypatch: pytest.MonkeyPatch,
+                            jobs: List[Dict[str, Any]]):
+        """Patch dependencies for dump_managed_job_queue."""
+
+        def fake_get_managed_jobs():
+            return jobs
+
+        def fake_get_pool_from_job_id(job_id):
+            return None
+
+        def fake_get_pool_submit_info(job_id):
+            return f'cluster-{job_id}', {}
+
+        def fake_generate_managed_job_cluster_name(task_name, job_id):
+            return f'cluster-{job_id}'
+
+        def fake_get_handle_from_cluster_name(cluster_name):
+            return None
+
+        # Patch the dependencies
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_managed_jobs',
+                            fake_get_managed_jobs)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'get_pool_from_job_id', fake_get_pool_from_job_id)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'get_pool_submit_info', fake_get_pool_submit_info)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            fake_generate_managed_job_cluster_name)
+        monkeypatch.setattr(jobs_utils.global_user_state,
+                            'get_handle_from_cluster_name',
+                            fake_get_handle_from_cluster_name)
+
+    def test_dump_managed_job_queue_basic(self, monkeypatch):
+        """Test basic functionality without filters."""
+        jobs = [
+            self._make_test_job(1),
+            self._make_test_job(2),
+            self._make_test_job(3),
+        ]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue()
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        assert decoded['total'] == 3
+        assert len(decoded['jobs']) == 3
+        assert [j['job_id'] for j in decoded['jobs']] == [1, 2, 3]
+
+    def test_dump_managed_job_queue_with_filters(self, monkeypatch):
+        """Test filtering by workspace, name, and pool."""
+        jobs = [
+            self._make_test_job(1,
+                                workspace='ws1',
+                                job_name='job_a',
+                                pool='pool1'),
+            self._make_test_job(2,
+                                workspace='ws2',
+                                job_name='job_b',
+                                pool='pool1'),
+            self._make_test_job(3,
+                                workspace='ws1',
+                                job_name='job_c',
+                                pool='pool2'),
+        ]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue(workspace_match='ws1',
+                                                   name_match='job_a',
+                                                   pool_match='pool1')
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        assert decoded['total'] == 1
+        assert len(decoded['jobs']) == 1
+        assert decoded['jobs'][0]['job_id'] == 1
+
+    def test_dump_managed_job_queue_with_pagination(self, monkeypatch):
+        """Test pagination functionality."""
+        jobs = [self._make_test_job(i) for i in range(1, 11)]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue(offset=2, limit=3)
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        assert decoded['total'] == 10
+        assert len(decoded['jobs']) == 3
+        assert [j['job_id'] for j in decoded['jobs']] == [4, 5, 6]
+
+    def test_dump_managed_job_queue_with_user_hashes(self, monkeypatch):
+        """Test filtering by user hashes."""
+        jobs = [
+            self._make_test_job(1, user_hash='user1'),
+            self._make_test_job(2, user_hash='user2'),
+            self._make_test_job(3, user_hash='user1'),
+        ]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue(user_hashes=['user1'])
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        assert decoded['total'] == 2
+        assert len(decoded['jobs']) == 2
+        assert [j['job_id'] for j in decoded['jobs']] == [1, 3]
+
+    def test_dump_managed_job_queue_with_accessible_workspaces(
+            self, monkeypatch):
+        """Test filtering by accessible workspaces."""
+        jobs = [
+            self._make_test_job(1, workspace='ws1'),
+            self._make_test_job(2, workspace='ws2'),
+            self._make_test_job(3, workspace='ws1'),
+        ]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue(
+            accessible_workspaces=['ws1'])
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        assert decoded['total'] == 2
+        assert len(decoded['jobs']) == 2
+        assert [j['job_id'] for j in decoded['jobs']] == [1, 3]
+
+    def test_dump_managed_job_queue_with_job_ids(self, monkeypatch):
+        """Test filtering by specific job IDs."""
+        jobs = [self._make_test_job(i) for i in range(1, 6)]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue(job_ids=[2, 4])
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        assert decoded['total'] == 2
+        assert len(decoded['jobs']) == 2
+        assert [j['job_id'] for j in decoded['jobs']] == [2, 4]
+
+    def test_dump_managed_job_queue_skip_finished(self, monkeypatch):
+        """Test skip_finished functionality."""
+        jobs = [
+            self._make_test_job(
+                1, status=managed_job_state.ManagedJobStatus.RUNNING),
+            self._make_test_job(
+                2, status=managed_job_state.ManagedJobStatus.SUCCEEDED),
+            self._make_test_job(
+                3, status=managed_job_state.ManagedJobStatus.FAILED),
+            self._make_test_job(
+                4, status=managed_job_state.ManagedJobStatus.PENDING),
+        ]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue(skip_finished=True)
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        # Should only include non-terminal statuses (RUNNING, PENDING)
+        assert decoded['total'] == 2
+        assert len(decoded['jobs']) == 2
+        job_ids = [j['job_id'] for j in decoded['jobs']]
+        assert 1 in job_ids
+        assert 4 in job_ids
+
+    def test_dump_managed_job_queue_priority_blocking(self, monkeypatch):
+        """Test priority blocking logic."""
+        jobs = [
+            self._make_test_job(1,
+                                priority=10,
+                                schedule_state=managed_job_state.
+                                ManagedJobScheduleState.LAUNCHING),
+            self._make_test_job(2,
+                                priority=5,
+                                schedule_state=managed_job_state.
+                                ManagedJobScheduleState.WAITING),
+            self._make_test_job(3,
+                                priority=1,
+                                schedule_state=managed_job_state.
+                                ManagedJobScheduleState.WAITING),
+        ]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue()
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        # Job 3 should have details about waiting for higher priority jobs
+        job3 = next(j for j in decoded['jobs'] if j['job_id'] == 3)
+        assert 'Waiting for higher priority jobs to launch' in job3['details']
+
+    def test_dump_managed_job_queue_job_duration_calculation(self, monkeypatch):
+        """Test job duration calculation."""
+        current_time = time.time()
+        jobs = [
+            self._make_test_job(1,
+                                last_recovered_at=current_time,
+                                job_duration=60,
+                                end_at=current_time + 120),
+        ]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue()
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        job = decoded['jobs'][0]
+        # job_duration should be calculated as end_at - (last_recovered_at - job_duration)
+        expected_duration = (current_time + 120) - (current_time - 60)
+        assert abs(job['job_duration'] -
+                   expected_duration) < 1  # Allow small time differences
+
+    def test_dump_managed_job_queue_recovering_job(self, monkeypatch):
+        """Test job duration calculation for recovering jobs."""
+        jobs = [
+            self._make_test_job(
+                1,
+                status=managed_job_state.ManagedJobStatus.RECOVERING,
+                job_duration=30),
+        ]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue()
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        job = decoded['jobs'][0]
+        # For recovering jobs, job_duration should be exactly the stored value
+        assert job['job_duration'] == 30
+
+    def test_dump_managed_job_queue_empty_result(self, monkeypatch):
+        """Test when no jobs match the filters."""
+        jobs = [self._make_test_job(1, workspace='ws1')]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue(workspace_match='ws2')
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        assert decoded['total'] == 0
+        assert len(decoded['jobs']) == 0
+
+    def test_dump_managed_job_queue_with_failure_reason(self, monkeypatch):
+        """Test job details with failure reason."""
+        jobs = [
+            self._make_test_job(1, failure_reason='Test failure'),
+        ]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue()
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        job = decoded['jobs'][0]
+        # When job has both state_details and failure_reason, they are combined
+        assert 'Test failure' in job['details']
+        assert 'Waiting for other jobs to launch' in job['details']
+
+    def test_dump_managed_job_queue_failure_reason_only(self, monkeypatch):
+        """Test job details with only failure reason (no state details)."""
+        jobs = [
+            self._make_test_job(
+                1,
+                failure_reason='Test failure',
+                schedule_state=managed_job_state.ManagedJobScheduleState.ALIVE),
+        ]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue()
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        job = decoded['jobs'][0]
+        # When only failure_reason exists (no state_details), it should be prefixed with 'Failure: '
+        assert job['details'] == 'Failure: Test failure'
+
+    def test_dump_managed_job_queue_alive_backoff_state(self, monkeypatch):
+        """Test ALIVE_BACKOFF schedule state details."""
+        jobs = [
+            self._make_test_job(1,
+                                schedule_state=managed_job_state.
+                                ManagedJobScheduleState.ALIVE_BACKOFF),
+        ]
+        self._patch_dependencies(monkeypatch, jobs)
+
+        result = jobs_utils.dump_managed_job_queue()
+        decoded = jobs_utils.message_utils.decode_payload(result)
+
+        job = decoded['jobs'][0]
+        assert 'In backoff, waiting for resources' in job['details']
