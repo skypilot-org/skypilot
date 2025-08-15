@@ -1528,7 +1528,7 @@ def get_nonterminal_job_ids_by_pool(pool: str,
 
 
 @_init_db
-def get_waiting_job(pool: Optional[str]) -> Optional[Dict[str, Any]]:
+def get_waiting_job() -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job, provided its
@@ -1559,8 +1559,6 @@ def get_waiting_job(pool: Optional[str]) -> Optional[Dict[str, Any]]:
             job_info_table.c.priority >= sqlalchemy.func.coalesce(
                 max_priority_subquery, 0),
         ]
-        if pool is not None:
-            select_conds.append(job_info_table.c.pool == pool)
         query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,

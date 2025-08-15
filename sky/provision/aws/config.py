@@ -105,13 +105,29 @@ def bootstrap_instances(
                                                        expected_sg_name,
                                                        extended_ip_rules)
         if expected_sg_name != aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
-            # Ensure the default security group is created. This is needed
+            logger.debug('Attempting to create the default security group.')
+            # Attempt to create the default security group. This is needed
             # to enable us to use the default security group to quickly
             # delete the cluster. If the default security group is not created,
             # we will need to block on instance termination to delete the
             # security group.
-            _configure_security_group(ec2, vpc_id,
-                                      aws_cloud.DEFAULT_SECURITY_GROUP_NAME, [])
+            try:
+                _configure_security_group(ec2, vpc_id,
+                                          aws_cloud.DEFAULT_SECURITY_GROUP_NAME,
+                                          [])
+                logger.debug('Default security group created.')
+            except exceptions.NoClusterLaunchedError as e:
+                if 'not authorized to perform: ec2:CreateSecurityGroup' in str(
+                        e):
+                    # User does not have permission to create the default
+                    # security group.
+                    logger.debug('User does not have permission to create '
+                                 'the default security group. '
+                                 f'{e}')
+                    pass
+                else:
+                    raise e
+
         end_time = time.time()
         elapsed = end_time - start_time
         logger.info(

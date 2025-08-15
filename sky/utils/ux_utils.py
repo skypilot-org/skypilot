@@ -26,9 +26,16 @@ BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
 
 # Log path hint in the spinner during launching
+# (old, kept for backward compatibility)
 _LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs: sky api logs -l '
                   '{log_path}'
                   f'{colorama.Style.RESET_ALL}')
+# Log hint: recommend sky logs --provision <cluster_name>
+_PROVISION_LOG_HINT = (
+    f'{colorama.Style.DIM}View logs: '
+    f'{BOLD}sky logs --provision {{cluster_name}}{RESET_BOLD}'
+    f'{colorama.Style.RESET_ALL}')
+# Legacy path hint retained for local-only cases where we don't have cluster
 _LOG_PATH_HINT_LOCAL = (f'{colorama.Style.DIM}View logs: '
                         '{log_path}'
                         f'{colorama.Style.RESET_ALL}')
@@ -126,7 +133,10 @@ class RedirectOutputForProcess:
 
 def log_path_hint(log_path: Union[str, 'pathlib.Path'],
                   is_local: bool = False) -> str:
-    """Gets the log path hint for the given log path."""
+    """Gets the log path hint for the given log path.
+
+    Kept for backward compatibility when only paths are available.
+    """
     log_path = str(log_path)
     expanded_home = os.path.expanduser('~')
     if log_path.startswith(expanded_home):
@@ -137,6 +147,12 @@ def log_path_hint(log_path: Union[str, 'pathlib.Path'],
         log_path = log_path[len(constants.SKY_LOGS_DIRECTORY):]
     log_path = log_path.lstrip(os.path.sep)
     return _LOG_PATH_HINT.format(log_path=log_path)
+
+
+def provision_hint(cluster_name: Optional[str]) -> Optional[str]:
+    if not cluster_name:
+        return None
+    return _PROVISION_LOG_HINT.format(cluster_name=cluster_name)
 
 
 def starting_message(message: str) -> str:
@@ -150,7 +166,8 @@ def starting_message(message: str) -> str:
 def finishing_message(message: str,
                       log_path: Optional[Union[str, 'pathlib.Path']] = None,
                       is_local: bool = False,
-                      follow_up_message: Optional[str] = None) -> str:
+                      follow_up_message: Optional[str] = None,
+                      cluster_name: Optional[str] = None) -> str:
     """Gets the finishing message for the given message.
 
     Args:
@@ -168,6 +185,9 @@ def finishing_message(message: str,
     success_prefix = (f'{colorama.Style.RESET_ALL}{colorama.Fore.GREEN}✓ '
                       f'{message}{colorama.Style.RESET_ALL}{follow_up_message}'
                       f'{colorama.Style.RESET_ALL}')
+    hint = provision_hint(cluster_name)
+    if hint:
+        return f'{success_prefix}  {hint}'
     if log_path is None:
         return success_prefix
     path_hint = log_path_hint(log_path, is_local)
@@ -176,13 +196,17 @@ def finishing_message(message: str,
 
 def error_message(message: str,
                   log_path: Optional[Union[str, 'pathlib.Path']] = None,
-                  is_local: bool = False) -> str:
+                  is_local: bool = False,
+                  cluster_name: Optional[str] = None) -> str:
     """Gets the error message for the given message."""
     # We have to reset the color before the message, because sometimes if a
     # previous spinner with dimmed color overflows in a narrow terminal, the
     # color might be messed up.
     error_prefix = (f'{colorama.Style.RESET_ALL}{colorama.Fore.RED}⨯'
                     f'{colorama.Style.RESET_ALL} {message}')
+    hint = provision_hint(cluster_name)
+    if hint:
+        return f'{error_prefix}  {hint}'
     if log_path is None:
         return error_prefix
     path_hint = log_path_hint(log_path, is_local)
@@ -200,9 +224,16 @@ def retry_message(message: str) -> str:
 
 def spinner_message(message: str,
                     log_path: Optional[Union[str, 'pathlib.Path']] = None,
-                    is_local: bool = False) -> str:
-    """Gets the spinner message for the given message and log path."""
+                    is_local: bool = False,
+                    cluster_name: Optional[str] = None) -> str:
+    """Gets the spinner message for the given message and log path.
+
+    If cluster_name is provided, recommend `sky logs --provision <cluster>`.
+    """
     colored_spinner = f'[bold cyan]{message}[/]'
+    hint = provision_hint(cluster_name)
+    if hint:
+        return f'{colored_spinner}  {hint}'
     if log_path is None:
         return colored_spinner
     path_hint = log_path_hint(log_path, is_local)

@@ -14,18 +14,20 @@ setup: |
     conda create -n flax python=3.10 -y
     conda activate flax
     # Make sure to install TPU related packages in a conda env to avoid package conflicts.
-    pip install \
-      -f https://storage.googleapis.com/jax-releases/libtpu_releases.html "jax[tpu]==0.4.35" \
+    pip install uv
+    uv pip install --prerelease=allow \
+      -f https://storage.googleapis.com/jax-releases/libtpu_releases.html -f https://storage.googleapis.com/jax-releases/jax_releases.html "jax[tpu]==0.4.35" \
       clu \
       tensorflow tensorflow-datasets
-    pip install -e flax
+    uv pip install -e flax
+    uv pip install --upgrade tensorflow-datasets
+    uv pip install --upgrade protobuf
   fi
 
 
 # The command to run.  Will be run under the working directory.
 run: |
   conda activate flax
-  pip install clu
   cd flax/examples/mnist
   python3 main.py --workdir=/tmp/mnist \
     --config=configs/default.py \

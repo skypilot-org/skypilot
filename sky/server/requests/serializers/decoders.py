@@ -102,8 +102,18 @@ def decode_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
 
 
 @register_decoders('jobs.queue')
-def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
-    jobs = return_value
+def decode_jobs_queue(return_value):
+    """Decode jobs queue response.
+
+    Supports legacy list, or a dict {jobs, total}.
+    - Returns list[job]
+    """
+    # Case 1: dict shape {jobs, total}
+    if isinstance(return_value, dict) and 'jobs' in return_value:
+        jobs = return_value.get('jobs', [])
+    else:
+        # Case 2: legacy list
+        jobs = return_value
     for job in jobs:
         job['status'] = managed_jobs.ManagedJobStatus(job['status'])
     return jobs
