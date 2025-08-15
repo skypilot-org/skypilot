@@ -5,7 +5,6 @@ import enum
 import functools
 from http.cookiejar import CookieJar
 from http.cookiejar import MozillaCookieJar
-import json
 import os
 import pathlib
 import re
@@ -372,7 +371,7 @@ def _handle_non_200_server_status(
                          '') == ApiServerStatus.VERSION_MISMATCH.value):
                 return ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
                                      error=body.get('message', ''))
-        except json.JSONDecodeError:
+        except requests.JSONDecodeError:
             pass
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
@@ -463,7 +462,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             # OAuth.
             set_api_cookie_jar(cookies, create_if_not_exists=True)
             return server_info
-        except (json.JSONDecodeError, AttributeError) as e:
+        except (requests.JSONDecodeError, AttributeError) as e:
             # Try to check if we got redirected to a login page.
             for prev_response in response.history:
                 logger.debug(f'Previous response: {prev_response.url}')
