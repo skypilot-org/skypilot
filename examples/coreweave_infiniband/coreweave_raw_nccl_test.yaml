@@ -1,0 +1,90 @@
+# This example is used to test the NCCL performance with
+# InfiniBand on a Coreweave Kubernetes cluster without SkyPilot's network_tier.
+#
+# Usage:
+#  sky launch -c nccl coreweave_raw_nccl_test.yaml
+#
+# Tested on H100_NVLINK_80GB:8 on Coreweave:
+# (head, rank=0, pid=3409) [1,0]<stdout>:#                                                              out-of-place                       in-place          
+# (head, rank=0, pid=3409) [1,0]<stdout>:#       size         count      type   redop    root     time   algbw   busbw #wrong     time   algbw   busbw #wrong
+# (head, rank=0, pid=3409) [1,0]<stdout>:#        (B)    (elements)                               (us)  (GB/s)  (GB/s)            (us)  (GB/s)  (GB/s)       
+# (head, rank=0, pid=3409) [1,0]<stdout>:   536870912     134217728     float     sum      -1   2383.6  225.24  422.32      0   2389.5  224.68  421.28      0
+# (head, rank=0, pid=3409) [1,0]<stdout>:  1073741824     268435456     float     sum      -1   4506.0  238.29  446.79      0   4508.4  238.16  446.56      0
+# (head, rank=0, pid=3409) [1,0]<stdout>:  2147483648     536870912     float     sum      -1   8742.3  245.64  460.58      0   8779.8  244.59  458.61      0
+# (head, rank=0, pid=3409) [1,0]<stdout>:  4294967296    1073741824     float     sum      -1    17259  248.85  466.60      0    17255  248.91  466.70      0
+# (head, rank=0, pid=3409) [1,0]<stdout>:  8589934592    2147483648     float     sum      -1    34297  250.46  469.60      0    34299  250.44  469.58      0
+# # Avg bus bandwidth    : 452.862
+
+name: nccl-network-tier
+
+envs:
+  NCCL_SOCKET_IFNAME: eth0
+  NCCL_IB_HCA: ibp
+  UCX_NET_DEVICES: ibp0:1,ibp1:1,ibp2:1,ibp3:1,ibp4:1,ibp5:1,ibp6:1,ibp7:1
+
+resources:
+  infra: k8s
+  cpus: 100+
+  memory: 1000+
+  accelerators: H100_NVLINK_80GB:8
+  image_id: ghcr.io/coreweave/nccl-tests:12.8.1-devel-ubuntu22.04-nccl2.26.2-1-0708d2e
+
+num_nodes: 2
+
+
+run: |
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    echo "Head node"
+
+    # Total number of processes, NP should be the total number of GPUs in the cluster
+    NP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
+
+    # Append :${SKYPILOT_NUM_GPUS_PER_NODE} to each IP as slots
+    nodes=""
+    for ip in $SKYPILOT_NODE_IPS; do
+      nodes="${nodes}${ip}:${SKYPILOT_NUM_GPUS_PER_NODE},"
+    done
+    nodes=${nodes::-1}
+    echo "All nodes: ${nodes}"
+
+    mpirun \
+      --allow-run-as-root \
+      --tag-output \
+      -H $nodes \
+      -np $NP \
+      -N $SKYPILOT_NUM_GPUS_PER_NODE \
+      --bind-to none \
+      -x PATH \
+      -x LD_LIBRARY_PATH \
+      -x NCCL_DEBUG=INFO \
+      -x NCCL_SOCKET_IFNAME=eth0 \
+      -x NCCL_IB_HCA \
+      -x UCX_NET_DEVICES \
+      -x SHARP_COLL_ENABLE_PCI_RELAXED_ORDERING=1 \
+      -x NCCL_COLLNET_ENABLE=0 \
+      /opt/nccl-tests/build/all_reduce_perf \
+      -b 512M \
+      -e 8G \
+      -f 2 \
+      -g 1 \
+      -c 1 \
+      -w 5 \
+      -n 10
+  else
+    echo "Worker nodes"
+  fi
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - securityContext:
+            capabilities:
+              add:
+              - IPC_LOCK
+          resources:
+            requests:
+              rdma/ib: 1
+            limits:
+              rdma/ib: 1
