@@ -371,7 +371,7 @@ def _handle_non_200_server_status(
                          '') == ApiServerStatus.VERSION_MISMATCH.value):
                 return ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
                                      error=body.get('message', ''))
-        except json.JSONDecodeError:
+        except requests.JSONDecodeError:
             pass
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
