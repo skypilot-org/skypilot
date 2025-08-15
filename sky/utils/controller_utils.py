@@ -143,14 +143,14 @@ def _create_compressed_archive(source_path: str, output_path: str) -> None:
 
 
 def _get_decompression_commands(compressed_filename: str,
-                                current_dir: str,
-                                output_path: str = '.') -> List[str]:
+                                current_dir: str) -> List[str]:
     """ Generate shell commands to:
     - extract the compressed file (assumed to be in the current directory)
       into a temporary subdirectory under $PWD,
     - move its contents back to $PWD (flattened),
     - and clean up the archive and temporary directory.
     """
+    output_path = '.'
     archive_base = os.path.splitext(
         os.path.splitext(compressed_filename)[0])[0]  # strip .tar.gz
     temp_extract_dir = f'tmp_extract_{archive_base}'
