@@ -377,7 +377,7 @@ export function ManagedJobsTable({
           userMatch: getFilterValue('user'),
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
-          offset: currentPage, // page index starting from 1
+          page: currentPage, // page index starting from 1
           limit: pageSize,
         };
 

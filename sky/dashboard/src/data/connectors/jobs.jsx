@@ -20,7 +20,7 @@ export async function getManagedJobs(options = {}) {
       userMatch,
       workspaceMatch,
       poolMatch,
-      offset,
+      page,
       limit,
     } = options;
 
@@ -32,7 +32,7 @@ export async function getManagedJobs(options = {}) {
     if (userMatch !== undefined) body.user_match = userMatch;
     if (workspaceMatch !== undefined) body.workspace_match = workspaceMatch;
     if (poolMatch !== undefined) body.pool_match = poolMatch;
-    if (offset !== undefined) body.offset = offset;
+    if (page !== undefined) body.page = page;
     if (limit !== undefined) body.limit = limit;
 
     const response = await apiClient.post(`/jobs/queue`, body);
@@ -174,7 +174,7 @@ export async function getManagedJobs(options = {}) {
  * @param {string} options.userMatch - Filter by user
  * @param {string} options.workspaceMatch - Filter by workspace
  * @param {string} options.poolMatch - Filter by pool
- * @param {number} options.offset - Page offset (1-based)
+ * @param {number} options.page - Page page (1-based)
  * @param {number} options.limit - Page size
  * @param {boolean} options.useClientPagination - Whether to use client-side pagination (default: true)
  * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean}>}
@@ -186,7 +186,7 @@ export async function getManagedJobsWithClientPagination(options = {}) {
     userMatch,
     workspaceMatch,
     poolMatch,
-    offset = 1,
+    page = 1,
     limit = 10,
     useClientPagination = true,
   } = options;
@@ -217,7 +217,7 @@ export async function getManagedJobsWithClientPagination(options = {}) {
     const total = allJobs.length;
 
     // Apply client-side pagination
-    const startIndex = (offset - 1) * limit;
+    const startIndex = (page - 1) * limit;
     const endIndex = startIndex + limit;
     const paginatedJobs = allJobs.slice(startIndex, endIndex);
 

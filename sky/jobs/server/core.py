@@ -585,7 +585,7 @@ def queue(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
-    offset: Optional[int] = None,
+    page: Optional[int] = None,
     limit: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -620,13 +620,13 @@ def queue(
     if limit is not None:
         if limit < 1:
             raise ValueError(f'Limit must be at least 1, got {limit}')
-        if offset is None:
-            offset = 1
-        if offset < 1:
-            raise ValueError(f'Offset must be at least 1, got {offset}')
+        if page is None:
+            page = 1
+        if page < 1:
+            raise ValueError(f'Page must be at least 1, got {page}')
     else:
-        if offset is not None:
-            raise ValueError('Limit must be specified when offset is specified')
+        if page is not None:
+            raise ValueError('Limit must be specified when page is specified')
 
     handle = _maybe_restart_controller(refresh,
                                        stopped_message='No in-progress '
@@ -651,7 +651,7 @@ def queue(
     accessible_workspaces = list(workspaces_core.get_workspaces().keys())
     code = managed_job_utils.ManagedJobCodeGen.get_job_table(
         skip_finished, accessible_workspaces, job_ids, workspace_match,
-        name_match, pool_match, offset, limit, user_hashes)
+        name_match, pool_match, page, limit, user_hashes)
     returncode, job_table_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -706,7 +706,7 @@ def queue(
                                          workspace_match,
                                          name_match,
                                          pool_match,
-                                         offset=offset,
+                                         page=page,
                                          limit=limit,
                                          user_match=user_match,
                                          enable_user_match=True)

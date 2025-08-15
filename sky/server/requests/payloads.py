@@ -501,7 +501,7 @@ class JobsQueueBody(RequestBody):
     workspace_match: Optional[str] = None
     name_match: Optional[str] = None
     pool_match: Optional[str] = None
-    offset: Optional[int] = None
+    page: Optional[int] = None
     limit: Optional[int] = None
 
 

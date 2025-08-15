@@ -74,7 +74,7 @@ class JobsCacheManager {
    * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean, fromCache: boolean, cacheStatus: string}>}
    */
   async getPaginatedJobs(options = {}) {
-    const { offset = 1, limit = 10, ...filterOptions } = options;
+    const { page = 1, limit = 10, ...filterOptions } = options;
 
     const filterKey = this._generateFilterKey(filterOptions);
 
@@ -83,7 +83,7 @@ class JobsCacheManager {
       const localCacheStatus = this._getCacheStatus(filterKey);
       if (localCacheStatus.isCached && localCacheStatus.hasData) {
         const cachedData = localCacheStatus.data;
-        const startIndex = (offset - 1) * limit;
+        const startIndex = (page - 1) * limit;
         const endIndex = startIndex + limit;
         const paginatedJobs = cachedData.jobs.slice(startIndex, endIndex);
 
@@ -117,7 +117,7 @@ class JobsCacheManager {
       const pageResponse = await dashboardCache.get(getManagedJobs, [
         {
           ...filterOptions,
-          offset,
+          page,
           limit,
         },
       ]);

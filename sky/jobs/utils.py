@@ -1133,7 +1133,7 @@ def dump_managed_job_queue(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
-    offset: Optional[int] = None,
+    page: Optional[int] = None,
     limit: Optional[int] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
 ) -> str:
@@ -1187,7 +1187,7 @@ def dump_managed_job_queue(
         jobs = [job for job in jobs if job['job_id'] in job_ids]
 
     jobs, total = filter_jobs(jobs, workspace_match, name_match, pool_match,
-                              offset, limit)
+                              page, limit)
     for job in jobs:
         end_at = job['end_at']
         if end_at is None:
@@ -1269,7 +1269,7 @@ def filter_jobs(
     workspace_match: Optional[str],
     name_match: Optional[str],
     pool_match: Optional[str],
-    offset: Optional[int],
+    page: Optional[int],
     limit: Optional[int],
     user_match: Optional[str] = None,
     enable_user_match: bool = False,
@@ -1281,7 +1281,7 @@ def filter_jobs(
         workspace_match: Workspace name to filter.
         name_match: Job name to filter.
         pool_match: Pool name to filter.
-        offset: Offset to filter.
+        page: Page to filter.
         limit: Limit to filter.
         user_match: User name to filter.
         enable_user_match: Whether to enable user match.
@@ -1304,16 +1304,16 @@ def filter_jobs(
             return False
         return pattern in str(value)
 
-    def _handle_offset_and_limit(
+    def _handle_page_and_limit(
         result: List[Dict[str, Any]],
-        offset: Optional[int],
+        page: Optional[int],
         limit: Optional[int],
     ) -> List[Dict[str, Any]]:
-        if offset is None and limit is None:
+        if page is None and limit is None:
             return result
-        assert offset is not None and limit is not None, (offset, limit)
-        # offset starts from 1
-        start = (offset - 1) * limit
+        assert page is not None and limit is not None, (page, limit)
+        # page starts from 1
+        start = (page - 1) * limit
         end = min(start + limit, len(result))
         return result[start:end]
 
@@ -1334,7 +1334,7 @@ def filter_jobs(
 
     total = len(result)
 
-    return _handle_offset_and_limit(result, offset, limit), total
+    return _handle_page_and_limit(result, page, limit), total
 
 
 def load_managed_job_queue(
@@ -1713,7 +1713,7 @@ class ManagedJobCodeGen:
         workspace_match: Optional[str] = None,
         name_match: Optional[str] = None,
         pool_match: Optional[str] = None,
-        offset: Optional[int] = None,
+        page: Optional[int] = None,
         limit: Optional[int] = None,
         user_hashes: Optional[List[Optional[str]]] = None,
     ) -> str:
@@ -1731,7 +1731,7 @@ class ManagedJobCodeGen:
                                 workspace_match={workspace_match!r},
                                 name_match={name_match!r},
                                 pool_match={pool_match!r},
-                                offset={offset!r},
+                                page={page!r},
                                 limit={limit!r},
                                 user_hashes={user_hashes!r})
         print(job_table, flush=True)

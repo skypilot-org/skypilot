@@ -84,7 +84,7 @@ class TestFilterJobs:
         # Remaining 5 items
         assert [j['job_id'] for j in page3] == list(range(21, 26))
 
-        # invalid offset/limit combinations in helper should raise assertion
+        # invalid page/limit combinations in helper should raise assertion
         with pytest.raises(AssertionError):
             jobs_utils.filter_jobs(jobs, None, None, None, 1, None)
 
@@ -190,7 +190,7 @@ class TestQueue:
             return {w: {} for w in workspaces}
 
         def fake_get_job_table(skip_finished, accessible_workspaces, job_ids,
-                               workspace_match, name_match, pool_match, offset,
+                               workspace_match, name_match, pool_match, page,
                                limit, user_hashes):
             # Return a payload containing all args for the loader to consume
             return {
@@ -200,7 +200,7 @@ class TestQueue:
                 'workspace_match': workspace_match,
                 'name_match': name_match,
                 'pool_match': pool_match,
-                'offset': offset,
+                'page': page,
                 'limit': limit,
                 'user_hashes': user_hashes,
             }
@@ -244,12 +244,12 @@ class TestQueue:
             workspace_match = payload.get('workspace_match')
             name_match = payload.get('name_match')
             pool_match = payload.get('pool_match')
-            offset = payload.get('offset')
+            page = payload.get('page')
             limit = payload.get('limit')
 
             filtered, total = jobs_utils.filter_jobs(result, workspace_match,
                                                      name_match, pool_match,
-                                                     offset, limit)
+                                                     page, limit)
 
             # Return as server queue() does: (jobs, total)
             return filtered, total, jobs_utils.ManagedJobQueueResultType.DICT
@@ -300,7 +300,7 @@ class TestQueue:
             workspace_match=None,
             name_match=None,
             pool_match=None,
-            offset=None,
+            page=None,
             limit=10,
         )
         # queue() returns Tuple[List[Dict], int]
@@ -324,7 +324,7 @@ class TestQueue:
             workspace_match=None,
             name_match=None,
             pool_match=None,
-            offset=None,
+            page=None,
             limit=10,
         )
         # When user_match returns no users, should return empty list and total 0
@@ -345,16 +345,16 @@ class TestQueue:
             workspace_match='ws',
             name_match=None,
             pool_match=None,
-            offset=2,
+            page=2,
             limit=10,
         )
         assert total == 30
         assert [j['job_id'] for j in filtered] == list(range(11, 21))
 
-    def test_queue_offset_limit_value_errors(self, monkeypatch):
+    def test_queue_page_limit_value_errors(self, monkeypatch):
         jobs = [_make_job(1)]
         self._patch_backend_and_utils(monkeypatch, jobs)
-        # offset without limit
+        # page without limit
         with pytest.raises(ValueError):
             jobs_core.queue(refresh=False,
                             skip_finished=False,
@@ -364,9 +364,9 @@ class TestQueue:
                             workspace_match=None,
                             name_match=None,
                             pool_match=None,
-                            offset=1,
+                            page=1,
                             limit=None)
-        # invalid offset
+        # invalid page
         with pytest.raises(ValueError):
             jobs_core.queue(refresh=False,
                             skip_finished=False,
@@ -376,7 +376,7 @@ class TestQueue:
                             workspace_match=None,
                             name_match=None,
                             pool_match=None,
-                            offset=0,
+                            page=0,
                             limit=10)
         # invalid limit
         with pytest.raises(ValueError):
@@ -388,7 +388,7 @@ class TestQueue:
                             workspace_match=None,
                             name_match=None,
                             pool_match=None,
-                            offset=1,
+                            page=1,
                             limit=0)
 
     def test_queue_all_users_filtering(self, monkeypatch):
@@ -439,7 +439,7 @@ class TestQueue:
                                           workspace_match=None,
                                           name_match=None,
                                           pool_match=None,
-                                          offset=None,
+                                          page=None,
                                           limit=None)
         assert total == 2
         assert sorted([j['job_id'] for j in filtered]) == [1, 3]
@@ -465,7 +465,7 @@ class TestQueue:
                                           workspace_match=None,
                                           name_match=None,
                                           pool_match=None,
-                                          offset=None,
+                                          page=None,
                                           limit=None)
         assert total == 1
         assert [j['job_id'] for j in filtered] == [1]
@@ -518,7 +518,7 @@ class TestQueue:
                                           workspace_match=None,
                                           name_match=None,
                                           pool_match=None,
-                                          offset=None,
+                                          page=None,
                                           limit=None)
         # Job id 1 has a running task, so both its tasks are included. Job id 2 excluded.
         assert total == 2
@@ -535,7 +535,7 @@ class TestQueue:
                                           workspace_match=None,
                                           name_match=None,
                                           pool_match=None,
-                                          offset=None,
+                                          page=None,
                                           limit=None)
         assert total == 2
         assert sorted([j['job_id'] for j in filtered]) == [2, 3]
@@ -643,7 +643,7 @@ class TestDumpManagedJobQueue:
         jobs = [self._make_test_job(i) for i in range(1, 11)]
         self._patch_dependencies(monkeypatch, jobs)
 
-        result = jobs_utils.dump_managed_job_queue(offset=2, limit=3)
+        result = jobs_utils.dump_managed_job_queue(page=2, limit=3)
         decoded = jobs_utils.message_utils.decode_payload(result)
 
         assert decoded['total'] == 10
