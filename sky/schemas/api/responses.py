@@ -138,6 +138,6 @@ class StatusResponse(ResponseBaseModel):
     nodes: int
     cloud: str
     region: str
-    cpus: float
+    cpus: str
     memory: Any
     accelerators: Any
