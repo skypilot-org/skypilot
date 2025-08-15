@@ -13,7 +13,7 @@
 # (head, rank=0, pid=3409) [1,0]<stdout>:  2147483648     536870912     float     sum      -1   8742.3  245.64  460.58      0   8779.8  244.59  458.61      0
 # (head, rank=0, pid=3409) [1,0]<stdout>:  4294967296    1073741824     float     sum      -1    17259  248.85  466.60      0    17255  248.91  466.70      0
 # (head, rank=0, pid=3409) [1,0]<stdout>:  8589934592    2147483648     float     sum      -1    34297  250.46  469.60      0    34299  250.44  469.58      0
-# # Avg bus bandwidth    : 452.862
+# (head, rank=0, pid=3409) [1,0]<stdout>:# Avg bus bandwidth    : 452.862
 
 name: nccl-network-tier
 
