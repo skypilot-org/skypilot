@@ -4569,11 +4569,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         exist_ok=True)
             log_file = os.path.join(local_log_dir, 'run.log')
 
-            code = managed_jobs.ManagedJobCodeGen.stream_logs(job_name=None,
-                                                              job_id=job_id,
-                                                              follow=False,
-                                                              controller=False)
-
+            code = managed_jobs.ManagedJobCodeGen.stream_logs(
+                job_name=None,
+                job_id=int(job_id),
+                follow=False,
+                controller=False)
             # With the stdin=subprocess.DEVNULL, the ctrl-c will not
             # kill the process, so we need to handle it manually here.
             if threading.current_thread() is threading.main_thread():
