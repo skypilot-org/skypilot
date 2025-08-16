@@ -2137,7 +2137,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         global_user_state.add_cluster_event(
             cluster_name,
             status_lib.ClusterStatus.UP,
-            'All nodes up + ray cluster healthy.',
+            'All nodes up; SkyPilot runtime healthy.',
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
         global_user_state.add_or_update_cluster(cluster_name,
@@ -2277,9 +2277,12 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                             -1,
                             autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
                             stream_logs=False)
-                    except exceptions.CommandError as e:
+                    except (exceptions.CommandError,
+                            grpc.FutureTimeoutError) as e:
                         success = False
-                        if e.returncode == 255:
+                        if isinstance(e, grpc.FutureTimeoutError) or (
+                                isinstance(e, exceptions.CommandError) and
+                                e.returncode == 255):
                             word = 'autostopped' if noun == 'autostop' else 'autodowned'
                             logger.debug(f'The cluster is likely {word}.')
                             reset_local_autostop = False
@@ -2329,10 +2332,14 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             # are only stored for an hour by default), so it is possible that
             # the previous event has a status reason, but now it does not.
             init_reason_regex = f'^Cluster is abnormal because {init_reason} .*'
+        log_message = f'Cluster is abnormal because {init_reason}'
+        if status_reason:
+            log_message += f' ({status_reason})'
+        log_message += '. Transitioned to INIT.'
         global_user_state.add_cluster_event(
             cluster_name,
             status_lib.ClusterStatus.INIT,
-            f'Cluster is abnormal because {init_reason} ({status_reason}). Transitioned to INIT.',
+            log_message,
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True,
             duplicate_regex=init_reason_regex)
