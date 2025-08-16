@@ -2033,3 +2033,122 @@ def test_remote_server_api_login():
         # The sky api login command should not read from environment config
         # when an explicit endpoint is provided as an argument.
         smoke_tests_utils.run_one_test(test, check_sky_status=False)
+
+
+# ---------- Testing Autostopping ----------
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_nebius  # Nebius does not support autodown
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
+def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    # See test_autostop_wait_for_jobs() for explanation of autostop_timeout.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    test = smoke_tests_utils.Test(
+        'autostop_with_unhealthy_ray_cluster',
+        [
+            f'sky launch -y -d -c {name} --num-nodes 2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} -i 5',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "5m"',
+            # Ensure the job succeeded.
+            f'sky logs {name} 1 --status',
+            # Stop the ray cluster, but leave the node running.
+            # TODO(kevin): Find a better way to replicate the issue
+            f'ssh {name} "skypilot-runtime/bin/ray stop"',
+            # Ensure the cluster is not terminated early, and is in INIT,
+            # because the ray cluster is stopped.
+            'sleep 240',
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep INIT',
+            # Ensure the cluster is STOPPED.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Autodowning ----------
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_nebius  # Nebius does not support autodown
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
+def test_autodown(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
+    # the VM is terminated.
+    autodown_timeout = 900 if generic_cloud in ('azure', 'kubernetes') else 240
+    total_timeout_minutes = 90 if generic_cloud in ('azure',
+                                                    'kubernetes') else 20
+    check_autostop_set = f's=$(sky status) && echo "$s" && echo "==check autostop set==" && echo "$s" | grep {name} | grep "1m (down)"'
+    test = smoke_tests_utils.Test(
+        'autodown',
+        [
+            f'sky launch -y -d -c {name} --num-nodes 2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --down -i 1',
+            check_autostop_set,
+            # Ensure the cluster is not terminated early.
+            'sleep 40',
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
+            # Ensure the cluster is terminated.
+            f'sleep {autodown_timeout}',
+            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} --infra {generic_cloud} --num-nodes 2 --down {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky exec {name} --infra {generic_cloud} tests/test_yamls/minimal.yaml',
+            check_autostop_set,
+            f'sleep {autodown_timeout}',
+            # Ensure the cluster is terminated.
+            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} --infra {generic_cloud} --num-nodes 2 --down {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --cancel',
+            f'sleep {autodown_timeout}',
+            # Ensure the cluster is still UP.
+            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && echo "$s" | grep {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.scp
+def test_scp_autodown():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'SCP_autodown',
+        [
+            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --down -i 1',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m (down)"',
+            # Ensure the cluster is not terminated early.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
+            # Ensure the cluster is terminated.
+            'sleep 200',
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} --down tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky exec {name} {smoke_tests_utils.SCP_TYPE} tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep "1m (down)"',
+            'sleep 200',
+            # Ensure the cluster is terminated.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} --down tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --cancel',
+            'sleep 200',
+            # Ensure the cluster is still UP.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

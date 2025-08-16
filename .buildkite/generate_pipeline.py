@@ -389,15 +389,22 @@ def main(args: str, file_pattern: str):
     print(f'args: {args}')
     file_pattern = file_pattern or os.getenv('FILE_PATTERN', '')
     print(f'file_pattern: {file_pattern}')
+    file_pattern_list = [
+        file_pattern_str.strip() for file_pattern_str in file_pattern.split(',')
+    ] if file_pattern else []
     # If trigger via buildkite, TRIGGER_COMMAND should be set.
     # Otherwise, use the args passed in for local testing.
-    trigger_command = os.getenv('TRIGGER_COMMAND', '') or args or '/smoke-test'
+    trigger_command = (os.getenv('TRIGGER_COMMAND', '') or args or
+                       '/smoke-test')
 
     test_files = []
     for root, _, files in os.walk('tests/smoke_tests'):
         for file in files:
-            if file.endswith('.py') and file.startswith('test_'):
-                if file_pattern and file_pattern not in file:
+            if (file.endswith('.py') and file.startswith('test_')):
+                excluded_by_file_pattern = (file_pattern_list and all(
+                    file_pattern_str not in file
+                    for file_pattern_str in file_pattern_list))
+                if excluded_by_file_pattern:
                     continue
                 test_files.append(os.path.join(root, file))
 
