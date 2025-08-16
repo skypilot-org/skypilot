@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package serve.v1;
+
+service ServeService {
+    // Get status of service.
+    rpc GetServiceStatus(GetServiceStatusRequest) returns (GetServiceStatusResponse);
+    // Add version to service.
+    rpc AddVersion(AddVersionRequest) returns (AddVersionResponse);
+}
+
+message ServiceNames {
+    repeated string names = 1;
+}
+
+message ServiceStatus {
+    map<string, string> status = 1;
+}
+
+message GetServiceStatusRequest {
+    optional ServiceNames service_names = 1;
+    bool pool = 2;
+}
+
+message GetServiceStatusResponse {
+    repeated ServiceStatus statuses = 1;
+}
+
+message AddVersionRequest {
+    string service_name = 1;
+}
+
+message AddVersionResponse {
+    int64 version = 1;
+}
