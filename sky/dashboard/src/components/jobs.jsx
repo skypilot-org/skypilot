@@ -901,7 +901,7 @@ export function ManagedJobsTable({
               ) : paginatedData.length > 0 ? (
                 <>
                   {paginatedData.map((item) => (
-                    <React.Fragment key={item.id}>
+                    <React.Fragment key={item.task_job_id}>
                       <TableRow>
                         <TableCell>
                           <Link
