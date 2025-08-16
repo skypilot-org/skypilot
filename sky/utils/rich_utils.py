@@ -421,7 +421,7 @@ async def decode_rich_status_async(
         undecoded_buffer = b''
 
         # Iterate over the response content in chunks
-        async for chunk in response.content.iter_chunked(8192):
+        async for chunk, _ in response.content.iter_chunks():
             if chunk is None:
                 return
 
@@ -481,6 +481,8 @@ async def decode_rich_status_async(
                     line = line[:-2] + '\n'
                 is_payload, line = message_utils.decode_payload(
                     line, raise_for_mismatch=False)
+                if line is None:
+                    continue
                 control = None
                 if is_payload:
                     control, encoded_status = Control.decode(line)

@@ -227,6 +227,11 @@ def get_controller_for_pool(pool: bool) -> Controllers:
 def high_availability_specified(cluster_name: Optional[str]) -> bool:
     """Check if the controller high availability is specified in user config.
     """
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+    if managed_job_utils.is_consolidation_mode():
+        return True
+
     controller = Controllers.from_name(cluster_name)
     if controller is None:
         return False
