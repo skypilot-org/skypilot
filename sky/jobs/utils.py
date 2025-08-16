@@ -27,9 +27,11 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.schemas.generated import jobsv1_pb2
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -47,12 +49,14 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import grpc
     import psutil
 
     import sky
     from sky import dag as dag_lib
 else:
     psutil = adaptors_common.LazyImport('psutil')
+    grpc = adaptors_common.LazyImport('grpc')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -270,17 +274,33 @@ def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                 logger.info(f'Job status: {status}')
             logger.info('=' * 34)
             return status
-        except exceptions.CommandError as e:
+        except (exceptions.CommandError, grpc.RpcError,
+                grpc.FutureTimeoutError) as e:
             # Retry on k8s transient network errors. This is useful when using
             # coreweave which may have transient network issue sometimes.
-            if (e.detailed_reason is not None and
-                    _JOB_K8S_TRANSIENT_NW_MSG in e.detailed_reason):
+            is_transient_error = False
+            detailed_reason = None
+            if isinstance(e, exceptions.CommandError):
+                detailed_reason = e.detailed_reason
+                if (detailed_reason is not None and
+                        _JOB_K8S_TRANSIENT_NW_MSG in detailed_reason):
+                    is_transient_error = True
+            elif isinstance(e, grpc.RpcError):
+                detailed_reason = e.details()
+                if e.code() in [
+                        grpc.StatusCode.UNAVAILABLE,
+                        grpc.StatusCode.DEADLINE_EXCEEDED
+                ]:
+                    is_transient_error = True
+            elif isinstance(e, grpc.FutureTimeoutError):
+                detailed_reason = 'Timeout'
+            if is_transient_error:
                 logger.info('Failed to connect to the cluster. Retrying '
                             f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
                 logger.info('=' * 34)
                 time.sleep(1)
             else:
-                logger.info(f'Failed to get job status: {e.detailed_reason}')
+                logger.info(f'Failed to get job status: {detailed_reason}')
                 logger.info('=' * 34)
                 return None
     return None
@@ -526,18 +546,37 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                       job_id: Optional[int], get_end_time: bool) -> float:
     """Get the submitted/ended time of the job."""
-    code = job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
-        job_id=job_id, get_ended_time=get_end_time)
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    returncode, stdout, stderr = backend.run_on_head(handle,
-                                                     code,
-                                                     stream_logs=False,
-                                                     require_outputs=True)
-    subprocess_utils.handle_returncode(returncode, code,
-                                       'Failed to get job time.',
-                                       stdout + stderr)
-    stdout = message_utils.decode_payload(stdout)
-    return float(stdout)
+    if handle.is_grpc_enabled:
+        if get_end_time:
+            end_ts_request = jobsv1_pb2.GetJobEndedTimestampRequest(
+                job_id=job_id)
+            end_ts_response = backend_utils.invoke_skylet_with_retries(
+                handle, lambda: cloud_vm_ray_backend.SkyletClient(
+                    handle.get_grpc_channel()).get_job_ended_timestamp(
+                        end_ts_request))
+            return end_ts_response.timestamp
+        else:
+            submit_ts_request = jobsv1_pb2.GetJobSubmittedTimestampRequest(
+                job_id=job_id)
+            submit_ts_response = backend_utils.invoke_skylet_with_retries(
+                handle, lambda: cloud_vm_ray_backend.SkyletClient(
+                    handle.get_grpc_channel()).get_job_submitted_timestamp(
+                        submit_ts_request))
+            return submit_ts_response.timestamp
+    else:
+        code = (
+            job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
+                job_id=job_id, get_ended_time=get_end_time))
+        returncode, stdout, stderr = backend.run_on_head(handle,
+                                                         code,
+                                                         stream_logs=False,
+                                                         require_outputs=True)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to get job time.',
+                                           stdout + stderr)
+        stdout = message_utils.decode_payload(stdout)
+        return float(stdout)
 
 
 def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
@@ -552,8 +591,13 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
                                  cluster_name,
                                  job_id=job_id,
                                  get_end_time=True)
-    except exceptions.CommandError as e:
-        if e.returncode == 255:
+    except (exceptions.CommandError, grpc.RpcError,
+            grpc.FutureTimeoutError) as e:
+        if isinstance(e, exceptions.CommandError) and e.returncode == 255 or \
+                (isinstance(e, grpc.RpcError) and e.code() in [
+                    grpc.StatusCode.UNAVAILABLE,
+                    grpc.StatusCode.DEADLINE_EXCEEDED,
+                ]) or isinstance(e, grpc.FutureTimeoutError):
             # Failed to connect - probably the instance was preempted since the
             # job completed. We shouldn't crash here, so just log and use the
             # current time.
