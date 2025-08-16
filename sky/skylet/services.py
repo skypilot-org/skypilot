@@ -173,11 +173,13 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         context: grpc.ServicerContext
     ) -> jobsv1_pb2.GetJobSubmittedTimestampResponse:
         try:
+            job_id = request.job_id if request.HasField(
+                'job_id') else job_lib.get_latest_job_id()
             timestamp = job_lib.get_job_submitted_or_ended_timestamp(
-                request.job_id, False)
+                job_id, False)
             if timestamp is None:
                 context.abort(grpc.StatusCode.NOT_FOUND,
-                              f'Job {request.job_id} not found')
+                              f'Job {job_id} not found')
             return jobsv1_pb2.GetJobSubmittedTimestampResponse(
                 timestamp=timestamp)
         except Exception as e:  # pylint: disable=broad-except
@@ -188,11 +190,13 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         context: grpc.ServicerContext
     ) -> jobsv1_pb2.GetJobEndedTimestampResponse:
         try:
+            job_id = request.job_id if request.HasField(
+                'job_id') else job_lib.get_latest_job_id()
             timestamp = job_lib.get_job_submitted_or_ended_timestamp(
-                request.job_id, True)
+                job_id, True)
             if timestamp is None:
                 context.abort(grpc.StatusCode.NOT_FOUND,
-                              f'Job {request.job_id} not found or not ended')
+                              f'Job {job_id} not found or not ended')
             return jobsv1_pb2.GetJobEndedTimestampResponse(timestamp=timestamp)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))

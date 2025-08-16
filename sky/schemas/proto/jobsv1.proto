@@ -123,19 +123,19 @@ message GetJobStatusResponse {
 }
 
 message GetJobSubmittedTimestampRequest {
-  int64 job_id = 1;
+  optional int64 job_id = 1;
 }
 
 message GetJobSubmittedTimestampResponse {
-  optional double timestamp = 1;
+  float timestamp = 1;
 }
 
 message GetJobEndedTimestampRequest {
-  int64 job_id = 1;
+  optional int64 job_id = 1;
 }
 
 message GetJobEndedTimestampResponse {
-  optional double timestamp = 1;
+  float timestamp = 1;
 }
 
 message GetLogDirsForJobsRequest {
