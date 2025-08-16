@@ -157,9 +157,11 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             self, request: jobsv1_pb2.GetJobStatusRequest,
             context: grpc.ServicerContext) -> jobsv1_pb2.GetJobStatusResponse:
         try:
-            job_ids = list(request.job_ids) if request.job_ids else [
-                job_lib.get_latest_job_id()
-            ]
+            if request.job_ids:
+                job_ids = list(request.job_ids)
+            else:
+                latest_job_id = job_lib.get_latest_job_id()
+                job_ids = [latest_job_id] if latest_job_id is not None else []
             job_statuses = job_lib.get_statuses(job_ids)
             for job_id, status in job_statuses.items():
                 job_statuses[job_id] = job_lib.JobStatus(status).to_protobuf(
@@ -206,9 +208,11 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             context: grpc.ServicerContext
     ) -> jobsv1_pb2.GetLogDirsForJobsResponse:
         try:
-            if not request.job_ids:
-                return jobsv1_pb2.GetLogDirsForJobsResponse(job_log_dirs={})
-            job_ids = list(request.job_ids)
+            if request.job_ids:
+                job_ids = list(request.job_ids)
+            else:
+                latest_job_id = job_lib.get_latest_job_id()
+                job_ids = [latest_job_id] if latest_job_id is not None else []
             job_log_dirs = job_lib.get_job_log_dirs(job_ids)
             return jobsv1_pb2.GetLogDirsForJobsResponse(
                 job_log_dirs=job_log_dirs)
