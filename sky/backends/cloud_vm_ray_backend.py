@@ -2674,9 +2674,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # as killing the process will close the tunnel too.
             head_runner.disable_control_master = True
 
-        cmd = head_runner.port_forward_command([(local_port,
-                                                 constants.SKYLET_GRPC_PORT)])
-        ssh_tunnel_proc = subprocess.Popen(cmd)
+        cmd = head_runner.port_forward_command(
+            [(local_port, constants.SKYLET_GRPC_PORT)], connect_timeout=5)
+        ssh_tunnel_proc = subprocess.Popen(' '.join(cmd), shell=True)
         tunnel_info = SSHTunnelInfo(port=local_port, pid=ssh_tunnel_proc.pid)
         try:
             grpc.channel_ready_future(
