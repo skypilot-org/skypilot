@@ -127,6 +127,7 @@ export async function getManagedJobs(options = {}) {
 
       return {
         id: job.job_id,
+        task_job_id: job._job_id,
         task: job.task_name,
         name: job.job_name,
         job_duration: job.job_duration,
