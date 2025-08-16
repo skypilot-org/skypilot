@@ -206,6 +206,8 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             context: grpc.ServicerContext
     ) -> jobsv1_pb2.GetLogDirsForJobsResponse:
         try:
+            if not request.job_ids:
+                return jobsv1_pb2.GetLogDirsForJobsResponse(job_log_dirs={})
             job_ids = list(request.job_ids)
             job_log_dirs = job_lib.get_job_log_dirs(job_ids)
             return jobsv1_pb2.GetLogDirsForJobsResponse(

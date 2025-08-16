@@ -4246,8 +4246,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         job_to_dir: Dict[str, str] = {}
         if handle.is_grpc_enabled:
-            int_job_ids = [int(job_id) for job_id in job_ids
-                          ] if job_ids else None
+            int_job_ids = []
+            if job_ids:
+                for str_job_id in job_ids:
+                    if str_job_id.isdigit():
+                        int_job_ids.append(int(str_job_id))
             request = jobsv1_pb2.GetLogDirsForJobsRequest(job_ids=int_job_ids)
             response = backend_utils.invoke_skylet_with_retries(
                 handle, lambda: SkyletClient(handle.get_grpc_channel()).
