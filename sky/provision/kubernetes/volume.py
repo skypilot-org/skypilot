@@ -203,6 +203,8 @@ def _get_pvc_spec(namespace: str,
             },
         }
     }
+    if config.labels:
+        pvc_spec['metadata']['labels'].update(config.labels)
     storage_class = config.config.get('storage_class_name')
     if storage_class is not None:
         pvc_spec['spec']['storageClassName'] = storage_class

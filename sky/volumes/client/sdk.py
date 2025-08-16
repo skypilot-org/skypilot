@@ -33,13 +33,16 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
     Returns:
         The request ID of the apply request.
     """
-    body = payloads.VolumeApplyBody(name=volume.name,
-                                    volume_type=volume.type,
-                                    cloud=volume.cloud,
-                                    region=volume.region,
-                                    zone=volume.zone,
-                                    size=volume.size,
-                                    config=volume.config)
+    body = payloads.VolumeApplyBody(
+        name=volume.name,
+        volume_type=volume.type,
+        cloud=volume.cloud,
+        region=volume.region,
+        zone=volume.zone,
+        size=volume.size,
+        config=volume.config,
+        labels=volume.labels,
+    )
     response = requests.post(f'{server_common.get_server_url()}/volumes/apply',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())
