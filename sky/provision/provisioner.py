@@ -483,45 +483,52 @@ def _post_provision_setup(
         logger.info(f'{indent_str}{colorama.Style.DIM}{vm_str}{plural} {verb} '
                     f'up.{colorama.Style.RESET_ALL}')
 
-        # Check if all k8s pods are able to access the public internet.
+        # Check if all nodes are able to access the public internet.
         # Otherwise, cluster runtime setup will stall. Issue #6605.
-        # TODO (kyuds): Add checks for SSH Node Pools after that part is
-        # figured out.
-        if cloud_name.lower() == 'kubernetes':
-            status.update(
-                ux_utils.spinner_message('Checking network availability...',
-                                         provision_logging.config.log_path))
+        status.update(
+            ux_utils.spinner_message('Checking network availability...',
+                                        provision_logging.config.log_path))
+        nc_start = time.time()
 
-            runners = provision.get_command_runners(cloud_name, cluster_info,
-                                                    **ssh_credentials)
+        runners = provision.get_command_runners(cloud_name, cluster_info,
+                                                **ssh_credentials)
 
-            def _check_internet_access(runner) -> bool:
-                # TODO (kyuds): add more network checkers
-                url = 'httpbin.org/get'
-                command = (
-                    'command -v curl >/dev/null && '
-                    f'(curl -s --connect-timeout 5 https://{url} >/dev/null && '
-                    f'curl -s --connect-timeout 5 http://{url} >/dev/null) || '
-                    'command -v wget >/dev/null && '
-                    f'(wget -q --timeout=5 --spider https://{url} && '
-                    f'wget -q --timeout=5 --spider http://{url}) || '
-                    'true')
-                return runner.run(command) == 0
+        def _check_internet_access(runner) -> bool:
+            # TODO (kyuds): add more network checkers
+            url = 'httpbin.org/get'
+            curl_check = 'command -v curl >/dev/null'
+            wget_check = 'command -v wget >/dev/null'
+            command = (
+                f'{curl_check} && '
+                f'(curl -s --connect-timeout 5 https://{url} >/dev/null && '
+                f'curl -s --connect-timeout 5 http://{url} >/dev/null) || '
+                f'{wget_check} && '
+                f'(wget -q --timeout=5 --spider https://{url} && '
+                f'wget -q --timeout=5 --spider http://{url}) || '
+                f'(! {curl_check} && ! {wget_check})')
+            return_code = runner.run(command)
+            logger.debug(f'{runner.node_id}: {return_code}')
+            return return_code == 0
 
-            accesses = subprocess_utils.run_in_parallel(_check_internet_access,
-                                                        runners)
-            if not all(accesses):
-                denied = ', '.join(
-                    [t[1].node_id for t in zip(accesses, runners) if not t[0]])
-                logger.debug(f'Cannot access network for pods: {denied}')
+        accesses = subprocess_utils.run_in_parallel(_check_internet_access,
+                                                    runners)
+        if not all(accesses):
+            ac = 'some' if any(accesses) else 'all'
+            node = 'pods' if cloud_name.lower() == 'kubernetes' else 'instances'
 
-                # TODO (kyuds): add link to documentation when it is published
-                ac = 'Some' if any(accesses) else 'All'
-                raise RuntimeError(f'{ac} pods cannot connect to the external '
-                                   'network. This can cause problems with '
-                                   'setup. If the cluster doesn\'t have '
-                                   'direct access to the network, consider '
-                                   'setting proxy environment variables.')
+            denied = ', '.join(
+                [t[1].node_id for t in zip(accesses, runners) if not t[0]])
+            logger.debug(f'Cannot access network for pods: {denied}')
+
+            # TODO (kyuds): add link to documentation when it is published
+            logger.warning(f'{colorama.Fore.YELLOW}'
+                           f'Network availability for {ac} {node} failed. '
+                           'This can cause problems with setup. If the '
+                           'cluster doesn\'t have direct access to the '
+                           'network, consider setting proxy environment '
+                           f'variables.{colorama.Style.RESET_ALL}')
+        nc_end = time.time()
+        logger.debug(f'Network Check Complete: {nc_end - nc_start:.4f}(s)')
 
         # It's promised by the cluster config that docker_config does not
         # exist for docker-native clouds, i.e. they provide docker containers
