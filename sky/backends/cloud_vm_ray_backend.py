@@ -84,6 +84,8 @@ if typing.TYPE_CHECKING:
     from sky import dag
     from sky.schemas.generated import autostopv1_pb2
     from sky.schemas.generated import autostopv1_pb2_grpc
+    from sky.schemas.generated import servev1_pb2
+    from sky.schemas.generated import servev1_pb2_grpc
 else:
     # To avoid requiring grpcio to be installed on the client side.
     grpc = adaptors_common.LazyImport('grpc')
@@ -91,6 +93,10 @@ else:
         'sky.schemas.generated.autostopv1_pb2')
     autostopv1_pb2_grpc = adaptors_common.LazyImport(
         'sky.schemas.generated.autostopv1_pb2_grpc')
+    servev1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.servev1_pb2')
+    servev1_pb2_grpc = adaptors_common.LazyImport(
+        'sky.schemas.generated.servev1_pb2_grpc')
 
 Path = str
 
@@ -2837,6 +2843,7 @@ class SkyletClient:
 
     def __init__(self, channel: 'grpc.Channel'):
         self._autostop_stub = autostopv1_pb2_grpc.AutostopServiceStub(channel)
+        self._serve_stub = servev1_pb2_grpc.ServeServiceStub(channel)
 
     def set_autostop(
         self,
@@ -2851,6 +2858,20 @@ class SkyletClient:
         timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'autostopv1_pb2.IsAutostoppingResponse':
         return self._autostop_stub.IsAutostopping(request, timeout=timeout)
+
+    def get_service_status(
+        self,
+        request: 'servev1_pb2.GetServiceStatusRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'servev1_pb2.GetServiceStatusResponse':
+        return self._serve_stub.GetServiceStatus(request, timeout=timeout)
+
+    def add_serve_version(
+        self,
+        request: 'servev1_pb2.AddVersionRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'servev1_pb2.AddVersionResponse':
+        return self._serve_stub.AddVersion(request, timeout=timeout)
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')

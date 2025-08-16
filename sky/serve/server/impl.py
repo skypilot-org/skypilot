@@ -18,8 +18,10 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.backends.cloud_vm_ray_backend import SkyletClient
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
+from sky.schemas.generated import servev1_pb2
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -77,24 +79,34 @@ def _get_service_record(
     """Get the service record."""
     noun = 'pool' if pool else 'service'
 
-    code = serve_utils.ServeCodeGen.get_service_status([service_name],
-                                                       pool=pool)
-    returncode, serve_status_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           f'Failed to get {noun} status',
-                                           stderr,
-                                           stream_logs=True)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+    if handle.is_grpc_enabled:
+        request = serve_utils.GetServiceStatusRequestConverter.to_proto(
+            [service_name], pool)
+        response = backend_utils.invoke_skylet_with_retries(
+            handle, lambda: SkyletClient(handle.get_grpc_channel()).
+            get_service_status(request))
+        pickled = serve_utils.GetServiceStatusResponseConverter.from_proto(
+            response)
+        service_statuses = serve_utils.unpickle_service_status(pickled)
+    else:
+        code = serve_utils.ServeCodeGen.get_service_status([service_name],
+                                                           pool=pool)
+        returncode, serve_status_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
+        try:
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               f'Failed to get {noun} status',
+                                               stderr,
+                                               stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
 
-    service_statuses = serve_utils.load_service_status(serve_status_payload)
+        service_statuses = serve_utils.load_service_status(serve_status_payload)
 
     assert len(service_statuses) <= 1, service_statuses
     if not service_statuses:
@@ -503,29 +515,36 @@ def update(
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
             task, task_type='serve')
 
-    code = serve_utils.ServeCodeGen.add_version(service_name)
-    returncode, version_string_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to add version',
-                                           stderr,
-                                           stream_logs=True)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+    if handle.is_grpc_enabled:
+        request = servev1_pb2.AddVersionRequest(service_name=service_name)
+        response = backend_utils.invoke_skylet_with_retries(
+            handle, lambda: SkyletClient(handle.get_grpc_channel()).
+            add_serve_version(request))
+        current_version = response.version
+    else:
+        code = serve_utils.ServeCodeGen.add_version(service_name)
+        returncode, version_string_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
+        try:
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               'Failed to add version',
+                                               stderr,
+                                               stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
 
-    version_string = serve_utils.load_version_string(version_string_payload)
-    try:
-        current_version = int(version_string)
-    except ValueError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Failed to parse version: {version_string}; '
-                             f'Returncode: {returncode}') from e
+        version_string = serve_utils.load_version_string(version_string_payload)
+        try:
+            current_version = int(version_string)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Failed to parse version: {version_string}; '
+                                 f'Returncode: {returncode}') from e
 
     with tempfile.NamedTemporaryFile(
             prefix=f'{service_name}-v{current_version}',
@@ -669,27 +688,39 @@ def status(
         stopped_message=controller_type.value.default_hint_if_non_existent.
         replace('service', noun))
 
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
+    if handle.is_grpc_enabled:
+        request = serve_utils.GetServiceStatusRequestConverter.to_proto(
+            service_names, pool)
+        response = backend_utils.invoke_skylet_with_retries(
+            handle, lambda: SkyletClient(handle.get_grpc_channel()).
+            get_service_status(request))
+        pickled = serve_utils.GetServiceStatusResponseConverter.from_proto(
+            response)
+        service_records = serve_utils.unpickle_service_status(pickled)
+    else:
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_utils.ServeCodeGen.get_service_status(service_names, pool=pool)
-    returncode, serve_status_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
+        code = serve_utils.ServeCodeGen.get_service_status(service_names,
+                                                           pool=pool)
+        returncode, serve_status_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
 
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           f'Failed to fetch {noun}s',
-                                           stderr,
-                                           stream_logs=True)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+        try:
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               f'Failed to fetch {noun}s',
+                                               stderr,
+                                               stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
 
-    service_records = serve_utils.load_service_status(serve_status_payload)
+        service_records = serve_utils.load_service_status(serve_status_payload)
+
     # Get the endpoint for each service
     for service_record in service_records:
         service_record['endpoint'] = None
@@ -792,25 +823,36 @@ def _get_all_replica_targets(
         handle: backends.CloudVmRayResourceHandle,
         pool: bool) -> Set[serve_utils.ServiceComponentTarget]:
     """Helper function to get targets for all live replicas."""
-    code = serve_utils.ServeCodeGen.get_service_status([service_name],
-                                                       pool=pool)
-    returncode, serve_status_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
+    if handle.is_grpc_enabled:
+        request = serve_utils.GetServiceStatusRequestConverter.to_proto(
+            [service_name], pool)
+        response = backend_utils.invoke_skylet_with_retries(
+            handle, lambda: SkyletClient(handle.get_grpc_channel()).
+            get_service_status(request))
+        pickled = serve_utils.GetServiceStatusResponseConverter.from_proto(
+            response)
+        service_records = serve_utils.unpickle_service_status(pickled)
+    else:
+        code = serve_utils.ServeCodeGen.get_service_status([service_name],
+                                                           pool=pool)
+        returncode, serve_status_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
 
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to fetch services',
-                                           stderr,
-                                           stream_logs=True)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+        try:
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               'Failed to fetch services',
+                                               stderr,
+                                               stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
 
-    service_records = serve_utils.load_service_status(serve_status_payload)
+        service_records = serve_utils.load_service_status(serve_status_payload)
+
     if not service_records:
         raise ValueError(f'Service {service_name!r} not found.')
     assert len(service_records) == 1
