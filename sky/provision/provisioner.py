@@ -487,7 +487,7 @@ def _post_provision_setup(
         # Otherwise, cluster runtime setup will stall. Issue #6605.
         status.update(
             ux_utils.spinner_message('Checking network availability...',
-                                        provision_logging.config.log_path))
+                                     provision_logging.config.log_path))
         nc_start = time.time()
 
         runners = provision.get_command_runners(cloud_name, cluster_info,
