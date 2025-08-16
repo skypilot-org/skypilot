@@ -397,7 +397,7 @@ def _follow_job_logs(file,
                 status_str = status.value if status is not None else 'None'
                 finish = ux_utils.finishing_message(
                     f'Job finished (status: {status_str}).')
-                yield '\n' + finish + '\n'
+                yield finish + '\n'
                 return
 
             time.sleep(SKY_LOG_TAILING_GAP_SECONDS)
