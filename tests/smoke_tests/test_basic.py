@@ -282,7 +282,7 @@ def test_aws_stale_job_manual_restart():
         'aws_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            f'sky launch -y -c {name} --infra aws/us-east-2 {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -309,6 +309,57 @@ def test_aws_stale_job_manual_restart():
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_vast
+@pytest.mark.aws
+def test_aws_manual_restart_recovery():
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.AWS.max_cluster_name_length())
+    region = 'us-east-2'
+    test = smoke_tests_utils.Test(
+        'test_aws_manual_restart_recovery',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                'aws', name, skip_remote_server_check=True),
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky autostop {name} -y -i 1',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=180),
+            # Wait for the instance state to be updated on AWS' side.
+            'sleep 30',
+            # Restart the cluster manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f'id=`aws ec2 describe-instances --region {region} --filters '
+                 f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+                 f'--query Reservations[].Instances[].InstanceId '
+                 f'--output text` && '
+                 f'aws ec2 start-instances --region {region} '
+                 f'--instance-ids $id && '
+                 f'aws ec2 wait instance-running --region {region} '
+                 f'--instance-ids $id'),
+                skip_remote_server_check=True),
+            # Status refresh should time out, as the restarted
+            # instance would get a new IP address.
+            # We should see a warning message on how to recover
+            # from this state.
+            f'sky status -r {name} | grep -i "SSH connection timed out" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            # Recover the cluster.
+            f'sky start -y {name}',
+            # Wait for the cluster to be up.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=120),
+        ],
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1247,7 +1298,7 @@ def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
     # the VM is terminated.
-    autodown_timeout = 900 if generic_cloud in ('azure', 'kubernetes') else 240
+    autodown_timeout = 180 if generic_cloud in ('azure', 'kubernetes') else 240
     total_timeout_minutes = 90 if generic_cloud in ('azure',
                                                     'kubernetes') else 20
     check_autostop_set = f's=$(sky status) && echo "$s" && echo "==check autostop set==" && echo "$s" | grep {name} | grep "1m (down)"'
