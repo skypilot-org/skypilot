@@ -55,6 +55,7 @@ After these required steps, perform optional setup steps as needed:
 * :ref:`kubernetes-setup-priority`
 * :ref:`kubernetes-setup-serviceaccount`
 * :ref:`kubernetes-setup-ports`
+* :ref:`kubernetes-setup-proxy`
 
 Once completed, the administrator can share the kubeconfig file with users, who can then submit tasks to the cluster using SkyPilot.
 
@@ -252,6 +253,7 @@ The following setup steps are optional and can be performed based on your specif
 * :ref:`kubernetes-setup-serviceaccount`
 * :ref:`kubernetes-setup-ports`
 * :ref:`kubernetes-setup-fuse`
+* :ref:`kubernetes-setup-proxy`
 
 .. _kubernetes-setup-volumes:
 
@@ -569,6 +571,40 @@ However, if you are operating in a cluster with restricted permissions, you can 
     # If you do not want to grant SkyPilot the ability to create privileged daemonsets, manually deploy the FUSE proxy:
     $ kubectl create namespace skypilot-system || true
     $ kubectl -n skypilot-system apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/provision/kubernetes/manifests/fusermount-server-daemonset.yaml
+
+.. _kubernetes-setup-proxy:
+
+Set up proxy configuration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If your Kubernetes cluster is behind a corporate proxy or firewall, SkyPilot pods may fail to download dependencies during setup. This typically manifests as the installation getting stuck during conda initialization or package downloads.
+
+To resolve this, you can configure proxy settings for SkyPilot pods by adding environment variables to your pod configuration in ``~/.sky/config.yaml``:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      pod_config:
+        spec:
+          containers:
+            - env:
+                - name: HTTP_PROXY
+                  value: http://proxy-host:3128
+                - name: HTTPS_PROXY
+                  value: http://proxy-host:3128
+                - name: NO_PROXY
+                  value: localhost,127.0.0.1
+                - name: http_proxy
+                  value: http://proxy-host:3128
+                - name: https_proxy
+                  value: http://proxy-host:3128
+                - name: no_proxy
+                  value: localhost,127.0.0.1
+
+Replace ``proxy-host:3128`` with your actual proxy server address and port.
+
+Both uppercase and lowercase versions of the proxy environment variables are included for maximum compatibility across different tools and libraries.
 
 .. _kubernetes-observability:
 
