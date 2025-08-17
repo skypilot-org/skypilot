@@ -18,10 +18,8 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.backends.cloud_vm_ray_backend import SkyletClient
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
-from sky.schemas.generated import servev1_pb2
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -80,14 +78,8 @@ def _get_service_record(
     noun = 'pool' if pool else 'service'
 
     if handle.is_grpc_enabled:
-        request = serve_utils.GetServiceStatusRequestConverter.to_proto(
-            [service_name], pool)
-        response = backend_utils.invoke_skylet_with_retries(
-            handle, lambda: SkyletClient(handle.get_grpc_channel()).
-            get_service_status(request))
-        pickled = serve_utils.GetServiceStatusResponseConverter.from_proto(
-            response)
-        service_statuses = serve_utils.unpickle_service_status(pickled)
+        service_statuses = serve_utils.RpcRunner.get_service_status(
+            handle, [service_name], pool)
     else:
         code = serve_utils.ServeCodeGen.get_service_status([service_name],
                                                            pool=pool)
@@ -516,11 +508,8 @@ def update(
             task, task_type='serve')
 
     if handle.is_grpc_enabled:
-        request = servev1_pb2.AddVersionRequest(service_name=service_name)
-        response = backend_utils.invoke_skylet_with_retries(
-            handle, lambda: SkyletClient(handle.get_grpc_channel()).
-            add_serve_version(request))
-        current_version = response.version
+        current_version = serve_utils.RpcRunner.add_version(
+            handle, service_name)
     else:
         code = serve_utils.ServeCodeGen.add_version(service_name)
         returncode, version_string_payload, stderr = backend.run_on_head(
@@ -689,14 +678,8 @@ def status(
         replace('service', noun))
 
     if handle.is_grpc_enabled:
-        request = serve_utils.GetServiceStatusRequestConverter.to_proto(
-            service_names, pool)
-        response = backend_utils.invoke_skylet_with_retries(
-            handle, lambda: SkyletClient(handle.get_grpc_channel()).
-            get_service_status(request))
-        pickled = serve_utils.GetServiceStatusResponseConverter.from_proto(
-            response)
-        service_records = serve_utils.unpickle_service_status(pickled)
+        service_records = serve_utils.RpcRunner.get_service_status(
+            handle, service_names, pool)
     else:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
@@ -824,14 +807,8 @@ def _get_all_replica_targets(
         pool: bool) -> Set[serve_utils.ServiceComponentTarget]:
     """Helper function to get targets for all live replicas."""
     if handle.is_grpc_enabled:
-        request = serve_utils.GetServiceStatusRequestConverter.to_proto(
-            [service_name], pool)
-        response = backend_utils.invoke_skylet_with_retries(
-            handle, lambda: SkyletClient(handle.get_grpc_channel()).
-            get_service_status(request))
-        pickled = serve_utils.GetServiceStatusResponseConverter.from_proto(
-            response)
-        service_records = serve_utils.unpickle_service_status(pickled)
+        service_records = serve_utils.RpcRunner.get_service_status(
+            handle, [service_name], pool)
     else:
         code = serve_utils.ServeCodeGen.get_service_status([service_name],
                                                            pool=pool)

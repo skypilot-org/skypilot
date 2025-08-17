@@ -28,6 +28,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.backends import backend_utils
 from sky.jobs import state as managed_job_state
 from sky.schemas.generated import servev1_pb2
 from sky.serve import constants
@@ -1723,3 +1724,35 @@ class GetServiceStatusResponseConverter:
     ) -> List[Dict[str, str]]:
         pickled = [dict(status.status) for status in proto.statuses]
         return pickled
+
+
+# ========================= gRPC Runner for Sky Serve =========================
+
+
+class RpcRunner:
+    """gRPC Runner for Sky Serve
+    The RPC runner does not check for errors, and assumes that backend handle
+    has grpc enabled.
+    """
+
+    @classmethod
+    def get_service_status(cls, handle: backends.CloudVmRayResourceHandle,
+                           service_names: Optional[List[str]],
+                           pool: bool) -> List[Dict[str, Any]]:
+        assert handle.is_grpc_enabled
+        request = GetServiceStatusRequestConverter.to_proto(service_names, pool)
+        response = backend_utils.invoke_skylet_with_retries(
+            handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
+            get_service_status(request))
+        pickled = GetServiceStatusResponseConverter.from_proto(response)
+        return unpickle_service_status(pickled)
+
+    @classmethod
+    def add_version(cls, handle: backends.CloudVmRayResourceHandle,
+                    service_name: str) -> int:
+        assert handle.is_grpc_enabled
+        request = servev1_pb2.AddVersionRequest(service_name=service_name)
+        response = backend_utils.invoke_skylet_with_retries(
+            handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
+            add_serve_version(request))
+        return response.version
