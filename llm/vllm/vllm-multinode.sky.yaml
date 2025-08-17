@@ -1,0 +1,72 @@
+# Serve Llama 4 with vLLM on SkyPilot with multiple nodes.
+#
+# Uses Ray + vLLM for multi-node serving with tensor parallelism and pipeline parallelism.
+#
+# Usage:
+#   sky launch vllm-multinode.sky.yaml -c vllm-multinode --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
+#   sky serve up -n vllm-multinode vllm-multinode.sky.yaml --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
+envs:
+  MODEL_NAME: meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8
+
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
+
+resources:
+  # image_id: docker:vllm/vllm-openai:latest # Use this and remove setup for faster cold start
+  network_tier: best
+  accelerators: H100:8
+  cpus: 100+
+  memory: 1000+
+  ports: 8081
+
+num_nodes: 2
+
+setup: |
+  pip install vllm>=0.10.0 ray>=2.48.0 blobfile
+
+run: |
+  echo "Starting Ray..."
+  sudo chmod 777 -R /var/tmp
+  HEAD_IP=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+    ps aux | grep ray | grep 6379 &> /dev/null || ray start --head --disable-usage-stats --port 6379
+    sleep 5
+  else
+    sleep 5
+    ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $HEAD_IP:6379 --disable-usage-stats
+    # Add sleep to after `ray start` to give ray enough time to daemonize
+    sleep 5
+  fi
+
+  sleep 10
+  echo "Ray cluster started"
+  ray status
+  
+  echo 'Starting vllm api server...'
+
+  # Set VLLM_HOST_IP to the IP of the current node based on rank
+  VLLM_HOST_IP=`echo "$SKYPILOT_NODE_IPS" | sed -n "$((SKYPILOT_NODE_RANK + 1))p"`
+  export VLLM_HOST_IP
+
+  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+    vllm serve $MODEL_NAME \
+      --port 8081 \
+      --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+      --pipeline-parallel-size $SKYPILOT_NUM_NODES \
+      --max-model-len 32768 \
+      --trust-remote-code
+  else
+    sleep infinity
+  fi
+
+service:
+  replicas: 1
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1 

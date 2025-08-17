@@ -1,0 +1,44 @@
+# Serve Llama 4 with vLLM on SkyPilot with authentication.
+#
+# Usage:
+#   sky launch vllm-with-auth.sky.yaml -c vllm-llama4-auth --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN --secret AUTH_TOKEN=YOUR_AUTH_TOKEN
+#   sky serve up -n vllm-llama4-auth vllm-with-auth.sky.yaml --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN --secret AUTH_TOKEN=YOUR_AUTH_TOKEN
+envs:
+  MODEL_NAME: meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8
+
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
+  AUTH_TOKEN: null # Custom API key. Pass with `--secret AUTH_TOKEN` in CLI
+
+service:
+  replicas: 1
+  readiness_probe:
+    path: /v1/chat/completions
+    headers:
+      Authorization: Bearer $AUTH_TOKEN  # Readiness probes uses the same API key
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
+
+resources:
+  accelerators: { H100:8, H200:8, B100:8, B200:8, GB200:8 }
+  cpus: 32+
+  disk_size: 512  # Ensure model checkpoints can fit.
+  disk_tier: best
+  ports: 8081
+
+setup: |
+  pip install "vllm>=0.8.3"
+
+run: |
+  echo 'Starting vllm api server...'
+
+  vllm serve $MODEL_NAME \
+    --port 8081 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-model-len 430000 \
+    --api-key $AUTH_TOKEN
+
