@@ -6,7 +6,8 @@ from sky.serve import serve_utils as utils
 def test_get_service_status_request_converter():
     # list
     proto = utils.GetServiceStatusRequestConverter.to_proto(['test'], True)
-    service_names, pool = utils.GetServiceStatusRequestConverter.from_proto(proto)
+    service_names, pool = utils.GetServiceStatusRequestConverter.from_proto(
+        proto)
     assert service_names is not None
     assert len(service_names) == 1
     assert service_names[0] == 'test'
@@ -14,14 +15,16 @@ def test_get_service_status_request_converter():
 
     # empty list
     proto = utils.GetServiceStatusRequestConverter.to_proto([], False)
-    service_names, pool = utils.GetServiceStatusRequestConverter.from_proto(proto)
+    service_names, pool = utils.GetServiceStatusRequestConverter.from_proto(
+        proto)
     assert service_names is not None
     assert len(service_names) == 0
     assert not pool
 
     # none
     proto = utils.GetServiceStatusRequestConverter.to_proto(None, True)
-    service_names, pool = utils.GetServiceStatusRequestConverter.from_proto(proto)
+    service_names, pool = utils.GetServiceStatusRequestConverter.from_proto(
+        proto)
     assert service_names is None
     assert pool
 
