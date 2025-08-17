@@ -1,0 +1,80 @@
+# Serve Kimi-K2 with SkyPilot and vLLM.
+# Uses multi-node serving with tensor parallelism and pipeline parallelism.
+# 
+# Usage:
+#   HF_TOKEN=xxx sky launch kimi-k2.yaml -c kimi-k2 --secret HF_TOKEN
+#   HF_TOKEN=xxx sky serve up kimi-k2.yaml -n kimi-k2 --secret HF_TOKEN
+envs:
+  MODEL_NAME: moonshotai/Kimi-K2-Instruct
+
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
+
+resources:
+  image_id: docker:vllm/vllm-openai:latest
+  network_tier: best
+  accelerators: H100:8
+  cpus: 100+
+  memory: 1000+
+  ports: 8081
+
+# Uses multi-node for serving on H100s - need at least 16 H100s
+num_nodes: 2
+
+setup: |
+  pip install blobfile
+
+run: |
+  echo "Starting Ray..."
+  sudo chmod 777 -R /var/tmp
+  HEAD_IP=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+    ps aux | grep ray | grep 6379 &> /dev/null || ray start --head --disable-usage-stats --port 6379
+    sleep 5
+  else
+    sleep 5
+    ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $HEAD_IP:6379 --disable-usage-stats
+    # Add sleep to after `ray start` to give ray enough time to daemonize
+    sleep 5
+  fi
+
+  sleep 10
+  echo "Ray cluster started"
+  ray status
+
+  echo 'Starting vllm api server...'
+
+  # Set VLLM_HOST_IP to the IP of the current node based on rank
+  VLLM_HOST_IP=`echo "$SKYPILOT_NODE_IPS" | sed -n "$((SKYPILOT_NODE_RANK + 1))p"`
+  export VLLM_HOST_IP
+
+  echo "================================================"
+  echo "RANK: $SKYPILOT_NODE_RANK"
+  echo "VLLM_HOST_IP: $VLLM_HOST_IP"
+  echo "SKYPILOT_NUM_NODES: $SKYPILOT_NUM_NODES"
+  echo "SKYPILOT_NUM_GPUS_PER_NODE: $SKYPILOT_NUM_GPUS_PER_NODE"
+  echo "================================================"
+
+  # Only head node needs to start the vllm api server
+  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+    vllm serve $MODEL_NAME \
+      --port 8081 \
+      --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+      --pipeline-parallel-size $SKYPILOT_NUM_NODES \
+      --max-model-len 32768 \
+      --trust-remote-code
+  else
+    sleep infinity
+  fi
+
+service:
+  replicas: 1
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
