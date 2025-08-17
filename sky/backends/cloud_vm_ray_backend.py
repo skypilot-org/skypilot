@@ -2712,7 +2712,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 except queue_lib.Empty:
                     ack = None
                 if ack == _ACK:
-                    logger.debug('Received ack from remote cluster')
                     break
                 time.sleep(0.1)
 
@@ -2731,7 +2730,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                f'({attempt + 1}/{max_attempts}). '
                                f'stdout: {stdout}, stderr: {stderr}')
                 continue
-            logger.debug(f'Port forward established on port {local_port}')
             break
 
         try:
