@@ -2727,10 +2727,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                         command=cmd_str,
                         error_msg='Port forward failed',
                         detailed_reason=stderr)
-                logger.warning(f'SSH tunnel failed on port {local_port} '
+                logger.warning(f'Port forward failed on port {local_port} '
                                f'({attempt + 1}/{max_attempts}). '
                                f'stdout: {stdout}, stderr: {stderr}')
                 continue
+            logger.debug(f'Port forward established on port {local_port}')
+            break
 
         try:
             grpc.channel_ready_future(
