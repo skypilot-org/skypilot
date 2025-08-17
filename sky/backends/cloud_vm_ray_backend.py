@@ -2718,16 +2718,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     time.sleep(0.1)
                     continue
                 logger.debug(f'ack: {ack}')
-                expected_ack = f'{_ACK}\n'
-                logger.debug(f'ack equals expected: {ack == expected_ack}')
                 assert ack is not None
                 if isinstance(
                         head_runner,
                         command_runner.SSHCommandRunner) and ack == f'{_ACK}\n':
+                    logger.debug('SSHCommandRunner: ack received')
                     break
                 elif isinstance(head_runner,
                                 command_runner.KubernetesCommandRunner
                                ) and 'Forwarding from' in ack:
+                    logger.debug('KubernetesCommandRunner: ack received')
                     break
                 raise ValueError(f'Unexpected ack: {ack}')
 
