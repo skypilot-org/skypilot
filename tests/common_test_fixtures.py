@@ -23,7 +23,7 @@ from sky.provision import common as provision_common
 from sky.provision.aws import config as aws_config
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_state
-from sky.serve import serve_utils
+from sky.serve import serve_rpc_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import rest
@@ -320,7 +320,7 @@ def mock_services_no_service_grpc(monkeypatch):
     """Mock services to return no services."""
 
     def mock_get_services_grpc(*_, **__):
-        return serve_utils.GetServiceStatusResponseConverter.to_proto([])
+        return serve_rpc_utils.GetServiceStatusResponseConverter.to_proto([])
 
     monkeypatch.setattr('sky.backends.backend_utils.invoke_skylet_with_retries',
                         mock_get_services_grpc)
@@ -372,7 +372,7 @@ def mock_services_one_service_grpc(monkeypatch):
             'replica_info': [],
             'tls_encrypted': False,
         }
-        return serve_utils.GetServiceStatusResponseConverter.to_proto([{
+        return serve_rpc_utils.GetServiceStatusResponseConverter.to_proto([{
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service.items()
         }])
