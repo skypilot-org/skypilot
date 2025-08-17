@@ -8,6 +8,7 @@ from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.schemas.generated import servev1_pb2
 from sky.schemas.generated import servev1_pb2_grpc
 from sky.serve import constants as serve_constants
+from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
@@ -61,14 +62,15 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
     ) -> servev1_pb2.GetServiceStatusResponse:
         """Gets serve status."""
         try:
-            service_names, pool = (serve_utils.GetServiceStatusRequestConverter.
-                                   from_proto(request))
+            service_names, pool = (
+                serve_rpc_utils.GetServiceStatusRequestConverter.from_proto(
+                    request))
 
             kwargs = {} if serve_constants.SERVE_VERSION < 3 else {'pool': pool}
             statuses = serve_utils.get_service_status_pickled(
                 service_names, **kwargs)
 
-            return serve_utils.GetServiceStatusResponseConverter.to_proto(
+            return serve_rpc_utils.GetServiceStatusResponseConverter.to_proto(
                 statuses)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))

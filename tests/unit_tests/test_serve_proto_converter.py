@@ -1,4 +1,4 @@
-from sky.serve import serve_utils as utils
+from sky.serve import serve_rpc_utils as utils
 
 # pylint: disable=line-too-long
 

@@ -21,6 +21,7 @@ from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.serve import constants as serve_constants
+from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
@@ -78,7 +79,7 @@ def _get_service_record(
     noun = 'pool' if pool else 'service'
 
     if handle.is_grpc_enabled:
-        service_statuses = serve_utils.RpcRunner.get_service_status(
+        service_statuses = serve_rpc_utils.RpcRunner.get_service_status(
             handle, [service_name], pool)
     else:
         code = serve_utils.ServeCodeGen.get_service_status([service_name],
@@ -508,7 +509,7 @@ def update(
             task, task_type='serve')
 
     if handle.is_grpc_enabled:
-        current_version = serve_utils.RpcRunner.add_version(
+        current_version = serve_rpc_utils.RpcRunner.add_version(
             handle, service_name)
     else:
         code = serve_utils.ServeCodeGen.add_version(service_name)
@@ -678,7 +679,7 @@ def status(
         replace('service', noun))
 
     if handle.is_grpc_enabled:
-        service_records = serve_utils.RpcRunner.get_service_status(
+        service_records = serve_rpc_utils.RpcRunner.get_service_status(
             handle, service_names, pool)
     else:
         backend = backend_utils.get_backend_from_handle(handle)
@@ -807,7 +808,7 @@ def _get_all_replica_targets(
         pool: bool) -> Set[serve_utils.ServiceComponentTarget]:
     """Helper function to get targets for all live replicas."""
     if handle.is_grpc_enabled:
-        service_records = serve_utils.RpcRunner.get_service_status(
+        service_records = serve_rpc_utils.RpcRunner.get_service_status(
             handle, [service_name], pool)
     else:
         code = serve_utils.ServeCodeGen.get_service_status([service_name],

@@ -10,6 +10,6 @@ from sky.backends.local_docker_backend import LocalDockerResourceHandle
 
 __all__ = [
     'Backend', 'ResourceHandle', 'CloudVmRayBackend',
-    'CloudVmRayResourceHandle', 'LocalResourcesHandle', 'LocalDockerBackend',
-    'LocalDockerResourceHandle'
+    'CloudVmRayResourceHandle', 'SkyletClient', 'LocalResourcesHandle',
+    'LocalDockerBackend', 'LocalDockerResourceHandle'
 ]
