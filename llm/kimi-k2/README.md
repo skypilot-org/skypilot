@@ -29,7 +29,7 @@ secrets:
   HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 resources:
-  image_id: docker:vllm/vllm-openai:latest
+  image_id: docker:vllm/vllm-openai:v0.10.0
   network_tier: best
   accelerators: H100:8
   cpus: 100+
