@@ -17,10 +17,10 @@
 ## Run Kimi-K2
 
 ```bash
-HF_TOKEN=xxx sky launch kimi-k2.yaml -c kimi-k2 --secret HF_TOKEN
+HF_TOKEN=xxx sky launch kimi-k2.sky.yaml -c kimi-k2 --secret HF_TOKEN
 ```
 
-The `kimi-k2.yaml` file is as follows:
+The `kimi-k2.sky.yaml` file is as follows:
 ```yaml
 envs:
   MODEL_NAME: moonshotai/Kimi-K2-Instruct
@@ -137,7 +137,7 @@ sky down kimi-k2
 
 With no change to the YAML, launch a fully managed service on your infra:
 ```console
-HF_TOKEN=xxx sky serve up kimi-k2.yaml -n kimi-k2 --secret HF_TOKEN
+HF_TOKEN=xxx sky serve up kimi-k2.sky.yaml -n kimi-k2 --secret HF_TOKEN
 ```
 
 Wait until the service is ready:
