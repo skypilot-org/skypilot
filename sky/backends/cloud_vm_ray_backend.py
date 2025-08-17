@@ -2675,20 +2675,23 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             local_port = common_utils.find_free_port(10000)
             runners = self.get_command_runners()
             head_runner = runners[0]
+            # The default connect_timeout of 1s is too short for
+            # connecting to clusters using a jump server.
+            # We use NON_INTERACTIVE mode to avoid allocating a pseudo-tty,
+            # which is counted towards non-idleness.
+            cmd: List[str] = head_runner.port_forward_command(
+                [(local_port, constants.SKYLET_GRPC_PORT)],
+                connect_timeout=5,
+                ssh_mode=command_runner.SshMode.NON_INTERACTIVE)
             if isinstance(head_runner, command_runner.SSHCommandRunner):
                 # Disabling ControlMaster makes things easier to reason about
                 # with respect to resource management/ownership,
                 # as killing the process will close the tunnel too.
                 head_runner.disable_control_master = True
                 head_runner.port_forward_execute_remote_command = True
-
-            # The default connect_timeout of 1s is too short for
-            # connecting to clusters using a jump server.
-            cmd: List[str] = head_runner.port_forward_command(
-                [(local_port, constants.SKYLET_GRPC_PORT)], connect_timeout=5)
-            # cat so the command doesn't exit until we kill it
-            cmd += [f'echo -n {_ACK} && cat']
-            cmd_str = provisioner.shlex_join(cmd)
+                # cat so the command doesn't exit until we kill it
+                cmd += [f'"echo {_ACK} && cat"']
+            cmd_str = ' '.join(cmd)
             ssh_tunnel_proc = subprocess.Popen(cmd_str,
                                                shell=True,
                                                stdin=subprocess.PIPE,
@@ -2702,7 +2705,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # the SSH connection times out.
             queue: queue_lib.Queue[str] = queue_lib.Queue()
             stdout_thread = threading.Thread(
-                target=lambda q, stdout: q.put(stdout.read(3)),
+                target=lambda q, stdout: q.put(stdout.readline()),
                 args=(queue, ssh_tunnel_proc.stdout),
                 daemon=True)
             stdout_thread.start()
@@ -2711,9 +2714,22 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     ack = queue.get_nowait()
                 except queue_lib.Empty:
                     ack = None
-                if ack == _ACK:
+                    logger.debug('No ack received')
+                    time.sleep(0.1)
+                    continue
+                logger.debug(f'ack: {ack}')
+                expected_ack = f'{_ACK}\n'
+                logger.debug(f'ack equals expected: {ack == expected_ack}')
+                assert ack is not None
+                if isinstance(
+                        head_runner,
+                        command_runner.SSHCommandRunner) and ack == f'{_ACK}\n':
                     break
-                time.sleep(0.1)
+                elif isinstance(head_runner,
+                                command_runner.KubernetesCommandRunner
+                               ) and 'Forwarding from' in ack:
+                    break
+                raise ValueError(f'Unexpected ack: {ack}')
 
             if ssh_tunnel_proc.poll() is not None:
                 stdout, stderr = ssh_tunnel_proc.communicate()

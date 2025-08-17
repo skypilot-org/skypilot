@@ -465,15 +465,19 @@ class CommandRunner:
         """Close the cached connection to the remote machine."""
         pass
 
-    def port_forward_command(self,
-                             port_forward: List[Tuple[int, int]],
-                             connect_timeout: int = 1) -> List[str]:
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         """Command for forwarding ports from localhost to the remote machine.
 
         Args:
             port_forward: A list of ports to forward from the localhost to the
                 remote host.
             connect_timeout: The timeout for the connection.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
         """
         raise NotImplementedError
 
@@ -650,21 +654,25 @@ class SSHCommandRunner(CommandRunner):
         self.port_forward_execute_remote_command = (
             port_forward_execute_remote_command)
 
-    def port_forward_command(self,
-                             port_forward: List[Tuple[int, int]],
-                             connect_timeout: int = 1) -> List[str]:
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         """Command for forwarding ports from localhost to the remote machine.
 
         Args:
             port_forward: A list of ports to forward from the local port to the
                 remote port.
             connect_timeout: The timeout for the ssh connection.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
 
         Returns:
             The command for forwarding ports from localhost to the remote
             machine.
         """
-        return self.ssh_base_command(ssh_mode=SshMode.INTERACTIVE,
+        return self.ssh_base_command(ssh_mode=ssh_mode,
                                      port_forward=port_forward,
                                      connect_timeout=connect_timeout)
 
@@ -901,9 +909,11 @@ class KubernetesCommandRunner(CommandRunner):
         else:
             return f'pod/{self.pod_name}'
 
-    def port_forward_command(self,
-                             port_forward: List[Tuple[int, int]],
-                             connect_timeout: int = 1) -> List[str]:
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         """Command for forwarding ports from localhost to the remote machine.
 
         Args:
@@ -911,7 +921,10 @@ class KubernetesCommandRunner(CommandRunner):
                 remote port. Currently, only one port is supported, i.e. the
                 list should have only one element.
             connect_timeout: The timeout for the ssh connection.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
         """
+        del ssh_mode  # unused
         assert port_forward and len(port_forward) == 1, (
             'Only one port is supported for Kubernetes port-forward.')
         kubectl_args = [
