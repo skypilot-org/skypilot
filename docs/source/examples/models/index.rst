@@ -18,7 +18,8 @@ Models
    Pixtral <pixtral>
    Mixtral <mixtral>
    Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot/>
-   Qwen 2.5 <qwen>
+   Qwen 3 <qwen>
+   Kimi-K2 <kimi-k2>
    Yi <yi>
    Gemma <gemma>
    DBRX <dbrx>

@@ -66,13 +66,6 @@ run: |
   VLLM_HOST_IP=`echo "$SKYPILOT_NODE_IPS" | sed -n "$((SKYPILOT_NODE_RANK + 1))p"`
   export VLLM_HOST_IP
 
-  echo "================================================"
-  echo "RANK: $SKYPILOT_NODE_RANK"
-  echo "VLLM_HOST_IP: $VLLM_HOST_IP"
-  echo "SKYPILOT_NUM_NODES: $SKYPILOT_NUM_NODES"
-  echo "SKYPILOT_NUM_GPUS_PER_NODE: $SKYPILOT_NUM_GPUS_PER_NODE"
-  echo "================================================"
-
   # Only head node needs to start the vllm api server
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
     vllm serve $MODEL_NAME \
