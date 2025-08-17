@@ -588,6 +588,7 @@ class SSHCommandRunner(CommandRunner):
         ssh_proxy_command: Optional[str] = None,
         docker_user: Optional[str] = None,
         disable_control_master: Optional[bool] = False,
+        port_forward_execute_remote_command: Optional[bool] = False,
     ):
         """Initialize SSHCommandRunner.
 
@@ -614,6 +615,10 @@ class SSHCommandRunner(CommandRunner):
             disable_control_master: bool; specifies either or not the ssh
                 command will utilize ControlMaster. We currently disable
                 it for k8s instance.
+            port_forward_execute_remote_command: bool; specifies whether to
+                add -N to the port forwarding command. This is useful if you
+                want to run a command on the remote machine to make sure the
+                SSH tunnel is established.
         """
         super().__init__(node)
         ip, port = node
@@ -642,6 +647,8 @@ class SSHCommandRunner(CommandRunner):
             self.ssh_user = ssh_user
             self.port = port
             self._docker_ssh_proxy_command = None
+        self.port_forward_execute_remote_command = (
+            port_forward_execute_remote_command)
 
     def port_forward_command(self,
                              port_forward: List[Tuple[int, int]],
@@ -676,7 +683,11 @@ class SSHCommandRunner(CommandRunner):
             for local, remote in port_forward:
                 logger.debug(
                     f'Forwarding local port {local} to remote port {remote}.')
-                ssh += ['-NL', f'{local}:localhost:{remote}']
+                if self.port_forward_execute_remote_command:
+                    ssh += ['-L']
+                else:
+                    ssh += ['-NL']
+                ssh += [f'{local}:localhost:{remote}']
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(ssh)
         else:
