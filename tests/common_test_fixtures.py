@@ -23,6 +23,7 @@ from sky.provision import common as provision_common
 from sky.provision.aws import config as aws_config
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_state
+from sky.serve import serve_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import rest
@@ -315,6 +316,17 @@ def mock_services_no_service(monkeypatch):
 
 
 @pytest.fixture
+def mock_services_no_service_grpc(monkeypatch):
+    """Mock services to return no services."""
+
+    def mock_get_services_grpc(*_, **__):
+        return serve_utils.GetServiceStatusResponseConverter.to_proto([])
+
+    monkeypatch.setattr('sky.backends.backend_utils.invoke_skylet_with_retries',
+                        mock_get_services_grpc)
+
+
+@pytest.fixture
 def mock_services_one_service(monkeypatch):
     """Mock services to return one service."""
 
@@ -340,6 +352,33 @@ def mock_services_one_service(monkeypatch):
             payload_type='service_status'), ''
 
     monkeypatch.setattr(CloudVmRayBackend, 'run_on_head', mock_get_services)
+
+
+@pytest.fixture
+def mock_services_one_service_grpc(monkeypatch):
+    """Mock services to return one services."""
+
+    def mock_get_services_grpc(*_, **__):
+        service = {
+            'name': 'test_service',
+            'controller_job_id': 1,
+            'uptime': 20,
+            'status': serve_state.ServiceStatus.READY,
+            'controller_port': 30001,
+            'load_balancer_port': 30000,
+            'endpoint': '4.3.2.1:30000',
+            'policy': None,
+            'requested_resources_str': '',
+            'replica_info': [],
+            'tls_encrypted': False,
+        }
+        return serve_utils.GetServiceStatusResponseConverter.to_proto([{
+            k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
+            for k, v in service.items()
+        }])
+
+    monkeypatch.setattr('sky.backends.backend_utils.invoke_skylet_with_retries',
+                        mock_get_services_grpc)
 
 
 @pytest.fixture
