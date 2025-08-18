@@ -18,7 +18,7 @@ resources:
   # image_id: docker:vllm/vllm-openai:latest # Use this and remove setup for faster cold start
 
 setup: |
-  pip install vllm>=0.10.0 ray>=2.48.0 blobfile
+  pip install vllm>=0.10.0
 
 run: |
   echo 'Starting vllm api server...'
@@ -32,6 +32,7 @@ service:
   replicas: 2
   # An actual request for readiness probe.
   readiness_probe:
+    timeout_seconds: 60
     path: /v1/chat/completions
     post_data:
       model: $MODEL_NAME

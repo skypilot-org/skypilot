@@ -63,6 +63,7 @@ service:
   replicas: 2
   # An actual request for readiness probe.
   readiness_probe:
+    timeout_seconds: 60
     path: /v1/chat/completions
     post_data:
       model: $MODEL_NAME

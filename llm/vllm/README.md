@@ -221,6 +221,8 @@ curl http://$ENDPOINT/v1/chat/completions \
 4. To scale up to multiple replicas, use SkyServe:
 ```bash
 HF_TOKEN=xxx sky serve up -n vllm-multinode vllm-multinode.sky.yaml --secret HF_TOKEN
+# After the service is ready, get the endpoint
+ENDPOINT=$(sky serve status --endpoint vllm-multinode)
 ```
 
 The multi-node setup automatically distributes the model across nodes using pipeline parallelism and tensor parallelism, allowing you to serve larger models or achieve higher throughput.
