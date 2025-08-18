@@ -533,6 +533,12 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
     def _get_target_qps_for_gpu_type(self, gpu_type: str) -> float:
         """Get target QPS for GPU type with flexible matching."""
         if not isinstance(self.target_qps_per_replica, dict):
+            if isinstance(self.target_qps_per_replica, (int, float)):
+                return float(self.target_qps_per_replica)
+            # Fallback for invalid types
+            logger.warning(
+                f'Invalid target_qps_per_replica type: '
+                f'{type(self.target_qps_per_replica)}. Using 1.0 as fallback.')
             return 1.0
 
         # Direct match first
