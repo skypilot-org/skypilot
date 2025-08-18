@@ -204,7 +204,7 @@ ENDPOINT=$(sky status --endpoint 8081 vllm-multinode)
 
 3. Test the multi-node service:
 ```bash
-curl http://$ENDPOINT/v1/chat/completions \
+curl $ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
