@@ -2694,8 +2694,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             if isinstance(head_runner, command_runner.SSHCommandRunner):
                 # cat so the command doesn't exit until we kill it
                 cmd += [f'"echo {_ACK} && cat"']
-            logger.debug(f'cmd: {cmd}')
             cmd_str = ' '.join(cmd)
+            logger.debug(f'Running port forward command: {cmd_str}')
             ssh_tunnel_proc = subprocess.Popen(cmd_str,
                                                shell=True,
                                                stdin=subprocess.PIPE,
@@ -2718,20 +2718,23 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     ack = queue.get_nowait()
                 except queue_lib.Empty:
                     ack = None
-                    logger.debug('No ack received')
                     time.sleep(0.1)
                     continue
-                logger.debug(f'ack: {ack}')
                 assert ack is not None
                 if isinstance(
                         head_runner,
                         command_runner.SSHCommandRunner) and ack == f'{_ACK}\n':
-                    logger.debug('SSHCommandRunner: ack received')
                     break
                 elif isinstance(head_runner,
                                 command_runner.KubernetesCommandRunner
                                ) and _FORWARDING_FROM in ack:
-                    logger.debug('KubernetesCommandRunner: ack received')
+                    # For Kind clusters, there seems to be a race condition.
+                    # Calling grpc.channel_ready_future immediately after
+                    # results in a connection refused error, leading to
+                    # the process dying and the health check timing out.
+                    # We did not observe this for non-Kind clusters.
+                    # TODO(kevin): Find a better way to handle this.
+                    time.sleep(0.5)
                     break
 
             if ssh_tunnel_proc.poll() is not None:
