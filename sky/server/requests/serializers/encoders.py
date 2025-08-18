@@ -113,8 +113,15 @@ def encode_status_kubernetes(
 @register_encoder('jobs.queue')
 def encode_jobs_queue(jobs_or_tuple):
     # Support returning either a plain jobs list or a (jobs, total) tuple
-    if isinstance(jobs_or_tuple, tuple) and len(jobs_or_tuple) == 2:
-        jobs, total = jobs_or_tuple
+    status_counts = {}
+    if isinstance(jobs_or_tuple, tuple):
+        if len(jobs_or_tuple) == 2:
+            jobs, total = jobs_or_tuple
+            total_no_filter = total
+        elif len(jobs_or_tuple) == 4:
+            jobs, total, status_counts, total_no_filter = jobs_or_tuple
+        else:
+            raise ValueError(f'Invalid jobs tuple: {jobs_or_tuple}')
     else:
         jobs = jobs_or_tuple
         total = None
@@ -122,7 +129,12 @@ def encode_jobs_queue(jobs_or_tuple):
         job['status'] = job['status'].value
     if total is None:
         return jobs
-    return {'jobs': jobs, 'total': total}
+    return {
+        'jobs': jobs,
+        'total': total,
+        'total_no_filter': total_no_filter,
+        'status_counts': status_counts
+    }
 
 
 def _encode_serve_status(
