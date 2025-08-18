@@ -198,11 +198,11 @@ async def test_endpoints(mock_stream_and_get, mock_to_thread,
     """Test endpoints() function."""
     mock_sdk_functions['endpoints'].return_value = 'test-request-id'
 
-    expected_result = {8080: 'http://1.2.3.4:8080'}
-    mock_stream_and_get.return_value = expected_result
+    api_return_response = {'8080': 'http://1.2.3.4:8080'}
+    mock_stream_and_get.return_value = api_return_response
 
     result = await sdk_async.endpoints('test-cluster', 8080)
-    assert result == expected_result
+    assert result == 'http://1.2.3.4:8080'
     mock_sdk_functions['endpoints'].assert_called_once_with(
         'test-cluster', 8080)
     # The function should be called with request_id and the default StreamConfig parameters
