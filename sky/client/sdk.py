@@ -1460,13 +1460,26 @@ def status(
     return server_common.get_request_id(response)
 
 
+@typing.overload
+def endpoints(cluster: str,
+              port: None = None) -> server_common.RequestId[Dict[str, str]]:
+    ...
+
+
+@typing.overload
+def endpoints(cluster: str,
+              port: Union[int, str]) -> server_common.RequestId[Dict[str, str]]:
+    ...
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def endpoints(
     cluster: str,
     port: Optional[Union[int, str]] = None
-) -> server_common.RequestId[Dict[str, str]]:
+) -> Union[server_common.RequestId[Dict[str, str]],
+           server_common.RequestId[Dict[str, str]]]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
