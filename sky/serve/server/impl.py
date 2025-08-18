@@ -10,6 +10,7 @@ import uuid
 
 import colorama
 import filelock
+import grpc
 
 from sky import backends
 from sky import exceptions
@@ -79,8 +80,13 @@ def _get_service_record(
     noun = 'pool' if pool else 'service'
 
     if handle.is_grpc_enabled:
-        service_statuses = serve_rpc_utils.RpcRunner.get_service_status(
-            handle, [service_name], pool)
+        try:
+            service_statuses = serve_rpc_utils.RpcRunner.get_service_status(
+                handle, [service_name], pool)
+        except grpc.RpcError as e:
+            raise RuntimeError(f'{e.details()} ({e.code()})') from e
+        except grpc.FutureTimeoutError as e:
+            raise RuntimeError('gRPC timed out') from e
     else:
         code = serve_utils.ServeCodeGen.get_service_status([service_name],
                                                            pool=pool)
@@ -509,8 +515,13 @@ def update(
             task, task_type='serve')
 
     if handle.is_grpc_enabled:
-        current_version = serve_rpc_utils.RpcRunner.add_version(
-            handle, service_name)
+        try:
+            current_version = serve_rpc_utils.RpcRunner.add_version(
+                handle, service_name)
+        except grpc.RpcError as e:
+            raise RuntimeError(f'{e.details()} ({e.code()})') from e
+        except grpc.FutureTimeoutError as e:
+            raise RuntimeError('gRPC timed out') from e
     else:
         code = serve_utils.ServeCodeGen.add_version(service_name)
         returncode, version_string_payload, stderr = backend.run_on_head(
@@ -630,35 +641,35 @@ def down(
 
     service_names = None if all else service_names
 
-    if handle.is_grpc_enabled:
-        # TODO (kyuds): how to handle the FetchClusterInfoError and substitute
-        # for CommandError?
-        stdout = serve_rpc_utils.RpcRunner.terminate_services(
-            handle, service_names, purge, pool)
-    else:
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
-        code = serve_utils.ServeCodeGen.terminate_services(
-            service_names, purge, pool)
+    try:
+        if handle.is_grpc_enabled:
+            stdout = serve_rpc_utils.RpcRunner.terminate_services(
+                handle, service_names, purge, pool)
+        else:
+            backend = backend_utils.get_backend_from_handle(handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+            code = serve_utils.ServeCodeGen.terminate_services(
+                service_names, purge, pool)
 
-        try:
             returncode, stdout, _ = backend.run_on_head(handle,
                                                         code,
                                                         require_outputs=True,
                                                         stream_logs=False)
-        except exceptions.FetchClusterInfoError as e:
-            raise RuntimeError(
-                'Failed to fetch controller IP. Please refresh '
-                'controller status by '
-                f'`sky status -r {controller_type.value.cluster_name}` '
-                'and try again.') from e
 
-        try:
             subprocess_utils.handle_returncode(returncode, code,
                                                f'Failed to terminate {noun}',
                                                stdout)
-        except exceptions.CommandError as e:
-            raise RuntimeError(e.error_msg) from e
+    except exceptions.FetchClusterInfoError as e:
+        raise RuntimeError(
+            'Failed to fetch controller IP. Please refresh controller status '
+            f'by `sky status -r {controller_type.value.cluster_name}` and try '
+            'again.') from e
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+    except grpc.RpcError as e:
+        raise RuntimeError(f'{e.details()} ({e.code()})') from e
+    except grpc.FutureTimeoutError as e:
+        raise RuntimeError('gRPC timed out') from e
 
     logger.info(stdout)
 
@@ -687,8 +698,13 @@ def status(
         replace('service', noun))
 
     if handle.is_grpc_enabled:
-        service_records = serve_rpc_utils.RpcRunner.get_service_status(
-            handle, service_names, pool)
+        try:
+            service_records = serve_rpc_utils.RpcRunner.get_service_status(
+                handle, service_names, pool)
+        except grpc.RpcError as e:
+            raise RuntimeError(f'{e.details()} ({e.code()})') from e
+        except grpc.FutureTimeoutError as e:
+            raise RuntimeError('gRPC timed out') from e
     else:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
@@ -816,8 +832,13 @@ def _get_all_replica_targets(
         pool: bool) -> Set[serve_utils.ServiceComponentTarget]:
     """Helper function to get targets for all live replicas."""
     if handle.is_grpc_enabled:
-        service_records = serve_rpc_utils.RpcRunner.get_service_status(
-            handle, [service_name], pool)
+        try:
+            service_records = serve_rpc_utils.RpcRunner.get_service_status(
+                handle, [service_name], pool)
+        except grpc.RpcError as e:
+            raise RuntimeError(f'{e.details()} ({e.code()})') from e
+        except grpc.FutureTimeoutError as e:
+            raise RuntimeError('gRPC timed out') from e
     else:
         code = serve_utils.ServeCodeGen.get_service_status([service_name],
                                                            pool=pool)
