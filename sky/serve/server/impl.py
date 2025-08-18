@@ -299,6 +299,8 @@ def up(
 
         assert controller_job_id is not None and controller_handle is not None
         assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
+        backend = backend_utils.get_backend_from_handle(controller_handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
         # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
         # change after the first time, so there is no consistency issue.
         try:
@@ -315,9 +317,6 @@ def up(
                 else:
                     code = serve_utils.ServeCodeGen.wait_service_registration(
                         service_name, controller_job_id, pool)
-                    backend = backend_utils.get_backend_from_handle(
-                        controller_handle)
-                    assert isinstance(backend, backends.CloudVmRayBackend)
                     returncode, lb_port_payload, _ = backend.run_on_head(
                         controller_handle,
                         code,
