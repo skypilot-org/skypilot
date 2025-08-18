@@ -2879,21 +2879,22 @@ class SkyletClient:
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'servev1_pb2.TerminateServiceResponse':
         return self._serve_stub.TerminateServices(request, timeout=timeout)
-    
+
     def terminate_replica(
         self,
         request: 'servev1_pb2.TerminateReplicaRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'servev1_pb2.TerminateReplicaResponse':
         return self._serve_stub.TerminateReplica(request, timeout=timeout)
-    
+
     def wait_service_registration(
         self,
         request: 'servev1_pb2.WaitRegistrationRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'servev1_pb2.WaitRegistrationResponse':
-        return self._serve_stub.WaitServiceRegistration(request, timeout=timeout)
-    
+        return self._serve_stub.WaitServiceRegistration(request,
+                                                        timeout=timeout)
+
     def update_service(
         self,
         request: 'servev1_pb2.UpdateServiceRequest',

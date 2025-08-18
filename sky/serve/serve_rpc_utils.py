@@ -132,42 +132,43 @@ class RpcRunner:
             handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
             terminate_services(request))
         return response.message
-    
+
     @classmethod
     def terminate_replica(cls, handle: backends.CloudVmRayResourceHandle,
-                          service_name: str, replica_id: int, purge: bool) -> str:
+                          service_name: str, replica_id: int,
+                          purge: bool) -> str:
         assert handle.is_grpc_enabled
-        request = servev1_pb2.TerminateReplicaRequest(
-            service_name=service_name,
-            replica_id=replica_id,
-            purge=purge)
+        request = servev1_pb2.TerminateReplicaRequest(service_name=service_name,
+                                                      replica_id=replica_id,
+                                                      purge=purge)
         response = backend_utils.invoke_skylet_with_retries(
             handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
             terminate_replica(request))
         return response.message
-    
+
     @classmethod
-    def wait_service_registration(cls, handle: backends.CloudVmRayResourceHandle,
-                                  service_name: str, job_id: int, pool: bool) -> int:
+    def wait_service_registration(cls,
+                                  handle: backends.CloudVmRayResourceHandle,
+                                  service_name: str, job_id: int,
+                                  pool: bool) -> int:
         assert handle.is_grpc_enabled
-        request = servev1_pb2.WaitRegistrationRequest(
-            service_name=service_name,
-            job_id=job_id,
-            pool=pool)
+        request = servev1_pb2.WaitRegistrationRequest(service_name=service_name,
+                                                      job_id=job_id,
+                                                      pool=pool)
         response = backend_utils.invoke_skylet_with_retries(
             handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
             wait_service_registration(request))
         return response.lb_port
-    
+
     @classmethod
     def update_service(cls, handle: backends.CloudVmRayResourceHandle,
-                       service_name: str, version: int, mode: serve_utils.UpdateMode, pool: bool) -> str:
+                       service_name: str, version: int,
+                       mode: serve_utils.UpdateMode, pool: bool) -> str:
         assert handle.is_grpc_enabled
-        request = servev1_pb2.UpdateServiceRequest(
-            service_name=service_name,
-            version=version,
-            mode=mode.value,
-            pool=pool)
+        request = servev1_pb2.UpdateServiceRequest(service_name=service_name,
+                                                   version=version,
+                                                   mode=mode.value,
+                                                   pool=pool)
         response = backend_utils.invoke_skylet_with_retries(
             handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
             update_service(request))
