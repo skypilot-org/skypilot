@@ -45,6 +45,8 @@ from argparse import ArgumentParser
 import asyncio
 import contextlib
 import os
+import pathlib
+import shutil
 import sys
 import typing
 from typing import Set
@@ -55,6 +57,7 @@ import filelock
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
@@ -95,6 +98,8 @@ JOBS_PER_WORKER = 200
 
 # keep 1GB reserved after the controllers
 MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
+
+CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
 
 # Maximum values for above constants. There will start to be lagging issues
 # at these numbers already.
@@ -189,6 +194,26 @@ def maybe_start_controllers() -> None:
     """
     try:
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
+            cur = pathlib.Path(CURRENT_HASH)
+            old = pathlib.Path(f'{CURRENT_HASH}.old')
+
+            if old.exists() and cur.exists():
+                if (old.read_text(encoding='utf-8') !=
+                        cur.read_text(encoding='utf-8')):
+                    # TODO(luca): there is a 1/2^160 chance that there will be
+                    # a collision. using a geometric distribution and assuming
+                    # one update a day, we expect a bug slightly before the heat
+                    # death of the universe. should get this fixed before then.
+                    try:
+                        # this is likely a problem
+                        sdk.api_stop()
+                    except Exception: # pylint: disable=broad-exception-caught
+                        pass
+                    else:
+                        shutil.copyfile(cur, old)
+            if not old.exists():
+                shutil.copyfile(cur, old)
+
             alive = get_alive_controllers()
             if alive is None:
                 return
@@ -222,6 +247,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
         if managed_job_utils.controller_process_alive(controller_pid, job_id):
             maybe_start_controllers()
             return
+
     state.scheduler_set_waiting(job_id, dag_yaml_path,
                                 original_user_yaml_path, env_file_path,
                                 common_utils.get_user_hash(), priority)

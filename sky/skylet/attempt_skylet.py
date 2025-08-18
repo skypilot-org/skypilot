@@ -12,9 +12,6 @@ def restart_skylet():
     # Kills old skylet if it is running.
     # TODO(zhwu): make the killing graceful, e.g., use a signal to tell
     # skylet to exit, instead of directly killing it.
-    # pylint: disable=import-outside-toplevel
-    import sky.client.sdk as sdk
-    sdk.api_stop()
 
     subprocess.run(
         # We use -m to grep instead of {constants.SKY_PYTHON_CMD} -m to grep
