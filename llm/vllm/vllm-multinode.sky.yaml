@@ -41,7 +41,7 @@ run: |
   sleep 10
   echo "Ray cluster started"
   ray status
-  
+
   echo 'Starting vllm api server...'
 
   # Set VLLM_HOST_IP to the IP of the current node based on rank
@@ -60,7 +60,7 @@ run: |
   fi
 
 service:
-  replicas: 1
+  replicas: 2
   # An actual request for readiness probe.
   readiness_probe:
     path: /v1/chat/completions

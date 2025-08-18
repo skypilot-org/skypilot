@@ -18,7 +18,7 @@ resources:
   # image_id: docker:vllm/vllm-openai:latest # Use this and remove setup for faster cold start
 
 setup: |
-  pip install "vllm>=0.8.3"
+  pip install vllm>=0.10.0 ray>=2.48.0 blobfile
 
 run: |
   echo 'Starting vllm api server...'

@@ -33,7 +33,7 @@ Wait for the launch to complete (you will see `Application startup complete` in 
 ```bash
 HF_TOKEN=xxx sky launch -c vllm-llama4 vllm.sky.yaml --gpus H200:8 --secret HF_TOKEN
 ```
-**Tip**: You can also use the vLLM docker container for faster cold starts by setting the `image_id` in the `resources` section. Refer to [vllm-docker.sky.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vllm/vllm-docker.sky.yaml) for more.
+**Tip**: You can also use the vLLM docker container for faster cold starts by setting the `image_id` in the `resources` section. Refer to [vllm.sky.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vllm/vllm.sky.yaml) for more.
 
 2. Get the endpoint for the cluster:
 ```bash
@@ -184,13 +184,17 @@ Notice that it is the same with previously curl command. You should get a simila
 
 For large models that require multiple nodes, vLLM supports pipeline parallelism and tensor parallelism across nodes. This is useful for serving very large models that may not fit on a single node.
 
-SkyPilot makes it easy to launch and manage multi-node vLLM deployments.
+SkyPilot makes it easy to launch and manage multi-node vLLM deployments. It takes care of:
+
+1. Provisioning multiple nodes (``num_nodes: n`` flag in the YAML)
+2. Distributed setup (including setting up the Ray cluster) and launching the vLLM server.
+3. Load balancing and autoscaling across replicas.
 
 Refer to [vllm-multinode.sky.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vllm/vllm-multinode.sky.yaml) for more details.
 
 1. Start a multi-node vLLM service:
 ```bash
-sky launch -c vllm-multinode vllm-multinode.sky.yaml --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
+HF_TOKEN=xxx sky launch -c vllm-multinode vllm-multinode.sky.yaml --secret HF_TOKEN
 ```
 
 2. Get the endpoint:
@@ -214,4 +218,9 @@ curl http://$ENDPOINT/v1/chat/completions \
   }'
 ```
 
-The multi-node setup automatically distributes the model across nodes using pipeline parallelism, allowing you to serve larger models or achieve higher throughput.
+4. To scale up to multiple replicas, use SkyServe:
+```bash
+HF_TOKEN=xxx sky serve up -n vllm-multinode vllm-multinode.sky.yaml --secret HF_TOKEN
+```
+
+The multi-node setup automatically distributes the model across nodes using pipeline parallelism and tensor parallelism, allowing you to serve larger models or achieve higher throughput.
