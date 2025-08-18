@@ -1650,6 +1650,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
+    # Run core.status in another thread to avoid blocking the event loop.
     cluster_records = await context_utils.to_thread(core.status,
                                                     cluster_name,
                                                     all_users=True)
@@ -1715,7 +1716,20 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                 pass
             await websocket.close()
 
-        await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
+        # Run the pipeline coroutines in a separate thread to avoid any
+        # lag caused by blocking calls in the main event loop.
+        def run_in_thread():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    asyncio.gather(websocket_to_ssh(), ssh_to_websocket()))
+            finally:
+                loop.close()
+
+        thread = threading.Thread(target=run_in_thread)
+        thread.start()
+        thread.join()
     finally:
         proc.terminate()
 
