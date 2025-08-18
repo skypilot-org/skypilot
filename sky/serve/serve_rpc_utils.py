@@ -87,8 +87,16 @@ class TerminateServiceRequestConverter:
 
 class RpcRunner:
     """gRPC Runner for Sky Serve
-    The RPC runner does not check for errors, and assumes that backend handle
-    has grpc enabled.
+
+    The RPC runner does not catch errors, and assumes that backend handle has
+    grpc enabled.
+
+    Common exceptions raised:
+        exceptions.FetchClusterInfoError
+        exceptions.SkyletInternalError
+        grpc.RpcError
+        grpc.FutureTimeoutError
+        AssertionError
     """
 
     @classmethod
