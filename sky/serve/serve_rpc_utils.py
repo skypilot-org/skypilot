@@ -1,6 +1,5 @@
 """Rpc Utilities for SkyServe"""
 
-import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import backends

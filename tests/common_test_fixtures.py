@@ -22,8 +22,8 @@ from sky.catalog import vsphere_catalog
 from sky.provision import common as provision_common
 from sky.provision.aws import config as aws_config
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.serve import serve_state
 from sky.serve import serve_rpc_utils
+from sky.serve import serve_state
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import rest
@@ -322,7 +322,7 @@ def mock_services_no_service_grpc(monkeypatch):
     def mock_get_services_grpc(*_, **__):
         return serve_rpc_utils.GetServiceStatusResponseConverter.to_proto([])
 
-    monkeypatch.setattr('sky.backends.backend_utils.invoke_skylet_with_retries',
+    monkeypatch.setattr(serve_rpc_utils.RpcRunner, 'get_service_status',
                         mock_get_services_grpc)
 
 
@@ -377,7 +377,7 @@ def mock_services_one_service_grpc(monkeypatch):
             for k, v in service.items()
         }])
 
-    monkeypatch.setattr('sky.backends.backend_utils.invoke_skylet_with_retries',
+    monkeypatch.setattr(serve_rpc_utils.RpcRunner, 'get_service_status',
                         mock_get_services_grpc)
 
 
