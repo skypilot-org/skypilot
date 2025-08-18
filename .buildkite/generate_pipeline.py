@@ -367,7 +367,7 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
         # We want enable all clouds by default for each test function
         # for pre-merge. And let the author controls which clouds
         # to run by parameter.
-        pipeline = _generate_pipeline(test_file, args)
+        pipeline = _generate_pipeline(test_file, args, auto_retry=True)
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(yaml_file_path,
