@@ -51,16 +51,6 @@ class AddJobResponse(_message.Message):
     log_dir: str
     def __init__(self, job_id: _Optional[int] = ..., log_dir: _Optional[str] = ...) -> None: ...
 
-class PersistRunScriptRequest(_message.Message):
-    __slots__ = ("script_path",)
-    SCRIPT_PATH_FIELD_NUMBER: _ClassVar[int]
-    script_path: str
-    def __init__(self, script_path: _Optional[str] = ...) -> None: ...
-
-class PersistRunScriptResponse(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
-
 class QueueJobRequest(_message.Message):
     __slots__ = ("job_id", "codegen", "script_path", "remote_log_dir", "managed_job")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]

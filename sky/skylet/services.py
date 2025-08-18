@@ -70,51 +70,6 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def PersistRunScript(  # type: ignore[return]
-            self, request: jobsv1_pb2.PersistRunScriptRequest,
-            context: grpc.ServicerContext
-    ) -> jobsv1_pb2.PersistRunScriptResponse:
-        """Persists a run script to the HA recovery directory."""
-        try:
-            script_path = os.path.expanduser(request.script_path)
-
-            # Extract job_id from script path (format: sky_job_{job_id})
-            script_filename = os.path.basename(script_path)
-            if not script_filename.startswith('sky_job_'):
-                context.abort(grpc.StatusCode.INVALID_ARGUMENT,
-                              f'Invalid script filename: {script_filename}')
-            job_id_str = script_filename[8:]  # Remove 'sky_job_' prefix
-            try:
-                job_id = int(job_id_str)
-            except ValueError:
-                context.abort(grpc.StatusCode.INVALID_ARGUMENT,
-                              f'Invalid job ID in filename: {job_id_str}')
-
-            # Build the complete job execution command (same logic as QueueJob)
-            cd = f'cd {os.path.expanduser(constants.SKY_REMOTE_WORKDIR)}'
-            job_submit_cmd = (
-                # JOB_CMD_IDENTIFIER is used for identifying the process
-                # retrieved with pid is the same driver process.
-                f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
-                f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}')
-
-            # Write the complete command to the persistent HA recovery directory
-            persistent_dir = os.path.expanduser(
-                constants.PERSISTENT_RUN_SCRIPT_DIR)
-            os.makedirs(persistent_dir, exist_ok=True)
-            persistent_script_path = os.path.join(persistent_dir,
-                                                  script_filename)
-
-            with open(persistent_script_path, 'w', encoding='utf-8') as f:
-                f.write(job_submit_cmd)
-
-            # Make the persistent script executable
-            os.chmod(persistent_script_path, 0o755)
-
-            return jobsv1_pb2.PersistRunScriptResponse()
-        except Exception as e:  # pylint: disable=broad-except
-            context.abort(grpc.StatusCode.INTERNAL, str(e))
-
     def QueueJob(  # type: ignore[return]
             self, request: jobsv1_pb2.QueueJobRequest,
             context: grpc.ServicerContext) -> jobsv1_pb2.QueueJobResponse:

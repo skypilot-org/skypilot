@@ -2943,13 +2943,6 @@ class SkyletClient:
     ) -> jobsv1_pb2.AddJobResponse:
         return self._jobs_stub.AddJob(request, timeout=timeout)
 
-    def persist_run_script(
-        self,
-        request: jobsv1_pb2.PersistRunScriptRequest,
-        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.PersistRunScriptResponse:
-        return self._jobs_stub.PersistRunScript(request, timeout=timeout)
-
     def queue_job(
         self,
         request: jobsv1_pb2.QueueJobRequest,
@@ -3925,6 +3918,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         script_path = os.path.join(SKY_REMOTE_APP_DIR, file_name)
         if remote_log_dir is None:
             remote_log_dir = self.log_dir
+        remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         def _dump_code_to_file(codegen: str,
                                target_dir: str = SKY_REMOTE_APP_DIR) -> None:
@@ -3942,23 +3936,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   up=True,
                                   stream_logs=False)
 
+        cd = f'cd {SKY_REMOTE_WORKDIR}'
+        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
+                      f'touch {remote_log_path}')
+        encoded_script = shlex.quote(codegen)
+        create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
+        job_submit_cmd = (
+            # JOB_CMD_IDENTIFIER is used for identifying the process
+            # retrieved with pid is the same driver process.
+            f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
+            f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
+            # Do not use &>, which is not POSIX and may not work.
+            # Note that the order of ">filename 2>&1" matters.
+            f'> {remote_log_path} 2>&1')
+        code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+        job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
+
+        # Should also be ealier than _is_command_length_over_limit
+        # Same reason as in _setup
+        if self._dump_final_script:
+            _dump_code_to_file(job_submit_cmd,
+                               constants.PERSISTENT_RUN_SCRIPT_DIR)
+
         if handle.is_grpc_enabled:
             try:
-                # Should also be ealier than _is_command_length_over_limit
-                # Same reason as in _setup
-                if self._dump_final_script:
-                    # Unlike the legacy path which dumps the whole
-                    # `job_submit_cmd`, we only dump `codegen` to the file,
-                    # and then call the `PersistRunScript` gRPC method to
-                    # persist the script to the persistent path.
-                    _dump_code_to_file(codegen)
-                    persist_run_script_request = (
-                        jobsv1_pb2.PersistRunScriptRequest(
-                            script_path=script_path))
-                    backend_utils.invoke_skylet_with_retries(
-                        handle, lambda: SkyletClient(handle.get_grpc_channel()).
-                        persist_run_script(persist_run_script_request))
-
                 managed_job_info: Optional[jobsv1_pb2.ManagedJobInfo] = None
                 if managed_job_dag is not None:
                     workspace = skypilot_config.get_active_workspace(
@@ -3983,13 +3984,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         entrypoint=entrypoint,
                         tasks=managed_job_tasks)
 
-                # Check if codegen content is too large for gRPC
                 if _is_command_length_over_limit(codegen):
-                    # If self._dump_final_script is True, it means that
-                    # we have rsync'ed `codegen` to the remote cluster,
-                    # so we don't need to rsync it again.
-                    if not self._dump_final_script:
-                        _dump_code_to_file(codegen)
+                    _dump_code_to_file(codegen)
                     queue_job_request = jobsv1_pb2.QueueJobRequest(
                         job_id=job_id,
                         # codegen not set - server assumes script uploaded
@@ -4011,32 +4007,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 use_legacy = True
 
         if use_legacy:
-            remote_log_path = os.path.join(remote_log_dir, 'run.log')
-
-            cd = f'cd {SKY_REMOTE_WORKDIR}'
-
-            mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
-                          f'touch {remote_log_path}')
-            encoded_script = shlex.quote(codegen)
-            create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
-            job_submit_cmd = (
-                # JOB_CMD_IDENTIFIER is used for identifying the process
-                # retrieved with pid is the same driver process.
-                f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
-                f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
-                # Do not use &>, which is not POSIX and may not work.
-                # Note that the order of ">filename 2>&1" matters.
-                f'> {remote_log_path} 2>&1')
-
-            code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-            job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
-
-            # Should also be ealier than _is_command_length_over_limit
-            # Same reason as in _setup
-            if self._dump_final_script:
-                _dump_code_to_file(job_submit_cmd,
-                                   constants.PERSISTENT_RUN_SCRIPT_DIR)
-
             if _is_command_length_over_limit(job_submit_cmd):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'

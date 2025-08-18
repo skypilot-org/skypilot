@@ -44,11 +44,6 @@ class JobsServiceStub(object):
                 request_serializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.AddJobRequest.SerializeToString,
                 response_deserializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.AddJobResponse.FromString,
                 _registered_method=True)
-        self.PersistRunScript = channel.unary_unary(
-                '/jobs.v1.JobsService/PersistRunScript',
-                request_serializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.PersistRunScriptRequest.SerializeToString,
-                response_deserializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.PersistRunScriptResponse.FromString,
-                _registered_method=True)
         self.QueueJob = channel.unary_unary(
                 '/jobs.v1.JobsService/QueueJob',
                 request_serializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.QueueJobRequest.SerializeToString,
@@ -106,13 +101,6 @@ class JobsServiceServicer(object):
 
     def AddJob(self, request, context):
         """Add a new job to the database.
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def PersistRunScript(self, request, context):
-        """Queue a job for execution.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -196,11 +184,6 @@ def add_JobsServiceServicer_to_server(servicer, server):
                     request_deserializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.AddJobRequest.FromString,
                     response_serializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.AddJobResponse.SerializeToString,
             ),
-            'PersistRunScript': grpc.unary_unary_rpc_method_handler(
-                    servicer.PersistRunScript,
-                    request_deserializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.PersistRunScriptRequest.FromString,
-                    response_serializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.PersistRunScriptResponse.SerializeToString,
-            ),
             'QueueJob': grpc.unary_unary_rpc_method_handler(
                     servicer.QueueJob,
                     request_deserializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.QueueJobRequest.FromString,
@@ -278,33 +261,6 @@ class JobsService(object):
             '/jobs.v1.JobsService/AddJob',
             sky_dot_schemas_dot_generated_dot_jobsv1__pb2.AddJobRequest.SerializeToString,
             sky_dot_schemas_dot_generated_dot_jobsv1__pb2.AddJobResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def PersistRunScript(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/jobs.v1.JobsService/PersistRunScript',
-            sky_dot_schemas_dot_generated_dot_jobsv1__pb2.PersistRunScriptRequest.SerializeToString,
-            sky_dot_schemas_dot_generated_dot_jobsv1__pb2.PersistRunScriptResponse.FromString,
             options,
             channel_credentials,
             insecure,

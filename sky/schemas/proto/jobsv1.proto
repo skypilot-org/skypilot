@@ -6,8 +6,6 @@ service JobsService {
   // Add a new job to the database.
   rpc AddJob(AddJobRequest) returns (AddJobResponse);
   // Queue a job for execution.
-  rpc PersistRunScript(PersistRunScriptRequest) returns (PersistRunScriptResponse);
-  // Queue a job for execution.
   rpc QueueJob(QueueJobRequest) returns (QueueJobResponse);
   // Update status of all jobs.
   rpc UpdateStatus(UpdateStatusRequest) returns (UpdateStatusResponse);
@@ -54,12 +52,6 @@ message AddJobResponse {
   int64 job_id = 1;
   string log_dir = 2;
 }
-
-message PersistRunScriptRequest {
-  string script_path = 1;
-}
-
-message PersistRunScriptResponse {}
 
 message QueueJobRequest {
   int64 job_id = 1;
