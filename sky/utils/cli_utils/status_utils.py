@@ -6,6 +6,7 @@ import click
 import colorama
 
 from sky import backends
+from sky.schemas.api import responses
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -44,7 +45,7 @@ class StatusColumn:
         return val
 
 
-def show_status_table(cluster_records: List[_ClusterRecord],
+def show_status_table(cluster_records: List[responses.StatusResponse],
                       show_all: bool,
                       show_user: bool,
                       query_clusters: Optional[List[str]] = None,

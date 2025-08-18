@@ -1235,7 +1235,8 @@ async def download_logs(
 
 
 @app.post('/download')
-async def download(download_body: payloads.DownloadBody) -> None:
+async def download(download_body: payloads.DownloadBody,
+                   request: fastapi.Request) -> None:
     """Downloads a folder from the cluster to the local machine."""
     folder_paths = [
         pathlib.Path(folder_path) for folder_path in download_body.folder_paths
@@ -1264,7 +1265,16 @@ async def download(download_body: payloads.DownloadBody) -> None:
             str(folder_path.expanduser().resolve())
             for folder_path in folder_paths
         ]
-        storage_utils.zip_files_and_folders(folders, zip_path)
+        # Check for optional query parameter to control zip entry structure
+        relative = request.query_params.get('relative', 'home')
+        if relative == 'items':
+            # Dashboard-friendly: entries relative to selected folders
+            storage_utils.zip_files_and_folders(folders,
+                                                zip_path,
+                                                relative_to_items=True)
+        else:
+            # CLI-friendly (default): entries with full paths for mapping
+            storage_utils.zip_files_and_folders(folders, zip_path)
 
         # Add home path to the response headers, so that the client can replace
         # the remote path in the zip file to the local path.
@@ -1583,13 +1593,7 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
     Returns:
-        A dictionary with the following keys:
-        - status: str; The status of the API server.
-        - api_version: str; The API version of the API server.
-        - version: str; The version of SkyPilot used for API server.
-        - version_on_disk: str; The version of the SkyPilot installation on
-          disk, which can be used to warn about restarting the API server
-        - commit: str; The commit hash of SkyPilot used for API server.
+        responses.APIHealthResponse: The health response.
     """
     user = request.state.auth_user
     server_status = common.ApiServerStatus.HEALTHY
