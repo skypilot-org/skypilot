@@ -595,7 +595,7 @@ async def endpoints(
 async def endpoints(
         cluster: str,
         port: Union[int, str],
-        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> str:
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> Optional[str]:
     ...
 
 
@@ -616,7 +616,7 @@ async def endpoints(
     if port is None:
         return {int(k): v for k, v in result.items()}
     else:
-        return result[str(port)]
+        return result.get(str(port), None)
 
 
 @usage_lib.entrypoint

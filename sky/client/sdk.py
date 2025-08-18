@@ -1521,7 +1521,7 @@ def endpoints(
         # Create a transformation function to extract
         # the specific port from the Dict
         def port_extractor(result: Dict[str, str]) -> Optional[str]:
-            return result.get(str(port))
+            return result.get(str(port), None)
 
         port_request_id.set_transform_func(port_extractor)
         return port_request_id
