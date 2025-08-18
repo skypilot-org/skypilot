@@ -2716,20 +2716,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     ack = queue.get_nowait()
                 except queue_lib.Empty:
                     ack = None
-                    logger.debug('No ack received')
                     time.sleep(0.1)
                     continue
-                logger.debug(f'ack: {ack}')
                 assert ack is not None
                 if isinstance(
                         head_runner,
                         command_runner.SSHCommandRunner) and ack == f'{_ACK}\n':
-                    logger.debug('SSHCommandRunner: ack received')
                     break
                 elif isinstance(head_runner,
                                 command_runner.KubernetesCommandRunner
                                ) and _FORWARDING_FROM in ack:
-                    logger.debug('KubernetesCommandRunner: ack received')
                     break
 
             if ssh_tunnel_proc.poll() is not None:
