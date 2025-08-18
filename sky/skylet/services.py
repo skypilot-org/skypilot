@@ -105,7 +105,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             persistent_script_path = os.path.join(persistent_dir,
                                                   script_filename)
 
-            with open(persistent_script_path, 'w') as f:
+            with open(persistent_script_path, 'w', encoding='utf-8') as f:
                 f.write(job_submit_cmd)
 
             # Make the persistent script executable
@@ -124,7 +124,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             remote_log_dir = os.path.expanduser(request.remote_log_dir)
             os.makedirs(remote_log_dir, exist_ok=True)
             remote_log_path = os.path.join(remote_log_dir, 'run.log')
-            open(remote_log_path, 'a').close()
+            open(remote_log_path, 'a').close()  # pylint: disable=unspecified-encoding
 
             script_path = os.path.expanduser(request.script_path)
             os.makedirs(os.path.dirname(script_path), exist_ok=True)
@@ -132,7 +132,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             # If `codegen` is not provided, assume script is already
             # uploaded to `script_path` via rsync.
             if request.HasField('codegen'):
-                with open(script_path, 'w') as f:
+                with open(script_path, 'w', encoding='utf-8') as f:
                     f.write(request.codegen)
                 os.chmod(script_path, 0o755)
 
