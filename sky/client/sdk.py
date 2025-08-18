@@ -1467,8 +1467,8 @@ def endpoints(cluster: str,
 
 
 @typing.overload
-def endpoints(cluster: str,
-              port: Union[int, str]) -> server_common.RequestId[Dict[str, str]]:
+def endpoints(cluster: str, port: Union[int,
+                                        str]) -> server_common.RequestId[str]:
     ...
 
 
@@ -1479,7 +1479,7 @@ def endpoints(
     cluster: str,
     port: Optional[Union[int, str]] = None
 ) -> Union[server_common.RequestId[Dict[str, str]],
-           server_common.RequestId[Dict[str, str]]]:
+           server_common.RequestId[str]]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -1505,7 +1505,14 @@ def endpoints(
     )
     response = server_common.make_authenticated_request(
         'POST', '/endpoints', json=json.loads(body.model_dump_json()))
-    return server_common.get_request_id(response)
+    if port is None:
+        no_port_request_id: server_common.RequestId[Dict[str, str]] = (
+            server_common.get_request_id(response))
+        return no_port_request_id
+    else:
+        port_request_id: server_common.RequestId[str] = (
+            server_common.get_request_id(response))
+        return port_request_id
 
 
 @usage_lib.entrypoint
