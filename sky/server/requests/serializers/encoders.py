@@ -8,6 +8,7 @@ import pickle
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky.schemas.api import responses
 from sky.server import constants as server_constants
 
 if typing.TYPE_CHECKING:
@@ -51,13 +52,17 @@ def default_encoder(return_value: Any) -> Any:
 
 
 @register_encoder('status')
-def encode_status(clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def encode_status(
+        clusters: List[responses.StatusResponse]) -> List[Dict[str, Any]]:
+    response = []
     for cluster in clusters:
-        cluster['status'] = cluster['status'].value
-        cluster['handle'] = pickle_and_encode(cluster['handle'])
-        cluster['storage_mounts_metadata'] = pickle_and_encode(
-            cluster['storage_mounts_metadata'])
-    return clusters
+        response_cluster = cluster.model_dump()
+        response_cluster['status'] = cluster['status'].value
+        response_cluster['handle'] = pickle_and_encode(cluster['handle'])
+        response_cluster['storage_mounts_metadata'] = pickle_and_encode(
+            response_cluster['storage_mounts_metadata'])
+        response.append(response_cluster)
+    return response
 
 
 @register_encoder('launch', 'exec', 'jobs.launch')
@@ -106,10 +111,18 @@ def encode_status_kubernetes(
 
 
 @register_encoder('jobs.queue')
-def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
+def encode_jobs_queue(jobs_or_tuple):
+    # Support returning either a plain jobs list or a (jobs, total) tuple
+    if isinstance(jobs_or_tuple, tuple) and len(jobs_or_tuple) == 2:
+        jobs, total = jobs_or_tuple
+    else:
+        jobs = jobs_or_tuple
+        total = None
     for job in jobs:
         job['status'] = job['status'].value
-    return jobs
+    if total is None:
+        return jobs
+    return {'jobs': jobs, 'total': total}
 
 
 def _encode_serve_status(

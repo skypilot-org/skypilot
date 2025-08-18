@@ -85,6 +85,12 @@ _JOB_CANCELLED_MESSAGE = (
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 40
 
 
+class ManagedJobQueueResultType(enum.Enum):
+    """The type of the managed job queue result."""
+    DICT = 'DICT'
+    LIST = 'LIST'
+
+
 class UserSignal(enum.Enum):
     """The signal to be sent to the user."""
     CANCEL = 'CANCEL'
@@ -337,9 +343,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             if handle is not None:
                 try:
                     if pool is None:
-                        global_user_state.add_cluster_event(
-                            cluster_name, None, 'Cluster was cleaned up.',
-                            global_user_state.ClusterEventType.STATUS_CHANGE)
                         terminate_cluster(cluster_name)
                 except Exception as e:  # pylint: disable=broad-except
                     error_msg = (
@@ -1120,7 +1123,17 @@ def stream_logs(job_id: Optional[int],
     return stream_logs_by_id(job_id, follow, tail)
 
 
-def dump_managed_job_queue() -> str:
+def dump_managed_job_queue(
+    skip_finished: bool = False,
+    accessible_workspaces: Optional[List[str]] = None,
+    job_ids: Optional[List[int]] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    user_hashes: Optional[List[Optional[str]]] = None,
+) -> str:
     # Make sure to get all jobs - some logic below (e.g. high priority job
     # detection) requires a full view of the jobs table.
     jobs = managed_job_state.get_managed_jobs()
@@ -1147,6 +1160,31 @@ def dump_managed_job_queue() -> str:
         if priority is not None and priority > highest_blocking_priority:
             highest_blocking_priority = priority
 
+    if user_hashes:
+        jobs = [
+            job for job in jobs if job.get('user_hash', None) in user_hashes
+        ]
+    if accessible_workspaces:
+        jobs = [
+            job for job in jobs
+            if job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) in
+            accessible_workspaces
+        ]
+    if skip_finished:
+        # Filter out the finished jobs. If a multi-task job is partially
+        # finished, we will include all its tasks.
+        non_finished_tasks = list(
+            filter(
+                lambda job: not managed_job_state.ManagedJobStatus(job[
+                    'status']).is_terminal(), jobs))
+        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
+        jobs = list(
+            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+    if job_ids:
+        jobs = [job for job in jobs if job['job_id'] in job_ids]
+
+    jobs, total = filter_jobs(jobs, workspace_match, name_match, pool_match,
+                              page, limit)
     for job in jobs:
         end_at = job['end_at']
         if end_at is None:
@@ -1220,12 +1258,96 @@ def dump_managed_job_queue() -> str:
         else:
             job['details'] = None
 
-    return message_utils.encode_payload(jobs)
+    return message_utils.encode_payload({'jobs': jobs, 'total': total})
 
 
-def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
+def filter_jobs(
+    jobs: List[Dict[str, Any]],
+    workspace_match: Optional[str],
+    name_match: Optional[str],
+    pool_match: Optional[str],
+    page: Optional[int],
+    limit: Optional[int],
+    user_match: Optional[str] = None,
+    enable_user_match: bool = False,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Filter jobs based on the given criteria.
+
+    Args:
+        jobs: List of jobs to filter.
+        workspace_match: Workspace name to filter.
+        name_match: Job name to filter.
+        pool_match: Pool name to filter.
+        page: Page to filter.
+        limit: Limit to filter.
+        user_match: User name to filter.
+        enable_user_match: Whether to enable user match.
+
+    Returns:
+        List of filtered jobs and total number of jobs.
+    """
+
+    # TODO(hailong): refactor the whole function including the
+    # `dump_managed_job_queue()` to use DB filtering.
+
+    def _pattern_matches(job: Dict[str, Any], key: str,
+                         pattern: Optional[str]) -> bool:
+        if pattern is None:
+            return True
+        if key not in job:
+            return False
+        value = job[key]
+        if not value:
+            return False
+        return pattern in str(value)
+
+    def _handle_page_and_limit(
+        result: List[Dict[str, Any]],
+        page: Optional[int],
+        limit: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        if page is None and limit is None:
+            return result
+        assert page is not None and limit is not None, (page, limit)
+        # page starts from 1
+        start = (page - 1) * limit
+        end = min(start + limit, len(result))
+        return result[start:end]
+
+    result = []
+    checks = [
+        ('workspace', workspace_match),
+        ('job_name', name_match),
+        ('pool', pool_match),
+    ]
+    if enable_user_match:
+        checks.append(('user_name', user_match))
+
+    for job in jobs:
+        if not all(
+                _pattern_matches(job, key, pattern) for key, pattern in checks):
+            continue
+        result.append(job)
+
+    total = len(result)
+
+    return _handle_page_and_limit(result, page, limit), total
+
+
+def load_managed_job_queue(
+    payload: str
+) -> Tuple[List[Dict[str, Any]], int, ManagedJobQueueResultType]:
     """Load job queue from json string."""
-    jobs = message_utils.decode_payload(payload)
+    result = message_utils.decode_payload(payload)
+    result_type = ManagedJobQueueResultType.DICT
+    if isinstance(result, dict):
+        jobs = result['jobs']
+        total = result['total']
+    else:
+        jobs = result
+        total = len(jobs)
+        result_type = ManagedJobQueueResultType.LIST
+
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
         if 'user_hash' in job and job['user_hash'] is not None:
@@ -1233,7 +1355,7 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
             # TODO(cooperc): Remove check before 0.12.0.
             user = global_user_state.get_user(job['user_hash'])
             job['user_name'] = user.name if user is not None else None
-    return jobs
+    return jobs, total, result_type
 
 
 def _get_job_status_from_tasks(
@@ -1580,9 +1702,35 @@ class ManagedJobCodeGen:
         """)
 
     @classmethod
-    def get_job_table(cls) -> str:
-        code = textwrap.dedent("""\
-        job_table = utils.dump_managed_job_queue()
+    def get_job_table(
+        cls,
+        skip_finished: bool = False,
+        accessible_workspaces: Optional[List[str]] = None,
+        job_ids: Optional[List[int]] = None,
+        workspace_match: Optional[str] = None,
+        name_match: Optional[str] = None,
+        pool_match: Optional[str] = None,
+        page: Optional[int] = None,
+        limit: Optional[int] = None,
+        user_hashes: Optional[List[Optional[str]]] = None,
+    ) -> str:
+        code = textwrap.dedent(f"""\
+        if managed_job_version < 9:
+            # For backward compatibility, since filtering is not supported
+            # before #6652.
+            # TODO(hailong): Remove compatibility before 0.12.0
+            job_table = utils.dump_managed_job_queue()
+        else:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r})
         print(job_table, flush=True)
         """)
         return cls._build(code)

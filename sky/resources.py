@@ -37,7 +37,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_DEFAULT_DISK_SIZE_GB = 256
+DEFAULT_DISK_SIZE_GB = 256
 
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
@@ -319,7 +319,7 @@ class Resources:
             self._disk_size = int(
                 resources_utils.parse_memory_resource(disk_size, 'disk_size'))
         else:
-            self._disk_size = _DEFAULT_DISK_SIZE_GB
+            self._disk_size = DEFAULT_DISK_SIZE_GB
 
         self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
@@ -482,7 +482,7 @@ class Resources:
             network_tier = f', network_tier={self.network_tier.value}'
 
         disk_size = ''
-        if self.disk_size != _DEFAULT_DISK_SIZE_GB:
+        if self.disk_size != DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
         ports = ''
@@ -1766,7 +1766,7 @@ class Resources:
             self._accelerators is None,
             self._accelerator_args is None,
             not self._use_spot_specified,
-            self._disk_size == _DEFAULT_DISK_SIZE_GB,
+            self._disk_size == DEFAULT_DISK_SIZE_GB,
             self._disk_tier is None,
             self._network_tier is None,
             self._image_id is None,
@@ -2255,7 +2255,7 @@ class Resources:
             accelerator_args = state.pop('accelerator_args', None)
             state['_accelerator_args'] = accelerator_args
 
-            disk_size = state.pop('disk_size', _DEFAULT_DISK_SIZE_GB)
+            disk_size = state.pop('disk_size', DEFAULT_DISK_SIZE_GB)
             state['_disk_size'] = disk_size
 
         if version < 2:

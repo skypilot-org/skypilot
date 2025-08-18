@@ -442,7 +442,9 @@ class Nebius(clouds.Cloud):
         del workspace_config  # Unused
         sdk = nebius.sdk()
         profile_client = nebius.iam().ProfileServiceClient(sdk)
-        profile = profile_client.get(nebius.iam().GetProfileRequest()).wait()
+        profile = nebius.sync_call(
+            profile_client.get(nebius.iam().GetProfileRequest(),
+                               timeout=nebius.READ_TIMEOUT))
         if profile.user_profile is not None:
             if profile.user_profile.attributes is None:
                 raise exceptions.CloudUserIdentityError(

@@ -1,11 +1,12 @@
 """Responses for the API server."""
 
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 import pydantic
 
 from sky import models
 from sky.server import common
+from sky.utils import status_lib
 
 
 class ResponseBaseModel(pydantic.BaseModel):
@@ -46,6 +47,9 @@ class ResponseBaseModel(pydantic.BaseModel):
     def __setitem__(self, key, value):
         setattr(self, key, value)
 
+    def get(self, key, default=None):
+        return getattr(self, key, default)
+
     def __contains__(self, key):
         return hasattr(self, key)
 
@@ -58,6 +62,9 @@ class ResponseBaseModel(pydantic.BaseModel):
     def items(self):
         return self.model_dump().items()
 
+    def __repr__(self):
+        return self.__dict__.__repr__()
+
 
 class APIHealthResponse(ResponseBaseModel):
     """Response for the API health endpoint."""
@@ -68,3 +75,45 @@ class APIHealthResponse(ResponseBaseModel):
     commit: str = ''
     basic_auth_enabled: bool = False
     user: Optional[models.User] = None
+
+
+class StatusResponse(ResponseBaseModel):
+    """Response for the status endpoint."""
+    name: str
+    launched_at: int
+    # pydantic cannot generate the pydantic-core schema for
+    # backends.ResourceHandle, so we use Any here.
+    # This is an internally facing field anyway, so it's less
+    # of a problem that it's not typed.
+    handle: Any
+    last_use: str
+    status: status_lib.ClusterStatus
+    autostop: int
+    to_down: bool
+    owner: Optional[List[str]] = None
+    # metadata is a JSON, so we use Any here.
+    metadata: Optional[Dict[str, Any]] = None
+    cluster_hash: str
+    # pydantic cannot generate the pydantic-core schema for
+    # storage_mounts_metadata, so we use Any here.
+    storage_mounts_metadata: Optional[Dict[str, Any]] = None
+    cluster_ever_up: bool
+    status_updated_at: int
+    user_hash: str
+    user_name: str
+    config_hash: Optional[str] = None
+    workspace: str
+    last_creation_yaml: Optional[str] = None
+    last_creation_command: Optional[str] = None
+    is_managed: bool
+    last_event: Optional[str] = None
+    resources_str: Optional[str] = None
+    resources_str_full: Optional[str] = None
+    # credentials is a JSON, so we use Any here.
+    credentials: Optional[Dict[str, Any]] = None
+    nodes: int
+    cloud: Optional[str] = None
+    region: Optional[str] = None
+    cpus: Optional[str] = None
+    memory: Optional[str] = None
+    accelerators: Optional[str] = None
