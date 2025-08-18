@@ -1650,7 +1650,10 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
-    cluster_records = core.status(cluster_name, all_users=True)
+    # Run core.status in another thread to avoid blocking the event loop.
+    cluster_records = await context_utils.to_thread(core.status,
+                                                    cluster_name,
+                                                    all_users=True)
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         raise fastapi.HTTPException(
