@@ -320,7 +320,7 @@ def mock_services_no_service_grpc(monkeypatch):
     """Mock services to return no services."""
 
     def mock_get_services_grpc(*_, **__):
-        return serve_rpc_utils.GetServiceStatusResponseConverter.to_proto([])
+        return []
 
     monkeypatch.setattr(serve_rpc_utils.RpcRunner, 'get_service_status',
                         mock_get_services_grpc)
@@ -372,10 +372,7 @@ def mock_services_one_service_grpc(monkeypatch):
             'replica_info': [],
             'tls_encrypted': False,
         }
-        return serve_rpc_utils.GetServiceStatusResponseConverter.to_proto([{
-            k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
-            for k, v in service.items()
-        }])
+        return [service]
 
     monkeypatch.setattr(serve_rpc_utils.RpcRunner, 'get_service_status',
                         mock_get_services_grpc)
