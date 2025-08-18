@@ -8,9 +8,12 @@ import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
 } from '@/components/utils';
-import { RotateCwIcon } from 'lucide-react';
+import { RotateCwIcon, Download } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
-import { streamClusterJobLogs } from '@/data/connectors/clusters';
+import {
+  streamClusterJobLogs,
+  downloadJobLogs,
+} from '@/data/connectors/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { LogFilter, formatLogs, stripAnsiCodes } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
@@ -389,20 +392,39 @@ export function JobDetailPage() {
                       logs.)
                     </span>
                   </div>
-                  <Tooltip
-                    content="Refresh logs"
-                    className="text-muted-foreground"
-                  >
-                    <button
-                      onClick={handleRefreshLogs}
-                      disabled={isLoadingLogs}
-                      className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  <div className="flex items-center space-x-3">
+                    <Tooltip
+                      content="Download full logs"
+                      className="text-muted-foreground"
                     >
-                      <RotateCwIcon
-                        className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
-                      />
-                    </button>
-                  </Tooltip>
+                      <button
+                        onClick={() =>
+                          downloadJobLogs({
+                            clusterName: cluster,
+                            jobIds: job ? [job] : null,
+                            workspace: clusterData?.workspace,
+                          })
+                        }
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip
+                      content="Refresh logs"
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={handleRefreshLogs}
+                        disabled={isLoadingLogs}
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <RotateCwIcon
+                          className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                        />
+                      </button>
+                    </Tooltip>
+                  </div>
                 </div>
                 <div className="p-4">
                   {isPending ? (

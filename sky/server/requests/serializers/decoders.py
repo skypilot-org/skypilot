@@ -9,6 +9,7 @@ from sky import models
 from sky.catalog import common
 from sky.data import storage
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.server import constants as server_constants
 from sky.skylet import job_lib
@@ -50,13 +51,17 @@ def default_decode_handler(return_value: Any) -> Any:
 
 
 @register_decoders('status')
-def decode_status(return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def decode_status(
+        return_value: List[Dict[str, Any]]) -> List[responses.StatusResponse]:
     clusters = return_value
+    response = []
     for cluster in clusters:
         cluster['handle'] = decode_and_unpickle(cluster['handle'])
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
-
-    return clusters
+        cluster['storage_mounts_metadata'] = decode_and_unpickle(
+            cluster['storage_mounts_metadata'])
+        response.append(responses.StatusResponse.model_validate(cluster))
+    return response
 
 
 @register_decoders('status_kubernetes')
@@ -102,8 +107,18 @@ def decode_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
 
 
 @register_decoders('jobs.queue')
-def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
-    jobs = return_value
+def decode_jobs_queue(return_value):
+    """Decode jobs queue response.
+
+    Supports legacy list, or a dict {jobs, total}.
+    - Returns list[job]
+    """
+    # Case 1: dict shape {jobs, total}
+    if isinstance(return_value, dict) and 'jobs' in return_value:
+        jobs = return_value.get('jobs', [])
+    else:
+        # Case 2: legacy list
+        jobs = return_value
     for job in jobs:
         job['status'] = managed_jobs.ManagedJobStatus(job['status'])
     return jobs

@@ -441,6 +441,17 @@ def get_user_by_name(username: str) -> List[models.User]:
 
 
 @_init_db
+def get_user_by_name_match(username_match: str) -> List[models.User]:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(user_table).filter(
+            user_table.c.name.like(f'%{username_match}%')).all()
+    return [
+        models.User(id=row.id, name=row.name, created_at=row.created_at)
+        for row in rows
+    ]
+
+
+@_init_db
 def delete_user(user_id: str) -> None:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(user_table).filter_by(id=user_id).delete()
@@ -846,7 +857,8 @@ def update_last_use(cluster_name: str):
 
 
 @_init_db
-def remove_cluster(cluster_name: str, terminate: bool) -> None:
+def remove_cluster(cluster_name: str, terminate: bool,
+                   remove_events: bool) -> None:
     """Removes cluster_name mapping."""
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
@@ -874,6 +886,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
 
         if terminate:
             session.query(cluster_table).filter_by(name=cluster_name).delete()
+        if remove_events:
             session.query(cluster_event_table).filter_by(
                 cluster_hash=cluster_hash).delete()
         else:

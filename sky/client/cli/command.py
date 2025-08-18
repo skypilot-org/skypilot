@@ -60,6 +60,7 @@ from sky.client.cli import git
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import requests
@@ -123,7 +124,7 @@ def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> List[dict]:
+) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
     Args:
@@ -1562,7 +1563,7 @@ def _status_kubernetes(show_all: bool):
 
 
 def _show_endpoint(query_clusters: Optional[List[str]],
-                   cluster_records: List[Dict[str, Any]], ip: bool,
+                   cluster_records: List[responses.StatusResponse], ip: bool,
                    endpoints: bool, endpoint: Optional[int]) -> None:
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
