@@ -5,6 +5,7 @@ from sky.utils import common_utils
 from sky.utils import infra_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.utils import volume as volume_lib
 
 
 class Volume:
@@ -94,14 +95,14 @@ class Volume:
         # Adjust the volume config (e.g., parse size)
         self._adjust_config()
 
-        # Validate the volume config
-        self._validate_config()
-
         # Resolve the infrastructure options to cloud, region, zone
         infra_info = infra_utils.InfraInfo.from_str(self.infra)
         self.cloud = infra_info.cloud
         self.region = infra_info.region
         self.zone = infra_info.zone
+
+        # Validate the volume config
+        self._validate_config()
 
     def _adjust_config(self) -> None:
         """Adjust the volume config (e.g., parse size)."""
@@ -123,3 +124,11 @@ class Volume:
             raise ValueError('Size is required for new volumes. '
                              'Please specify the size in the YAML file or '
                              'use the --size flag.')
+        if (self.cloud == 'kubernetes' and
+                self.type != volume_lib.VolumeType.PVC.value):
+            raise ValueError(f'Invalid volume type {self.type} for Kubernetes. '
+                             'Only k8s-pvc is supported.')
+        if (self.cloud == 'gcp' and
+                self.type != volume_lib.VolumeType.LUSTRE.value):
+            raise ValueError(f'Invalid volume type {self.type} for GCP. '
+                             'Only lustre is supported.')
