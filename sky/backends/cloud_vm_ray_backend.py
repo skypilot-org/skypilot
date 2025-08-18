@@ -51,6 +51,7 @@ from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.serve import constants as serve_constants
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -2890,8 +2891,11 @@ class SkyletClient:
     def wait_service_registration(
         self,
         request: 'servev1_pb2.WaitRegistrationRequest',
-        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = None
     ) -> 'servev1_pb2.WaitRegistrationResponse':
+        # set timeout to 10 seconds more than service register constant
+        # to make sure that timeouts will not occur.
+        timeout = serve_constants.SERVICE_REGISTER_TIMEOUT_SECONDS + 10
         return self._serve_stub.WaitServiceRegistration(request,
                                                         timeout=timeout)
 
