@@ -434,10 +434,8 @@ def launch(
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
                     # Dump script for high availability recovery.
-                    if controller_utils.high_availability_specified(
-                            controller_name):
-                        managed_job_state.set_ha_recovery_script(
-                            consolidation_mode_job_id, run_script)
+                    managed_job_state.set_ha_recovery_script(
+                        consolidation_mode_job_id, run_script)
                     backend.run_on_head(local_handle, run_script)
                     return consolidation_mode_job_id, local_handle
 

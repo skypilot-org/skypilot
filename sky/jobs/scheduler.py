@@ -225,6 +225,13 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
     state.scheduler_set_waiting(job_id, dag_yaml_path,
                                 original_user_yaml_path, env_file_path,
                                 common_utils.get_user_hash(), priority)
+    if state.get_ha_recovery_script(job_id) is None:
+        # the run command is just the command that called scheduler
+        run = (f'{sys.executable} -m sky.jobs.scheduler {dag_yaml_path} '
+               f'--job-id {job_id} --env-file {env_file_path} '
+               f'--user-yaml-path {original_user_yaml_path} '
+               f'--priority {priority}')
+        state.set_ha_recovery_script(job_id, run)
     maybe_start_controllers()
 
 
@@ -312,13 +319,13 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
     state.scheduler_set_done(job_id, idempotent)
 
 
-def job_done_async(job_id: int, idempotent: bool = False):
+async def job_done_async(job_id: int, idempotent: bool = False):
     """Async version of job_done."""
-    if idempotent and (state.get_job_schedule_state(job_id)
+    if idempotent and (await state.get_job_schedule_state_async(job_id)
                        == state.ManagedJobScheduleState.DONE):
         return
 
-    state.scheduler_set_done_async(job_id, idempotent)
+    await state.scheduler_set_done_async(job_id, idempotent)
 
 
 if __name__ == '__main__':

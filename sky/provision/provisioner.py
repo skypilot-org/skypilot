@@ -22,7 +22,6 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.backends import backend_utils
-from sky.jobs.server import utils as server_jobs_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
@@ -522,13 +521,6 @@ def _post_provision_setup(
             status.update(
                 ux_utils.spinner_message(
                     'Checking controller version compatibility'))
-            try:
-                server_jobs_utils.check_version_mismatch_and_non_terminal_jobs()
-            except exceptions.ClusterNotUpError:
-                # Controller is not up yet during initial provisioning, that
-                # also means no non-terminal jobs, so no incompatibility in
-                # this case.
-                pass
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
