@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#sky/schemas/generated/servev1.proto\x12\x08serve.v1\"\x1d\n\x0cServiceNames\x12\r\n\x05names\x18\x01 \x03(\t\"s\n\rServiceStatus\x12\x33\n\x06status\x18\x01 \x03(\x0b\x32#.serve.v1.ServiceStatus.StatusEntry\x1a-\n\x0bStatusEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"m\n\x17GetServiceStatusRequest\x12\x32\n\rservice_names\x18\x01 \x01(\x0b\x32\x16.serve.v1.ServiceNamesH\x00\x88\x01\x01\x12\x0c\n\x04pool\x18\x02 \x01(\x08\x42\x10\n\x0e_service_names\"E\n\x18GetServiceStatusResponse\x12)\n\x08statuses\x18\x01 \x03(\x0b\x32\x17.serve.v1.ServiceStatus\")\n\x11\x41\x64\x64VersionRequest\x12\x14\n\x0cservice_name\x18\x01 \x01(\t\"%\n\x12\x41\x64\x64VersionResponse\x12\x0f\n\x07version\x18\x01 \x01(\x03\x32\xb2\x01\n\x0cServeService\x12Y\n\x10GetServiceStatus\x12!.serve.v1.GetServiceStatusRequest\x1a\".serve.v1.GetServiceStatusResponse\x12G\n\nAddVersion\x12\x1b.serve.v1.AddVersionRequest\x1a\x1c.serve.v1.AddVersionResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#sky/schemas/generated/servev1.proto\x12\x08serve.v1\"\x1d\n\x0cServiceNames\x12\r\n\x05names\x18\x01 \x03(\t\"s\n\rServiceStatus\x12\x33\n\x06status\x18\x01 \x03(\x0b\x32#.serve.v1.ServiceStatus.StatusEntry\x1a-\n\x0bStatusEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"m\n\x17GetServiceStatusRequest\x12\x32\n\rservice_names\x18\x01 \x01(\x0b\x32\x16.serve.v1.ServiceNamesH\x00\x88\x01\x01\x12\x0c\n\x04pool\x18\x02 \x01(\x08\x42\x10\n\x0e_service_names\"E\n\x18GetServiceStatusResponse\x12)\n\x08statuses\x18\x01 \x03(\x0b\x32\x17.serve.v1.ServiceStatus\")\n\x11\x41\x64\x64VersionRequest\x12\x14\n\x0cservice_name\x18\x01 \x01(\t\"%\n\x12\x41\x64\x64VersionResponse\x12\x0f\n\x07version\x18\x01 \x01(\x03\"|\n\x17TerminateServiceRequest\x12\x32\n\rservice_names\x18\x01 \x01(\x0b\x32\x16.serve.v1.ServiceNamesH\x00\x88\x01\x01\x12\r\n\x05purge\x18\x02 \x01(\x08\x12\x0c\n\x04pool\x18\x03 \x01(\x08\x42\x10\n\x0e_service_names\"+\n\x18TerminateServiceResponse\x12\x0f\n\x07message\x18\x01 \x01(\t2\x8e\x02\n\x0cServeService\x12Y\n\x10GetServiceStatus\x12!.serve.v1.GetServiceStatusRequest\x1a\".serve.v1.GetServiceStatusResponse\x12G\n\nAddVersion\x12\x1b.serve.v1.AddVersionRequest\x1a\x1c.serve.v1.AddVersionResponse\x12Z\n\x11TerminateServices\x12!.serve.v1.TerminateServiceRequest\x1a\".serve.v1.TerminateServiceResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -37,6 +37,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_ADDVERSIONREQUEST']._serialized_end=420
   _globals['_ADDVERSIONRESPONSE']._serialized_start=422
   _globals['_ADDVERSIONRESPONSE']._serialized_end=459
-  _globals['_SERVESERVICE']._serialized_start=462
-  _globals['_SERVESERVICE']._serialized_end=640
+  _globals['_TERMINATESERVICEREQUEST']._serialized_start=461
+  _globals['_TERMINATESERVICEREQUEST']._serialized_end=585
+  _globals['_TERMINATESERVICERESPONSE']._serialized_start=587
+  _globals['_TERMINATESERVICERESPONSE']._serialized_end=630
+  _globals['_SERVESERVICE']._serialized_start=633
+  _globals['_SERVESERVICE']._serialized_end=903
 # @@protoc_insertion_point(module_scope)

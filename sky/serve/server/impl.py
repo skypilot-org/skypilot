@@ -628,29 +628,37 @@ def down(
         raise ValueError(f'Can only specify one of {noun}_names or all. '
                          f'Provided {argument_str!r}.')
 
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
     service_names = None if all else service_names
-    code = serve_utils.ServeCodeGen.terminate_services(service_names, purge,
-                                                       pool)
 
-    try:
-        returncode, stdout, _ = backend.run_on_head(handle,
-                                                    code,
-                                                    require_outputs=True,
-                                                    stream_logs=False)
-    except exceptions.FetchClusterInfoError as e:
-        raise RuntimeError(
-            'Failed to fetch controller IP. Please refresh controller status '
-            f'by `sky status -r {controller_type.value.cluster_name}` '
-            'and try again.') from e
+    if handle.is_grpc_enabled:
+        # TODO (kyuds): how to handle the FetchClusterInfoError and substitute
+        # for CommandError?
+        stdout = serve_rpc_utils.RpcRunner.terminate_services(
+            handle, service_names, purge, pool)
+    else:
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+        code = serve_utils.ServeCodeGen.terminate_services(
+            service_names, purge, pool)
 
-    try:
-        subprocess_utils.handle_returncode(returncode, code,
-                                           f'Failed to terminate {noun}',
-                                           stdout)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+        try:
+            returncode, stdout, _ = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True,
+                                                        stream_logs=False)
+        except exceptions.FetchClusterInfoError as e:
+            raise RuntimeError(
+                'Failed to fetch controller IP. Please refresh '
+                'controller status by '
+                f'`sky status -r {controller_type.value.cluster_name}` '
+                'and try again.') from e
+
+        try:
+            subprocess_utils.handle_returncode(returncode, code,
+                                               f'Failed to terminate {noun}',
+                                               stdout)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
 
     logger.info(stdout)
 

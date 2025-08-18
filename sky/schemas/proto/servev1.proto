@@ -7,6 +7,8 @@ service ServeService {
     rpc GetServiceStatus(GetServiceStatusRequest) returns (GetServiceStatusResponse);
     // Add version to service.
     rpc AddVersion(AddVersionRequest) returns (AddVersionResponse);
+    // Terminate services.
+    rpc TerminateServices(TerminateServiceRequest) returns (TerminateServiceResponse);
 }
 
 message ServiceNames {
@@ -32,4 +34,14 @@ message AddVersionRequest {
 
 message AddVersionResponse {
     int64 version = 1;
+}
+
+message TerminateServiceRequest {
+    optional ServiceNames service_names = 1;
+    bool purge = 2;
+    bool pool = 3;
+}
+
+message TerminateServiceResponse {
+    string message = 1;
 }

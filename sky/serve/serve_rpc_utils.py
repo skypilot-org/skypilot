@@ -56,6 +56,32 @@ class GetServiceStatusResponseConverter:
         return pickled
 
 
+class TerminateServiceRequestConverter:
+    """Converter for TerminateServiceRequest"""
+
+    @classmethod
+    def to_proto(cls, service_names: Optional[List[str]], purge: bool,
+                 pool: bool) -> servev1_pb2.TerminateServiceRequest:
+        request = servev1_pb2.TerminateServiceRequest()
+        request.purge = purge
+        request.pool = pool
+        if service_names is not None:
+            request.service_names.names.extend(service_names)
+        return request
+
+    @classmethod
+    def from_proto(
+        cls, proto: servev1_pb2.TerminateServiceRequest
+    ) -> Tuple[Optional[List[str]], bool, bool]:
+        purge = proto.purge
+        pool = proto.pool
+        if proto.HasField('service_names'):
+            service_names = list(proto.service_names.names)
+        else:
+            service_names = None
+        return service_names, purge, pool
+
+
 # ========================= gRPC Runner for Sky Serve =========================
 
 
@@ -86,3 +112,15 @@ class RpcRunner:
             handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
             add_serve_version(request))
         return response.version
+
+    @classmethod
+    def terminate_services(cls, handle: backends.CloudVmRayResourceHandle,
+                           service_names: Optional[List[str]], purge: bool,
+                           pool: bool) -> str:
+        assert handle.is_grpc_enabled
+        request = TerminateServiceRequestConverter.to_proto(
+            service_names, purge, pool)
+        response = backend_utils.invoke_skylet_with_retries(
+            handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
+            terminate_services(request))
+        return response.message

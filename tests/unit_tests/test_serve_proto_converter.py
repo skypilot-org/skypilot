@@ -45,3 +45,33 @@ def test_get_service_status_response_converter():
     dict_data_1 = tmp_data_deser[1]
     assert dict_data_1 is not None
     assert len(dict_data_1.keys()) == 0
+
+
+def test_terminate_service_request_converter():
+    # list
+    proto = utils.TerminateServiceRequestConverter.to_proto(['test'], True,
+                                                            False)
+    service_names, purge, pool = utils.TerminateServiceRequestConverter.from_proto(
+        proto)
+    assert service_names is not None
+    assert len(service_names) == 1
+    assert service_names[0] == 'test'
+    assert purge
+    assert not pool
+
+    # empty list
+    proto = utils.TerminateServiceRequestConverter.to_proto([], False, True)
+    service_names, purge, pool = utils.TerminateServiceRequestConverter.from_proto(
+        proto)
+    assert service_names is not None
+    assert len(service_names) == 0
+    assert not purge
+    assert pool
+
+    # none
+    proto = utils.TerminateServiceRequestConverter.to_proto(None, True, True)
+    service_names, purge, pool = utils.TerminateServiceRequestConverter.from_proto(
+        proto)
+    assert service_names is None
+    assert purge
+    assert pool

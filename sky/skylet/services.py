@@ -85,3 +85,19 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
             return servev1_pb2.AddVersionResponse(version=version)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def TerminateServices(  # type: ignore[return]
+            self, request: servev1_pb2.TerminateServiceRequest,
+            context: grpc.ServicerContext
+    ) -> servev1_pb2.TerminateServiceResponse:
+        """Terminates serve"""
+        try:
+            service_names, purge, pool = (
+                serve_rpc_utils.TerminateServiceRequestConverter.from_proto(request))  # pylint: disable=line-too-long
+            kwargs = {} if serve_constants.SERVE_VERSION < 3 else {'pool': pool}
+            message = serve_utils.terminate_services(service_names,
+                                                     purge=purge,
+                                                     **kwargs)
+            return servev1_pb2.TerminateServiceResponse(message=message)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))

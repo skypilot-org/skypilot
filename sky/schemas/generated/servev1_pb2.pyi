@@ -49,3 +49,19 @@ class AddVersionResponse(_message.Message):
     VERSION_FIELD_NUMBER: _ClassVar[int]
     version: int
     def __init__(self, version: _Optional[int] = ...) -> None: ...
+
+class TerminateServiceRequest(_message.Message):
+    __slots__ = ("service_names", "purge", "pool")
+    SERVICE_NAMES_FIELD_NUMBER: _ClassVar[int]
+    PURGE_FIELD_NUMBER: _ClassVar[int]
+    POOL_FIELD_NUMBER: _ClassVar[int]
+    service_names: ServiceNames
+    purge: bool
+    pool: bool
+    def __init__(self, service_names: _Optional[_Union[ServiceNames, _Mapping]] = ..., purge: bool = ..., pool: bool = ...) -> None: ...
+
+class TerminateServiceResponse(_message.Message):
+    __slots__ = ("message",)
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    message: str
+    def __init__(self, message: _Optional[str] = ...) -> None: ...
