@@ -2891,11 +2891,13 @@ class SkyletClient:
     def wait_service_registration(
         self,
         request: 'servev1_pb2.WaitRegistrationRequest',
-        timeout: Optional[float] = None
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'servev1_pb2.WaitRegistrationResponse':
-        # set timeout to 10 seconds more than service register constant
-        # to make sure that timeouts will not occur.
-        timeout = serve_constants.SERVICE_REGISTER_TIMEOUT_SECONDS + 10
+        # set timeout to at least 10 seconds more than service register
+        # constant to make sure that timeouts will not occur.
+        if timeout is not None:
+            timeout = max(timeout,
+                          serve_constants.SERVICE_REGISTER_TIMEOUT_SECONDS + 10)
         return self._serve_stub.WaitServiceRegistration(request,
                                                         timeout=timeout)
 
