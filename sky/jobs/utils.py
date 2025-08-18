@@ -768,6 +768,7 @@ def stream_logs_by_id(job_id: int,
                             assert tail > 0
                             # Read only the last 'tail' lines using deque
                             read_from = collections.deque(f, maxlen=tail)
+                            start_streaming = True
                         for line in read_from:
                             if log_lib.LOG_FILE_START_STREAMING_AT in line:
                                 start_streaming = True
