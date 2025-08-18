@@ -768,6 +768,13 @@ def stream_logs_by_id(job_id: int,
                             assert tail > 0
                             # Read only the last 'tail' lines using deque
                             read_from = collections.deque(f, maxlen=tail)
+                            # We set start_streaming to True here in case
+                            # truncating the log file removes the line that
+                            # contains LOG_FILE_START_STREAMING_AT. This does
+                            # not cause issues for log files shorter than tail
+                            # because tail_logs in sky/skylet/log_lib.py also
+                            # handles LOG_FILE_START_STREAMING_AT.
+                            start_streaming = True
                         for line in read_from:
                             if log_lib.LOG_FILE_START_STREAMING_AT in line:
                                 start_streaming = True
