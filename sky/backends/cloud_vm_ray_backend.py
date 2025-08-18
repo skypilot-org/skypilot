@@ -2682,6 +2682,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # as killing the process will close the tunnel too.
                 head_runner.disable_control_master = True
                 head_runner.port_forward_execute_remote_command = True
+
             # The default connect_timeout of 1s is too short for
             # connecting to clusters using a jump server.
             # We use NON_INTERACTIVE mode to avoid allocating a pseudo-tty,
@@ -2693,6 +2694,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             if isinstance(head_runner, command_runner.SSHCommandRunner):
                 # cat so the command doesn't exit until we kill it
                 cmd += [f'"echo {_ACK} && cat"']
+            logger.debug(f'cmd: {cmd}')
             cmd_str = ' '.join(cmd)
             ssh_tunnel_proc = subprocess.Popen(cmd_str,
                                                shell=True,
@@ -2716,16 +2718,20 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     ack = queue.get_nowait()
                 except queue_lib.Empty:
                     ack = None
+                    logger.debug('No ack received')
                     time.sleep(0.1)
                     continue
+                logger.debug(f'ack: {ack}')
                 assert ack is not None
                 if isinstance(
                         head_runner,
                         command_runner.SSHCommandRunner) and ack == f'{_ACK}\n':
+                    logger.debug('SSHCommandRunner: ack received')
                     break
                 elif isinstance(head_runner,
                                 command_runner.KubernetesCommandRunner
                                ) and _FORWARDING_FROM in ack:
+                    logger.debug('KubernetesCommandRunner: ack received')
                     break
 
             if ssh_tunnel_proc.poll() is not None:
