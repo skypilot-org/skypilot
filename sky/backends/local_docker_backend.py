@@ -256,7 +256,9 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                 logger.error(
                     'Unable to run container - nvidia runtime for docker not '
                     'found. Have you installed nvidia-docker on your machine?')
-            global_user_state.remove_cluster(cluster_name, terminate=True)
+            global_user_state.remove_cluster(cluster_name,
+                                             terminate=True,
+                                             remove_events=False)
             raise e
         self.containers[handle] = container
         logger.info(
@@ -323,7 +325,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     def _teardown(self,
                   handle: LocalDockerResourceHandle,
                   terminate: bool,
-                  purge: bool = False):
+                  purge: bool = False,
+                  explicitly_requested: bool = False):
         """Teardown kills the container."""
         del purge  # Unused.
         if not terminate:
@@ -339,7 +342,9 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             container.remove(force=True)
         cluster_name = handle.get_cluster_name()
 
-        global_user_state.remove_cluster(cluster_name, terminate=True)
+        global_user_state.remove_cluster(cluster_name,
+                                         terminate=True,
+                                         remove_events=explicitly_requested)
 
     # --- Utilities ---
 

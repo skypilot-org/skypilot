@@ -503,6 +503,16 @@ def get_services() -> List[Dict[str, Any]]:
 
 
 @init_db
+def get_num_services() -> int:
+    """Get the number of services."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        return session.execute(
+            sqlalchemy.select(sqlalchemy.func.count()  # pylint: disable=not-callable
+                             ).select_from(services_table)).fetchone()[0]
+
+
+@init_db
 def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     """Get all existing service records."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -658,6 +668,38 @@ def total_number_provisioning_replicas() -> int:
         if replica_info.status == ReplicaStatus.PROVISIONING:
             provisioning_count += 1
     return provisioning_count
+
+
+@init_db
+def total_number_terminating_replicas() -> int:
+    """Returns the total number of terminating replicas."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(sqlalchemy.select(
+            replicas_table.c.replica_info)).fetchall()
+    terminating_count = 0
+    for row in rows:
+        replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
+        if (replica_info.status_property.sky_down_status ==
+                common_utils.ProcessStatus.RUNNING):
+            terminating_count += 1
+    return terminating_count
+
+
+@init_db
+def total_number_scheduled_to_terminate_replicas() -> int:
+    """Returns the total number of terminating replicas."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(sqlalchemy.select(
+            replicas_table.c.replica_info)).fetchall()
+    terminating_count = 0
+    for row in rows:
+        replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
+        if (replica_info.status_property.sky_down_status ==
+                common_utils.ProcessStatus.SCHEDULED):
+            terminating_count += 1
+    return terminating_count
 
 
 def get_replicas_at_status(

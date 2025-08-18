@@ -30,6 +30,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server import versions
@@ -66,8 +67,8 @@ if typing.TYPE_CHECKING:
 
     import sky
     from sky import backends
+    from sky import catalog
     from sky import models
-    import sky.catalog
     from sky.provision.kubernetes import utils as kubernetes_utils
     from sky.skylet import job_lib
 else:
@@ -234,7 +235,7 @@ def list_accelerators(
     require_price: bool = True,
     case_sensitive: bool = True
 ) -> server_common.RequestId[Dict[str,
-                                  List['sky.catalog.common.InstanceTypeInfo']]]:
+                                  List['catalog.common.InstanceTypeInfo']]]:
     """Lists the names of all accelerators offered by Sky.
 
     This will include all accelerators offered by Sky, including those
@@ -479,11 +480,11 @@ def launch(
             This option works in conjunction with ``idle_minutes_to_autostop``.
             Choices:
 
-            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-               AND all SSH sessions to disconnect.
-            2. "jobs" - Wait for all jobs to complete.
-            3. "none" - Stop immediately after idle time expires,
-               regardless of running jobs or SSH connections.
+            1. "jobs_and_ssh" (default) - Wait for in-progress jobs and SSH
+               connections to finish.
+            2. "jobs" - Only wait for in-progress jobs.
+            3. "none" - Wait for nothing; autostop right after
+               ``idle_minutes_to_autostop``.
         dryrun: if True, do not actually launch the cluster.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
@@ -856,6 +857,56 @@ def tail_logs(cluster_name: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(17)
+@annotations.client_api
+@rest.retry_transient_errors()
+def tail_provision_logs(cluster_name: str,
+                        follow: bool = True,
+                        tail: int = 0,
+                        output_stream: Optional['io.TextIOBase'] = None) -> int:
+    """Tails the provisioning logs (provision.log) for a cluster.
+
+    Args:
+        cluster_name: name of the cluster.
+        follow: follow the logs.
+        tail: lines from end to tail.
+        output_stream: optional stream to write logs.
+    Returns:
+        Exit code 0 on streaming success; raises on HTTP error.
+    """
+    body = payloads.ClusterNameBody(cluster_name=cluster_name)
+    params = {
+        'follow': str(follow).lower(),
+        'tail': tail,
+    }
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/provision_logs',
+        json=json.loads(body.model_dump_json()),
+        params=params,
+        stream=True,
+        timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
+                 None))
+    # Log request is idempotent when tail is 0, thus can resume previous
+    # streaming point on retry.
+    # request_id=None here because /provision_logs does not create an async
+    # request. Instead, it streams a plain file from the server. This does NOT
+    # violate the stream_response doc warning about None in multi-user
+    # environments: we are not asking stream_response to select “the latest
+    # request”. We already have the HTTP response to stream; request_id=None
+    # merely disables the follow-up GET. It is also necessary for --no-follow
+    # to return cleanly after printing the tailed lines. If we provided a
+    # non-None request_id here, the get(request_id) in stream_response(
+    # would fail since /provision_logs does not create a request record.
+    stream_response(request_id=None,
+                    response=response,
+                    output_stream=output_stream,
+                    resumable=(tail == 0))
+    return 0
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
 @annotations.client_api
 def download_logs(cluster_name: str,
                   job_ids: Optional[List[str]]) -> Dict[str, str]:
@@ -935,11 +986,11 @@ def start(
             This option works in conjunction with ``idle_minutes_to_autostop``.
             Choices:
 
-            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-               AND all SSH sessions to disconnect.
-            2. "jobs" - Wait for all jobs to complete.
-            3. "none" - Stop immediately after idle time expires,
-               regardless of running jobs or SSH connections.
+            1. "jobs_and_ssh" (default) - Wait for in-progress jobs and SSH
+               connections to finish.
+            2. "jobs" - Only wait for in-progress jobs.
+            3. "none" - Wait for nothing; autostop right after
+               ``idle_minutes_to_autostop``.
         retry_until_up: whether to retry launching the cluster until it is
             up.
         down: Autodown the cluster: tear down the cluster after specified
@@ -1118,11 +1169,10 @@ def autostop(
             This option works in conjunction with ``idle_minutes``.
             Choices:
 
-            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-               AND all SSH sessions to disconnect.
-            2. "jobs" - Wait for all jobs to complete.
-            3. "none" - Stop immediately after idle time expires,
-               regardless of running jobs or SSH connections.
+            1. "jobs_and_ssh" (default) - Wait for in-progress jobs and SSH
+               connections to finish.
+            2. "jobs" - Only wait for in-progress jobs.
+            3. "none" - Wait for nothing; autostop right after ``idle_minutes``.
         down: if true, use autodown (tear down the cluster; non-restartable),
             rather than autostop (restartable).
 
@@ -1322,7 +1372,7 @@ def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> server_common.RequestId[List[Dict[str, Any]]]:
+) -> server_common.RequestId[List[responses.StatusResponse]]:
     """Gets cluster statuses.
 
     If cluster_names is given, return those clusters. Otherwise, return all
@@ -2059,7 +2109,7 @@ def api_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def api_info() -> Dict[str, Any]:
+def api_info() -> responses.APIHealthResponse:
     """Gets the server's status, commit and version.
 
     Returns:
@@ -2084,7 +2134,7 @@ def api_info() -> Dict[str, Any]:
     """
     response = server_common.make_authenticated_request('GET', '/api/health')
     response.raise_for_status()
-    return response.json()
+    return responses.APIHealthResponse(**response.json())
 
 
 @usage_lib.entrypoint

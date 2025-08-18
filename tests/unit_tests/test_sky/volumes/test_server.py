@@ -93,7 +93,7 @@ class TestVolumeServer:
         mock_cloud.is_same_cloud.return_value = True
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.server.sky.CLOUD_REGISTRY',
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Create test client
@@ -147,7 +147,7 @@ class TestVolumeServer:
         mock_cloud.is_same_cloud.return_value = True
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.server.sky.CLOUD_REGISTRY',
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Create test client
@@ -197,7 +197,7 @@ class TestVolumeServer:
         mock_cloud.is_same_cloud.return_value = True
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.server.sky.CLOUD_REGISTRY',
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Create test client
@@ -262,7 +262,7 @@ class TestVolumeServer:
         # Mock cloud registry to return None
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = None
-        monkeypatch.setattr('sky.volumes.server.server.sky.CLOUD_REGISTRY',
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Create test client
@@ -298,7 +298,7 @@ class TestVolumeServer:
         mock_cloud.is_same_cloud.return_value = False  # Not Kubernetes
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.server.sky.CLOUD_REGISTRY',
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Create test client
@@ -335,7 +335,7 @@ class TestVolumeServer:
         mock_cloud.is_same_cloud.return_value = True  # Is Kubernetes
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.server.sky.CLOUD_REGISTRY',
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Create test client
@@ -377,7 +377,7 @@ class TestVolumeServer:
         mock_cloud = mock.MagicMock()
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.server.sky.CLOUD_REGISTRY',
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Create test client

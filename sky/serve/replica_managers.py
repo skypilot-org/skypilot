@@ -1,7 +1,5 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
-import collections
 import dataclasses
-import enum
 import functools
 import multiprocessing
 from multiprocessing import pool as mp_pool
@@ -13,16 +11,16 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
-import psutil
+import filelock
 import requests
 
-import sky
 from sky import backends
 from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import sky_logging
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.jobs import scheduler as jobs_scheduler
 from sky.serve import constants as serve_constants
@@ -41,7 +39,6 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import resources
     from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
@@ -50,10 +47,6 @@ _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 _RETRY_INIT_GAP_SECONDS = 60
 _DEFAULT_DRAIN_SECONDS = 120
-
-# Since sky.launch is very resource demanding, we limit the number of
-# concurrent sky.launch process to avoid overloading the machine.
-_MAX_NUM_LAUNCH = psutil.cpu_count() * 2
 
 
 # TODO(tian): Combine this with
@@ -81,7 +74,7 @@ def launch_cluster(replica_id: int,
     try:
         config = common_utils.read_yaml(
             os.path.expanduser(service_task_yaml_path))
-        task = sky.Task.from_yaml_config(config)
+        task = task_lib.Task.from_yaml_config(config)
         if resources_override is not None:
             resources = task.resources
             overrided_resources = [
@@ -177,7 +170,7 @@ def terminate_cluster(cluster_name: str,
 
 def _get_resources_ports(service_task_yaml_path: str) -> str:
     """Get the resources ports used by the task."""
-    task = sky.Task.from_yaml(service_task_yaml_path)
+    task = task_lib.Task.from_yaml(service_task_yaml_path)
     # Already checked all ports are valid in sky.serve.core.up
     assert task.resources, task
     assert task.service is not None, task
@@ -195,7 +188,7 @@ def _should_use_spot(service_task_yaml_path: str,
         if use_spot_override is not None:
             assert isinstance(use_spot_override, bool)
             return use_spot_override
-    task = sky.Task.from_yaml(service_task_yaml_path)
+    task = task_lib.Task.from_yaml(service_task_yaml_path)
     spot_use_resources = [
         resources for resources in task.resources if resources.use_spot
     ]
@@ -204,6 +197,12 @@ def _should_use_spot(service_task_yaml_path: str,
     return len(spot_use_resources) == len(task.resources)
 
 
+# Every function that calls serve_state.add_or_update_replica should acquire
+# this lock. It is to prevent race condition when the replica status is updated
+# by multiple threads at the same time. The modification of replica info is
+# 2 database calls: read the whole replica info object, unpickle it, and modify
+# corresponding fields. Then it is write back to the database. We need to ensure
+# the read-modify-write operation is atomic.
 def with_lock(func):
 
     @functools.wraps(func)
@@ -212,22 +211,6 @@ def with_lock(func):
             return func(self, *args, **kwargs)
 
     return wrapper
-
-
-class ProcessStatus(enum.Enum):
-    """Process status."""
-
-    # The process is running
-    RUNNING = 'RUNNING'
-
-    # The process is finished and succeeded
-    SUCCEEDED = 'SUCCEEDED'
-
-    # The process is interrupted
-    INTERRUPTED = 'INTERRUPTED'
-
-    # The process failed
-    FAILED = 'FAILED'
 
 
 @dataclasses.dataclass
@@ -241,15 +224,16 @@ class ReplicaStatusProperty:
         first_ready_time: The first time the service is ready.
         sky_down_status: Process status of sky.down.
     """
-    # None means sky.launch is not called yet.
-    sky_launch_status: Optional[ProcessStatus] = None
+    # sky.launch will always be scheduled on creation of ReplicaStatusProperty.
+    sky_launch_status: common_utils.ProcessStatus = (
+        common_utils.ProcessStatus.SCHEDULED)
     user_app_failed: bool = False
     service_ready_now: bool = False
     # None means readiness probe is not succeeded yet;
     # -1 means the initial delay seconds is exceeded.
     first_ready_time: Optional[float] = None
     # None means sky.down is not called yet.
-    sky_down_status: Optional[ProcessStatus] = None
+    sky_down_status: Optional[common_utils.ProcessStatus] = None
     # Whether the termination is caused by autoscaler's decision
     is_scale_down: bool = False
     # The replica's spot instance was preempted.
@@ -304,7 +288,7 @@ class ReplicaStatusProperty:
             (1) Job status;
             (2) Readiness probe.
         """
-        if self.sky_launch_status != ProcessStatus.SUCCEEDED:
+        if self.sky_launch_status != common_utils.ProcessStatus.SUCCEEDED:
             return False
         if self.sky_down_status is not None:
             return False
@@ -318,37 +302,43 @@ class ReplicaStatusProperty:
 
     def to_replica_status(self) -> serve_state.ReplicaStatus:
         """Convert status property to human-readable replica status."""
-        if self.sky_launch_status is None:
+        # Backward compatibility. Before we introduce ProcessStatus.SCHEDULED,
+        # we use None to represent sky.launch is not called yet.
+        if (self.sky_launch_status is None or
+                self.sky_launch_status == common_utils.ProcessStatus.SCHEDULED):
             # Pending to launch
             return serve_state.ReplicaStatus.PENDING
-        if self.sky_launch_status == ProcessStatus.RUNNING:
-            if self.sky_down_status == ProcessStatus.FAILED:
+        if self.sky_launch_status == common_utils.ProcessStatus.RUNNING:
+            if self.sky_down_status == common_utils.ProcessStatus.FAILED:
                 return serve_state.ReplicaStatus.FAILED_CLEANUP
-            if self.sky_down_status == ProcessStatus.SUCCEEDED:
+            if self.sky_down_status == common_utils.ProcessStatus.SUCCEEDED:
                 # This indicate it is a scale_down with correct teardown.
                 # Should have been cleaned from the replica table.
                 return serve_state.ReplicaStatus.UNKNOWN
             # Still launching
             return serve_state.ReplicaStatus.PROVISIONING
-        if self.sky_launch_status == ProcessStatus.INTERRUPTED:
+        if self.sky_launch_status == common_utils.ProcessStatus.INTERRUPTED:
             # sky.down is running and a scale down interrupted sky.launch
             return serve_state.ReplicaStatus.SHUTTING_DOWN
         if self.sky_down_status is not None:
             if self.preempted:
                 # Replica (spot) is preempted
                 return serve_state.ReplicaStatus.PREEMPTED
-            if self.sky_down_status == ProcessStatus.RUNNING:
+            if self.sky_down_status == common_utils.ProcessStatus.SCHEDULED:
+                # sky.down is scheduled to run, but not started yet.
+                return serve_state.ReplicaStatus.SHUTTING_DOWN
+            if self.sky_down_status == common_utils.ProcessStatus.RUNNING:
                 # sky.down is running
                 return serve_state.ReplicaStatus.SHUTTING_DOWN
-            if self.sky_launch_status == ProcessStatus.INTERRUPTED:
+            if self.sky_launch_status == common_utils.ProcessStatus.INTERRUPTED:
                 return serve_state.ReplicaStatus.SHUTTING_DOWN
-            if self.sky_down_status == ProcessStatus.FAILED:
+            if self.sky_down_status == common_utils.ProcessStatus.FAILED:
                 # sky.down failed
                 return serve_state.ReplicaStatus.FAILED_CLEANUP
             if self.user_app_failed:
                 # Failed on user setup/run
                 return serve_state.ReplicaStatus.FAILED
-            if self.sky_launch_status == ProcessStatus.FAILED:
+            if self.sky_launch_status == common_utils.ProcessStatus.FAILED:
                 # sky.launch failed
                 return serve_state.ReplicaStatus.FAILED_PROVISION
             if self.first_ready_time is None:
@@ -364,7 +354,7 @@ class ReplicaStatusProperty:
             # This indicate it is a scale_down with correct teardown.
             # Should have been cleaned from the replica table.
             return serve_state.ReplicaStatus.UNKNOWN
-        if self.sky_launch_status == ProcessStatus.FAILED:
+        if self.sky_launch_status == common_utils.ProcessStatus.FAILED:
             # sky.launch failed
             # The down process has not been started if it reaches here,
             # due to the `if self.sky_down_status is not None`` check above.
@@ -688,7 +678,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                  service_task_yaml_path: str) -> None:
         super().__init__(service_name, spec)
         self.service_task_yaml_path = service_task_yaml_path
-        task = sky.Task.from_yaml(service_task_yaml_path)
+        task = task_lib.Task.from_yaml(service_task_yaml_path)
         self._spot_placer: Optional[spot_placer.SpotPlacer] = (
             spot_placer.SpotPlacer.from_task(spec, task))
         # TODO(tian): Store launch/down pid in the replica table, to make the
@@ -708,6 +698,7 @@ class SkyPilotReplicaManager(ReplicaManager):
 
         self._recover_replica_operations()
 
+    @with_lock
     def _recover_replica_operations(self):
         """Let's see are there something to do for ReplicaManager in a
         recovery run"""
@@ -748,9 +739,8 @@ class SkyPilotReplicaManager(ReplicaManager):
     # Replica management functions #
     ################################
 
-    # Adding lock here to make sure spot placer's current locations are
-    # consistent with the replicas' status.
-    @with_lock
+    # We don't need to add lock here since every caller of this function
+    # will acquire the lock.
     def _launch_replica(
         self,
         replica_id: int,
@@ -806,11 +796,61 @@ class SkyPilotReplicaManager(ReplicaManager):
         # to avoid too many sky.launch running at the same time.
         self._launch_process_pool[replica_id] = p
 
+    @with_lock
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
         self._launch_replica(self._next_replica_id, resources_override)
         self._next_replica_id += 1
 
+    def _handle_sky_down_finish(self, info: ReplicaInfo, exitcode: int) -> None:
+        if exitcode != 0:
+            logger.error(f'Down process for replica {info.replica_id} '
+                         f'exited abnormally with code {exitcode}.')
+            info.status_property.sky_down_status = (
+                common_utils.ProcessStatus.FAILED)
+        else:
+            info.status_property.sky_down_status = (
+                common_utils.ProcessStatus.SUCCEEDED)
+        # Failed replica still count as a replica. In our current design, we
+        # want to fail early if user code have any error. This will prevent
+        # infinite loop of teardown and re-provision. However, there is a
+        # special case that if the replica is UP for longer than
+        # initial_delay_seconds, we assume it is just some random failure and
+        # we should restart the replica. Please refer to the implementation of
+        # `is_scale_down_succeeded` for more details.
+        # TODO(tian): Currently, restart replicas that failed within
+        # initial_delay_seconds is not supported. We should add it
+        # later when we support `sky serve update`.
+        removal_reason = None
+        if info.status_property.is_scale_down:
+            # This means the cluster is deleted due to an autoscaler
+            # decision or the cluster is recovering from preemption.
+            # Delete the replica info so it won't count as a replica.
+            if info.status_property.preempted:
+                removal_reason = 'for preemption recovery'
+            else:
+                removal_reason = 'normally'
+        # Don't keep failed record for version mismatch replicas,
+        # since user should fixed the error before update.
+        elif info.version != self.latest_version:
+            removal_reason = 'for version outdated'
+        elif info.status_property.purged:
+            removal_reason = 'for purge'
+        elif info.status_property.failed_spot_availability:
+            removal_reason = 'for spot availability failure'
+        else:
+            logger.info(f'Termination of replica {info.replica_id} '
+                        'finished. Replica info is kept since some '
+                        'failure detected.')
+            serve_state.add_or_update_replica(self._service_name,
+                                              info.replica_id, info)
+        if removal_reason is not None:
+            serve_state.remove_replica(self._service_name, info.replica_id)
+            logger.info(f'Replica {info.replica_id} removed from the '
+                        f'replica table {removal_reason}.')
+
+    # We don't need to add lock here since every caller of this function
+    # will acquire the lock.
     def _terminate_replica(self,
                            replica_id: int,
                            sync_down_logs: bool,
@@ -828,7 +868,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             info = serve_state.get_replica_info_from_id(self._service_name,
                                                         replica_id)
             assert info is not None
-            info.status_property.sky_launch_status = ProcessStatus.INTERRUPTED
+            info.status_property.sky_launch_status = (
+                common_utils.ProcessStatus.INTERRUPTED)
             serve_state.add_or_update_replica(self._service_name, replica_id,
                                               info)
             launch_process = self._launch_process_pool[replica_id]
@@ -872,8 +913,9 @@ class SkyPilotReplicaManager(ReplicaManager):
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             replica_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                                 'replica_jobs')
-            job_log_file_name = (controller_utils.download_and_stream_job_log(
-                backend, handle, replica_job_logs_dir))
+            job_ids = ['1'] if self._is_pool else None
+            job_log_file_name = controller_utils.download_and_stream_job_log(
+                backend, handle, replica_job_logs_dir, job_ids)
             if job_log_file_name is not None:
                 logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
                 with open(log_file_name, 'a',
@@ -899,18 +941,30 @@ class SkyPilotReplicaManager(ReplicaManager):
 
         logger.info(f'preempted: {info.status_property.preempted}, '
                     f'replica_id: {replica_id}')
+        info.status_property.is_scale_down = is_scale_down
+        info.status_property.purged = purge
+
+        # If the cluster does not exist, it means either the cluster never
+        # exists (e.g., the cluster is scaled down before it gets a chance to
+        # provision) or the cluster is preempted and cleaned up by the status
+        # refresh. In this case, we skip spawning a new down process to save
+        # controller resources.
+        if global_user_state.get_cluster_from_name(info.cluster_name) is None:
+            self._handle_sky_down_finish(info, exitcode=0)
+            return
+
+        # Otherwise, start the process to terminate the cluster.
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(terminate_cluster,
                                                      log_file_name, 'a').run,
             args=(info.cluster_name, replica_drain_delay_seconds),
         )
-        info.status_property.sky_down_status = ProcessStatus.RUNNING
-        info.status_property.is_scale_down = is_scale_down
-        info.status_property.purged = purge
+        info.status_property.sky_down_status = (
+            common_utils.ProcessStatus.SCHEDULED)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
-        p.start()
         self._down_process_pool[replica_id] = p
 
+    @with_lock
     def scale_down(self, replica_id: int, purge: bool = False) -> None:
         self._terminate_replica(
             replica_id,
@@ -919,6 +973,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             is_scale_down=True,
             purge=purge)
 
+    # We don't need to add lock here since every caller of this function
+    # will acquire the lock.
     def _handle_preemption(self, info: ReplicaInfo) -> bool:
         """Handle preemption of the replica if any error happened.
 
@@ -981,7 +1037,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         # To avoid `dictionary changed size during iteration` error.
         launch_process_pool_snapshot = list(self._launch_process_pool.items())
         for replica_id, p in launch_process_pool_snapshot:
-            if not p.is_alive():
+            if p.is_alive():
+                continue
+            with filelock.FileLock(controller_utils.get_resources_lock_path()):
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
                 assert info is not None, replica_id
@@ -989,11 +1047,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                 schedule_next_jobs = False
                 if info.status == serve_state.ReplicaStatus.PENDING:
                     # sky.launch not started yet
-                    if (serve_state.total_number_provisioning_replicas() <
-                            _MAX_NUM_LAUNCH):
+                    if controller_utils.can_provision():
                         p.start()
                         info.status_property.sky_launch_status = (
-                            ProcessStatus.RUNNING)
+                            common_utils.ProcessStatus.RUNNING)
                 else:
                     # sky.launch finished
                     # TODO(tian): Try-catch in process, and have an enum return
@@ -1010,11 +1067,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                             f'exited abnormally with code {p.exitcode}.'
                             ' Terminating...')
                         info.status_property.sky_launch_status = (
-                            ProcessStatus.FAILED)
+                            common_utils.ProcessStatus.FAILED)
                         error_in_sky_launch = True
                     else:
                         info.status_property.sky_launch_status = (
-                            ProcessStatus.SUCCEEDED)
+                            common_utils.ProcessStatus.SUCCEEDED)
                         schedule_next_jobs = True
                     if self._spot_placer is not None and info.is_spot:
                         # TODO(tian): Currently, we set the location to
@@ -1036,69 +1093,36 @@ class SkyPilotReplicaManager(ReplicaManager):
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
                 if schedule_next_jobs and self._is_pool:
-                    jobs_scheduler.maybe_schedule_next_jobs(
-                        pool=self._service_name)
+                    jobs_scheduler.maybe_schedule_next_jobs()
                 if error_in_sky_launch:
                     # Teardown after update replica info since
                     # _terminate_replica will update the replica info too.
                     self._terminate_replica(replica_id,
                                             sync_down_logs=True,
                                             replica_drain_delay_seconds=0)
+            # Try schedule next job after acquiring the lock.
+            jobs_scheduler.maybe_schedule_next_jobs()
         down_process_pool_snapshot = list(self._down_process_pool.items())
         for replica_id, p in down_process_pool_snapshot:
-            if not p.is_alive():
+            if p.is_alive():
+                continue
+            info = serve_state.get_replica_info_from_id(self._service_name,
+                                                        replica_id)
+            assert info is not None, replica_id
+            if (info.status_property.sky_down_status ==
+                    common_utils.ProcessStatus.SCHEDULED):
+                # sky.down not started yet
+                if controller_utils.can_terminate():
+                    p.start()
+                    info.status_property.sky_down_status = (
+                        common_utils.ProcessStatus.RUNNING)
+                    serve_state.add_or_update_replica(self._service_name,
+                                                      replica_id, info)
+            else:
                 logger.info(
                     f'Terminate process for replica {replica_id} finished.')
                 del self._down_process_pool[replica_id]
-                info = serve_state.get_replica_info_from_id(
-                    self._service_name, replica_id)
-                assert info is not None, replica_id
-                if p.exitcode != 0:
-                    logger.error(f'Down process for replica {replica_id} '
-                                 f'exited abnormally with code {p.exitcode}.')
-                    info.status_property.sky_down_status = (
-                        ProcessStatus.FAILED)
-                else:
-                    info.status_property.sky_down_status = (
-                        ProcessStatus.SUCCEEDED)
-                # Failed replica still count as a replica. In our current
-                # design, we want to fail early if user code have any error.
-                # This will prevent infinite loop of teardown and
-                # re-provision. However, there is a special case that if the
-                # replica is UP for longer than initial_delay_seconds, we
-                # assume it is just some random failure and we should restart
-                # the replica. Please refer to the implementation of
-                # `is_scale_down_succeeded` for more details.
-                # TODO(tian): Currently, restart replicas that failed within
-                # initial_delay_seconds is not supported. We should add it
-                # later when we support `sky serve update`.
-                removal_reason = None
-                if info.status_property.is_scale_down:
-                    # This means the cluster is deleted due to an autoscaler
-                    # decision or the cluster is recovering from preemption.
-                    # Delete the replica info so it won't count as a replica.
-                    if info.status_property.preempted:
-                        removal_reason = 'for preemption recovery'
-                    else:
-                        removal_reason = 'normally'
-                # Don't keep failed record for version mismatch replicas,
-                # since user should fixed the error before update.
-                elif info.version != self.latest_version:
-                    removal_reason = 'for version outdated'
-                elif info.status_property.purged:
-                    removal_reason = 'for purge'
-                elif info.status_property.failed_spot_availability:
-                    removal_reason = 'for spot availability failure'
-                else:
-                    logger.info(f'Termination of replica {replica_id} '
-                                'finished. Replica info is kept since some '
-                                'failure detected.')
-                    serve_state.add_or_update_replica(self._service_name,
-                                                      replica_id, info)
-                if removal_reason is not None:
-                    serve_state.remove_replica(self._service_name, replica_id)
-                    logger.info(f'Replica {replica_id} removed from the '
-                                f'replica table {removal_reason}.')
+                self._handle_sky_down_finish(info, exitcode=p.exitcode)
 
         # Clean old version
         replica_infos = serve_state.get_replica_infos(self._service_name)
@@ -1394,12 +1418,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                 old_config_any_of = old_config.get('resources',
                                                    {}).pop('any_of', [])
 
-                def normalize_dict_list(lst):
-                    return collections.Counter(
-                        frozenset(d.items()) for d in lst)
-
-                if (normalize_dict_list(old_config_any_of) !=
-                        normalize_dict_list(new_config_any_of)):
+                if (resources_utils.normalize_any_of_resources_config(
+                        old_config_any_of) != resources_utils.
+                        normalize_any_of_resources_config(new_config_any_of)):
                     logger.info('Replica config changed (any_of), skipping. '
                                 f'old: {old_config_any_of}, '
                                 f'new: {new_config_any_of}')

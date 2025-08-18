@@ -2,12 +2,12 @@
 
 import fastapi
 
-import sky
 from sky import clouds
 from sky import sky_logging
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
+from sky.utils import registry
 from sky.utils import volume
 from sky.volumes.server import core
 
@@ -55,7 +55,7 @@ async def volume_apply(request: fastapi.Request,
     if volume_type not in supported_volume_types:
         raise fastapi.HTTPException(
             status_code=400, detail=f'Invalid volume type: {volume_type}')
-    cloud = sky.CLOUD_REGISTRY.from_str(volume_cloud)
+    cloud = registry.CLOUD_REGISTRY.from_str(volume_cloud)
     if cloud is None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid cloud: {volume_cloud}')

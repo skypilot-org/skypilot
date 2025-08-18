@@ -10,8 +10,8 @@ import traceback
 import typing
 from typing import Optional
 
-import sky
 from sky import backends
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
@@ -61,7 +61,7 @@ class StrategyExecutor:
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
-        self.dag = sky.Dag()
+        self.dag = dag_lib.Dag()
         self.dag.add(task)
         # For jobs submitted to a pool, the cluster name might change after each
         # recovery. Initially this is set to an empty string to indicate that no
@@ -261,9 +261,6 @@ class StrategyExecutor:
         if self.cluster_name is None:
             return
         if self.pool is None:
-            global_user_state.add_cluster_event(
-                self.cluster_name, None, 'Cluster was cleaned up.',
-                global_user_state.ClusterEventType.STATUS_CHANGE)
             managed_job_utils.terminate_cluster(self.cluster_name)
 
     def _launch(self,
@@ -447,7 +444,7 @@ class StrategyExecutor:
                 # We retry immediately for worker pool, since no sky.launch()
                 # is called and the overhead is minimal.
                 gap_seconds = (backoff.current_backoff()
-                               if self.pool is None else 0)
+                               if self.pool is None else 1)
                 logger.info('Retrying to launch the cluster in '
                             f'{gap_seconds:.1f} seconds.')
                 time.sleep(gap_seconds)
