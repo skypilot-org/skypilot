@@ -189,6 +189,7 @@ This will produce a summary like:
     SCP: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
+    Tigris (for object storage): enabled
     Kubernetes: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
@@ -539,6 +540,44 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 .. note::
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
+
+Tigris
+~~~~~~
+
+`Tigris <https://www.tigrisdata.com/>`__ is a globally distributed S3-compatible object storage service. SkyPilot can download/upload data to Tigris buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Tigris support:
+
+.. code-block:: shell
+
+  # Install boto3 if not already installed
+  pip install boto3
+
+Create your Tigris credentials file at :code:`~/.tigris/credentials`:
+
+.. code-block:: shell
+
+  # Create Tigris credentials directory and file
+  mkdir -p ~/.tigris
+  
+  # Add your Tigris credentials
+  cat << EOF > ~/.tigris/credentials
+  [tigris]
+  aws_access_key_id = <tid_your_access_key_id>
+  aws_secret_access_key = <tsec_your_secret_access_key>
+  endpoint_url = https://t3.storage.dev
+  EOF
+
+You can get your Tigris access keys from the `Tigris console <https://www.tigrisdata.com/docs/get-started/>`_.
+
+Verify your configuration:
+
+.. code-block:: shell
+
+  # Test the configuration
+  AWS_SHARED_CREDENTIALS_FILE=~/.tigris/credentials aws s3 ls --profile tigris
+
+.. note::
+
+  Tigris supports both global endpoint (https://t3.storage.dev) and Fly.io endpoint (https://fly.storage.tigris.dev). SkyPilot will automatically select the appropriate endpoint based on your environment.
 
 Nebius
 ~~~~~~

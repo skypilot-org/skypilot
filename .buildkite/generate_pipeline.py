@@ -33,7 +33,7 @@ from conftest import cloud_to_pytest_keyword
 from conftest import default_clouds_to_run
 import yaml
 
-DEFAULT_CLOUDS_TO_RUN = default_clouds_to_run
+DEFAULT_CLOUDS_TO_RUN = default_clouds_to_run + ['tigris']
 PYTEST_TO_CLOUD_KEYWORD = {v: k for k, v in cloud_to_pytest_keyword.items()}
 
 QUEUE_GENERIC_CLOUD = 'generic_cloud'
@@ -57,7 +57,8 @@ CLOUD_QUEUE_MAP = {
     'aws': QUEUE_GENERIC_CLOUD,
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
-    'kubernetes': QUEUE_KUBERNETES
+    'kubernetes': QUEUE_KUBERNETES,
+    'tigris': QUEUE_GENERIC_CLOUD,
 }
 
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
