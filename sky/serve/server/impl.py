@@ -298,30 +298,35 @@ def up(
         fore = colorama.Fore
 
         assert controller_job_id is not None and controller_handle is not None
+        assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
         # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
         # change after the first time, so there is no consistency issue.
-        with rich_utils.safe_status(
-                ux_utils.spinner_message(
-                    f'Waiting for the {noun} to register')):
-            # This function will check the controller job id in the database
-            # and return the endpoint if the job id matches. Otherwise it will
-            # return None.
-            code = serve_utils.ServeCodeGen.wait_service_registration(
-                service_name, controller_job_id, pool)
-            backend = backend_utils.get_backend_from_handle(controller_handle)
-            assert isinstance(backend, backends.CloudVmRayBackend)
-            assert isinstance(controller_handle,
-                              backends.CloudVmRayResourceHandle)
-            returncode, lb_port_payload, _ = backend.run_on_head(
-                controller_handle,
-                code,
-                require_outputs=True,
-                stream_logs=False)
         try:
-            subprocess_utils.handle_returncode(
-                returncode, code, f'Failed to wait for {noun} initialization',
-                lb_port_payload)
-        except exceptions.CommandError:
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(
+                        f'Waiting for the {noun} to register')):
+                # This function will check the controller job id in the database
+                # and return the endpoint if the job id matches. Otherwise it will
+                # return None.
+                if controller_handle.is_grpc_enabled:
+                    lb_port = serve_rpc_utils.RpcRunner.wait_service_registration(
+                        controller_handle, service_name, controller_job_id, pool)
+                else:
+                    code = serve_utils.ServeCodeGen.wait_service_registration(
+                        service_name, controller_job_id, pool)
+                    backend = backend_utils.get_backend_from_handle(controller_handle)
+                    assert isinstance(backend, backends.CloudVmRayBackend)
+                    returncode, lb_port_payload, _ = backend.run_on_head(
+                        controller_handle,
+                        code,
+                        require_outputs=True,
+                        stream_logs=False)
+                    subprocess_utils.handle_returncode(
+                        returncode, code, f'Failed to wait for {noun} initialization',
+                        lb_port_payload)
+                    lb_port = serve_utils.load_service_initialization_result(
+                        lb_port_payload)
+        except (exceptions.CommandError, grpc.FutureTimeoutError, grpc.RpcError):
             if serve_utils.is_consolidation_mode(pool):
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
@@ -355,8 +360,6 @@ def up(
                         'Failed to spin up the service. Please '
                         'check the logs above for more details.') from None
         else:
-            lb_port = serve_utils.load_service_initialization_result(
-                lb_port_payload)
             if not serve_utils.is_consolidation_mode(pool) and not pool:
                 socket_endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
@@ -560,23 +563,31 @@ def update(
                                      {remote_task_yaml_path: service_file.name},
                                      storage_mounts=None)
 
-        code = serve_utils.ServeCodeGen.update_service(service_name,
-                                                       current_version,
-                                                       mode=mode.value,
-                                                       pool=pool)
-        returncode, _, stderr = backend.run_on_head(handle,
-                                                    code,
-                                                    require_outputs=True,
-                                                    stream_logs=False,
-                                                    separate_stderr=True)
-        try:
-            subprocess_utils.handle_returncode(returncode,
-                                               code,
-                                               f'Failed to update {noun}s',
-                                               stderr,
-                                               stream_logs=True)
-        except exceptions.CommandError as e:
-            raise RuntimeError(e.error_msg) from e
+        if handle.is_grpc_enabled:
+            try:
+                _ = serve_rpc_utils.RpcRunner.update_service(handle, service_name, current_version, mode, pool)
+            except grpc.RpcError as e:
+                raise RuntimeError(f'{e.details()} ({e.code()})') from e
+            except grpc.FutureTimeoutError as e:
+                raise RuntimeError('gRPC timed out') from e
+        else:
+            code = serve_utils.ServeCodeGen.update_service(service_name,
+                                                        current_version,
+                                                        mode=mode.value,
+                                                        pool=pool)
+            returncode, _, stderr = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True,
+                                                        stream_logs=False,
+                                                        separate_stderr=True)
+            try:
+                subprocess_utils.handle_returncode(returncode,
+                                                code,
+                                                f'Failed to update {noun}s',
+                                                stderr,
+                                                stream_logs=True)
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
 
     cmd = 'sky jobs pool status' if pool else 'sky serve status'
     logger.info(

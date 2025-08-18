@@ -65,3 +65,53 @@ class TerminateServiceResponse(_message.Message):
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     message: str
     def __init__(self, message: _Optional[str] = ...) -> None: ...
+
+class TerminateReplicaRequest(_message.Message):
+    __slots__ = ("service_name", "replica_id", "purge")
+    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    REPLICA_ID_FIELD_NUMBER: _ClassVar[int]
+    PURGE_FIELD_NUMBER: _ClassVar[int]
+    service_name: str
+    replica_id: int
+    purge: bool
+    def __init__(self, service_name: _Optional[str] = ..., replica_id: _Optional[int] = ..., purge: bool = ...) -> None: ...
+
+class TerminateReplicaResponse(_message.Message):
+    __slots__ = ("message",)
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    message: str
+    def __init__(self, message: _Optional[str] = ...) -> None: ...
+
+class WaitRegistrationRequest(_message.Message):
+    __slots__ = ("service_name", "job_id", "pool")
+    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    POOL_FIELD_NUMBER: _ClassVar[int]
+    service_name: str
+    job_id: int
+    pool: bool
+    def __init__(self, service_name: _Optional[str] = ..., job_id: _Optional[int] = ..., pool: bool = ...) -> None: ...
+
+class WaitRegistrationResponse(_message.Message):
+    __slots__ = ("lb_port",)
+    LB_PORT_FIELD_NUMBER: _ClassVar[int]
+    lb_port: int
+    def __init__(self, lb_port: _Optional[int] = ...) -> None: ...
+
+class UpdateServiceRequest(_message.Message):
+    __slots__ = ("service_name", "version", "mode", "pool")
+    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    MODE_FIELD_NUMBER: _ClassVar[int]
+    POOL_FIELD_NUMBER: _ClassVar[int]
+    service_name: str
+    version: int
+    mode: str
+    pool: bool
+    def __init__(self, service_name: _Optional[str] = ..., version: _Optional[int] = ..., mode: _Optional[str] = ..., pool: bool = ...) -> None: ...
+
+class UpdateServiceResponse(_message.Message):
+    __slots__ = ("encoded_message",)
+    ENCODED_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    encoded_message: str
+    def __init__(self, encoded_message: _Optional[str] = ...) -> None: ...

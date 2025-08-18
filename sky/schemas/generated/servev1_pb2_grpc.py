@@ -54,6 +54,21 @@ class ServeServiceStub(object):
                 request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServiceRequest.SerializeToString,
                 response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServiceResponse.FromString,
                 _registered_method=True)
+        self.TerminateReplica = channel.unary_unary(
+                '/serve.v1.ServeService/TerminateReplica',
+                request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaResponse.FromString,
+                _registered_method=True)
+        self.WaitServiceRegistration = channel.unary_unary(
+                '/serve.v1.ServeService/WaitServiceRegistration',
+                request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitRegistrationRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitRegistrationResponse.FromString,
+                _registered_method=True)
+        self.UpdateService = channel.unary_unary(
+                '/serve.v1.ServeService/UpdateService',
+                request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.FromString,
+                _registered_method=True)
 
 
 class ServeServiceServicer(object):
@@ -80,6 +95,27 @@ class ServeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def TerminateReplica(self, request, context):
+        """Terminate replica.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def WaitServiceRegistration(self, request, context):
+        """Wait for service registration.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateService(self, request, context):
+        """Update service.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ServeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -97,6 +133,21 @@ def add_ServeServiceServicer_to_server(servicer, server):
                     servicer.TerminateServices,
                     request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServiceRequest.FromString,
                     response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServiceResponse.SerializeToString,
+            ),
+            'TerminateReplica': grpc.unary_unary_rpc_method_handler(
+                    servicer.TerminateReplica,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaResponse.SerializeToString,
+            ),
+            'WaitServiceRegistration': grpc.unary_unary_rpc_method_handler(
+                    servicer.WaitServiceRegistration,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitRegistrationRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitRegistrationResponse.SerializeToString,
+            ),
+            'UpdateService': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateService,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -179,6 +230,87 @@ class ServeService(object):
             '/serve.v1.ServeService/TerminateServices',
             sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServiceRequest.SerializeToString,
             sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServiceResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def TerminateReplica(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/serve.v1.ServeService/TerminateReplica',
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WaitServiceRegistration(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/serve.v1.ServeService/WaitServiceRegistration',
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitRegistrationRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitRegistrationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateService(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/serve.v1.ServeService/UpdateService',
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.FromString,
             options,
             channel_credentials,
             insecure,

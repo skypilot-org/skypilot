@@ -1,4 +1,5 @@
 """SkyServe core APIs."""
+import grpc
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -6,6 +7,7 @@ from sky import backends
 from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.serve import serve_rpc_utils
 from sky.serve import serve_utils
 from sky.serve.server import impl
 from sky.usage import usage_lib
@@ -105,25 +107,32 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
         'Please spin up a service first.',
     )
 
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
+    if handle.is_grpc_enabled:
+        try:
+            stdout = serve_rpc_utils.RpcRunner.terminate_replica(handle, service_name, replica_id, purge)
+        except grpc.RpcError as e:
+            raise RuntimeError(f'{e.details()} ({e.code()})') from e
+        except grpc.FutureTimeoutError as e:
+            raise RuntimeError('gRPC timed out') from e
+    else:
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_utils.ServeCodeGen.terminate_replica(service_name, replica_id,
-                                                      purge)
-    returncode, stdout, stderr = backend.run_on_head(handle,
-                                                     code,
-                                                     require_outputs=True,
-                                                     stream_logs=False,
-                                                     separate_stderr=True)
+        code = serve_utils.ServeCodeGen.terminate_replica(service_name, replica_id, purge)
+        returncode, stdout, stderr = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True,
+                                                        stream_logs=False,
+                                                        separate_stderr=True)
 
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to terminate the replica',
-                                           stderr,
-                                           stream_logs=True)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+        try:
+            subprocess_utils.handle_returncode(returncode,
+                                            code,
+                                            'Failed to terminate the replica',
+                                            stderr,
+                                            stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
 
     sky_logging.print(stdout)
 

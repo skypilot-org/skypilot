@@ -9,6 +9,12 @@ service ServeService {
     rpc AddVersion(AddVersionRequest) returns (AddVersionResponse);
     // Terminate services.
     rpc TerminateServices(TerminateServiceRequest) returns (TerminateServiceResponse);
+    // Terminate replica.
+    rpc TerminateReplica(TerminateReplicaRequest) returns (TerminateReplicaResponse);
+    // Wait for service registration.
+    rpc WaitServiceRegistration(WaitRegistrationRequest) returns (WaitRegistrationResponse);
+    // Update service.
+    rpc UpdateService(UpdateServiceRequest) returns (UpdateServiceResponse);
 }
 
 message ServiceNames {
@@ -44,4 +50,39 @@ message TerminateServiceRequest {
 
 message TerminateServiceResponse {
     string message = 1;
+}
+
+message TerminateReplicaRequest {
+    string service_name = 1;
+    int64 replica_id = 2;
+    bool purge = 3;
+}
+
+message TerminateReplicaResponse {
+    string message = 1;
+}
+
+message WaitRegistrationRequest {
+    string service_name = 1;
+    int64 job_id = 2;
+    bool pool = 3;
+}
+
+message WaitRegistrationResponse {
+    int64 lb_port = 1;
+}
+
+message UpdateServiceRequest {
+    string service_name = 1;
+    int64 version = 2;
+    string mode = 3;
+    bool pool = 4;
+}
+
+message UpdateServiceResponse {
+    // TODO (kyuds): leaving this as encoded because we don't actually
+    // use the output encoded message in the code, so it is difficult
+    // to infer the type. We should send the decoded version once
+    // we actually start using the message contents.
+    string encoded_message = 1;
 }
