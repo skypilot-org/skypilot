@@ -10,7 +10,7 @@ from multiprocessing import pool
 import re
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from sky import sky_logging
 from sky.adaptors import aws
@@ -527,6 +527,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 to_start_count,
                 associate_public_ip_address=(
                     not config.provider_config['use_internal_ips']))
+
             created_instances.extend(created_remaining_instances)
         created_instances.sort(key=lambda x: x.id)
 
@@ -585,11 +586,13 @@ def _filter_instances(ec2: 'mypy_boto3_ec2.ServiceResource',
 # stop() and terminate() for example already implicitly assume non-terminated.
 @common_utils.retry
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
@@ -608,12 +611,13 @@ def query_instances(
         'shutting-down': None,
         'terminated': None,
     }
-    statuses = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst in instances:
         status = status_map[inst.state['Name']]
         if non_terminated_only and status is None:
             continue
-        statuses[inst.id] = status
+        statuses[inst.id] = (status, None)
     return statuses
 
 
@@ -681,19 +685,40 @@ def terminate_instances(
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
-    instances_list = list(instances)
-    instances.terminate()
-    if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
-            not managed_by_skypilot):
-        # Using default AWS SG or user specified security group. We don't need
-        # to wait for the termination of the instances, as we do not need to
-        # delete the SG.
-        return
-    # If ports are specified, we need to delete the newly created Security
-    # Group. Here we wait for all instances to be terminated, since the
-    # Security Group dependent on them.
-    for instance in instances_list:
-        instance.wait_until_terminated()
+    default_sg = _get_sg_from_name(ec2, aws_cloud.DEFAULT_SECURITY_GROUP_NAME)
+    if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
+        # Case 1: The default SG is used, we don't need to ensure instance are
+        # terminated.
+        instances.terminate()
+    elif not managed_by_skypilot:
+        # Case 2: We are not managing the non-default sg. We don't need to
+        # ensure instances are terminated.
+        instances.terminate()
+    elif (managed_by_skypilot and default_sg is not None):
+        # Case 3: We are managing the non-default sg. The default SG exists
+        # so we can move the instances to the default SG and terminate them
+        # without blocking.
+
+        # Make this multithreaded: modify all instances' SGs in parallel.
+        def modify_instance_sg(instance):
+            instance.modify_attribute(Groups=[default_sg.id])
+            logger.debug(f'Instance {instance.id} modified to use default SG:'
+                         f'{default_sg.id} for quick deletion.')
+
+        with pool.ThreadPool() as thread_pool:
+            thread_pool.map(modify_instance_sg, instances)
+            thread_pool.close()
+            thread_pool.join()
+
+        instances.terminate()
+    else:
+        # Case 4: We are managing the non-default sg. The default SG does not
+        # exist. We must block on instance termination so that we can
+        # delete the security group.
+        instances.terminate()
+        for instance in instances:
+            instance.wait_until_terminated()
+
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
     #  trigger the termination process (via http call) and then return.

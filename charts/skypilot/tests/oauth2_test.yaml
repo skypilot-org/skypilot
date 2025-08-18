@@ -30,10 +30,6 @@ tests:
   - it: should create oauth2-proxy resources when legacy config is enabled
     set:
       auth.oauth.enabled: false
-      # Template bug: validation checks auth.oauth values even when disabled
-      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      auth.oauth.client-id: "test-client-id"
-      auth.oauth.client-secret: "test-client-secret"
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
       ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
@@ -56,10 +52,6 @@ tests:
   - it: should configure oauth2-proxy deployment with legacy values
     set:
       auth.oauth.enabled: false
-      # Template bug: validation checks auth.oauth values even when disabled
-      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      auth.oauth.client-id: "test-client-id"
-      auth.oauth.client-secret: "test-client-secret"
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
       ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
@@ -99,9 +91,6 @@ tests:
   - it: should configure oauth2-proxy with client credentials from secret (legacy)
     set:
       auth.oauth.enabled: false
-      # Template bug: validation checks auth.oauth values even when disabled
-      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      auth.oauth.client-details-from-secret: "oauth-secret"
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
       ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
@@ -124,10 +113,6 @@ tests:
   - it: should configure oauth2-proxy with external redis (legacy)
     set:
       auth.oauth.enabled: false
-      # Template bug: validation checks auth.oauth values even when disabled
-      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      auth.oauth.client-id: "test-client-id"
-      auth.oauth.client-secret: "test-client-secret"
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
       ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
@@ -143,12 +128,6 @@ tests:
   - it: should not create redis when external redis is configured (legacy)
     set:
       auth.oauth.enabled: false
-      # Template bug: validation checks auth.oauth values even when disabled
-      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      auth.oauth.client-id: "test-client-id"
-      auth.oauth.client-secret: "test-client-secret"
-      # Due to template bug, Redis URL must be set in auth.oauth even for legacy config
-      auth.oauth.redis-url: "redis://external-redis:6379/1"
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
       ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
@@ -163,10 +142,6 @@ tests:
   - it: should configure cookie session store when specified (legacy)
     set:
       auth.oauth.enabled: false
-      # Template bug: validation checks auth.oauth values even when disabled
-      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      auth.oauth.client-id: "test-client-id"
-      auth.oauth.client-secret: "test-client-secret"
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
       ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
@@ -182,10 +157,6 @@ tests:
   - it: should configure ingress with oauth2-proxy annotations (legacy)
     set:
       auth.oauth.enabled: false
-      # Template bug: validation checks auth.oauth values even when disabled
-      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      auth.oauth.client-id: "test-client-id"
-      auth.oauth.client-secret: "test-client-secret"
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
       ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
@@ -210,10 +181,6 @@ tests:
   - it: should configure ingress with HTTPS oauth2-proxy annotations (legacy)
     set:
       auth.oauth.enabled: false
-      # Template bug: validation checks auth.oauth values even when disabled
-      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      auth.oauth.client-id: "test-client-id"
-      auth.oauth.client-secret: "test-client-secret"
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
       ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
@@ -232,10 +199,6 @@ tests:
   - it: should create oauth2-proxy ingress (legacy)
     set:
       auth.oauth.enabled: false
-      # Template bug: validation checks auth.oauth values even when disabled
-      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      auth.oauth.client-id: "test-client-id"
-      auth.oauth.client-secret: "test-client-secret"
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
       ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
@@ -265,11 +228,6 @@ tests:
       auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
       auth.oauth.client-id: "test-client-id"
       auth.oauth.client-secret: "test-client-secret"
-      ingress.oauth2-proxy.enabled: false
-      # Since the template still uses ingress.oauth2-proxy values, we need to set them too
-      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      ingress.oauth2-proxy.client-id: "test-client-id"
-      ingress.oauth2-proxy.client-secret: "test-client-secret"
     asserts:
       - hasDocuments:
           count: 1
@@ -287,11 +245,6 @@ tests:
       auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
       auth.oauth.client-id: "test-client-id"
       auth.oauth.client-secret: "test-client-secret"
-      ingress.oauth2-proxy.enabled: false
-      # Since the template still uses ingress.oauth2-proxy values, we need to set them too
-      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      ingress.oauth2-proxy.client-id: "test-client-id"
-      ingress.oauth2-proxy.client-secret: "test-client-secret"
     template: templates/api-deployment.yaml
     asserts:
       - contains:
@@ -311,11 +264,6 @@ tests:
       auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
       auth.oauth.client-id: "test-client-id"
       auth.oauth.client-secret: "test-client-secret"
-      ingress.oauth2-proxy.enabled: false
-      # Since the template still uses ingress.oauth2-proxy values, we need to set them too
-      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      ingress.oauth2-proxy.client-id: "test-client-id"
-      ingress.oauth2-proxy.client-secret: "test-client-secret"
     template: templates/oauth2-proxy-ingress.yaml
     asserts:
       - hasDocuments:
@@ -328,11 +276,6 @@ tests:
       auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
       auth.oauth.client-id: "test-client-id"
       auth.oauth.client-secret: "test-client-secret"
-      ingress.oauth2-proxy.enabled: false
-      # Since the template still uses ingress.oauth2-proxy values, we need to set them too
-      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      ingress.oauth2-proxy.client-id: "test-client-id"
-      ingress.oauth2-proxy.client-secret: "test-client-secret"
     template: templates/ingress.yaml
     asserts:
       - notExists:
@@ -340,45 +283,14 @@ tests:
       - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
 
-  # ============================================================================
-  # Tests for cookie timing configuration
-  # ============================================================================
-  - it: should configure cookie timing settings (legacy)
-    set:
-      auth.oauth.enabled: false
-      # Template bug: validation checks auth.oauth values even when disabled
-      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      auth.oauth.client-id: "test-client-id"
-      auth.oauth.client-secret: "test-client-secret"
-      ingress.enabled: true
-      ingress.oauth2-proxy.enabled: true
-      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      ingress.oauth2-proxy.client-id: "test-client-id"
-      ingress.oauth2-proxy.client-secret: "test-client-secret"
-      ingress.oauth2-proxy.cookie-refresh: 3600
-      ingress.oauth2-proxy.cookie-expire: 7200
-    template: templates/oauth2-proxy-deployment.yaml
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--cookie-refresh=3600"
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--cookie-expire=7200"
-
   - it: should configure cookie timing settings (new auth)
     set:
       auth.oauth.enabled: true
       auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
       auth.oauth.client-id: "test-client-id"
       auth.oauth.client-secret: "test-client-secret"
-      ingress.oauth2-proxy.enabled: false
-      # Since the template still uses ingress.oauth2-proxy values, we need to set them too
-      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      ingress.oauth2-proxy.client-id: "test-client-id"
-      ingress.oauth2-proxy.client-secret: "test-client-secret"
-      ingress.oauth2-proxy.cookie-refresh: 3600
-      ingress.oauth2-proxy.cookie-expire: 7200
+      auth.oauth.cookie-refresh: 3600
+      auth.oauth.cookie-expire: 7200
     template: templates/oauth2-proxy-deployment.yaml
     asserts:
       - contains:
@@ -391,7 +303,6 @@ tests:
   - it: should fail when oidc-issuer-url is missing (legacy)
     set:
       auth.oauth.enabled: false
-      # For error testing, we don't set auth.oauth values to trigger validation failure
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
       ingress.oauth2-proxy.client-id: "test-client-id"
@@ -422,11 +333,6 @@ tests:
       auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
       auth.oauth.client-id: "test-client-id"
       auth.oauth.client-secret: "test-client-secret"
-      ingress.oauth2-proxy.enabled: false
-      # Since the template still uses ingress.oauth2-proxy values, we need to set them too
-      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      ingress.oauth2-proxy.client-id: "test-client-id"
-      ingress.oauth2-proxy.client-secret: "test-client-secret"
     template: templates/oauth2-proxy-service.yaml
     asserts:
       - isKind:
@@ -450,12 +356,6 @@ tests:
       auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
       auth.oauth.client-id: "test-client-id"
       auth.oauth.client-secret: "test-client-secret"
-      ingress.oauth2-proxy.enabled: false
-      # Since the template still uses ingress.oauth2-proxy values, we need to set them too
-      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      ingress.oauth2-proxy.client-id: "test-client-id"
-      ingress.oauth2-proxy.client-secret: "test-client-secret"
-      ingress.oauth2-proxy.session-store-type: "redis"
     template: templates/oauth2-proxy-redis.yaml
     asserts:
       - hasDocuments:
@@ -475,26 +375,50 @@ tests:
           value: "redis:7-alpine"
         documentIndex: 0
 
-  - it: should use default values when not specified (legacy)
+  - it: should configure oauth2-proxy with redis-secret
     set:
-      auth.oauth.enabled: false
-      # Template bug: validation checks auth.oauth values even when disabled
+      auth.oauth.enabled: true
       auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
       auth.oauth.client-id: "test-client-id"
       auth.oauth.client-secret: "test-client-secret"
-      ingress.enabled: true
-      ingress.oauth2-proxy.enabled: true
-      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
-      ingress.oauth2-proxy.client-id: "test-client-id"
-      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      auth.oauth.redis-secret: "redis-credentials"
     template: templates/oauth2-proxy-deployment.yaml
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: "--email-domain=*"
+          content: "--redis-connection-url=$(REDIS_URL)"
       - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--session-store-type=redis"
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--cookie-secure=false"
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_URL
+            valueFrom:
+              secretKeyRef:
+                name: "redis-credentials"
+                key: "redis_url"
+
+
+  - it: should not create redis when redis-secret is configured
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.redis-secret: "redis-credentials"
+    template: templates/oauth2-proxy-redis.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+
+  - it: should fail when both redis-url and redis-secret are set
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.redis-url: "redis://external-redis:6379/1"
+      auth.oauth.redis-secret: "redis-credentials"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: "redis-url and redis-secret are mutually exclusive when OAuth2 proxy is enabled"

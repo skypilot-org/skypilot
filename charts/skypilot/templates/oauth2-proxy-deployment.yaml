@@ -12,6 +12,9 @@
 {{- if and (not (index $oauth2 "client-details-from-secret")) (eq (index $oauth2 "client-secret") "") -}}
 {{- fail "ingress.oauth2-proxy.client-secret is required when OAuth2 proxy is enabled and client-details-from-secret is not set" -}}
 {{- end -}}
+{{- if and (index $oauth2 "redis-url") (index $oauth2 "redis-secret") -}}
+{{- fail "redis-url and redis-secret are mutually exclusive when OAuth2 proxy is enabled" -}}
+{{- end -}}
 
 {{- /* Determine the secret key format when using client-details-from-secret */ -}}
 {{- $clientIdKey := "client-id" -}}
@@ -57,55 +60,64 @@ spec:
     spec:
       containers:
       - name: oauth2-proxy
-        image: {{ index .Values.ingress "oauth2-proxy" "image" | default "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0" }}
+        image: {{ index $oauth2 "image" | default "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0" }}
         imagePullPolicy: IfNotPresent
         args:
         - --provider=oidc
-        - --oidc-issuer-url={{ index .Values.ingress "oauth2-proxy" "oidc-issuer-url" }}
-        - --email-domain={{ index .Values.ingress "oauth2-proxy" "email-domain" | default "*" }}
+        - --oidc-issuer-url={{ index $oauth2 "oidc-issuer-url" }}
+        - --email-domain={{ index $oauth2 "email-domain" | default "*" }}
         - --upstream=file:///dev/null
         - --http-address=0.0.0.0:4180
         - --skip-provider-button=true
         - --reverse-proxy=true
         - --set-xauthrequest
-        - --session-store-type={{ index .Values.ingress "oauth2-proxy" "session-store-type" | default "redis" }}
-        {{- if not (index .Values.ingress "oauth2-proxy" "use-https" | default false) }}
+        - --session-store-type={{ index $oauth2 "session-store-type" | default "redis" }}
+        {{- if not (index $oauth2 "use-https" | default false) }}
         - --cookie-secure=false
         {{- end }}
-        {{- if (index .Values.ingress "oauth2-proxy" "cookie-refresh") }}
-        - --cookie-refresh={{ index .Values.ingress "oauth2-proxy" "cookie-refresh" }}
+        {{- if (index $oauth2 "cookie-refresh") }}
+        - --cookie-refresh={{ index $oauth2 "cookie-refresh" }}
         {{- end }}
-        {{- if (index .Values.ingress "oauth2-proxy" "cookie-expire") }}
-        - --cookie-expire={{ index .Values.ingress "oauth2-proxy" "cookie-expire" }}
+        {{- if (index $oauth2 "cookie-expire") }}
+        - --cookie-expire={{ index $oauth2 "cookie-expire" }}
         {{- end }}
-        {{- if eq (index .Values.ingress "oauth2-proxy" "session-store-type" | default "redis") "redis" }}
-        {{- if (index .Values.ingress "oauth2-proxy" "redis-url") }}
-        - --redis-connection-url={{ index .Values.ingress "oauth2-proxy" "redis-url" }}
+        {{- if eq (index $oauth2 "session-store-type" | default "redis") "redis" }}
+        {{- if (index $oauth2 "redis-url") }}
+        - --redis-connection-url={{ index $oauth2 "redis-url" }}
+        {{- else if (index $oauth2 "redis-secret") }}
+        - --redis-connection-url=$(REDIS_URL)
         {{- else }}
         - --redis-connection-url=redis://$(SERVICE_NAME)-oauth2-proxy-redis:6379/0
         {{- end }}
         {{- end }}
         env:
         - name: OAUTH2_PROXY_CLIENT_ID
-          {{- if (index .Values.ingress "oauth2-proxy" "client-details-from-secret") }}
+          {{- if (index $oauth2 "client-details-from-secret") }}
           valueFrom:
             secretKeyRef:
-              name: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" }}
+              name: {{ index $oauth2 "client-details-from-secret" }}
               key: {{ $clientIdKey }}
           {{- else }}
-          value: {{ index .Values.ingress "oauth2-proxy" "client-id" | quote }}
+          value: {{ index $oauth2 "client-id" | quote }}
           {{- end }}
         - name: OAUTH2_PROXY_CLIENT_SECRET
-          {{- if (index .Values.ingress "oauth2-proxy" "client-details-from-secret") }}
+          {{- if (index $oauth2 "client-details-from-secret") }}
           valueFrom:
             secretKeyRef:
-              name: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" }}
+              name: {{ index $oauth2 "client-details-from-secret" }}
               key: {{ $clientSecretKey }}
           {{- else }}
-          value: {{ index .Values.ingress "oauth2-proxy" "client-secret" | quote }}
+          value: {{ index $oauth2 "client-secret" | quote }}
           {{- end }}
         - name: SERVICE_NAME
           value: {{ .Release.Name }}
+        {{- if (index $oauth2 "redis-secret") }}
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ index $oauth2 "redis-secret" }}
+              key: redis_url
+        {{- end }}
         - name: OAUTH2_PROXY_COOKIE_SECRET
           {{- /* Look up existing deployment to get the current cookie secret if available */}}
           {{- $deploymentName := printf "%s-oauth2-proxy" .Release.Name }}

@@ -8,7 +8,8 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
-import { REFRESH_INTERVALS } from '@/lib/config';
+import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
+import Link from 'next/link';
 
 // Refresh interval in milliseconds
 export const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -232,50 +233,24 @@ export function formatDuration(durationInSeconds) {
 export function formatLogs(str) {
   if (!str) return '';
 
-  // Filter out unwanted lines
-  const lines = str
+  // Remove ANSI escape codes
+  const cleaned = stripAnsiCodes(str);
+
+  // Split into lines and format each one
+  return cleaned
     .split('\n')
-    .filter(
-      (line) =>
+    .filter((line) => {
+      // Filter out empty lines and rich terminal formatting artifacts
+      return (
+        line.trim() !== '' && // remove empty
         !line.match(/<rich_.*?\[bold cyan\]/) &&
         !line.match(/<rich_.*>.*<\/rich_.*>/) &&
         !line.match(/├──/) &&
         !line.match(/└──/)
-    );
-
-  // Remove ANSI escape codes
-  str = stripAnsiCodes(lines.join('\n'));
-
-  // Process each line
-  return str
-    .split('\n')
-    .map((line) => {
-      // Match the format: "I 04-14 02:07:19 controller.py:59] DAG:"
-      const standardMatch = line.match(
-        /^([IWED])\s+(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+([^:]+:\d+\])(.*)/
       );
-
-      if (standardMatch) {
-        const [_, level, timestamp, location, message] = standardMatch;
-        const logLevel =
-          {
-            I: 'INFO',
-            W: 'WARNING',
-            E: 'ERROR',
-            D: 'DEBUG',
-          }[level] || '';
-
-        return `<span class="log-line ${logLevel}"><span class="level">${level}</span><span class="timestamp">${timestamp}</span><span class="location">${location}</span><span class="message">${message}</span></span>`;
-      }
-
-      // If it doesn't match the standard format, try to split on parentheses content
-      const parts = line.match(/^(\([^)]+\))(.*)$/);
-      if (parts) {
-        const [_, prefix, rest] = parts;
-        return `<span class="log-line"><span class="log-prefix">${prefix}</span><span class="log-rest">${rest}</span></span>`;
-      }
-
-      // If no patterns match, return the line as is
+    })
+    .map((line) => {
+      // Wrap each line in log formatting
       return `<span class="log-line"><span class="message">${line}</span></span>`;
     })
     .join('\n');
@@ -426,7 +401,7 @@ export function LogFilter({ logs, controller = false }) {
       )}
       <div
         className="logs-container"
-        dangerouslySetInnerHTML={{ __html: filteredLogs }}
+        dangerouslySetInnerHTML={{ __html: formatLogs(filteredLogs) }}
       />
     </div>
   );
@@ -495,3 +470,213 @@ export function formatFullTimestamp(date) {
   });
   return dateStr + ' ' + timeStr;
 }
+
+// Shared badge components for pools
+
+export const getJobStatusCounts = (poolData) => {
+  if (!poolData || !poolData.jobCounts) return {};
+  return poolData.jobCounts;
+};
+
+export const getInfraSummary = (replicaInfo) => {
+  if (!replicaInfo || replicaInfo.length === 0) return {};
+
+  const readyWorkers = replicaInfo.filter(
+    (worker) => worker.status === 'READY'
+  );
+
+  const cloudData = {};
+  readyWorkers.forEach((worker) => {
+    try {
+      // Handle undefined/null/empty cloud values
+      const hasCloud =
+        worker.cloud &&
+        worker.cloud.trim() !== '' &&
+        worker.cloud !== 'undefined';
+      const hasRegion =
+        worker.region &&
+        worker.region !== 'undefined' &&
+        worker.region !== null &&
+        worker.region.trim() !== '';
+
+      // Skip if both cloud and region are missing
+      if (!hasCloud && !hasRegion) {
+        return;
+      }
+
+      const cloud = hasCloud ? worker.cloud : 'Unknown';
+      const region = hasRegion ? worker.region : null;
+
+      if (!cloudData[cloud]) {
+        cloudData[cloud] = {
+          count: 0,
+          regions: new Set(),
+        };
+      }
+
+      cloudData[cloud].count += 1;
+      if (region) {
+        cloudData[cloud].regions.add(region);
+      }
+    } catch (error) {
+      // Handle errors gracefully
+      if (!cloudData['Unknown']) {
+        cloudData['Unknown'] = {
+          count: 0,
+          regions: new Set(),
+        };
+      }
+      cloudData['Unknown'].count += 1;
+    }
+  });
+
+  // Convert to the expected format: "Cloud (X regions) Total" or "Kubernetes (X contexts) Total"
+  const infraCounts = {};
+  Object.entries(cloudData).forEach(([cloud, data]) => {
+    const regionCount = data.regions.size;
+
+    // Use 'context' for Kubernetes, 'region' for other clouds
+    const isKubernetes =
+      cloud.toLowerCase().includes('kubernetes') ||
+      cloud.toLowerCase().includes('k8s');
+    const locationTerm = isKubernetes ? 'context' : 'region';
+    const locationText =
+      regionCount === 1
+        ? `1 ${locationTerm}`
+        : `${regionCount} ${locationTerm}s`;
+
+    const key = regionCount > 0 ? `${cloud} (${locationText})` : cloud;
+    infraCounts[key] = data.count;
+  });
+
+  return infraCounts;
+};
+
+export const JobStatusBadges = ({ jobCounts, getStatusStyle }) => {
+  if (!jobCounts || Object.keys(jobCounts).length === 0) {
+    return <span className="text-gray-1000">No active jobs</span>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {Object.entries(jobCounts).map(([status, count]) => {
+        const style = getStatusStyle(status);
+        return (
+          <span
+            key={status}
+            className={`px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium ${style}`}
+          >
+            <span>{status}</span>
+            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+              {count}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+};
+
+export const InfraBadges = ({ replicaInfo }) => {
+  const infraCounts = getInfraSummary(replicaInfo);
+
+  if (Object.keys(infraCounts).length === 0) {
+    return <span className="text-gray-500 text-sm">-</span>;
+  }
+
+  const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+
+  const truncateCloudRegion = (cloudWithRegion) => {
+    // Check if there's a region part in parentheses
+    const parenIndex = cloudWithRegion.indexOf('(');
+    if (parenIndex === -1) {
+      // No region part, return as is
+      return cloudWithRegion;
+    }
+
+    const cloudName = cloudWithRegion.substring(0, parenIndex).trim();
+    const regionPart = cloudWithRegion.substring(
+      parenIndex + 1,
+      cloudWithRegion.length - 1
+    );
+
+    // Only truncate the region part if it's longer than the truncate length
+    if (regionPart.length <= NAME_TRUNCATE_LENGTH) {
+      return cloudWithRegion;
+    }
+
+    // Truncate only the region part
+    const truncatedRegion = `${regionPart.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionPart.substring(regionPart.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+
+    return `${cloudName} (${truncatedRegion})`;
+  };
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {Object.entries(infraCounts).map(([cloudWithRegion, count]) => {
+        const displayText = truncateCloudRegion(cloudWithRegion);
+        const shouldTruncate = displayText !== cloudWithRegion;
+
+        return (
+          <span
+            key={cloudWithRegion}
+            className="px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium bg-blue-50 text-blue-700"
+          >
+            {shouldTruncate ? (
+              <NonCapitalizedTooltip
+                content={cloudWithRegion}
+                className="text-sm text-muted-foreground"
+              >
+                <span>{displayText}</span>
+              </NonCapitalizedTooltip>
+            ) : (
+              <span>{cloudWithRegion}</span>
+            )}
+            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+              {count}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+};
+
+// Common function for rendering pool links with hash comparison
+export const renderPoolLink = (poolName, poolHash, poolsData) => {
+  if (!poolName) return '-';
+
+  // Check if pool hash matches to determine if we should link
+  const matchingPool = poolsData.find(
+    (pool) => pool.name === poolName && pool.hash === poolHash
+  );
+
+  if (matchingPool && poolHash) {
+    // Running pool - show green circle indicator
+    return (
+      <div className="flex items-center space-x-2">
+        <NonCapitalizedTooltip content="This pool is running" placement="top">
+          <div className="w-2 h-2 bg-green-700 rounded-full"></div>
+        </NonCapitalizedTooltip>
+        <Link
+          href={`/jobs/pools/${poolName}`}
+          className="text-gray-700 hover:text-blue-600 hover:underline"
+        >
+          {poolName}
+        </Link>
+      </div>
+    );
+  }
+  // Pool exists but no matching hash found - likely terminated
+  const shortHash = poolHash ? poolHash.substring(0, 4) : '';
+  return (
+    <div className="flex items-center space-x-2">
+      <NonCapitalizedTooltip content="This pool is terminated" placement="top">
+        <div className="w-2 h-2 bg-gray-800"></div>
+      </NonCapitalizedTooltip>
+      <span>
+        {poolName} ({shortHash})
+      </span>
+    </div>
+  );
+};

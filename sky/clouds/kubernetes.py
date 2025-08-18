@@ -3,7 +3,6 @@ import os
 import re
 import subprocess
 import tempfile
-import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
@@ -11,6 +10,7 @@ import colorama
 from sky import catalog
 from sky import clouds
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -30,10 +30,6 @@ from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import volume as volume_lib
-
-if typing.TYPE_CHECKING:
-    # Renaming to avoid shadowing variables.
-    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -734,7 +730,8 @@ class Kubernetes(clouds.Cloud):
                 (constants.PERSISTENT_RUN_SCRIPT_DIR),
             'k8s_high_availability_restarting_signal_file':
                 (constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE),
-            'ha_recovery_log_path': constants.HA_PERSISTENT_RECOVERY_LOG_PATH,
+            'ha_recovery_log_path':
+                constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(''),
             'sky_python_cmd': constants.SKY_PYTHON_CMD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
@@ -770,11 +767,25 @@ class Kubernetes(clouds.Cloud):
 
         return deploy_vars
 
+    @staticmethod
+    def _warn_on_disk_size(resources: 'resources_lib.Resources'):
+        if resources.disk_size != resources_lib.DEFAULT_DISK_SIZE_GB:
+            logger.info(f'{colorama.Style.DIM}Disk size {resources.disk_size} '
+                        'is not supported by Kubernetes. '
+                        'To add additional disk, use volumes.'
+                        f'{colorama.Style.RESET_ALL}')
+        if resources.disk_tier is not None:
+            logger.info(f'{colorama.Style.DIM}Disk tier {resources.disk_tier} '
+                        'is not supported by Kubernetes. '
+                        'To add additional disk, use volumes.'
+                        f'{colorama.Style.RESET_ALL}')
+
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
         # TODO(zhwu): This needs to be updated to return the correct region
         # (context) that has enough resources.
+        self._warn_on_disk_size(resources)
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources

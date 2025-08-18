@@ -60,7 +60,7 @@ To launch a [GPU enabled development cluster](https://docs.skypilot.co/en/latest
 
 SkyPilot will setup SSH config for you.
 * [SSH access](https://docs.skypilot.co/en/latest/examples/interactive-development.html#ssh): `ssh mycluster`
-* [VSCode remote development](https://docs.skypilot.co/en/latest/examples/interactive-development.html#vscode): `code --remote ssh-remote+mycluster "/"`
+* [VSCode remote development](https://docs.skypilot.co/en/latest/examples/interactive-development.html#vscode): `code --remote ssh-remote+mycluster "/home"`
 
 
 ### Jobs

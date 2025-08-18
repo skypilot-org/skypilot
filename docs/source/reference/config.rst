@@ -29,6 +29,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
+    :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 24
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -107,6 +108,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`security_group_name <config-yaml-aws-security-group-name>`: my-security-group
     :ref:`disk_encrypted <config-yaml-aws-disk-encrypted>`: false
+    :ref:`ssh_user <config-yaml-aws-ssh-user>`: ubuntu
     :ref:`prioritize_reservations <config-yaml-aws-prioritize-reservations>`: false
     :ref:`specific_reservations <config-yaml-aws-specific-reservations>`:
       - cr-a1234567
@@ -225,7 +227,7 @@ Retention period for finished requests in hours (optional). Set to a negative va
 
 Requests GC will remove request entries in `sky api status`, i.e., the logs and status of the requests. All the launched resources (clusters/jobs) will still be correctly running.
 
-Default: ``24`` (1 day).
+Default: ``24.0`` (1 day).
 
 Example:
 
@@ -233,6 +235,24 @@ Example:
 
   api_server:
     requests_retention_hours: -1 # Disable requests GC
+
+.. _config-yaml-api-server-cluster-event-retention-hours:
+
+``api_server.cluster_event_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for cluster events in hours (optional). Set to a negative value to disable cluster event GC.
+
+Cluster event GC will remove cluster event entries in `sky status -v`, i.e., the logs and status of the cluster events.
+
+Default: ``24.0`` (1 day).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    cluster_event_retention_hours: -1 # Disable cluster event GC
 
 .. _config-yaml-jobs:
 
@@ -630,6 +650,15 @@ Set to ``true`` to encrypt the boot disk of all AWS instances launched by
 SkyPilot. This is useful for compliance with data protection regulations.
 
 Default: ``false``.
+
+.. _config-yaml-aws-ssh-user:
+
+``aws.ssh_user``
+~~~~~~~~~~~~~~~~
+
+SSH user (optional) for the SkyPilot nodes.
+
+Default: ``ubuntu``.
 
 .. _config-yaml-aws-prioritize-reservations:
 

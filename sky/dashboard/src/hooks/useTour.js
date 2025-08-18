@@ -1726,7 +1726,7 @@ export function TourProvider({ children }) {
         tourRef.current.complete();
       }
     };
-  }, [isFirstVisit, markTourCompleted, router, tourAutoStarted]);
+  }, [isFirstVisit]);
 
   // Block navigation during tour
   useEffect(() => {

@@ -122,6 +122,7 @@ def managed_job_status_refresh_event():
     if controller_utils.high_availability_specified(
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name):
         managed_job_utils.ha_recovery_for_consolidation_mode()
+
     # After recovery, we start the event loop.
     from sky.skylet import events
     refresh_event = events.ManagedJobEvent()
@@ -142,10 +143,21 @@ def should_skip_managed_job_status_refresh():
 def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
-    # TODO(tian): Add HA recovery logic.
+    from sky.serve import serve_utils
+    from sky.utils import controller_utils
+
+    # We run the recovery logic before starting the event loop as those two are
+    # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
+    controller = controller_utils.get_controller_for_pool(pool)
+    if controller_utils.high_availability_specified(
+            controller.value.cluster_name):
+        serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
+
+    # After recovery, we start the event loop.
     from sky.skylet import events
     event = events.ServiceUpdateEvent(pool=pool)
-    logger.info('=== Running serve status refresh event ===')
+    noun = 'pool' if pool else 'serve'
+    logger.info(f'=== Running {noun} status refresh event ===')
     event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 

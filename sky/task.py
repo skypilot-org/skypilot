@@ -10,26 +10,25 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 
-import sky
 from sky import clouds
+from sky import dag as dag_lib
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import docker_utils
 from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     import yaml
-
-    from sky import resources as resources_lib
 else:
     yaml = adaptors_common.LazyImport('yaml')
 
@@ -241,21 +240,26 @@ class Task:
         self,
         name: Optional[str] = None,
         *,
-        setup: Optional[str] = None,
-        run: Optional[CommandOrCommandGen] = None,
+        setup: Optional[Union[str, List[str]]] = None,
+        run: Optional[Union[CommandOrCommandGen, List[str]]] = None,
         envs: Optional[Dict[str, str]] = None,
         secrets: Optional[Dict[str, str]] = None,
         workdir: Optional[Union[str, Dict[str, Any]]] = None,
         num_nodes: Optional[int] = None,
+        file_mounts: Optional[Dict[str, str]] = None,
+        storage_mounts: Optional[Dict[str, storage_lib.Storage]] = None,
         volumes: Optional[Dict[str, str]] = None,
+        resources: Optional[Union['resources_lib.Resources',
+                                  List['resources_lib.Resources'],
+                                  Set['resources_lib.Resources']]] = None,
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
-        file_mounts_mapping: Optional[Dict[str, str]] = None,
-        volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        _file_mounts_mapping: Optional[Dict[str, str]] = None,
+        _volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
+        _metadata: Optional[Dict[str, Any]] = None,
         _user_specified_yaml: Optional[str] = None,
     ):
         """Initializes a Task.
@@ -288,15 +292,15 @@ class Task:
 
         Args:
           name: A string name for the Task for display purposes.
-          setup: A setup command, which will be run before executing the run
+          setup: A setup command(s), which will be run before executing the run
             commands ``run``, and executed under ``workdir``.
           run: The actual command for the task. If not None, either a shell
-            command (str) or a command generator (callable).  If latter, it
-            must take a node rank and a list of node addresses as input and
-            return a shell command (str) (valid to return None for some nodes,
-            in which case no commands are run on them).  Run commands will be
-            run under ``workdir``. Note the command generator should be a
-            self-contained lambda.
+            command(s) (str, list(str)) or a command generator (callable). If
+            latter, it must take a node rank and a list of node addresses as
+            input and return a shell command (str) (valid to return None for
+            some nodes, in which case no commands are run on them). Run
+            commands will be run under ``workdir``. Note the command generator
+            should be a self-contained lambda.
           envs: A dictionary of environment variables to set before running the
             setup and run commands.
           secrets: A dictionary of secret environment variables to set before
@@ -315,21 +319,48 @@ class Task:
             setup/run command, where ``run`` can either be a str, meaning all
             nodes get the same command, or a lambda, with the semantics
             documented above.
+          file_mounts: An optional dict of ``{remote_path: (local_path|cloud
+            URI)}``, where remote means the VM(s) on which this Task will
+            eventually run on, and local means the node from which the task is
+            launched.
+          storage_mounts: an optional dict of ``{mount_path: sky.Storage
+            object}``, where mount_path is the path inside the remote VM(s)
+            where the Storage object will be mounted on.
+          volumes: A dict of volumes to be mounted for the task. The dict has
+            the form of ``{mount_path: volume_name}``.
+          resources: either a sky.Resources, a set of them, or a list of them.
+            A set or a list of resources asks the optimizer to "pick the
+            best of these resources" to run this task.
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
+          event_callback: A bash script that will be executed when the task
+            changes state.
           blocked_resources: A set of resources that this task cannot run on.
-          metadata: A dictionary of metadata to be added to the task.
+          _file_mounts_mapping: (Internal use only) A dictionary of file mounts
+            mapping.
+          _volume_mounts: (Internal use only) A list of volume mounts.
+          _metadata: (Internal use only) A dictionary of metadata to be added to
+            the task.
+          _user_specified_yaml: (Internal use only) A string of user-specified
+            YAML config.
         """
         self.name = name
-        self.run = run
         self.storage_mounts: Dict[str, storage_lib.Storage] = {}
         self.storage_plans: Dict[storage_lib.Storage,
                                  storage_lib.StoreType] = {}
-        self.setup = setup
         self._envs = envs or {}
         self._secrets = secrets or {}
         self._volumes = volumes or {}
+
+        # concatenate commands if given as list
+        def _concat(commands):
+            if isinstance(commands, list):
+                return '\n'.join(commands)
+            return commands
+
+        self.run = _concat(run)
+        self.setup = _concat(setup)
 
         # Validate Docker login configuration early if both envs and secrets
         # contain Docker variables
@@ -350,35 +381,45 @@ class Task:
         self.estimated_inputs_size_gigabytes: Optional[float] = None
         self.estimated_outputs_size_gigabytes: Optional[float] = None
         # Default to CPU VM
-        self.resources: Union[List[sky.Resources],
-                              Set[sky.Resources]] = {sky.Resources()}
+        self.resources: Union[List['resources_lib.Resources'],
+                              Set['resources_lib.Resources']] = {
+                                  resources_lib.Resources()
+                              }
         self._service: Optional[service_spec.SkyServiceSpec] = None
 
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
-        self.time_estimator_func: Optional[Callable[['sky.Resources'],
+        self.time_estimator_func: Optional[Callable[['resources_lib.Resources'],
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
 
         # Only set when 'self' is a jobs controller task: 'self.managed_job_dag'
         # is the underlying managed job dag (sky.Dag object).
-        self.managed_job_dag: Optional['sky.Dag'] = None
+        self.managed_job_dag: Optional['dag_lib.Dag'] = None
 
         # Only set when 'self' is a sky serve controller task.
         self.service_name: Optional[str] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
-        self.best_resources: Optional[sky.Resources] = None
+        self.best_resources: Optional['resources_lib.Resources'] = None
 
         # For internal use only.
-        self.file_mounts_mapping: Optional[Dict[str, str]] = file_mounts_mapping
+        self.file_mounts_mapping: Optional[Dict[str,
+                                                str]] = _file_mounts_mapping
         self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
-            volume_mounts)
+            _volume_mounts)
 
-        self._metadata = metadata if metadata is not None else {}
+        self._metadata = _metadata if _metadata is not None else {}
 
-        dag = sky.dag.get_current_dag()
+        if resources is not None:
+            self.set_resources(resources)
+        if storage_mounts is not None:
+            self.set_storage_mounts(storage_mounts)
+        if file_mounts is not None:
+            self.set_file_mounts(file_mounts)
+
+        dag = dag_lib.get_current_dag()
         if dag is not None:
             dag.add(self)
 
@@ -621,10 +662,10 @@ class Task:
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
             secrets=config.pop('secrets', None),
-            event_callback=config.pop('event_callback', None),
-            file_mounts_mapping=config.pop('file_mounts_mapping', None),
             volumes=config.pop('volumes', None),
-            metadata=config.pop('_metadata', None),
+            event_callback=config.pop('event_callback', None),
+            _file_mounts_mapping=config.pop('file_mounts_mapping', None),
+            _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
         )
 
@@ -743,7 +784,8 @@ class Task:
                 '_cluster_config_overrides'] = cluster_config_override
         if volumes:
             resources_config['volumes'] = volumes
-        task.set_resources(sky.Resources.from_yaml_config(resources_config))
+        task.set_resources(
+            resources_lib.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)
         pool = config.pop('pool', None)
@@ -891,7 +933,8 @@ class Task:
         for key, (vol_name, vol_req) in topology.items():
             if vol_req is not None:
                 if key == 'cloud':
-                    override_params[key] = sky.CLOUD_REGISTRY.from_str(vol_req)
+                    override_params[key] = registry.CLOUD_REGISTRY.from_str(
+                        vol_req)
                 else:
                     override_params[key] = vol_req
         self.set_resources_override(override_params)
@@ -1102,7 +1145,7 @@ class Task:
         Returns:
           self: The current task, with resources set.
         """
-        if isinstance(resources, sky.Resources):
+        if isinstance(resources, resources_lib.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs,
@@ -1147,8 +1190,8 @@ class Task:
         self._service = service
         return self
 
-    def set_time_estimator(self, func: Callable[['sky.Resources'],
-                                                int]) -> 'Task':
+    def set_time_estimator(
+            self, func: Callable[['resources_lib.Resources'], int]) -> 'Task':
         """Sets a func mapping resources to estimated time (secs).
 
         This is EXPERIMENTAL.
@@ -1672,7 +1715,7 @@ class Task:
         return required_features
 
     def __rshift__(self, b):
-        sky.dag.get_current_dag().add_edge(self, b)
+        dag_lib.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
         if isinstance(self.run, str):

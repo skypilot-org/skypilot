@@ -1,12 +1,16 @@
 """Implementation of the SkyServe core APIs."""
+import pathlib
 import re
+import shlex
+import signal
 import tempfile
-from typing import Any, Dict, List, Optional, Tuple, Union
+import threading
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import uuid
 
 import colorama
 import filelock
 
-import sky
 from sky import backends
 from sky import exceptions
 from sky import execution
@@ -20,7 +24,9 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
+from sky.skylet import job_lib
 from sky.utils import admin_policy_utils
+from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -33,7 +39,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 def _rewrite_tls_credential_paths_and_get_tls_env_vars(
-        service_name: str, task: 'sky.Task') -> Dict[str, Any]:
+        service_name: str, task: 'task_lib.Task') -> Dict[str, Any]:
     """Rewrite the paths of TLS credentials in the task.
 
     Args:
@@ -96,24 +102,12 @@ def _get_service_record(
     return service_statuses[0]
 
 
-def _get_controller_type(pool: bool) -> controller_utils.Controllers:
-    """Get the controller type."""
-    if pool:
-        return controller_utils.Controllers.JOBS_CONTROLLER
-    else:
-        return controller_utils.Controllers.SKY_SERVE_CONTROLLER
-
-
 def up(
-    task: 'sky.Task',
+    task: 'task_lib.Task',
     service_name: Optional[str] = None,
     pool: bool = False,
 ) -> Tuple[str, str]:
     """Spins up a service or a pool."""
-    if pool and not serve_utils.is_consolidation_mode(pool):
-        raise ValueError(
-            'Pool is only supported in consolidation mode. To fix, set '
-            '`jobs.controller.consolidation_mode: true` in SkyPilot config.')
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
     assert task.service is not None
@@ -182,7 +176,8 @@ def up(
             prefix=f'controller-task-{service_name}-',
             mode='w',
     ) as controller_file:
-        controller_name = common.SKY_SERVE_CONTROLLER_NAME
+        controller = controller_utils.get_controller_for_pool(pool)
+        controller_name = controller.value.cluster_name
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(service_file.name, task_config)
         remote_tmp_task_yaml_path = (
@@ -192,11 +187,15 @@ def up(
         controller_log_file = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
         controller_resources = controller_utils.get_controller_resources(
-            controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-            task_resources=task.resources)
+            controller=controller, task_resources=task.resources)
         controller_job_id = None
         if serve_utils.is_consolidation_mode(pool):
-            controller_job_id = 0
+            # We need a unique integer per sky.serve.up call to avoid name
+            # conflict. Originally in non-consolidation mode, this is the ray
+            # job id; now we use the request id hash instead. Here we also
+            # make sure it is a 32-bit integer to avoid overflow on sqlalchemy.
+            rid = common_utils.get_current_request_id()
+            controller_job_id = hash(uuid.UUID(rid).int) & 0x7FFFFFFF
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
@@ -208,6 +207,7 @@ def up(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'consolidation_mode_job_id': controller_job_id,
+            'entrypoint': shlex.quote(common_utils.get_current_command()),
             **tls_template_vars,
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
@@ -223,10 +223,11 @@ def up(
         # balancer port from the controller? So we don't need to open so many
         # ports here. Or, we should have a nginx traffic control to refuse
         # any connection to the unregistered ports.
-        controller_resources = {
-            r.copy(ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
-            for r in controller_resources
-        }
+        if not pool:
+            controller_resources = {
+                r.copy(ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
+                for r in controller_resources
+            }
         controller_task.set_resources(controller_resources)
 
         # # Set service_name so the backend will know to modify default ray
@@ -259,7 +260,7 @@ def up(
                         _disable_controller_check=True,
                     )
         else:
-            controller_type = _get_controller_type(pool)
+            controller_type = controller_utils.get_controller_for_pool(pool)
             controller_handle = backend_utils.is_controller_accessible(
                 controller=controller_type, stopped_message='')
             backend = backend_utils.get_backend_from_handle(controller_handle)
@@ -278,10 +279,8 @@ def up(
             ]
             run_script = '\n'.join(env_cmds + [run_script])
             # Dump script for high availability recovery.
-            # if controller_utils.high_availability_specified(
-            #         controller_name):
-            #     managed_job_state.set_ha_recovery_script(
-            #         consolidation_mode_job_id, run_script)
+            if controller_utils.high_availability_specified(controller_name):
+                serve_state.set_ha_recovery_script(service_name, run_script)
             backend.run_on_head(controller_handle, run_script)
 
         style = colorama.Style
@@ -322,7 +321,7 @@ def up(
                                               [controller_job_id],
                                               stream_logs=False)
             controller_job_status = list(statuses.values())[0]
-            if controller_job_status == sky.JobStatus.PENDING:
+            if controller_job_status == job_lib.JobStatus.PENDING:
                 # Max number of services reached due to vCPU constraint.
                 # The controller job is pending due to ray job scheduling.
                 # We manually cancel the job here.
@@ -347,7 +346,7 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            if not serve_utils.is_consolidation_mode(pool):
+            if not serve_utils.is_consolidation_mode(pool) and not pool:
                 socket_endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     lb_port,
@@ -371,10 +370,10 @@ def up(
                 f'\n📋 Useful Commands'
                 f'\n{ux_utils.INDENT_SYMBOL}To submit jobs to the pool:\t'
                 f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
-                f'<run-command>{ux_utils.RESET_BOLD}'
+                f'<yaml_file>{ux_utils.RESET_BOLD}'
                 f'\n{ux_utils.INDENT_SYMBOL}To submit multiple jobs:\t'
                 f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
-                f'--num-jobs 10 <run-command>{ux_utils.RESET_BOLD}'
+                f'--num-jobs 10 <yaml_file>{ux_utils.RESET_BOLD}'
                 f'\n{ux_utils.INDENT_SYMBOL}To check the pool status:\t'
                 f'{ux_utils.BOLD}sky jobs pool status {service_name}'
                 f'{ux_utils.RESET_BOLD}'
@@ -418,7 +417,7 @@ def up(
 
 
 def update(
-    task: 'sky.Task',
+    task: 'task_lib.Task',
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
@@ -450,7 +449,7 @@ def update(
                        'effect. To update TLS keyfile and certfile, please '
                        'tear down the service and spin up a new one.')
 
-    controller_type = _get_controller_type(pool)
+    controller_type = controller_utils.get_controller_for_pool(pool)
     handle = backend_utils.is_controller_accessible(
         controller=controller_type,
         stopped_message=
@@ -573,7 +572,7 @@ def update(
 
 
 def apply(
-    task: 'sky.Task',
+    task: 'task_lib.Task',
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
@@ -581,7 +580,7 @@ def apply(
     """Applies the config to the service or pool."""
     with filelock.FileLock(serve_utils.get_service_filelock_path(service_name)):
         try:
-            controller_type = _get_controller_type(pool)
+            controller_type = controller_utils.get_controller_for_pool(pool)
             handle = backend_utils.is_controller_accessible(
                 controller=controller_type, stopped_message='')
             backend = backend_utils.get_backend_from_handle(handle)
@@ -607,7 +606,7 @@ def down(
         service_names = []
     if isinstance(service_names, str):
         service_names = [service_names]
-    controller_type = _get_controller_type(pool)
+    controller_type = controller_utils.get_controller_for_pool(pool)
     handle = backend_utils.is_controller_accessible(
         controller=controller_type,
         stopped_message=f'All {noun}s should have terminated.')
@@ -634,7 +633,7 @@ def down(
     except exceptions.FetchClusterInfoError as e:
         raise RuntimeError(
             'Failed to fetch controller IP. Please refresh controller status '
-            f'by `sky status -r {common.SKY_SERVE_CONTROLLER_NAME}` '
+            f'by `sky status -r {controller_type.value.cluster_name}` '
             'and try again.') from e
 
     try:
@@ -664,7 +663,7 @@ def status(
             raise RuntimeError(f'Failed to refresh {noun}s status '
                                'due to network error.') from e
 
-    controller_type = _get_controller_type(pool)
+    controller_type = controller_utils.get_controller_for_pool(pool)
     handle = backend_utils.is_controller_accessible(
         controller=controller_type,
         stopped_message=controller_type.value.default_hint_if_non_existent.
@@ -717,3 +716,228 @@ def status(
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
 
     return service_records
+
+
+ServiceComponentOrStr = Union[str, serve_utils.ServiceComponent]
+
+
+def tail_logs(
+    service_name: str,
+    *,
+    target: ServiceComponentOrStr,
+    replica_id: Optional[int] = None,
+    follow: bool = True,
+    tail: Optional[int] = None,
+    pool: bool = False,
+) -> None:
+    """Tail logs of a service or pool."""
+    if isinstance(target, str):
+        target = serve_utils.ServiceComponent(target)
+
+    if pool and target == serve_utils.ServiceComponent.LOAD_BALANCER:
+        raise ValueError(f'Target {target} is not supported for pool.')
+
+    if target == serve_utils.ServiceComponent.REPLICA:
+        if replica_id is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    '`replica_id` must be specified when using target=REPLICA.')
+    else:
+        if replica_id is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('`replica_id` must be None when using '
+                                 'target=CONTROLLER/LOAD_BALANCER.')
+
+    controller_type = controller_utils.get_controller_for_pool(pool)
+    handle = backend_utils.is_controller_accessible(
+        controller=controller_type,
+        stopped_message=controller_type.value.default_hint_if_non_existent)
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend), backend
+
+    if target != serve_utils.ServiceComponent.REPLICA:
+        code = serve_utils.ServeCodeGen.stream_serve_process_logs(
+            service_name,
+            stream_controller=(
+                target == serve_utils.ServiceComponent.CONTROLLER),
+            follow=follow,
+            tail=tail,
+            pool=pool)
+    else:
+        assert replica_id is not None, service_name
+        code = serve_utils.ServeCodeGen.stream_replica_logs(service_name,
+                                                            replica_id,
+                                                            follow,
+                                                            tail=tail,
+                                                            pool=pool)
+
+    # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+    # kill the process, so we need to handle it manually here.
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+
+    # Refer to the notes in
+    # sky/backends/cloud_vm_ray_backend.py::CloudVmRayBackend::tail_logs.
+    backend.run_on_head(handle,
+                        code,
+                        stream_logs=True,
+                        process_stream=False,
+                        ssh_mode=command_runner.SshMode.INTERACTIVE)
+
+
+def _get_all_replica_targets(
+        service_name: str, backend: backends.CloudVmRayBackend,
+        handle: backends.CloudVmRayResourceHandle,
+        pool: bool) -> Set[serve_utils.ServiceComponentTarget]:
+    """Helper function to get targets for all live replicas."""
+    code = serve_utils.ServeCodeGen.get_service_status([service_name],
+                                                       pool=pool)
+    returncode, serve_status_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to fetch services',
+                                           stderr,
+                                           stream_logs=True)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    service_records = serve_utils.load_service_status(serve_status_payload)
+    if not service_records:
+        raise ValueError(f'Service {service_name!r} not found.')
+    assert len(service_records) == 1
+    service_record = service_records[0]
+
+    return {
+        serve_utils.ServiceComponentTarget(serve_utils.ServiceComponent.REPLICA,
+                                           replica_info['replica_id'])
+        for replica_info in service_record['replica_info']
+    }
+
+
+def sync_down_logs(
+    service_name: str,
+    *,
+    local_dir: str,
+    targets: Union[ServiceComponentOrStr, List[ServiceComponentOrStr],
+                   None] = None,
+    replica_ids: Optional[List[int]] = None,
+    tail: Optional[int] = None,
+    pool: bool = False,
+) -> str:
+    """Sync down logs of a service or pool."""
+    noun = 'pool' if pool else 'service'
+    repnoun = 'worker' if pool else 'replica'
+    caprepnoun = repnoun.capitalize()
+
+    # Step 0) get the controller handle
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(f'Checking {noun} status...')):
+        controller_type = controller_utils.get_controller_for_pool(pool)
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_type,
+            stopped_message=controller_type.value.default_hint_if_non_existent)
+        backend: backends.CloudVmRayBackend = (
+            backend_utils.get_backend_from_handle(handle))
+
+    requested_components: Set[serve_utils.ServiceComponent] = set()
+    if not targets:
+        # No targets specified -> request all components
+        requested_components = {
+            serve_utils.ServiceComponent.CONTROLLER,
+            serve_utils.ServiceComponent.LOAD_BALANCER,
+            serve_utils.ServiceComponent.REPLICA
+        }
+    else:
+        # Parse provided targets
+        if isinstance(targets, (str, serve_utils.ServiceComponent)):
+            requested_components = {serve_utils.ServiceComponent(targets)}
+        else:  # list
+            requested_components = {
+                serve_utils.ServiceComponent(t) for t in targets
+            }
+
+    normalized_targets: Set[serve_utils.ServiceComponentTarget] = set()
+    if serve_utils.ServiceComponent.CONTROLLER in requested_components:
+        normalized_targets.add(
+            serve_utils.ServiceComponentTarget(
+                serve_utils.ServiceComponent.CONTROLLER))
+    if serve_utils.ServiceComponent.LOAD_BALANCER in requested_components:
+        normalized_targets.add(
+            serve_utils.ServiceComponentTarget(
+                serve_utils.ServiceComponent.LOAD_BALANCER))
+    if serve_utils.ServiceComponent.REPLICA in requested_components:
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(f'Getting live {repnoun} infos...')):
+            replica_targets = _get_all_replica_targets(service_name, backend,
+                                                       handle, pool)
+        if not replica_ids:
+            # Replica target requested but no specific IDs
+            # -> Get all replica logs
+            normalized_targets.update(replica_targets)
+        else:
+            # Replica target requested with specific IDs
+            requested_replica_targets = [
+                serve_utils.ServiceComponentTarget(
+                    serve_utils.ServiceComponent.REPLICA, rid)
+                for rid in replica_ids
+            ]
+            for target in requested_replica_targets:
+                if target not in replica_targets:
+                    logger.warning(f'{caprepnoun} ID {target.replica_id} not '
+                                   f'found for {service_name}. Skipping...')
+                else:
+                    normalized_targets.add(target)
+
+    def sync_down_logs_by_target(target: serve_utils.ServiceComponentTarget):
+        component = target.component
+        # We need to set one side of the pipe to a logs stream, and the other
+        # side to a file.
+        log_path = str(pathlib.Path(local_dir) / f'{target}.log')
+        stream_logs_code: str
+
+        if component == serve_utils.ServiceComponent.CONTROLLER:
+            stream_logs_code = (
+                serve_utils.ServeCodeGen.stream_serve_process_logs(
+                    service_name,
+                    stream_controller=True,
+                    follow=False,
+                    tail=tail,
+                    pool=pool))
+        elif component == serve_utils.ServiceComponent.LOAD_BALANCER:
+            stream_logs_code = (
+                serve_utils.ServeCodeGen.stream_serve_process_logs(
+                    service_name,
+                    stream_controller=False,
+                    follow=False,
+                    tail=tail,
+                    pool=pool))
+        elif component == serve_utils.ServiceComponent.REPLICA:
+            replica_id = target.replica_id
+            assert replica_id is not None, service_name
+            stream_logs_code = serve_utils.ServeCodeGen.stream_replica_logs(
+                service_name, replica_id, follow=False, tail=tail, pool=pool)
+        else:
+            assert False, component
+
+        # Refer to the notes in
+        # sky/backends/cloud_vm_ray_backend.py::CloudVmRayBackend::tail_logs.
+        backend.run_on_head(handle,
+                            stream_logs_code,
+                            stream_logs=False,
+                            process_stream=False,
+                            ssh_mode=command_runner.SshMode.INTERACTIVE,
+                            log_path=log_path)
+
+    subprocess_utils.run_in_parallel(sync_down_logs_by_target,
+                                     list(normalized_targets))
+
+    return local_dir

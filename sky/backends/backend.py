@@ -147,8 +147,9 @@ class Backend(Generic[_ResourceHandleType]):
     def teardown(self,
                  handle: _ResourceHandleType,
                  terminate: bool,
-                 purge: bool = False) -> None:
-        self._teardown(handle, terminate, purge)
+                 purge: bool = False,
+                 explicitly_requested: bool = False) -> None:
+        self._teardown(handle, terminate, purge, explicitly_requested)
 
     def register_info(self, **kwargs) -> None:
         """Register backend-specific information."""
@@ -200,5 +201,6 @@ class Backend(Generic[_ResourceHandleType]):
     def _teardown(self,
                   handle: _ResourceHandleType,
                   terminate: bool,
-                  purge: bool = False):
+                  purge: bool = False,
+                  explicitly_requested: bool = False):
         raise NotImplementedError
