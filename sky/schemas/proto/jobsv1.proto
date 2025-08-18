@@ -6,6 +6,8 @@ service JobsService {
   // Add a new job to the database.
   rpc AddJob(AddJobRequest) returns (AddJobResponse);
   // Queue a job for execution.
+  rpc PersistRunScript(PersistRunScriptRequest) returns (PersistRunScriptResponse);
+  // Queue a job for execution.
   rpc QueueJob(QueueJobRequest) returns (QueueJobResponse);
   // Update status of all jobs.
   rpc UpdateStatus(UpdateStatusRequest) returns (UpdateStatusResponse);
@@ -53,9 +55,33 @@ message AddJobResponse {
   string log_dir = 2;
 }
 
+message PersistRunScriptRequest {
+  string script_path = 1;
+}
+
+message PersistRunScriptResponse {}
+
 message QueueJobRequest {
   int64 job_id = 1;
-  string cmd = 2;
+  optional string codegen = 2;
+  string script_path = 3;
+  string remote_log_dir = 4;
+  optional ManagedJobInfo managed_job = 5;
+}
+
+message ManagedJobInfo {
+  string name = 1;
+  optional string pool = 2;
+  string workspace = 3;
+  string entrypoint = 4;
+  repeated ManagedJobTask tasks = 5;
+}
+
+message ManagedJobTask {
+  int32 task_id = 1;
+  string name = 2;
+  string resources_str = 3;
+  string metadata_json = 4;
 }
 
 message QueueJobResponse {}

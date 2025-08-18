@@ -51,13 +51,55 @@ class AddJobResponse(_message.Message):
     log_dir: str
     def __init__(self, job_id: _Optional[int] = ..., log_dir: _Optional[str] = ...) -> None: ...
 
+class PersistRunScriptRequest(_message.Message):
+    __slots__ = ("script_path",)
+    SCRIPT_PATH_FIELD_NUMBER: _ClassVar[int]
+    script_path: str
+    def __init__(self, script_path: _Optional[str] = ...) -> None: ...
+
+class PersistRunScriptResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
 class QueueJobRequest(_message.Message):
-    __slots__ = ("job_id", "cmd")
+    __slots__ = ("job_id", "codegen", "script_path", "remote_log_dir", "managed_job")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
-    CMD_FIELD_NUMBER: _ClassVar[int]
+    CODEGEN_FIELD_NUMBER: _ClassVar[int]
+    SCRIPT_PATH_FIELD_NUMBER: _ClassVar[int]
+    REMOTE_LOG_DIR_FIELD_NUMBER: _ClassVar[int]
+    MANAGED_JOB_FIELD_NUMBER: _ClassVar[int]
     job_id: int
-    cmd: str
-    def __init__(self, job_id: _Optional[int] = ..., cmd: _Optional[str] = ...) -> None: ...
+    codegen: str
+    script_path: str
+    remote_log_dir: str
+    managed_job: ManagedJobInfo
+    def __init__(self, job_id: _Optional[int] = ..., codegen: _Optional[str] = ..., script_path: _Optional[str] = ..., remote_log_dir: _Optional[str] = ..., managed_job: _Optional[_Union[ManagedJobInfo, _Mapping]] = ...) -> None: ...
+
+class ManagedJobInfo(_message.Message):
+    __slots__ = ("name", "pool", "workspace", "entrypoint", "tasks")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    POOL_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    ENTRYPOINT_FIELD_NUMBER: _ClassVar[int]
+    TASKS_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    pool: str
+    workspace: str
+    entrypoint: str
+    tasks: _containers.RepeatedCompositeFieldContainer[ManagedJobTask]
+    def __init__(self, name: _Optional[str] = ..., pool: _Optional[str] = ..., workspace: _Optional[str] = ..., entrypoint: _Optional[str] = ..., tasks: _Optional[_Iterable[_Union[ManagedJobTask, _Mapping]]] = ...) -> None: ...
+
+class ManagedJobTask(_message.Message):
+    __slots__ = ("task_id", "name", "resources_str", "metadata_json")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    RESOURCES_STR_FIELD_NUMBER: _ClassVar[int]
+    METADATA_JSON_FIELD_NUMBER: _ClassVar[int]
+    task_id: int
+    name: str
+    resources_str: str
+    metadata_json: str
+    def __init__(self, task_id: _Optional[int] = ..., name: _Optional[str] = ..., resources_str: _Optional[str] = ..., metadata_json: _Optional[str] = ...) -> None: ...
 
 class QueueJobResponse(_message.Message):
     __slots__ = ()

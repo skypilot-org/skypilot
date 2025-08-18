@@ -2739,10 +2739,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
             if ssh_tunnel_proc.poll() is not None:
                 stdout, stderr = ssh_tunnel_proc.communicate()
-                # Don't retry if the error is due to timeout or
-                # an in-progress termination.
-                if backend_utils.SSH_CONNECTION_ERROR_PATTERN.search(
-                        stderr) or attempt == max_attempts - 1:
+                # Don't retry if the error is due to timeout,
+                # connection refused, Kubernetes pods not found,
+                # or an in-progress termination.
+                if (backend_utils.SSH_CONNECTION_ERROR_PATTERN.search(stderr) or
+                        backend_utils.K8S_PODS_NOT_FOUND_PATTERN.search(stderr)
+                        or attempt == max_attempts - 1):
                     raise exceptions.CommandError(
                         returncode=ssh_tunnel_proc.returncode,
                         command=cmd_str,
@@ -2940,6 +2942,13 @@ class SkyletClient:
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> jobsv1_pb2.AddJobResponse:
         return self._jobs_stub.AddJob(request, timeout=timeout)
+
+    def persist_run_script(
+        self,
+        request: jobsv1_pb2.PersistRunScriptRequest,
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> jobsv1_pb2.PersistRunScriptResponse:
+        return self._jobs_stub.PersistRunScript(request, timeout=timeout)
 
     def queue_job(
         self,
@@ -3911,29 +3920,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         remote_log_dir: Optional[str] = None,
     ) -> None:
         """Executes generated code on the head node."""
-        script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
+        use_legacy = not handle.is_grpc_enabled
+        file_name = f'sky_job_{job_id}'
+        script_path = os.path.join(SKY_REMOTE_APP_DIR, file_name)
         if remote_log_dir is None:
             remote_log_dir = self.log_dir
-        remote_log_path = os.path.join(remote_log_dir, 'run.log')
-
-        cd = f'cd {SKY_REMOTE_WORKDIR}'
-
-        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
-                      f'touch {remote_log_path}')
-        encoded_script = shlex.quote(codegen)
-        create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
-        job_submit_cmd = (
-            # JOB_CMD_IDENTIFIER is used for identifying the process retrieved
-            # with pid is the same driver process.
-            f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
-            f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
-            # Do not use &>, which is not POSIX and may not work.
-            # Note that the order of ">filename 2>&1" matters.
-            f'> {remote_log_path} 2>&1')
-
-        # TODO(kevin): Move to gRPC
-        code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-        job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
         def _dump_code_to_file(codegen: str,
                                target_dir: str = SKY_REMOTE_APP_DIR) -> None:
@@ -3942,79 +3933,172 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
                 fp.flush()
-                script_path = os.path.join(target_dir, f'sky_job_{job_id}')
-                # We choose to sync code + exec, because the alternative of 'ray
-                # submit' may not work as it may use system python (python2) to
-                # execute the script. Happens for AWS.
+                script_path = os.path.join(target_dir, file_name)
+                # We choose to sync code + exec, because the alternative of
+                # 'ray submit' may not work as it may use system python
+                # (python2) to execute the script. Happens for AWS.
                 head_runner.rsync(source=fp.name,
                                   target=script_path,
                                   up=True,
                                   stream_logs=False)
 
-        # Should also be ealier than _is_command_length_over_limit
-        # Same reason as in _setup
-        if self._dump_final_script:
-            _dump_code_to_file(job_submit_cmd,
-                               constants.PERSISTENT_RUN_SCRIPT_DIR)
+        if handle.is_grpc_enabled:
+            try:
+                # Should also be ealier than _is_command_length_over_limit
+                # Same reason as in _setup
+                if self._dump_final_script:
+                    # Unlike the legacy path which dumps the whole
+                    # `job_submit_cmd`, we only dump `codegen` to the file,
+                    # and then call the `PersistRunScript` gRPC method to
+                    # persist the script to the persistent path.
+                    _dump_code_to_file(codegen)
+                    persist_run_script_request = (
+                        jobsv1_pb2.PersistRunScriptRequest(
+                            script_path=script_path))
+                    backend_utils.invoke_skylet_with_retries(
+                        handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                        persist_run_script(persist_run_script_request))
 
-        if _is_command_length_over_limit(job_submit_cmd):
-            _dump_code_to_file(codegen)
-            job_submit_cmd = f'{mkdir_code} && {code}'
+                managed_job_info: Optional[jobsv1_pb2.ManagedJobInfo] = None
+                if managed_job_dag is not None:
+                    workspace = skypilot_config.get_active_workspace(
+                        force_user_workspace=True)
+                    entrypoint = common_utils.get_current_command()
 
-        def _maybe_add_managed_job_code(job_submit_cmd: str) -> str:
-            if managed_job_dag is not None:
-                # Add the managed job to job queue database.
-                managed_job_codegen = managed_jobs.ManagedJobCodeGen()
-                managed_job_code = managed_job_codegen.set_pending(
-                    job_id,
-                    managed_job_dag,
-                    skypilot_config.get_active_workspace(
-                        force_user_workspace=True),
-                    entrypoint=common_utils.get_current_command())
-                # Set the managed job to PENDING state to make sure that this
-                # managed job appears in the `sky jobs queue`, even if it needs
-                # to wait to be submitted.
-                # We cannot set the managed job to PENDING state in the job
-                # template (jobs-controller.yaml.j2), as it may need to wait for
-                # the run commands to be scheduled on the job controller in
-                # high-load cases.
-                job_submit_cmd += ' && ' + managed_job_code
-            return job_submit_cmd
+                    managed_job_tasks: List[jobsv1_pb2.ManagedJobTask] = []
+                    for task_id, task in enumerate(managed_job_dag.tasks):
+                        resources_str = backend_utils.get_task_resources_str(
+                            task, is_managed_job=True)
+                        managed_job_tasks.append(
+                            jobsv1_pb2.ManagedJobTask(
+                                task_id=task_id,
+                                name=task.name,
+                                resources_str=resources_str,
+                                metadata_json=task.metadata_json))
 
-        job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
+                    managed_job_info = jobsv1_pb2.ManagedJobInfo(
+                        name=managed_job_dag.name,
+                        pool=managed_job_dag.pool,
+                        workspace=workspace,
+                        entrypoint=entrypoint,
+                        tasks=managed_job_tasks)
 
-        returncode, stdout, stderr = self.run_on_head(handle,
-                                                      job_submit_cmd,
-                                                      stream_logs=False,
-                                                      require_outputs=True)
-        # Happens when someone calls `sky exec` but remote is outdated for
-        # running a job. Necessitating calling `sky launch`.
-        backend_utils.check_stale_runtime_on_remote(returncode, stderr,
-                                                    handle.cluster_name)
-        output = stdout + stderr
-        if ((returncode == 255 and 'too long' in output.lower()) or
-            (returncode == 1 and 'request-uri too large' in output.lower())):
-            # If the generated script is too long, we retry it with dumping
-            # the script to a file and running it with SSH. We use a general
-            # length limit check before but it could be inaccurate on some
-            # systems.
-            # When there is a cloudflare proxy in front of the remote, it could
-            # cause `414 Request-URI Too Large` error.
-            logger.debug('Failed to submit job due to command length limit. '
-                         'Dumping job to file and running it with SSH. '
-                         f'Output: {output}')
-            _dump_code_to_file(codegen)
-            job_submit_cmd = f'{mkdir_code} && {code}'
+                # Check if codegen content is too large for gRPC
+                if _is_command_length_over_limit(codegen):
+                    # If self._dump_final_script is True, it means that
+                    # we have rsync'ed `codegen` to the remote cluster,
+                    # so we don't need to rsync it again.
+                    if not self._dump_final_script:
+                        _dump_code_to_file(codegen)
+                    queue_job_request = jobsv1_pb2.QueueJobRequest(
+                        job_id=job_id,
+                        # codegen not set - server assumes script uploaded
+                        remote_log_dir=remote_log_dir,
+                        managed_job=managed_job_info,
+                        script_path=script_path)
+                else:
+                    queue_job_request = jobsv1_pb2.QueueJobRequest(
+                        job_id=job_id,
+                        codegen=codegen,
+                        remote_log_dir=remote_log_dir,
+                        managed_job=managed_job_info,
+                        script_path=script_path)
+
+                backend_utils.invoke_skylet_with_retries(
+                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                    queue_job(queue_job_request))
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            remote_log_path = os.path.join(remote_log_dir, 'run.log')
+
+            cd = f'cd {SKY_REMOTE_WORKDIR}'
+
+            mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
+                          f'touch {remote_log_path}')
+            encoded_script = shlex.quote(codegen)
+            create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
+            job_submit_cmd = (
+                # JOB_CMD_IDENTIFIER is used for identifying the process
+                # retrieved with pid is the same driver process.
+                f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
+                f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
+                # Do not use &>, which is not POSIX and may not work.
+                # Note that the order of ">filename 2>&1" matters.
+                f'> {remote_log_path} 2>&1')
+
+            code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+            job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
+
+            # Should also be ealier than _is_command_length_over_limit
+            # Same reason as in _setup
+            if self._dump_final_script:
+                _dump_code_to_file(job_submit_cmd,
+                                   constants.PERSISTENT_RUN_SCRIPT_DIR)
+
+            if _is_command_length_over_limit(job_submit_cmd):
+                _dump_code_to_file(codegen)
+                job_submit_cmd = f'{mkdir_code} && {code}'
+
+            def _maybe_add_managed_job_code(job_submit_cmd: str) -> str:
+                if managed_job_dag is not None:
+                    # Add the managed job to job queue database.
+                    managed_job_codegen = managed_jobs.ManagedJobCodeGen()
+                    managed_job_code = managed_job_codegen.set_pending(
+                        job_id,
+                        managed_job_dag,
+                        skypilot_config.get_active_workspace(
+                            force_user_workspace=True),
+                        entrypoint=common_utils.get_current_command())
+                    # Set the managed job to PENDING state to make sure that
+                    # this managed job appears in the `sky jobs queue`, even
+                    # if it needs to wait to be submitted.
+                    # We cannot set the managed job to PENDING state in the
+                    # job template (jobs-controller.yaml.j2), as it may need
+                    # to wait for the run commands to be scheduled on the job
+                    # controller in high-load cases.
+                    job_submit_cmd += ' && ' + managed_job_code
+                return job_submit_cmd
+
             job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
+
             returncode, stdout, stderr = self.run_on_head(handle,
                                                           job_submit_cmd,
                                                           stream_logs=False,
                                                           require_outputs=True)
+            # Happens when someone calls `sky exec` but remote is outdated for
+            # running a job. Necessitating calling `sky launch`.
+            backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                        handle.cluster_name)
+            output = stdout + stderr
+            if ((returncode == 255 and 'too long' in output.lower()) or
+                (returncode == 1 and
+                 'request-uri too large' in output.lower())):
+                # If the generated script is too long, we retry it with dumping
+                # the script to a file and running it with SSH. We use a general
+                # length limit check before but it could be inaccurate on some
+                # systems.
+                # When there is a cloudflare proxy in front of the remote, it
+                # could cause `414 Request-URI Too Large` error.
+                logger.debug(
+                    'Failed to submit job due to command length limit. '
+                    'Dumping job to file and running it with SSH. '
+                    f'Output: {output}')
+                _dump_code_to_file(codegen)
+                job_submit_cmd = f'{mkdir_code} && {code}'
+                job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
+                returncode, stdout, stderr = self.run_on_head(
+                    handle,
+                    job_submit_cmd,
+                    stream_logs=False,
+                    require_outputs=True)
 
-        subprocess_utils.handle_returncode(returncode,
-                                           job_submit_cmd,
-                                           f'Failed to submit job {job_id}.',
-                                           stderr=stdout + stderr)
+            subprocess_utils.handle_returncode(
+                returncode,
+                job_submit_cmd,
+                f'Failed to submit job {job_id}.',
+                stderr=stdout + stderr)
 
         controller = controller_utils.Controllers.from_name(handle.cluster_name)
         if controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER:

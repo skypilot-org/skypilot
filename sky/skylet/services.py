@@ -6,10 +6,12 @@ import grpc
 
 from sky import exceptions
 from sky import sky_logging
+from sky.jobs import state as managed_job_state
 from sky.schemas.generated import autostopv1_pb2
 from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.schemas.generated import jobsv1_pb2
 from sky.schemas.generated import jobsv1_pb2_grpc
+from sky.serve import serve_state
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -68,11 +70,106 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
+    def PersistRunScript(  # type: ignore[return]
+            self, request: jobsv1_pb2.PersistRunScriptRequest,
+            context: grpc.ServicerContext
+    ) -> jobsv1_pb2.PersistRunScriptResponse:
+        """Persists a run script to the HA recovery directory."""
+        try:
+            script_path = os.path.expanduser(request.script_path)
+
+            # Extract job_id from script path (format: sky_job_{job_id})
+            script_filename = os.path.basename(script_path)
+            if not script_filename.startswith('sky_job_'):
+                context.abort(grpc.StatusCode.INVALID_ARGUMENT,
+                              f'Invalid script filename: {script_filename}')
+            job_id_str = script_filename[8:]  # Remove 'sky_job_' prefix
+            try:
+                job_id = int(job_id_str)
+            except ValueError:
+                context.abort(grpc.StatusCode.INVALID_ARGUMENT,
+                              f'Invalid job ID in filename: {job_id_str}')
+
+            # Build the complete job execution command (same logic as QueueJob)
+            cd = f'cd {os.path.expanduser(constants.SKY_REMOTE_WORKDIR)}'
+            job_submit_cmd = (
+                # JOB_CMD_IDENTIFIER is used for identifying the process
+                # retrieved with pid is the same driver process.
+                f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
+                f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}')
+
+            # Write the complete command to the persistent HA recovery directory
+            persistent_dir = os.path.expanduser(
+                constants.PERSISTENT_RUN_SCRIPT_DIR)
+            os.makedirs(persistent_dir, exist_ok=True)
+            persistent_script_path = os.path.join(persistent_dir,
+                                                  script_filename)
+
+            with open(persistent_script_path, 'w') as f:
+                f.write(job_submit_cmd)
+
+            # Make the persistent script executable
+            os.chmod(persistent_script_path, 0o755)
+
+            return jobsv1_pb2.PersistRunScriptResponse()
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
     def QueueJob(  # type: ignore[return]
             self, request: jobsv1_pb2.QueueJobRequest,
             context: grpc.ServicerContext) -> jobsv1_pb2.QueueJobResponse:
         try:
-            job_lib.scheduler.queue(request.job_id, request.cmd)
+            job_id = request.job_id
+            # Create log directory and file
+            remote_log_dir = os.path.expanduser(request.remote_log_dir)
+            os.makedirs(remote_log_dir, exist_ok=True)
+            remote_log_path = os.path.join(remote_log_dir, 'run.log')
+            open(remote_log_path, 'a').close()
+
+            script_path = os.path.expanduser(request.script_path)
+            os.makedirs(os.path.dirname(script_path), exist_ok=True)
+
+            # If `codegen` is not provided, assume script is already
+            # uploaded to `script_path` via rsync.
+            if request.HasField('codegen'):
+                with open(script_path, 'w') as f:
+                    f.write(request.codegen)
+                os.chmod(script_path, 0o755)
+
+            cd = f'cd {constants.SKY_REMOTE_WORKDIR}'
+            job_submit_cmd = (
+                # JOB_CMD_IDENTIFIER is used for identifying the process
+                # retrieved with pid is the same driver process.
+                f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
+                f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
+                # Do not use &>, which is not POSIX and may not work.
+                # Note that the order of ">filename 2>&1" matters.
+                f' > {remote_log_path} 2>&1')
+            job_lib.scheduler.queue(job_id, job_submit_cmd)
+
+            if request.HasField('managed_job'):
+                managed_job = request.managed_job
+                pool = managed_job.pool if managed_job.HasField(
+                    'pool') else None
+                pool_hash = None
+                if pool is not None:
+                    pool_hash = serve_state.get_service_hash(pool)
+                # Add the managed job to job queue database.
+                managed_job_state.set_job_info(job_id, managed_job.name,
+                                               managed_job.workspace,
+                                               managed_job.entrypoint, pool,
+                                               pool_hash)
+                # Set the managed job to PENDING state to make sure that
+                # this managed job appears in the `sky jobs queue`, even
+                # if it needs to wait to be submitted.
+                # We cannot set the managed job to PENDING state in the
+                # job template (jobs-controller.yaml.j2), as it may need
+                # to wait for the run commands to be scheduled on the job
+                # controller in high-load cases.
+                for task in managed_job.tasks:
+                    managed_job_state.set_pending(job_id, task.task_id,
+                                                  task.name, task.resources_str,
+                                                  task.metadata_json)
             return jobsv1_pb2.QueueJobResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
