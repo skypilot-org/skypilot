@@ -13,20 +13,25 @@ Welcome to SkyPilot!
   :class: no-scaled-link, only-light
 
 .. <strong>Run AI on Any Infra</strong> — Unified, Faster, Cheaper
+.. <strong>Unified Control Plane for Any AI Compute </strong>
+
+.. <p style="text-align:center">
+.. SkyPilot is a system for running AI and batch workloads on any AI infrastructure.
+.. </p>
 
 .. raw:: html
 
    <p></p>
    <p style="text-align:center">
-   <strong>Simplify & Scale Your AI Infrastructure</strong>
+   <strong>Simplify & scale any AI infrastructure</strong>
    </p>
+
    <p style="text-align:center">
    <a class="github-button" href="https://github.com/skypilot-org/skypilot" data-show-count="true" data-size="large" aria-label="Star skypilot-org/skypilot on GitHub">Star</a>
    <a class="github-button" href="https://github.com/skypilot-org/skypilot/subscription" data-icon="octicon-eye" data-size="large" aria-label="Watch skypilot-org/skypilot on GitHub">Watch</a>
    <a class="reference external image-reference" style="vertical-align:9.5px" href="http://slack.skypilot.co"><img src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack" style="height:27px"></a>
    <script async defer src="https://buttons.github.io/buttons.js"></script>
    </p>
-
 
 .. grid:: 1 1 1 1
     :gutter: 3
@@ -42,19 +47,39 @@ Welcome to SkyPilot!
 
 .. SkyPilot is an open-source system for running AI and batch workloads on any infra.
 
-SkyPilot is an open-source system for running AI and batch workloads on any AI
-infrastructure. It offers a simplified interface to access your AI
-infrastructure (K8s, VMs on 16+ clouds, on-prem), cost optimizations, and infra scaling.
+.. SkyPilot is an open-source system for running AI and batch workloads on any AI
+.. infrastructure. It offers a simplified interface to access your AI
+.. infrastructure (K8s, VMs on 16+ clouds, on-prem), cost optimizations, and infra scaling.
+
+.. SkyPilot is an open-source control plane for any AI compute and workloads. Bring your own Kubernetes, VMs, or on-prem GPUs, and run the entire AI lifecycle — all with a simple interface and advanced scaling capabilities.
+
+.. SkyPilot is a system for running AI and batch workloads on any AI infrastructure.
+
+.. SkyPilot is an open-source control plane for any AI compute infrastructure.
+
+.. SkyPilot is an open-source system for using, managing, and scaling any AI infrastructure.
+
+SkyPilot is a system for running, managing, and scaling AI workloads on any AI infrastructure.
+
+.. SkyPilot simplifies using any infra for AI teams, while offering advanced scaling, orchestration, and cost optimization capabilities for infra teams.
+
+
+SkyPilot gives AI teams a simple interface to run jobs on any infra.
+Infra teams get a unified control plane to manage any AI compute — with advanced scheduling, scaling, and orchestration.
+
+.. to manage any AI compute consistently, cost-effectively, and with advanced
+.. scheduling and scaling capabilities.
+
 
 
 
 SkyPilot **is easy to use for AI users**:
 
-- Quickly spin up jobs on your own infra
+- Quickly spin up compute on your own infra
 - Environment and job as code --- simple and portable
-- Easy management: queue, run, and auto-recover many jobs
+- Easy job management: queue, run, and auto-recover many jobs
 
-SkyPilot **makes Kubernetes easy for AI teams**:
+SkyPilot **makes Kubernetes easy for AI & Infra teams**:
 
 - Slurm-like ease of use, cloud-native robustness
 - Local dev experience on K8s: SSH into pods, sync code, or connect IDE

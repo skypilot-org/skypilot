@@ -1,5 +1,5 @@
-ERROR [root] File does not exist: /var/folders/8f/56gzvwkd3n3293xjlrztr6600000gp/T/tmp2lylxzpf
-ERROR [root] File does not exist: /var/folders/8f/56gzvwkd3n3293xjlrztr6600000gp/T/tmp2lylxzpf
+ERROR [root] File does not exist: /var/folders/8f/56gzvwkd3n3293xjlrztr6600000gp/T/tmpopm23s50
+ERROR [root] File does not exist: /var/folders/8f/56gzvwkd3n3293xjlrztr6600000gp/T/tmpopm23s50
 Note: No GPUs found in any Kubernetes clusters. If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs (e.g., skypilot.co/accelerator) are setup correctly. To further debug, run: sky check Note: No GPUs found in any SSH clusters. If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs (e.g., skypilot.co/accelerator) are setup correctly. To further debug, run: sky check 
 
 COMMON_GPU  AVAILABLE_QUANTITIES        

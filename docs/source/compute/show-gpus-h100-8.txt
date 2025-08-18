@@ -1,7 +1,7 @@
 [ValueError] Resources 'H100' with requested quantity 8 not found in Kubernetes clusters. If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs (e.g., skypilot.co/accelerator) are setup correctly. To show available accelerators on kubernetes,  run: sky show-gpus --cloud kubernetes 
 
-ERROR [root] File does not exist: /var/folders/8f/56gzvwkd3n3293xjlrztr6600000gp/T/tmp102k7shw
-ERROR [root] File does not exist: /var/folders/8f/56gzvwkd3n3293xjlrztr6600000gp/T/tmp102k7shw
+ERROR [root] File does not exist: /var/folders/8f/56gzvwkd3n3293xjlrztr6600000gp/T/tmp3hsizthu
+ERROR [root] File does not exist: /var/folders/8f/56gzvwkd3n3293xjlrztr6600000gp/T/tmp3hsizthu
 [ValueError] Resources 'H100' with requested quantity 8 not found in SSH clusters. If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs (e.g., skypilot.co/accelerator) are setup correctly. To show available accelerators on ssh,  run: sky show-gpus --cloud ssh 
 
 Cloud GPUs
