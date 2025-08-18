@@ -3457,5 +3457,11 @@ def _handle_grpc_error(e: grpc.RpcError,
         if recreate_tunnel:
             handle.open_and_update_skylet_tunnel()
         time.sleep(current_backoff)
+    elif e.code() == grpc.StatusCode.UNIMPLEMENTED:
+        # Handle backwards compatibility: old server doesn't implement this RPC.
+        # Let the caller fall back to legacy execution.
+        raise exceptions.SkyletMethodNotImplementedError(
+            f'gRPC method not implemented on server, falling back to legacy execution: {e.details()}'
+        )
     else:
         raise e

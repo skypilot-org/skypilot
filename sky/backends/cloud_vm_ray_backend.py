@@ -3509,12 +3509,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.debug('Update job queue on remote cluster.')
             with rich_utils.safe_status(
                     ux_utils.spinner_message('Preparing SkyPilot runtime')):
+                use_legacy = not handle.is_grpc_enabled
+
                 if handle.is_grpc_enabled:
-                    request = jobsv1_pb2.UpdateStatusRequest()
-                    backend_utils.invoke_skylet_with_retries(
-                        handle, lambda: SkyletClient(handle.get_grpc_channel()).
-                        update_status(request))
-                else:
+                    try:
+                        request = jobsv1_pb2.UpdateStatusRequest()
+                        backend_utils.invoke_skylet_with_retries(
+                            handle,
+                            lambda: SkyletClient(handle.get_grpc_channel()
+                                                ).update_status(request))
+                    except exceptions.SkyletMethodNotImplementedError:
+                        use_legacy = True
+
+                if use_legacy:
                     cmd = job_lib.JobLibCodeGen.update_status()
                     returncode, _, stderr = self.run_on_head(
                         handle, cmd, require_outputs=True)
@@ -3527,12 +3534,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # 1. A job finishes RUNNING, but right before it update itself
             # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
             # 2. On next `sky start`, it gets reset to FAILED.
+            use_legacy = not handle.is_grpc_enabled
+
             if handle.is_grpc_enabled:
-                fail_request = jobsv1_pb2.FailAllInProgressJobsRequest()
-                backend_utils.invoke_skylet_with_retries(
-                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
-                    fail_all_in_progress_jobs(fail_request))
-            else:
+                try:
+                    fail_request = jobsv1_pb2.FailAllInProgressJobsRequest()
+                    backend_utils.invoke_skylet_with_retries(
+                        handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                        fail_all_in_progress_jobs(fail_request))
+                except exceptions.SkyletMethodNotImplementedError:
+                    use_legacy = True
+
+            if use_legacy:
                 cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
                 returncode, stdout, stderr = self.run_on_head(
                     handle, cmd, require_outputs=True)
@@ -4022,19 +4035,26 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str,
                  metadata: str) -> Tuple[int, str]:
+        use_legacy = not handle.is_grpc_enabled
+
         if handle.is_grpc_enabled:
-            request = jobsv1_pb2.AddJobRequest(
-                job_name=job_name,
-                username=common_utils.get_user_hash(),
-                run_timestamp=self.run_timestamp,
-                resources_str=resources_str,
-                metadata=metadata)
-            response = backend_utils.invoke_skylet_with_retries(
-                handle, lambda: SkyletClient(handle.get_grpc_channel()).add_job(
-                    request))
-            job_id = response.job_id
-            log_dir = response.log_dir
-        else:
+            try:
+                request = jobsv1_pb2.AddJobRequest(
+                    job_name=job_name,
+                    username=common_utils.get_user_hash(),
+                    run_timestamp=self.run_timestamp,
+                    resources_str=resources_str,
+                    metadata=metadata)
+                response = backend_utils.invoke_skylet_with_retries(
+                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                    add_job(request))
+                job_id = response.job_id
+                log_dir = response.log_dir
+                return job_id, log_dir
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
             code = job_lib.JobLibCodeGen.add_job(
                 job_name=job_name,
                 username=common_utils.get_user_hash(),
@@ -4251,28 +4271,29 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_ids: Optional[List[int]] = None,
         stream_logs: bool = True
     ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
-        statuses: Dict[Optional[int], Optional[job_lib.JobStatus]]
         if handle.is_grpc_enabled:
-            request = jobsv1_pb2.GetJobStatusRequest(job_ids=job_ids)
-            response = backend_utils.invoke_skylet_with_retries(
-                handle, lambda: SkyletClient(handle.get_grpc_channel()).
-                get_job_status(request))
-            statuses = {
-                job_id: job_lib.JobStatus.from_protobuf(proto_status)
-                for job_id, proto_status in response.job_statuses.items()
-            }
-        else:
-            code = job_lib.JobLibCodeGen.get_job_status(job_ids)
-            returncode, stdout, stderr = self.run_on_head(
-                handle,
-                code,
-                stream_logs=stream_logs,
-                require_outputs=True,
-                separate_stderr=True)
-            subprocess_utils.handle_returncode(returncode, code,
-                                               'Failed to get job status.',
-                                               stderr)
-            statuses = job_lib.load_statuses_payload(stdout)
+            try:
+                request = jobsv1_pb2.GetJobStatusRequest(job_ids=job_ids)
+                response = backend_utils.invoke_skylet_with_retries(
+                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                    get_job_status(request))
+                statuses: Dict[Optional[int], Optional[job_lib.JobStatus]] = {
+                    job_id: job_lib.JobStatus.from_protobuf(proto_status)
+                    for job_id, proto_status in response.job_statuses.items()
+                }
+                return statuses
+            except exceptions.SkyletMethodNotImplementedError:
+                pass
+
+        code = job_lib.JobLibCodeGen.get_job_status(job_ids)
+        returncode, stdout, stderr = self.run_on_head(handle,
+                                                      code,
+                                                      stream_logs=stream_logs,
+                                                      require_outputs=True,
+                                                      separate_stderr=True)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to get job status.', stderr)
+        statuses = job_lib.load_statuses_payload(stdout)
         return statuses
 
     def cancel_jobs(self,
@@ -4284,15 +4305,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         See `skylet.job_lib.cancel_jobs_encoded_results` for more details.
         """
+        use_legacy = not handle.is_grpc_enabled
+
         if handle.is_grpc_enabled:
-            request = jobsv1_pb2.CancelJobsRequest(job_ids=jobs,
-                                                   cancel_all=cancel_all,
-                                                   user_hash=user_hash)
-            response = backend_utils.invoke_skylet_with_retries(
-                handle, lambda: SkyletClient(handle.get_grpc_channel()).
-                cancel_jobs(request))
-            cancelled_ids = response.cancelled_job_ids
-        else:
+            try:
+                request = jobsv1_pb2.CancelJobsRequest(job_ids=jobs,
+                                                       cancel_all=cancel_all,
+                                                       user_hash=user_hash)
+                response = backend_utils.invoke_skylet_with_retries(
+                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                    cancel_jobs(request))
+                cancelled_ids = response.cancelled_job_ids
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
             code = job_lib.JobLibCodeGen.cancel_jobs(jobs, cancel_all,
                                                      user_hash)
             returncode, stdout, _ = self.run_on_head(handle,
@@ -4321,26 +4348,33 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             A dictionary mapping job_id to log path.
         """
         job_to_dir: Dict[str, str] = {}
+        use_legacy = not handle.is_grpc_enabled
+
         if handle.is_grpc_enabled:
-            int_job_ids = []
-            if job_ids:
-                for str_job_id in job_ids:
-                    if str_job_id.isdigit():
-                        int_job_ids.append(int(str_job_id))
-            request = jobsv1_pb2.GetLogDirsForJobsRequest(job_ids=int_job_ids)
-            response = backend_utils.invoke_skylet_with_retries(
-                handle, lambda: SkyletClient(handle.get_grpc_channel()).
-                get_log_dirs_for_jobs(request))
-            job_log_dirs = response.job_log_dirs
-            if not job_log_dirs:
-                logger.info(f'{colorama.Fore.YELLOW}'
-                            'No matching log directories found'
-                            f'{colorama.Style.RESET_ALL}')
-                return {}
-            for job_id, log_dir in job_log_dirs.items():
-                # Convert to string for backwards compatibility
-                job_to_dir[str(job_id)] = log_dir
-        else:
+            try:
+                int_job_ids = []
+                if job_ids:
+                    for str_job_id in job_ids:
+                        if str_job_id.isdigit():
+                            int_job_ids.append(int(str_job_id))
+                request = jobsv1_pb2.GetLogDirsForJobsRequest(
+                    job_ids=int_job_ids)
+                response = backend_utils.invoke_skylet_with_retries(
+                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                    get_log_dirs_for_jobs(request))
+                job_log_dirs = response.job_log_dirs
+                if not job_log_dirs:
+                    logger.info(f'{colorama.Fore.YELLOW}'
+                                'No matching log directories found'
+                                f'{colorama.Style.RESET_ALL}')
+                    return {}
+                for job_id, log_dir in job_log_dirs.items():
+                    # Convert to string for backwards compatibility
+                    job_to_dir[str(job_id)] = log_dir
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
             code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(job_ids)
             returncode, stdout, stderr = self.run_on_head(handle,
                                                           code,
@@ -4439,6 +4473,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
             signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+
         if handle.is_grpc_enabled:
             last_exit_code = 0
             try:
@@ -4455,30 +4490,29 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         sys.stdout.flush()
                     last_exit_code = resp.exit_code
                 return last_exit_code
+            except exceptions.SkyletMethodNotImplementedError:
+                pass
             except grpc.RpcError as e:
                 if e.code() == grpc.StatusCode.CANCELLED:
                     return last_exit_code
                 raise e
-        else:
-            try:
-                code = job_lib.JobLibCodeGen.tail_logs(
-                    job_id,
-                    managed_job_id=managed_job_id,
-                    follow=follow,
-                    tail=tail)
-                final = self.run_on_head(
-                    handle,
-                    code,
-                    stream_logs=stream_logs,
-                    process_stream=process_stream,
-                    require_outputs=require_outputs,
-                    # Allocate a pseudo-terminal to disable output buffering.
-                    # Otherwise, there may be 5 minutes delay in logging.
-                    ssh_mode=command_runner.SshMode.INTERACTIVE,
-                )
-            except SystemExit as e:
-                final = e.code
-            return final
+
+        try:
+            code = job_lib.JobLibCodeGen.tail_logs(
+                job_id, managed_job_id=managed_job_id, follow=follow, tail=tail)
+            final = self.run_on_head(
+                handle,
+                code,
+                stream_logs=stream_logs,
+                process_stream=process_stream,
+                require_outputs=require_outputs,
+                # Allocate a pseudo-terminal to disable output buffering.
+                # Otherwise, there may be 5 minutes delay in logging.
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
+            )
+        except SystemExit as e:
+            final = e.code
+        return final
 
     def tail_managed_job_logs(self,
                               handle: CloudVmRayResourceHandle,

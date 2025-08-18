@@ -550,36 +550,39 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                       job_id: Optional[int], get_end_time: bool) -> float:
     """Get the submitted/ended time of the job."""
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+
     if handle.is_grpc_enabled:
-        if get_end_time:
-            end_ts_request = jobsv1_pb2.GetJobEndedTimestampRequest(
-                job_id=job_id)
-            end_ts_response = backend_utils.invoke_skylet_with_retries(
-                handle, lambda: cloud_vm_ray_backend.SkyletClient(
-                    handle.get_grpc_channel()).get_job_ended_timestamp(
-                        end_ts_request))
-            return end_ts_response.timestamp
-        else:
-            submit_ts_request = jobsv1_pb2.GetJobSubmittedTimestampRequest(
-                job_id=job_id)
-            submit_ts_response = backend_utils.invoke_skylet_with_retries(
-                handle, lambda: cloud_vm_ray_backend.SkyletClient(
-                    handle.get_grpc_channel()).get_job_submitted_timestamp(
-                        submit_ts_request))
-            return submit_ts_response.timestamp
-    else:
-        code = (
-            job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
-                job_id=job_id, get_ended_time=get_end_time))
-        returncode, stdout, stderr = backend.run_on_head(handle,
-                                                         code,
-                                                         stream_logs=False,
-                                                         require_outputs=True)
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to get job time.',
-                                           stdout + stderr)
-        stdout = message_utils.decode_payload(stdout)
-        return float(stdout)
+        try:
+            if get_end_time:
+                end_ts_request = jobsv1_pb2.GetJobEndedTimestampRequest(
+                    job_id=job_id)
+                end_ts_response = backend_utils.invoke_skylet_with_retries(
+                    handle, lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel()).get_job_ended_timestamp(
+                            end_ts_request))
+                return end_ts_response.timestamp
+            else:
+                submit_ts_request = jobsv1_pb2.GetJobSubmittedTimestampRequest(
+                    job_id=job_id)
+                submit_ts_response = backend_utils.invoke_skylet_with_retries(
+                    handle, lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel()).get_job_submitted_timestamp(
+                            submit_ts_request))
+                return submit_ts_response.timestamp
+        except exceptions.SkyletMethodNotImplementedError:
+            pass
+
+    code = (job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
+        job_id=job_id, get_ended_time=get_end_time))
+    returncode, stdout, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     stream_logs=False,
+                                                     require_outputs=True)
+    subprocess_utils.handle_returncode(returncode, code,
+                                       'Failed to get job time.',
+                                       stdout + stderr)
+    stdout = message_utils.decode_payload(stdout)
+    return float(stdout)
 
 
 def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',

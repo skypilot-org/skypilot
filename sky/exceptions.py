@@ -656,3 +656,8 @@ class RequestInterruptedError(Exception):
 class SkyletInternalError(Exception):
     """Raised when a Skylet internal error occurs."""
     pass
+
+
+class SkyletMethodNotImplementedError(Exception):
+    """Raised when a Skylet gRPC method is not implemented on the server."""
+    pass
