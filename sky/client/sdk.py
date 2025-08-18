@@ -1462,13 +1462,13 @@ def status(
 
 @typing.overload
 def endpoints(cluster: str,
-              port: None = None) -> server_common.RequestId[Dict[str, str]]:
+              port: None = None) -> server_common.RequestId[Dict[int, str]]:
     ...
 
 
 @typing.overload
-def endpoints(cluster: str, port: Union[int,
-                                        str]) -> server_common.RequestId[Optional[str]]:
+def endpoints(cluster: str,
+              port: Union[int, str]) -> server_common.RequestId[Optional[str]]:
     ...
 
 
@@ -1478,7 +1478,7 @@ def endpoints(cluster: str, port: Union[int,
 def endpoints(
     cluster: str,
     port: Optional[Union[int, str]] = None
-) -> Union[server_common.RequestId[Dict[str, str]],
+) -> Union[server_common.RequestId[Dict[int, str]],
            server_common.RequestId[Optional[str]]]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
@@ -1491,8 +1491,8 @@ def endpoints(
         The request ID of the endpoints request.
 
     Request Returns:
-        A dictionary of port numbers to endpoints. If port is None,
-        the dictionary will contain all ports:endpoints exposed on the cluster.
+        If port is None, a dictionary of port numbers to endpoints.
+        If port is not None, the string endpoint for the given port.
 
     Request Raises:
         ValueError: if the cluster is not UP or the endpoint is not exposed.
@@ -1506,12 +1506,24 @@ def endpoints(
     response = server_common.make_authenticated_request(
         'POST', '/endpoints', json=json.loads(body.model_dump_json()))
     if port is None:
-        no_port_request_id: server_common.RequestId[Dict[str, str]] = (
+        no_port_request_id: server_common.RequestId[Dict[int, str]] = (
             server_common.get_request_id(response))
+
+        def response_transform(result: Dict[str, str]) -> Dict[int, str]:
+            return {int(k): v for k, v in result.items()}
+
+        no_port_request_id.set_transform_func(response_transform)
         return no_port_request_id
     else:
         port_request_id: server_common.RequestId[Optional[str]] = (
             server_common.get_request_id(response))
+
+        # Create a transformation function to extract
+        # the specific port from the Dict
+        def port_extractor(result: Dict[str, str]) -> Optional[str]:
+            return result.get(str(port))
+
+        port_request_id.set_transform_func(port_extractor)
         return port_request_id
 
 
@@ -1940,7 +1952,14 @@ def get(request_id: server_common.RequestId[T]) -> T:
                 f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
                 f'({request_task.request_id}) is cancelled by another process.'
                 f'{colorama.Style.RESET_ALL}')
-    return request_task.get_return_value()
+    result = request_task.get_return_value()
+
+    # Apply transformation function if it exists in the request_id
+    if hasattr(request_id,
+               'transform_func') and request_id.transform_func is not None:
+        result = request_id.transform_func(result)
+
+    return result
 
 
 @typing.overload
