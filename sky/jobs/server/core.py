@@ -669,8 +669,8 @@ def queue(
         raise RuntimeError('Failed to fetch managed jobs with returncode: '
                            f'{returncode}.\n{job_table_payload + stderr}')
 
-    jobs, total, result_type, total_no_filter, status_counts = managed_job_utils.load_managed_job_queue(
-        job_table_payload)
+    (jobs, total, result_type, total_no_filter, status_counts
+    ) = managed_job_utils.load_managed_job_queue(job_table_payload)
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
         return jobs, total, status_counts, total_no_filter
