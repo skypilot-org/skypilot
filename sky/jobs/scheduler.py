@@ -210,7 +210,7 @@ def maybe_start_controllers() -> None:
                     try:
                         # this is likely a problem
                         sdk.api_stop()
-                    except Exception as e:  # pylint: disable=broad-except
+                    except BaseException as e:  # pylint: disable=broad-except
                         logger.error(f'Failed to stop the api server: {e}')
                         with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
                             f.write(f'Failed to stop the api server: {e}')
