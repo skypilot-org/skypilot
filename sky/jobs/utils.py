@@ -1201,6 +1201,7 @@ def dump_managed_job_queue(
     page: Optional[int] = None,
     limit: Optional[int] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
+    statuses: Optional[List[str]] = None,
 ) -> str:
     # Make sure to get all jobs - some logic below (e.g. high priority job
     # detection) requires a full view of the jobs table.
@@ -1228,6 +1229,8 @@ def dump_managed_job_queue(
         if priority is not None and priority > highest_blocking_priority:
             highest_blocking_priority = priority
 
+    total_no_filter = len(jobs)
+
     if user_hashes:
         jobs = [
             job for job in jobs if job.get('user_hash', None) in user_hashes
@@ -1251,8 +1254,13 @@ def dump_managed_job_queue(
     if job_ids:
         jobs = [job for job in jobs if job['job_id'] in job_ids]
 
-    jobs, total = filter_jobs(jobs, workspace_match, name_match, pool_match,
-                              page, limit)
+    jobs, total, status_counts = filter_jobs(jobs,
+                                             workspace_match,
+                                             name_match,
+                                             pool_match,
+                                             page,
+                                             limit,
+                                             statuses=statuses)
     for job in jobs:
         end_at = job['end_at']
         if end_at is None:
@@ -1326,7 +1334,12 @@ def dump_managed_job_queue(
         else:
             job['details'] = None
 
-    return message_utils.encode_payload({'jobs': jobs, 'total': total})
+    return message_utils.encode_payload({
+        'jobs': jobs,
+        'total': total,
+        'total_no_filter': total_no_filter,
+        'status_counts': status_counts
+    })
 
 
 def filter_jobs(
@@ -1338,7 +1351,8 @@ def filter_jobs(
     limit: Optional[int],
     user_match: Optional[str] = None,
     enable_user_match: bool = False,
-) -> Tuple[List[Dict[str, Any]], int]:
+    statuses: Optional[List[str]] = None,
+) -> Tuple[List[Dict[str, Any]], int, Dict[str, int]]:
     """Filter jobs based on the given criteria.
 
     Args:
@@ -1350,9 +1364,12 @@ def filter_jobs(
         limit: Limit to filter.
         user_match: User name to filter.
         enable_user_match: Whether to enable user match.
+        statuses: Statuses to filter.
 
     Returns:
-        List of filtered jobs and total number of jobs.
+        List of filtered jobs
+        Total number of jobs
+        Dictionary of status counts
     """
 
     # TODO(hailong): refactor the whole function including the
@@ -1382,6 +1399,7 @@ def filter_jobs(
         end = min(start + limit, len(result))
         return result[start:end]
 
+    status_counts: Dict[str, int] = collections.defaultdict(int)
     result = []
     checks = [
         ('workspace', workspace_match),
@@ -1395,25 +1413,34 @@ def filter_jobs(
         if not all(
                 _pattern_matches(job, key, pattern) for key, pattern in checks):
             continue
+        status_counts[job['status'].value] += 1
+        if statuses:
+            if job['status'].value not in statuses:
+                continue
         result.append(job)
 
     total = len(result)
 
-    return _handle_page_and_limit(result, page, limit), total
+    return _handle_page_and_limit(result, page, limit), total, status_counts
 
 
 def load_managed_job_queue(
     payload: str
-) -> Tuple[List[Dict[str, Any]], int, ManagedJobQueueResultType]:
+) -> Tuple[List[Dict[str, Any]], int, ManagedJobQueueResultType, int, Dict[
+        str, int]]:
     """Load job queue from json string."""
     result = message_utils.decode_payload(payload)
     result_type = ManagedJobQueueResultType.DICT
+    status_counts = {}
     if isinstance(result, dict):
         jobs = result['jobs']
         total = result['total']
+        status_counts = result.get('status_counts', {})
+        total_no_filter = result.get('total_no_filter', total)
     else:
         jobs = result
         total = len(jobs)
+        total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
 
     for job in jobs:
@@ -1423,7 +1450,7 @@ def load_managed_job_queue(
             # TODO(cooperc): Remove check before 0.12.0.
             user = global_user_state.get_user(job['user_hash'])
             job['user_name'] = user.name if user is not None else None
-    return jobs, total, result_type
+    return jobs, total, result_type, total_no_filter, status_counts
 
 
 def _get_job_status_from_tasks(
@@ -1781,6 +1808,7 @@ class ManagedJobCodeGen:
         page: Optional[int] = None,
         limit: Optional[int] = None,
         user_hashes: Optional[List[Optional[str]]] = None,
+        statuses: Optional[List[str]] = None,
     ) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 9:
@@ -1788,7 +1816,7 @@ class ManagedJobCodeGen:
             # before #6652.
             # TODO(hailong): Remove compatibility before 0.12.0
             job_table = utils.dump_managed_job_queue()
-        else:
+        elif managed_job_version < 10:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
@@ -1799,6 +1827,18 @@ class ManagedJobCodeGen:
                                 page={page!r},
                                 limit={limit!r},
                                 user_hashes={user_hashes!r})
+        else:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r},
+                                statuses={statuses!r})
         print(job_table, flush=True)
         """)
         return cls._build(code)

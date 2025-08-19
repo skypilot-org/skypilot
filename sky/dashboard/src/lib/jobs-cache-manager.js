@@ -21,6 +21,7 @@ class JobsCacheManager {
       userMatch,
       workspaceMatch,
       poolMatch,
+      statuses,
     } = filters;
 
     const keyParts = [
@@ -29,6 +30,9 @@ class JobsCacheManager {
       userMatch ? `user:${userMatch}` : '',
       workspaceMatch ? `workspace:${workspaceMatch}` : '',
       poolMatch ? `pool:${poolMatch}` : '',
+      statuses && statuses.length > 0
+        ? `statuses:${statuses.sort().join(',')}`
+        : '',
     ].filter(Boolean);
 
     return keyParts.join('|') || 'default';
@@ -71,7 +75,7 @@ class JobsCacheManager {
    * - If full dataset cache is fresh: slice locally
    * - Otherwise: fetch only the requested page from server and prefetch full dataset in background
    * @param {Object} options - Query options including pagination
-   * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean, fromCache: boolean, cacheStatus: string}>}
+   * @returns {Promise<{jobs: Array, total: number, totalNoFilter: number, controllerStopped: boolean, statusCounts: Object, fromCache: boolean, cacheStatus: string}>}
    */
   async getPaginatedJobs(options = {}) {
     const { page = 1, limit = 10, ...filterOptions } = options;
@@ -105,7 +109,9 @@ class JobsCacheManager {
         return {
           jobs: paginatedJobs,
           total: cachedData.total,
+          totalNoFilter: cachedData.totalNoFilter || cachedData.total,
           controllerStopped: cachedData.controllerStopped,
+          statusCounts: cachedData.statusCounts || {},
           fromCache: true,
           cacheStatus: localCacheStatus.isFresh
             ? 'local_cache_hit'
@@ -144,7 +150,9 @@ class JobsCacheManager {
       return {
         jobs: pageJobs,
         total: pageTotal,
+        totalNoFilter: pageResponse?.totalNoFilter || pageTotal,
         controllerStopped,
+        statusCounts: pageResponse?.statusCounts || {},
         fromCache: false,
         cacheStatus: 'server_page_fetch',
       };
@@ -153,7 +161,9 @@ class JobsCacheManager {
       return {
         jobs: [],
         total: 0,
+        totalNoFilter: 0,
         controllerStopped: false,
+        statusCounts: {},
         fromCache: false,
         cacheStatus: 'error',
       };
@@ -176,7 +186,10 @@ class JobsCacheManager {
     const fullData = {
       jobs: fullDataResponse.jobs,
       total: fullDataResponse.jobs.length,
+      totalNoFilter:
+        fullDataResponse.totalNoFilter || fullDataResponse.jobs.length,
       controllerStopped: false,
+      statusCounts: fullDataResponse.statusCounts || {},
       timestamp: Date.now(),
     };
 
