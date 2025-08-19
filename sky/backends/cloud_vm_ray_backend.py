@@ -18,8 +18,8 @@ import textwrap
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterable, Iterator, List, Optional,
-                    Set, Tuple, Union)
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
+                    Union)
 
 import colorama
 import psutil
@@ -2978,13 +2978,6 @@ class SkyletClient:
     ) -> jobsv1_pb2.FailAllInProgressJobsResponse:
         return self._jobs_stub.FailAllInProgressJobs(request, timeout=timeout)
 
-    def tail_logs(
-        self,
-        request: jobsv1_pb2.TailLogsRequest,
-        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> Iterator[jobsv1_pb2.TailLogsResponse]:
-        return self._jobs_stub.TailLogs(request, timeout=timeout)
-
     def get_job_status(
         self,
         request: jobsv1_pb2.GetJobStatusRequest,
@@ -4518,6 +4511,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             The exit code of the tail command. Returns code 100 if the job has
             failed. See exceptions.JobExitCode for possible return codes.
         """
+        code = job_lib.JobLibCodeGen.tail_logs(job_id,
+                                               managed_job_id=managed_job_id,
+                                               follow=follow,
+                                               tail=tail)
         if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
@@ -4527,33 +4524,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
             signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
-
-        if handle.is_grpc_enabled:
-            last_exit_code = 0
-            try:
-                request = jobsv1_pb2.TailLogsRequest(
-                    job_id=job_id,
-                    managed_job_id=managed_job_id,
-                    follow=follow,
-                    tail=tail)
-                for resp in backend_utils.invoke_skylet_streaming_with_retries(
-                        handle, lambda: SkyletClient(handle.get_grpc_channel()).
-                        tail_logs(request, timeout=None)):
-                    if resp.log_line:
-                        sys.stdout.write(resp.log_line)
-                        sys.stdout.flush()
-                    last_exit_code = resp.exit_code
-                return last_exit_code
-            except exceptions.SkyletMethodNotImplementedError:
-                pass
-            except grpc.RpcError as e:
-                if e.code() == grpc.StatusCode.CANCELLED:
-                    return last_exit_code
-                raise e
-
         try:
-            code = job_lib.JobLibCodeGen.tail_logs(
-                job_id, managed_job_id=managed_job_id, follow=follow, tail=tail)
             final = self.run_on_head(
                 handle,
                 code,
