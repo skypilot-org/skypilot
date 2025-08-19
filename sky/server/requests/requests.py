@@ -572,7 +572,7 @@ def get_api_request_ids_start_with(incomplete: str) -> List[str]:
     with _DB.conn:
         cursor = _DB.conn.cursor()
         cursor.execute(
-            f'SELECT request_id FROM {REQUEST_TABLE} WHERE request_id LIKE ?', 
+            f'SELECT request_id FROM {REQUEST_TABLE} WHERE request_id LIKE ?',
             (f'{incomplete}%',))
         return [row[0] for row in cursor.fetchall()]
 
