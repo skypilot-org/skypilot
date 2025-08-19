@@ -18,9 +18,8 @@ from sky.clouds import aws as aws_cloud
 from sky.clouds.utils import aws_utils
 from sky.provision import common
 from sky.provision import constants
+from sky.provision.aws import config as aws_config
 from sky.provision.aws import utils
-from sky.provision.aws.config import _get_security_group_from_vpc_id
-from sky.provision.aws.config import _get_vpc_id_by_name
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
@@ -687,7 +686,7 @@ def terminate_instances(
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
-    default_sg = _get_security_group_from_vpc_id(
+    default_sg = aws_config.get_security_group_from_vpc_id(
         ec2, _get_vpc_id(provider_config),
         aws_cloud.DEFAULT_SECURITY_GROUP_NAME)
     if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
@@ -783,8 +782,9 @@ def open_ports(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Instance with cluster name '
                              f'{cluster_name_on_cloud} not found.')
-    sg = _get_security_group_from_vpc_id(ec2, _get_vpc_id(provider_config),
-                                         sg_name)
+    sg = aws_config.get_security_group_from_vpc_id(ec2,
+                                                   _get_vpc_id(provider_config),
+                                                   sg_name)
     if sg is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot find new security group '
@@ -880,8 +880,9 @@ def cleanup_ports(
         # We only want to delete the SG that is dedicated to this cluster (i.e.,
         # this cluster have opened some ports).
         return
-    sg = _get_security_group_from_vpc_id(ec2, _get_vpc_id(provider_config),
-                                         sg_name)
+    sg = aws_config.get_security_group_from_vpc_id(ec2,
+                                                   _get_vpc_id(provider_config),
+                                                   sg_name)
     if sg is None:
         logger.warning(
             'Find security group failed. Skip cleanup security group.')
@@ -998,7 +999,8 @@ def _get_vpc_id(provider_config: Dict[str, Any]) -> str:
     region = provider_config['region']
     ec2 = _default_ec2_resource(provider_config['region'])
     if 'vpc_name' in provider_config:
-        return _get_vpc_id_by_name(ec2, provider_config['vpc_name'], region)
+        return aws_config.get_vpc_id_by_name(ec2, provider_config['vpc_name'],
+                                             region)
     else:
         # Retrieve the default VPC name from the region.
         response = ec2.meta.client.describe_vpcs(Filters=[{
