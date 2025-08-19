@@ -2213,20 +2213,6 @@ def api_stop() -> None:
             raise RuntimeError(
                 f'Cannot kill the API server at {server_url} because it is not '
                 f'the default SkyPilot API server started locally.')
-        
-    with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-        f.write(f'killing api server {server_url}')
-
-    found = _local_api_server_running(kill=True)
-
-    with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-        f.write(f'found: {found}')
-
-    # Remove the database for requests.
-    server_common.clear_local_api_server_database()
-
-    with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-        f.write(f'cleared database')
 
     try:
         with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
@@ -2258,6 +2244,21 @@ def api_stop() -> None:
         with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
             f.write(f'Error looking at job controller pid file: {e}')
         pass
+
+    with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
+        f.write(f'killing api server {server_url}')
+
+    found = _local_api_server_running(kill=True)
+
+    with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
+        f.write(f'found: {found}')
+
+    # Remove the database for requests.
+    server_common.clear_local_api_server_database()
+
+    with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
+        f.write(f'cleared database')
+
 
     if found:
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'
