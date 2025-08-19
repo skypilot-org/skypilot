@@ -194,25 +194,25 @@ def maybe_start_controllers() -> None:
     """
     try:
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
-            cur = pathlib.Path(CURRENT_HASH)
-            old = pathlib.Path(f'{CURRENT_HASH}.old')
+            # cur = pathlib.Path(CURRENT_HASH)
+            # old = pathlib.Path(f'{CURRENT_HASH}.old')
 
-            if old.exists() and cur.exists():
-                if (old.read_text(encoding='utf-8') !=
-                        cur.read_text(encoding='utf-8')):
-                    # TODO(luca): there is a 1/2^160 chance that there will be
-                    # a collision. using a geometric distribution and assuming
-                    # one update a day, we expect a bug slightly before the heat
-                    # death of the universe. should get this fixed before then.
-                    try:
-                        # this is likely a problem
-                        sdk.api_stop()
-                    except Exception:  # pylint: disable=broad-except
-                        pass
-                    else:
-                        shutil.copyfile(cur, old)
-            if not old.exists():
-                shutil.copyfile(cur, old)
+            # if old.exists() and cur.exists():
+            #     if (old.read_text(encoding='utf-8') !=
+            #             cur.read_text(encoding='utf-8')):
+            #         # TODO(luca): there is a 1/2^160 chance that there will be
+            #         # a collision. using a geometric distribution and assuming
+            #         # one update a day, we expect a bug slightly before the heat
+            #         # death of the universe. should get this fixed before then.
+            #         try:
+            #             # this is likely a problem
+            #             sdk.api_stop()
+            #         except Exception:  # pylint: disable=broad-except
+            #             pass
+            #         else:
+            #             shutil.copyfile(cur, old)
+            # if not old.exists():
+            #     shutil.copyfile(cur, old)
 
             alive = get_alive_controllers()
             if alive is None:
