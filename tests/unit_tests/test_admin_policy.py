@@ -458,10 +458,11 @@ def _policy_server(policy: str) -> Iterator[str]:
     if env.get('PYTHONPATH'):
         pypath = pypath + ':' + env['PYTHONPATH']
     env['PYTHONPATH'] = pypath
-    proc = subprocess.Popen(
-        f'python {POLICY_PATH}/example_server/dynamic_policy_server.py --port {port} --policy {policy}',
-        shell=True,
-        env=env)
+    # Use current interpreter to avoid env mismatches.
+    cmd = (f'{sys.executable} '
+           f'{POLICY_PATH}/example_server/dynamic_policy_server.py '
+           f'--port {port} --policy {policy}')
+    proc = subprocess.Popen(cmd, shell=True, env=env)
     start_time = time.time()
     server_ready = False
     while time.time() - start_time < 5.0:

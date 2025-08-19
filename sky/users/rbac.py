@@ -80,8 +80,9 @@ def get_role_permissions(
     # Get all roles from the config
     config_permissions = skypilot_config.get_nested(('rbac', 'roles'),
                                                     default_value={})
-    supported_roles = get_supported_roles()
-    for role, permissions in config_permissions.items():
+    # Derive supported roles from RoleName
+    supported_roles = {role.value for role in RoleName}
+    for role, permissions in list(config_permissions.items()):
         role_name = role.lower()
         if role_name not in supported_roles:
             logger.warning(f'Invalid role: {role_name}')

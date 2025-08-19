@@ -952,11 +952,13 @@ def unzip_file(zip_file_path: pathlib.Path,
                client_file_mounts_dir: pathlib.Path) -> None:
     """Unzips a zip file."""
     try:
+        # Resolve to avoid path aliasing (/var vs /private/var on macOS).
+        client_root = client_file_mounts_dir.resolve()
         with zipfile.ZipFile(zip_file_path, 'r') as zipf:
             for member in zipf.infolist():
                 # Determine the new path
                 original_path = os.path.normpath(member.filename)
-                new_path = client_file_mounts_dir / original_path.lstrip('/')
+                new_path = client_root / original_path.lstrip('/')
 
                 if (member.external_attr >> 28) == 0xA:
                     # Symlink. Read the target path and create a symlink.
@@ -966,8 +968,7 @@ def unzip_file(zip_file_path: pathlib.Path,
                     # Since target is a relative path, we need to check that it
                     # is under `client_file_mounts_dir` for security.
                     full_target_path = (new_path.parent / target).resolve()
-                    if not _is_relative_to(full_target_path,
-                                           client_file_mounts_dir):
+                    if not _is_relative_to(full_target_path, client_root):
                         raise ValueError(f'Symlink target {target} leads to a '
                                          'file not in userspace. Aborted.')
 
