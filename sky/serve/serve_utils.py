@@ -295,7 +295,7 @@ def is_consolidation_mode(pool: bool = False) -> bool:
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
     if (os.environ.get(skylet_constants.ENV_VAR_IS_JOB_CONTROLLER) is not None
-        and controller.controller_type == 'jobs'):
+            and controller.controller_type == 'jobs'):
         # if we are in the job controller, we must always be in consolidation
         # mode.
         return True
