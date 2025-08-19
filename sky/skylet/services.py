@@ -1,6 +1,8 @@
 """gRPC service implementations for skylet."""
 
 import os
+import time
+from typing import List
 
 import grpc
 
@@ -18,6 +20,59 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
+
+
+class LogChunkBuffer:
+    """Buffer for efficiently chunking log lines for streaming."""
+
+    def __init__(self, max_size: int = 4096, flush_interval: float = 0.5):
+        """Initialize the chunk buffer.
+
+        Args:
+            max_size: Maximum buffer size in bytes before flushing
+            flush_interval: Maximum time in seconds before flushing
+        """
+        self.buffer: List[str] = []
+        self.buffer_size = 0
+        self.max_size = max_size
+        self.flush_interval = flush_interval
+        self.last_flush = time.time()
+
+    def should_flush(self) -> bool:
+        """Check if the buffer should be flushed."""
+        return (self.buffer_size >= self.max_size or
+                time.time() - self.last_flush >= self.flush_interval)
+
+    def add_line(self, line: str) -> bool:
+        """Add a line to the buffer.
+
+        Args:
+            line: The log line to add
+
+        Returns:
+            True if buffer should be flushed after adding the line
+        """
+        self.buffer.append(line)
+        self.buffer_size += len(line.encode('utf-8'))
+        return self.should_flush()
+
+    def get_chunk(self) -> str:
+        """Get the current buffered content and clear the buffer.
+
+        Returns:
+            The buffered log lines as a single string
+        """
+        if not self.buffer:
+            return ''
+        chunk = ''.join(self.buffer)
+        self.buffer.clear()
+        self.buffer_size = 0
+        self.last_flush = time.time()
+        return chunk
+
+    def empty(self) -> bool:
+        """Check if buffer is empty."""
+        return len(self.buffer) == 0
 
 
 class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
@@ -189,9 +244,28 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 run_timestamp = job_lib.get_run_timestamp(job_id)
                 log_dir = None if run_timestamp is None else os.path.join(
                     constants.SKY_LOGS_DIRECTORY, run_timestamp)
+
+            chunk_buffer = LogChunkBuffer()
+            last_flush = time.time()
             for line in log_lib.tail_logs_iter(job_id, log_dir, managed_job_id,
                                                request.follow, request.tail):
-                yield jobsv1_pb2.TailLogsResponse(log_line=line)
+                if chunk_buffer.add_line(line):
+                    chunk = chunk_buffer.get_chunk()
+                    if chunk:
+                        yield jobsv1_pb2.TailLogsResponse(log_line=chunk)
+                    last_flush = time.time()
+                elif request.follow and not chunk_buffer.empty():
+                    if time.time() - last_flush >= chunk_buffer.flush_interval:
+                        chunk = chunk_buffer.get_chunk()
+                        if chunk:
+                            yield jobsv1_pb2.TailLogsResponse(log_line=chunk)
+                        last_flush = time.time()
+
+            # Send any remaining buffered content
+            remaining = chunk_buffer.get_chunk()
+            if remaining:
+                yield jobsv1_pb2.TailLogsResponse(log_line=remaining)
+
             job_status = job_lib.get_status(job_id)
             exit_code = exceptions.JobExitCode.from_job_status(job_status)
             # Fix for dashboard: When follow=False and job is still running
