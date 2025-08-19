@@ -184,7 +184,7 @@ jobs:
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--remote-server", "FILE_PATTERN": "test_cluster_job.py"}'
       timeout_minutes: 40
-      sleep_seconds: 1800  # 30-minute delay to reduce buildkite resource usage
+      sleep_seconds: 1500  # 25-minute delay to reduce buildkite resource usage
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
