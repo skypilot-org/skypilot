@@ -16,7 +16,7 @@ import logging
 import os
 import subprocess
 import typing
-from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Dict, Iterator, List, Literal, Optional, Tuple, TypeVar, Union
 from urllib import parse as urlparse
 
 import click
@@ -794,6 +794,26 @@ def exec(  # pylint: disable=redefined-builtin
     return server_common.get_request_id(response)
 
 
+@typing.overload
+def tail_logs(cluster_name: str,
+              job_id: Optional[int],
+              follow: bool,
+              tail: int = 0,
+              output_stream: Optional['io.TextIOBase'] = None,
+              preload_content: Literal[True] = ...) -> int:
+    ...
+
+
+@typing.overload
+def tail_logs(cluster_name: str,
+              job_id: Optional[int],
+              follow: bool,
+              tail: int = 0,
+              output_stream: Optional['io.TextIOBase'] = None,
+              preload_content: Literal[False] = ...) -> Iterator[Optional[str]]:
+    ...
+
+
 # TODO(aylei): when retry logs request, there will be duplciated log entries.
 # We should fix this.
 @usage_lib.entrypoint
@@ -804,7 +824,8 @@ def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
               tail: int = 0,
-              output_stream: Optional['io.TextIOBase'] = None) -> int:
+              output_stream: Optional['io.TextIOBase'] = None,
+              preload_content: bool = True) -> Union[int, Iterator[Optional[str]]]:
     """Tails the logs of a job.
 
     Args:
@@ -814,7 +835,11 @@ def tail_logs(cluster_name: str,
             immediately.
         tail: if > 0, tail the last N lines of the logs.
         output_stream: the stream to write the logs to. If None, print to the
-            console.
+            console. Cannot be used with preload_content=False.
+        preload_content: if False, returns an Iterator[str | None] containing the
+            logs without the function blocking on the retrieval of entire log.
+            Iterator returns None when the log has been completely streamed.
+            Default True. Cannot be used with output_stream.
 
     Returns:
         Exit code based on success or failure of the job. 0 if success,
@@ -832,6 +857,10 @@ def tail_logs(cluster_name: str,
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
+    if output_stream is not None and not preload_content:
+        raise ValueError(
+            'output_stream cannot be specified when preload_content is False')
+
     body = payloads.ClusterJobBody(
         cluster_name=cluster_name,
         job_id=job_id,
@@ -847,12 +876,15 @@ def tail_logs(cluster_name: str,
                  None))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
-    # Log request is idempotent when tail is 0, thus can resume previous
-    # streaming point on retry.
-    return stream_response(request_id=request_id,
-                           response=response,
-                           output_stream=output_stream,
-                           resumable=(tail == 0))
+    if preload_content:
+        # Log request is idempotent when tail is 0, thus can resume previous
+        # streaming point on retry.
+        return stream_response(request_id=request_id,
+                               response=response,
+                               output_stream=output_stream,
+                               resumable=(tail == 0))
+    else:
+        return rich_utils.decode_rich_status(response)
 
 
 @usage_lib.entrypoint
