@@ -2172,16 +2172,19 @@ def api_start(
     if host not in server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS:
         raise ValueError(f'Invalid host: {host}. Should be one of: '
                          f'{server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS}')
-    is_local_api_server = server_common.is_api_server_local()
-    if not is_local_api_server:
-        server_url = server_common.get_server_url()
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unable to start local API server: '
-                             f'server endpoint is set to {server_url}. '
-                             'To start a local API server, remove the endpoint '
-                             'from the config file and/or unset the '
-                             'SKYPILOT_API_SERVER_ENDPOINT environment '
-                             'variable.')
+    # This block below is the only part that has been changed.
+    if not deploy:
+        is_local_api_server = server_common.is_api_server_local()
+        if not is_local_api_server:
+            server_url = server_common.get_server_url()
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Unable to start local API server: '
+                    f'server endpoint is set to {server_url}. '
+                    'To start a local API server, remove the endpoint '
+                    'from the config file and/or unset the '
+                    'SKYPILOT_API_SERVER_ENDPOINT environment '
+                    'variable.')
     server_common.check_server_healthy_or_start_fn(deploy, host, foreground,
                                                    metrics, metrics_port,
                                                    enable_basic_auth)

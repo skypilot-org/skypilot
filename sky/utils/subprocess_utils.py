@@ -3,7 +3,6 @@ import multiprocessing
 from multiprocessing import pool
 import os
 import random
-import resource
 import shlex
 import subprocess
 import sys
@@ -13,6 +12,12 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
 
 import colorama
+
+try:
+    # resource is not available on Windows
+    import resource
+except ImportError:
+    pass
 
 from sky import exceptions
 from sky import sky_logging
