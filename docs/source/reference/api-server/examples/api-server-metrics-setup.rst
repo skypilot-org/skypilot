@@ -55,6 +55,19 @@ The endpoint ``/grafana`` on the SkyPilot API server exposes the following metri
 
 You can also :ref:`setup GPU metric collection <api-server-gpu-metrics-setup>` to directly export GPU memory, utilization and power consumption.
 
+.. note::
+
+   You can override the request duration histogram buckets by setting the
+   ``SKY_APISERVER_HISTOGRAM_BUCKETS`` environment variable, e.g.:
+
+   .. code-block:: bash
+
+      helm upgrade skypilot skypilot/skypilot-nightly --devel \
+        --namespace skypilot \
+        --reuse-values \
+        --set extraEnvs[0].name=SKY_APISERVER_HISTOGRAM_BUCKETS \
+        --set extraEnvs[0].value='0.1,1.0,2.5,5.0,10.0,15.0,30.0,60.0,120.0,inf'
+
 Using existing Prometheus / Grafana
 -----------------------------------
 
