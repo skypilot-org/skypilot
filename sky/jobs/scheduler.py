@@ -185,7 +185,7 @@ def get_alive_controllers() -> typing.Optional[int]:
     return alive
 
 
-def maybe_start_controllers() -> None:
+def maybe_start_controllers(from_scheduler: bool = False) -> None:
     """Start the job controller process.
 
     If the process is already running, it will not start a new one.
@@ -194,33 +194,28 @@ def maybe_start_controllers() -> None:
     """
     try:
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
-            cur = pathlib.Path(CURRENT_HASH)
-            old = pathlib.Path(f'{CURRENT_HASH}.old')
+            if from_scheduler:
+                cur = pathlib.Path(CURRENT_HASH)
+                old = pathlib.Path(f'{CURRENT_HASH}.old')
 
-            if old.exists() and cur.exists():
-                if (old.read_text(encoding='utf-8') !=
-                        cur.read_text(encoding='utf-8')):
-                    with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-                        f.write(old.read_text(encoding='utf-8'))
-                        f.write(cur.read_text(encoding='utf-8'))
-                    # TODO(luca): there is a 1/2^160 chance that there will be
-                    # a collision. using a geometric distribution and assuming
-                    # one update a day, we expect a bug slightly before the heat
-                    # death of the universe. should get this fixed before then.
-                    try:
-                        # this is likely a problem
-                        sdk.api_stop()
-                    except BaseException as e:  # pylint: disable=broad-except
-                        logger.error(f'Failed to stop the api server: {e}')
-                        with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-                            f.write(f'Failed to stop the api server: {e}')
-                        pass
-                    else:
-                        with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-                            f.write(f'COPIED FILE')
-                        shutil.copyfile(cur, old)
-            if not old.exists():
-                shutil.copyfile(cur, old)
+                if old.exists() and cur.exists():
+                    if (old.read_text(encoding='utf-8') !=
+                            cur.read_text(encoding='utf-8')):
+                        # TODO(luca): there is a 1/2^160 chance that there will
+                        # be a collision. using a geometric distribution and
+                        # assuming one update a day, we expect a bug slightly
+                        # before the heat death of the universe. should get
+                        # this fixed before then.
+                        try:
+                            # this is likely a problem
+                            sdk.api_stop()
+                        except Exception as e:  # pylint: disable=broad-except
+                            logger.error(f'Failed to stop the api server: {e}')
+                            pass
+                        else:
+                            shutil.copyfile(cur, old)
+                if not old.exists():
+                    shutil.copyfile(cur, old)
 
             alive = get_alive_controllers()
             if alive is None:
@@ -253,7 +248,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
     controller_pid = state.get_job_controller_pid(job_id)
     if controller_pid is not None:
         if managed_job_utils.controller_process_alive(controller_pid, job_id):
-            maybe_start_controllers()
+            maybe_start_controllers(from_scheduler=True)
             return
 
     state.scheduler_set_waiting(job_id, dag_yaml_path,
@@ -266,7 +261,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                f'--user-yaml-path {original_user_yaml_path} '
                f'--priority {priority}')
         state.set_ha_recovery_script(job_id, run)
-    maybe_start_controllers()
+    maybe_start_controllers(from_scheduler=True)
 
 
 @contextlib.asynccontextmanager

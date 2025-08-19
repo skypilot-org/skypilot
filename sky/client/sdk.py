@@ -2218,47 +2218,25 @@ def api_stop() -> None:
         with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
                   'r',
                   encoding='utf-8') as f:
-            with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-                f.write(f'opened pid file {scheduler.JOB_CONTROLLER_PID_PATH}')
             pids = f.read().split('\n')[:-1]
-            with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-                f.write(f'pids: {pids}')
             for pid in pids:
-                with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-                    f.write(f'pid: {pid}')
                 if subprocess_utils.is_process_alive(int(pid.strip())):
                     subprocess_utils.kill_children_processes(
                         parent_pids=[int(pid.strip())], force=True)
-                    with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-                        f.write(f'killed pid: {pid}')
         os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
     except FileNotFoundError:
         # its fine we will create it
-        with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-            f.write('FILE NOT FOUND LUCA WILL BE SAD')
         pass
     except Exception as e:  # pylint: disable=broad-except
         # in case we get perm issues or something is messed up, just ignore it
         # and assume the process is dead
         logger.error(f'Error looking at job controller pid file: {e}')
-        with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-            f.write(f'Error looking at job controller pid file: {e}')
         pass
-
-    with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-        f.write(f'killing api server {server_url}')
 
     found = _local_api_server_running(kill=True)
 
-    with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-        f.write(f'found: {found}')
-
     # Remove the database for requests.
     server_common.clear_local_api_server_database()
-
-    with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
-        f.write(f'cleared database')
-
 
     if found:
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'
