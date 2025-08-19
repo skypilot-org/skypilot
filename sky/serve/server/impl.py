@@ -713,6 +713,11 @@ def status(
         replace('service', noun))
 
     if handle.is_grpc_enabled:
+        # no need to get unused CloudVmRayBackend class. Simply check
+        # resource handle type. This check is needed because
+        # `backend_utils.is_controller_accessible` may return
+        # `LocalResourcesHandle`.
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
         try:
             service_records = serve_rpc_utils.RpcRunner.get_service_status(
                 handle, service_names, pool)
