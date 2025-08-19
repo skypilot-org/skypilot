@@ -207,7 +207,7 @@ def maybe_start_controllers() -> None:
                     try:
                         # this is likely a problem
                         sdk.api_stop()
-                    except Exception: # pylint: disable=broad-exception-caught
+                    except Exception:  # pylint: disable=broad-except
                         pass
                     else:
                         shutil.copyfile(cur, old)

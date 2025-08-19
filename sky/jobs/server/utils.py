@@ -33,7 +33,8 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
 
     returncode, output, stderr = backend.run_on_head(handle,
                                                      code,
-                                                     require_outputs=True,                                                     stream_logs=False,
+                                                     require_outputs=True,
+                                                     stream_logs=False,
                                                      separate_stderr=True)
 
     if returncode != 0:
