@@ -2676,41 +2676,29 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # as killing the process will close the tunnel too.
             head_runner.disable_control_master = True
 
-        is_local_runner = isinstance(head_runner,
-                                     command_runner.LocalProcessCommandRunner)
-
-        if not is_local_runner:
-            cmd = head_runner.port_forward_command([
-                (local_port, constants.SKYLET_GRPC_PORT)
-            ])
-            ssh_tunnel_proc = subprocess.Popen(cmd)
-            tunnel_info = SSHTunnelInfo(port=local_port,
-                                        pid=ssh_tunnel_proc.pid)
-
+        cmd = head_runner.port_forward_command([
+            (local_port, constants.SKYLET_GRPC_PORT)
+        ])
+        ssh_tunnel_proc = subprocess.Popen(cmd)
+        tunnel_info = SSHTunnelInfo(port=local_port,
+                                    pid=ssh_tunnel_proc.pid)
         try:
-            if is_local_runner:
-                port = constants.SKYLET_GRPC_PORT
-            else:
-                port = tunnel_info.port
             grpc.channel_ready_future(
-                grpc.insecure_channel(f'localhost:{port}')).result(
+                grpc.insecure_channel(f'localhost:{tunnel_info.port}')).result(
                     timeout=constants.SKYLET_GRPC_TIMEOUT_SECONDS)
             # Clean up existing tunnel before setting up the new one.
-            if not is_local_runner:
-                if self.skylet_ssh_tunnel is not None:
-                    self._cleanup_ssh_tunnel(self.skylet_ssh_tunnel)
-                self.skylet_ssh_tunnel = tunnel_info
-                global_user_state.update_cluster_handle(self.cluster_name, self)
+            if self.skylet_ssh_tunnel is not None:
+                self._cleanup_ssh_tunnel(self.skylet_ssh_tunnel)
+            self.skylet_ssh_tunnel = tunnel_info
+            global_user_state.update_cluster_handle(self.cluster_name, self)
         except grpc.FutureTimeoutError as e:
-            if not is_local_runner:
-                self._cleanup_ssh_tunnel(tunnel_info)
+            self._cleanup_ssh_tunnel(tunnel_info)
             logger.warning(
                 f'Skylet gRPC channel for cluster {self.cluster_name} not '
                 f'ready after {constants.SKYLET_GRPC_TIMEOUT_SECONDS}s')
             raise e
         except Exception as e:
-            if not is_local_runner:
-                self._cleanup_ssh_tunnel(tunnel_info)
+            self._cleanup_ssh_tunnel(tunnel_info)
             raise e
 
     @property
