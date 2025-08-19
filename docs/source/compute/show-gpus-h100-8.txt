@@ -1,34 +1,18 @@
-[ValueError] Resources 'H100' with requested quantity 8 not found in Kubernetes clusters. If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs (e.g., skypilot.co/accelerator) are setup correctly. To show available accelerators on kubernetes,  run: sky show-gpus --cloud kubernetes 
+GPU   QTY  CLOUD       INSTANCE_TYPE                     DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION             
+H100  8    Vast        8x-H100_NVL-32-65536              749GB       32     64GB      $ 16.000      $ 16.000           Australia, AU, OC  
+H100  8    Vast        8x-H100_SXM-32-65536              637GB       32     64GB      $ 21.000      $ 10.670           Iceland, IS, EU    
+H100  8    nebius      gpu-h100-sxm_8gpu-128vcpu-1600gb  200GB       128    1600GB    $ 23.600      -                  eu-north1          
+H100  8    Lambda      gpu_8x_h100_sxm5                  80GB        208    1800GB    $ 23.920      -                  europe-central-1   
+H100  8    Fluidstack  H100_NVLINK_80GB::8               80GB        252    1440GB    $ 23.920      -                  FINLAND            
+H100  8    RunPod      8x_H100_SECURE                    -           128    640GB     $ 35.920      -                  CA                 
+H100  8    GCP         a3-highgpu-8g                     80GB        208    1872GB    $ 46.021      $ 20.199           us-central1        
+H100  8    Paperspace  H100x8                            -           128    640GB     $ 47.600      -                  East Coast (NY2)   
+H100  8    DO          gpu-h100x8-640gb                  80GB        160    1920GB    $ 47.600      -                  tor1               
+H100  8    OCI         BM.GPU.H100.8                     80GB        224    2048GB    $ 80.000      -                  eu-amsterdam-1     
+H100  8    AWS         p5.48xlarge                       80GB        192    2048GB    $ 98.320      $ 9.832            us-east-2          
 
-ERROR [root] File does not exist: /var/folders/8f/56gzvwkd3n3293xjlrztr6600000gp/T/tmp3hsizthu
-ERROR [root] File does not exist: /var/folders/8f/56gzvwkd3n3293xjlrztr6600000gp/T/tmp3hsizthu
-[ValueError] Resources 'H100' with requested quantity 8 not found in SSH clusters. If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs (e.g., skypilot.co/accelerator) are setup correctly. To show available accelerators on ssh,  run: sky show-gpus --cloud ssh 
-
-Cloud GPUs
-GPU   QTY  CLOUD       INSTANCE_TYPE                        DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION            
-H100  8    Hyperbolic  8x-H100-224-2165                     80GB        224    2165GB    $ 7.920       -                  default           
-H100  8    Hyperbolic  8x-H100-224-1623                     80GB        224    1623GB    $ 9.200       -                  default           
-H100  8    RunPod      8x_H100_SECURE                       -           128    640GB     $ 19.120      -                  CA                
-H100  8    Cudo        epyc-genoa-h100-nvl-pcie_8x64v128gb  94GB        64     128GB     $ 20.701      -                  au-melbourne-1    
-H100  8    Cudo        epyc-genoa-h100-nvl-pcie_8x96v192gb  94GB        96     192GB     $ 21.171      -                  au-melbourne-1    
-H100  8    nebius      gpu-h100-sxm_8gpu-128vcpu-1600gb     200GB       128    1600GB    $ 23.600      -                  eu-north1         
-H100  8    Lambda      gpu_8x_h100_sxm5                     80GB        208    1800GB    $ 23.920      -                  europe-central-1  
-H100  8    GCP         a3-highgpu-8g                        80GB        208    1872GB    $ 43.066      $ 20.199           us-central1       
-H100  8    DO          gpu-h100x8-640gb                     80GB        160    1920GB    $ 47.600      -                  tor1              
-H100  8    Paperspace  H100x8                               -           128    640GB     $ 47.600      -                  East Coast (NY2)  
-H100  8    AWS         p5.48xlarge                          80GB        192    2048GB    $ 55.040      $ 13.168           us-east-2         
-H100  8    OCI         BM.GPU.H100.8                        80GB        224    2048GB    $ 80.000      -                  eu-amsterdam-1    
-
-GPU        QTY  CLOUD  INSTANCE_TYPE  DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION        
-H100-MEGA  8    GCP    a3-megagpu-8g  80GB        208    1872GB    $ 45.808      $ 18.273           europe-west1  
+GPU        QTY  CLOUD  INSTANCE_TYPE  DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION       
+H100-MEGA  8    GCP    a3-megagpu-8g  80GB        208    1872GB    $ 92.214      $ 21.208           us-central1  
 
 GPU       QTY  CLOUD   INSTANCE_TYPE       DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION  
-H100-NVL  8    RunPod  8x_H100-NVL_SECURE  -           128    752GB     $ 22.320      -                  CA      
-
-GPU       QTY  CLOUD   INSTANCE_TYPE                    DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION             
-H100-SXM  8    Cudo    sapphire-rapids-h100_8x64v128gb  80GB        64     128GB     $ 19.005      -                  no-kristiansand-1  
-H100-SXM  8    Cudo    sapphire-rapids-h100_8x96v192gb  80GB        96     192GB     $ 19.507      -                  no-kristiansand-1  
-H100-SXM  8    RunPod  8x_H100-SXM_SECURE               -           160    640GB     $ 23.920      $ 21.520           CA                 
-
-GPU          QTY  CLOUD       INSTANCE_TYPE        DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION   
-H100-NVLINK  8    Fluidstack  H100_NVLINK_80GB::8  80GB        -      1440GB    $ 23.920      -                  FINLAND  
+H100-SXM  8    RunPod  8x_H100-SXM_SECURE  -           208    640GB     $ 37.520      -                  CA      

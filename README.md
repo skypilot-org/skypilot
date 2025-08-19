@@ -210,8 +210,3 @@ For general discussions, join us on the [SkyPilot Slack](http://slack.skypilot.c
 
 ## Contributing
 We welcome all contributions to the project! See [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.
-
-
-<a href="https://github.com/skypilot-org/skypilot/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=skypilot-org/skypilot&max=200&anon=1" />
-</a>
