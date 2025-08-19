@@ -498,8 +498,8 @@ def _vpc_id_from_security_group_ids(ec2: 'mypy_boto3_ec2.ServiceResource',
     return vpc_ids[0]
 
 
-def _get_vpc_id_by_name(ec2: 'mypy_boto3_ec2.ServiceResource', vpc_name: str,
-                        region: str) -> str:
+def get_vpc_id_by_name(ec2: 'mypy_boto3_ec2.ServiceResource', vpc_name: str,
+                       region: str) -> str:
     """Returns the VPC ID of the unique VPC with a given name.
 
     Exits with code 1 if:
@@ -532,7 +532,7 @@ def _get_subnet_and_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
                            use_internal_ips: bool,
                            vpc_name: Optional[str]) -> Tuple[Any, str]:
     if vpc_name is not None:
-        vpc_id_of_sg = _get_vpc_id_by_name(ec2, vpc_name, region)
+        vpc_id_of_sg = get_vpc_id_by_name(ec2, vpc_name, region)
     elif security_group_ids:
         vpc_id_of_sg = _vpc_id_from_security_group_ids(ec2, security_group_ids)
     else:
@@ -614,8 +614,8 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
             due to AWS service issues.
     """
     # Figure out which security groups with this name exist for each VPC...
-    security_group = _get_security_group_from_vpc_id(ec2, vpc_id,
-                                                     expected_sg_name)
+    security_group = get_security_group_from_vpc_id(ec2, vpc_id,
+                                                    expected_sg_name)
     if security_group is not None:
         return security_group
 
@@ -631,7 +631,7 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
             # The security group already exists, but we didn't see it
             # because of eventual consistency.
             logger.warning(f'{expected_sg_name} already exists when creating.')
-            security_group = _get_security_group_from_vpc_id(
+            security_group = get_security_group_from_vpc_id(
                 ec2, vpc_id, expected_sg_name)
             assert (security_group is not None and
                     security_group.group_name == expected_sg_name), (
@@ -646,8 +646,8 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
         logger.warning(message)
         raise exceptions.NoClusterLaunchedError(message) from e
 
-    security_group = _get_security_group_from_vpc_id(ec2, vpc_id,
-                                                     expected_sg_name)
+    security_group = get_security_group_from_vpc_id(ec2, vpc_id,
+                                                    expected_sg_name)
     assert security_group is not None, 'Failed to create security group'
     logger.info(f'Created new security group {colorama.Style.BRIGHT}'
                 f'{security_group.group_name}{colorama.Style.RESET_ALL} '
@@ -655,9 +655,9 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
     return security_group
 
 
-def _get_security_group_from_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
-                                    vpc_id: str,
-                                    group_name: str) -> Optional[Any]:
+def get_security_group_from_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
+                                   vpc_id: str,
+                                   group_name: str) -> Optional[Any]:
     """Get security group by VPC ID and group name."""
     existing_groups = list(
         ec2.security_groups.filter(Filters=[{
