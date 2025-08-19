@@ -169,12 +169,12 @@ jobs:
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy", "FILE_PATTERN": "test_cluster_job.py,test_region_and_zone.py,test_basic.py"}'
       timeout_minutes: 40
-      sleep_seconds: 1500  # 25-minute delay to reduce buildkite resource usage
+      sleep_seconds: 1200  # 20-minute delay to reduce buildkite resource usage
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   smoke-tests-remote-server:
-    needs: [gate-tests, nightly-build-pypi]
+    needs: [gate-tests, smoke-tests-kubernetes]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
@@ -184,7 +184,7 @@ jobs:
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--remote-server", "FILE_PATTERN": "test_cluster_job.py"}'
       timeout_minutes: 40
-      sleep_seconds: 2100  # 35-minute delay to reduce buildkite resource usage
+      sleep_seconds: 1800  # 30-minute delay to reduce buildkite resource usage
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
