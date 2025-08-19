@@ -677,7 +677,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
                  '--output text) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
                 )),
         ],
-        smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+        'sky jobs logs --controller 1; sky jobs logs --controller 2;' + smoke_tests_utils.down_cluster_for_cloud_cmd(name),
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60)
     smoke_tests_utils.run_one_test(test)
