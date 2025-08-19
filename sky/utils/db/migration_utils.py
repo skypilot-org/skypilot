@@ -4,6 +4,8 @@ import contextlib
 import logging
 import os
 import pathlib
+import threading
+from typing import Dict
 
 from alembic import command as alembic_command
 from alembic.config import Config
@@ -30,6 +32,11 @@ SERVE_DB_NAME = 'serve_db'
 SERVE_VERSION = '001'
 SERVE_LOCK_PATH = '~/.sky/locks/.serve_db.lock'
 
+# Global cache for remote database engines to share connection pools
+# across different database contexts (global_user_state, jobs, serve)
+_remote_engine_cache: Dict[str, sqlalchemy.Engine] = {}
+_engine_cache_lock = threading.Lock()
+
 
 def get_engine(db_name: str):
     conn_string = None
@@ -38,22 +45,34 @@ def get_engine(db_name: str):
     if is_api_server:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
-        # Use pooling for PostgreSQL on API server processes, but keep NullPool
-        # as default for other processes to avoid overloading the database
-        if is_api_server and conn_string.startswith('postgresql'):
-            # Use QueuePool for PostgreSQL on API server processes for
-            # better performance
-            engine = sqlalchemy.create_engine(conn_string,
-                                              pool_size=10,
-                                              max_overflow=20,
-                                              pool_pre_ping=True,
-                                              pool_recycle=3600)
-        else:
-            # Use NullPool for non-API server processes or non-PostgreSQL
-            # databases
-            engine = sqlalchemy.create_engine(conn_string,
-                                              poolclass=sqlalchemy.NullPool)
+        # For remote databases, cache the engine to share connection pools
+        # across different database contexts (global_user_state, jobs, serve)
+        with _engine_cache_lock:
+            if conn_string in _remote_engine_cache:
+                return _remote_engine_cache[conn_string]
+
+            # Use pooling for PostgreSQL on API server processes, but keep
+            # NullPool as default for other processes to avoid overloading
+            # the database
+            if is_api_server and conn_string.startswith('postgresql'):
+                # Use QueuePool for PostgreSQL on API server processes for
+                # better performance
+                engine = sqlalchemy.create_engine(conn_string,
+                                                  pool_size=10,
+                                                  max_overflow=20,
+                                                  pool_pre_ping=True,
+                                                  pool_recycle=3600)
+            else:
+                # Use NullPool for non-API server processes or non-PostgreSQL
+                # databases
+                engine = sqlalchemy.create_engine(conn_string,
+                                                  poolclass=sqlalchemy.NullPool)
+
+            _remote_engine_cache[conn_string] = engine
+            return engine
     else:
+        # For local SQLite databases, don't cache since each has a different
+        # file path based on db_name
         db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
         engine = sqlalchemy.create_engine('sqlite:///' + db_path)
