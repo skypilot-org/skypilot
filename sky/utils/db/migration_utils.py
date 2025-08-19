@@ -33,11 +33,26 @@ SERVE_LOCK_PATH = '~/.sky/locks/.serve_db.lock'
 
 def get_engine(db_name: str):
     conn_string = None
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+    is_api_server = os.environ.get(
+        constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None
+    if is_api_server:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
-        engine = sqlalchemy.create_engine(conn_string,
-                                          poolclass=sqlalchemy.NullPool)
+        # Use pooling for PostgreSQL on API server processes, but keep NullPool
+        # as default for other processes to avoid overloading the database
+        if is_api_server and conn_string.startswith('postgresql'):
+            # Use QueuePool for PostgreSQL on API server processes for
+            # better performance
+            engine = sqlalchemy.create_engine(conn_string,
+                                              pool_size=10,
+                                              max_overflow=20,
+                                              pool_pre_ping=True,
+                                              pool_recycle=3600)
+        else:
+            # Use NullPool for non-API server processes or non-PostgreSQL
+            # databases
+            engine = sqlalchemy.create_engine(conn_string,
+                                              poolclass=sqlalchemy.NullPool)
     else:
         db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
