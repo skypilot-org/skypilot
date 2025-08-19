@@ -264,7 +264,7 @@ The SkyPilot helm chart automatically configures the ingress resource to achieve
 API compatbility
 ----------------
 
-Starting from `0.10.0`, SkyPilot guarantees the API compatibility between adjacent minor versions, which makes graceful upgrades across minor versions possible:
+Starting from ``0.10.0``, SkyPilot guarantees the API compatibility between adjacent minor versions, which makes graceful upgrades across minor versions possible. For example, assuming ``0.11.0`` is released, the following table shows one possible upgrade sequence that can upgrade the API server and clients from ``0.10.0`` to ``0.11.0`` without breaking the API compatibility:
 
 .. list-table:: Upgrade across minor versions
    :widths: 25 25 10 35
@@ -281,11 +281,11 @@ Starting from `0.10.0`, SkyPilot guarantees the API compatibility between adjace
    * - ``0.10.0``
      - ``0.11.0``
      - ``Yes``
-     - Upgrade server
+     - Upgrade the API server
    * - ``0.11.0``
      - ``0.11.0``
      - ``Yes``
-     - Upgrade clients
+     - Gradually upgrade all clients
 
 For SkyPilot CLI, there is an additional upgrade hint when the client and server are running on different minor versions to remind you to upgrade the client:
 
@@ -296,6 +296,4 @@ For SkyPilot CLI, there is an additional upgrade hint when the client and server
     Consider upgrading your client with:
     pip install -U skypilot==X.X.X
 
-.. note::
-
-    For a nightly build, its API compatibility is equivalent to its previous minor version, e.g. all nightly builds after ``0.10.0`` and before ``0.11.0`` has the same API compatibility guarantee with ``0.10.0``.
+For a nightly build, its API compatibility is equivalent to its previous minor version, e.g. all nightly builds after ``0.10.0`` and before ``0.11.0`` has the same API compatibility guarantee with ``0.10.0``.
