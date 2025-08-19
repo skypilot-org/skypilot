@@ -2231,11 +2231,15 @@ def api_stop() -> None:
         os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
     except FileNotFoundError:
         # its fine we will create it
+        with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
+            f.write('FILE NOT FOUND LUCA WILL BE SAD')
         pass
     except Exception as e:  # pylint: disable=broad-except
         # in case we get perm issues or something is messed up, just ignore it
         # and assume the process is dead
         logger.error(f'Error looking at job controller pid file: {e}')
+        with open(os.path.expanduser('~/sky_logs/jobs_controller/5.log'), 'a') as f:
+            f.write(f'Error looking at job controller pid file: {e}')
         pass
 
     if found:
