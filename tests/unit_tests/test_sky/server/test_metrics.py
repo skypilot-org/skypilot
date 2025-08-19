@@ -275,3 +275,146 @@ def cleanup_metrics():
     # Clear all metrics after each test
     metrics.sky_apiserver_requests_total.clear()
     metrics.sky_apiserver_request_duration_seconds.clear()
+
+
+def test_parse_histogram_buckets_default_when_env_var_not_set():
+    """Test that default buckets are returned when env var is not set"""
+    with patch.dict(os.environ, {}, clear=False):
+        if 'SKY_APISERVER_HISTOGRAM_BUCKETS' in os.environ:
+            del os.environ['SKY_APISERVER_HISTOGRAM_BUCKETS']
+
+        buckets = metrics._parse_histogram_buckets()
+        expected = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+                    15.0, 30.0, 60.0, 120.0, float('inf'))
+        assert buckets == expected
+
+
+def test_parse_histogram_buckets_default_when_env_var_empty():
+    """Test that default buckets are returned when env var is empty"""
+    with patch.dict(os.environ, {'SKY_APISERVER_HISTOGRAM_BUCKETS': ''}):
+        buckets = metrics._parse_histogram_buckets()
+        expected = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+                    15.0, 30.0, 60.0, 120.0, float('inf'))
+        assert buckets == expected
+
+
+def test_parse_histogram_buckets_valid_custom_buckets():
+    """Test parsing valid custom buckets"""
+    with patch.dict(os.environ,
+                    {'SKY_APISERVER_HISTOGRAM_BUCKETS': '0.1,0.5,1.0,5.0,inf'}):
+        buckets = metrics._parse_histogram_buckets()
+        expected = (0.1, 0.5, 1.0, 5.0, float('inf'))
+        assert buckets == expected
+
+
+def test_parse_histogram_buckets_with_whitespace():
+    """Test parsing buckets with extra whitespace"""
+    with patch.dict(
+            os.environ,
+        {'SKY_APISERVER_HISTOGRAM_BUCKETS': ' 0.1 , 0.5 , 1.0 , inf '}):
+        buckets = metrics._parse_histogram_buckets()
+        expected = (0.1, 0.5, 1.0, float('inf'))
+        assert buckets == expected
+
+
+def test_parse_histogram_buckets_without_inf_adds_inf():
+    """Test that inf is automatically added if not present"""
+    with patch.dict(os.environ,
+                    {'SKY_APISERVER_HISTOGRAM_BUCKETS': '0.1,0.5,1.0'}):
+        buckets = metrics._parse_histogram_buckets()
+        expected = (0.1, 0.5, 1.0, float('inf'))
+        assert buckets == expected
+
+
+def test_parse_histogram_buckets_inf_variations():
+    """Test different representations of infinity"""
+    test_cases = [
+        ('0.1,0.5,inf', (0.1, 0.5, float('inf'))),
+        ('0.1,0.5,+inf', (0.1, 0.5, float('inf'))),
+        ('0.1,0.5,infinity', (0.1, 0.5, float('inf'))),
+        ('0.1,0.5,INF', (0.1, 0.5, float('inf'))),
+    ]
+
+    for env_value, expected in test_cases:
+        with patch.dict(os.environ,
+                        {'SKY_APISERVER_HISTOGRAM_BUCKETS': env_value}):
+            buckets = metrics._parse_histogram_buckets()
+            assert buckets == expected
+
+
+def test_parse_histogram_buckets_invalid_non_numeric_falls_back():
+    """Test that invalid non-numeric values fall back to default"""
+    with patch.dict(os.environ,
+                    {'SKY_APISERVER_HISTOGRAM_BUCKETS': '0.1,invalid,1.0'}):
+        with patch('sky.server.metrics.logger') as mock_logger:
+            buckets = metrics._parse_histogram_buckets()
+            expected = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+                        15.0, 30.0, 60.0, 120.0, float('inf'))
+            assert buckets == expected
+            mock_logger.warning.assert_called_once()
+
+
+def test_parse_histogram_buckets_non_monotonic_falls_back():
+    """Test that non-monotonic buckets fall back to default"""
+    with patch.dict(os.environ,
+                    {'SKY_APISERVER_HISTOGRAM_BUCKETS': '1.0,0.5,2.0,inf'}):
+        with patch('sky.server.metrics.logger') as mock_logger:
+            buckets = metrics._parse_histogram_buckets()
+            expected = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+                        15.0, 30.0, 60.0, 120.0, float('inf'))
+            assert buckets == expected
+            mock_logger.warning.assert_called_once()
+
+
+def test_parse_histogram_buckets_duplicate_falls_back():
+    """Test that duplicate bucket values fall back to default"""
+    with patch.dict(os.environ,
+                    {'SKY_APISERVER_HISTOGRAM_BUCKETS': '0.1,0.5,0.5,1.0,inf'}):
+        with patch('sky.server.metrics.logger') as mock_logger:
+            buckets = metrics._parse_histogram_buckets()
+            expected = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+                        15.0, 30.0, 60.0, 120.0, float('inf'))
+            assert buckets == expected
+            mock_logger.warning.assert_called_once()
+
+
+def test_parse_histogram_buckets_negative_falls_back():
+    """Test that negative bucket values fall back to default"""
+    with patch.dict(os.environ,
+                    {'SKY_APISERVER_HISTOGRAM_BUCKETS': '-0.1,0.5,1.0,inf'}):
+        with patch('sky.server.metrics.logger') as mock_logger:
+            buckets = metrics._parse_histogram_buckets()
+            expected = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+                        15.0, 30.0, 60.0, 120.0, float('inf'))
+            assert buckets == expected
+            mock_logger.warning.assert_called_once()
+
+
+def test_parse_histogram_buckets_empty_values_falls_back():
+    """Test that empty bucket values fall back to default"""
+    with patch.dict(os.environ,
+                    {'SKY_APISERVER_HISTOGRAM_BUCKETS': '0.1,,1.0,inf'}):
+        with patch('sky.server.metrics.logger') as mock_logger:
+            buckets = metrics._parse_histogram_buckets()
+            expected = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+                        15.0, 30.0, 60.0, 120.0, float('inf'))
+            assert buckets == expected
+            mock_logger.warning.assert_called_once()
+
+
+def test_parse_histogram_buckets_single_bucket():
+    """Test single bucket configuration"""
+    with patch.dict(os.environ, {'SKY_APISERVER_HISTOGRAM_BUCKETS': '1.0,inf'}):
+        buckets = metrics._parse_histogram_buckets()
+        expected = (1.0, float('inf'))
+        assert buckets == expected
+
+
+def test_parse_histogram_buckets_large_values():
+    """Test with large bucket values"""
+    with patch.dict(
+            os.environ,
+        {'SKY_APISERVER_HISTOGRAM_BUCKETS': '1,10,100,1000,10000,inf'}):
+        buckets = metrics._parse_histogram_buckets()
+        expected = (1.0, 10.0, 100.0, 1000.0, 10000.0, float('inf'))
+        assert buckets == expected
