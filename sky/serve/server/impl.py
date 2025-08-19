@@ -80,6 +80,7 @@ def _get_service_record(
     noun = 'pool' if pool else 'service'
 
     if handle.is_grpc_enabled:
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
         try:
             service_statuses = serve_rpc_utils.RpcRunner.get_service_status(
                 handle, [service_name], pool)
@@ -478,6 +479,7 @@ def update(
         f'use {ux_utils.BOLD}sky serve up{ux_utils.RESET_BOLD}',
     )
 
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
@@ -849,6 +851,7 @@ def _get_all_replica_targets(
         pool: bool) -> Set[serve_utils.ServiceComponentTarget]:
     """Helper function to get targets for all live replicas."""
     if handle.is_grpc_enabled:
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
         try:
             service_records = serve_rpc_utils.RpcRunner.get_service_status(
                 handle, [service_name], pool)
