@@ -95,7 +95,7 @@ _TEARDOWN_SERVICE = _SHOW_SERVE_STATUS + (
     'done; '
     # Wait for service to be fully terminated
     'start_time=$(date +%s); '
-    'timeout=360; '
+    'timeout=600; '
     'while true; do '
     '    status_output=$(sky serve status {name} 2>&1); '
     '    echo "Checking service termination status..."; '
