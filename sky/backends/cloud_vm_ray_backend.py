@@ -2841,8 +2841,28 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 class LocalResourcesHandle(CloudVmRayResourceHandle):
     """A handle for local resources."""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(
+            self,
+            *,
+            cluster_name: str,
+            cluster_name_on_cloud: str,
+            cluster_yaml: Optional[str],
+            launched_nodes: int,
+            launched_resources: resources_lib.Resources,
+            stable_internal_external_ips: Optional[List[Tuple[str,
+                                                              str]]] = None,
+            stable_ssh_ports: Optional[List[int]] = None,
+            cluster_info: Optional[provision_common.ClusterInfo] = None
+    ) -> None:
+        super().__init__(
+            cluster_name=cluster_name,
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            cluster_yaml=cluster_yaml,
+            launched_nodes=launched_nodes,
+            launched_resources=launched_resources,
+            stable_internal_external_ips=stable_internal_external_ips,
+            stable_ssh_ports=stable_ssh_ports,
+            cluster_info=cluster_info)
         # TODO (kyuds): handle jobs consolidation mode. Currently,
         # jobs consolidation mode will not run a skylet, hence
         # grpc server will not run. In the future, we should
