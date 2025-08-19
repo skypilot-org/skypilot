@@ -170,7 +170,7 @@ def volume_apply(
     zone: Optional[str],
     size: Optional[str],
     config: Dict[str, Any],
-    labels: Optional[Dict[str, Any]] = None,
+    labels: Optional[Dict[str, str]] = None,
 ) -> None:
     """Creates or registers a volume.
 

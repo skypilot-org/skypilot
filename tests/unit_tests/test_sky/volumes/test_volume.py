@@ -507,143 +507,19 @@ class TestVolume:
             volume = volume_lib.Volume.from_dict(config)
             volume.normalize_config()  # Should not raise
 
-    def test_is_valid_label_key_valid_cases(self):
-        """Test Volume.is_valid_label_key with valid label keys."""
-        volume = volume_lib.Volume(name='test', type='k8s-pvc')
-
-        # Valid label keys for Kubernetes
-        valid_keys = [
-            'app',
-            'app.kubernetes.io/name',
-            'kubernetes.io/name',
-            'my-label',
-            'my_label',
-            'my.label',
-            'my-label-123',
-            'my-label_123',
-            'my-label.123',
-            'ab',  # Two characters (must start and end with alphanumeric)
-            'a' * 63,  # Maximum length
-            'my-prefix/my-label',  # With prefix
-            'my-prefix/my-label-123',
-        ]
-
-        for key in valid_keys:
-            assert volume.is_valid_label_key(
-                key), f"Label key '{key}' should be valid"
-
-    def test_is_valid_label_key_invalid_cases(self):
-        """Test Volume.is_valid_label_key with invalid label keys."""
-        volume = volume_lib.Volume(name='test', type='k8s-pvc')
-
-        # Invalid label keys for Kubernetes
-        invalid_keys = [
-            '',  # Empty string
-            '-my-label',  # Starts with dash
-            'my-label-',  # Ends with dash
-            'my-label--',  # Double dash
-            'my-label_',  # Ends with underscore
-            '_my-label',  # Starts with underscore
-            'my-label.',  # Ends with dot
-            '.my-label',  # Starts with dot
-            'my-label..',  # Double dot
-            'my-label/',  # Ends with slash
-            '/my-label',  # Starts with slash
-            'my-prefix//my-label',  # Double slash
-            'my-prefix/my-label/',  # Ends with slash after prefix
-            '/my-prefix/my-label',  # Starts with slash before prefix
-            'a' * 64,  # Too long
-            'my-prefix/' + 'a' * 64,  # Name too long with prefix
-            'a' * 254 + '/my-label',  # Prefix too long
-            'my-label@',  # Invalid character
-            'my-label/',  # Invalid character
-            'my-label ',  # Space
-            ' my-label',  # Leading space
-            'my-label ',  # Trailing space
-        ]
-
-        for key in invalid_keys:
-            assert not volume.is_valid_label_key(
-                key), f"Label key '{key}' should be invalid"
-
-    def test_is_valid_label_key_non_pvc_type(self):
-        """Test Volume.is_valid_label_key with non-PVC volume types."""
-        # Test with different volume types
-        volume_types = ['aws-ebs', 'gcp-disk', 'azure-disk', None]
-
-        for vol_type in volume_types:
-            volume = volume_lib.Volume(name='test', type=vol_type)
-            # For non-PVC types, should return False
-            assert not volume.is_valid_label_key(
-                'app'), f"Non-PVC type '{vol_type}' should not support labels"
-
-    def test_is_valid_label_value_valid_cases(self):
-        """Test Volume.is_valid_label_value with valid label values."""
-        volume = volume_lib.Volume(name='test', type='k8s-pvc')
-
-        # Valid label values for Kubernetes
-        valid_values = [
-            'app',
-            'my-value',
-            'my_value',
-            'my.value',
-            'my-value-123',
-            'my-value_123',
-            'my-value.123',
-            'ab',  # Two characters (must start and end with alphanumeric)
-            'a' * 63,  # Maximum length
-            '',  # Empty string is valid for Kubernetes labels
-            '123',
-            'app-123',
-            'app_123',
-            'app.123',
-        ]
-
-        for value in valid_values:
-            assert volume.is_valid_label_value(
-                value), f"Label value '{value}' should be valid"
-
-    def test_is_valid_label_value_invalid_cases(self):
-        """Test Volume.is_valid_label_value with invalid label values."""
-        volume = volume_lib.Volume(name='test', type='k8s-pvc')
-
-        # Invalid label values for Kubernetes
-        invalid_values = [
-            '-my-value',  # Starts with dash
-            'my-value-',  # Ends with dash
-            'my-value--',  # Double dash
-            'my-value_',  # Ends with underscore
-            '_my-value',  # Starts with underscore
-            'my-value.',  # Ends with dot
-            '.my-value',  # Starts with dot
-            'my-value..',  # Double dot
-            'a' * 64,  # Too long
-            'my-value@',  # Invalid character
-            'my-value/',  # Invalid character
-            'my-value ',  # Space
-            ' my-value',  # Leading space
-            'my-value ',  # Trailing space
-        ]
-
-        for value in invalid_values:
-            assert not volume.is_valid_label_value(
-                value), f"Label value '{value}' should be invalid"
-
-    def test_is_valid_label_value_non_pvc_type(self):
-        """Test Volume.is_valid_label_value with non-PVC volume types."""
-        # Test with different volume types
-        volume_types = ['aws-ebs', 'gcp-disk', 'azure-disk', None]
-
-        for vol_type in volume_types:
-            volume = volume_lib.Volume(name='test', type=vol_type)
-            # For non-PVC types, should return False
-            assert not volume.is_valid_label_value(
-                'app'), f"Non-PVC type '{vol_type}' should not support labels"
-
-    def test_validate_config_with_valid_labels(self):
+    def test_validate_config_with_valid_labels(self, monkeypatch):
         """Test Volume._validate_config with valid labels."""
+        # Mock infra_utils.InfraInfo.from_str
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+
         volume = volume_lib.Volume(name='test',
                                    type='k8s-pvc',
+                                   infra='k8s',
                                    size='100Gi',
                                    labels={
                                        'app': 'myapp',
@@ -652,55 +528,101 @@ class TestVolume:
                                        'app.kubernetes.io/version': 'v1.0.0'
                                    })
 
+        # First normalize config to set cloud info
+        volume.normalize_config()
         # Should not raise any exception
         volume._validate_config()
 
-    def test_validate_config_with_invalid_label_key(self):
+    def test_validate_config_with_invalid_label_key(self, monkeypatch):
         """Test Volume._validate_config with invalid label key."""
+        # Mock infra_utils.InfraInfo.from_str
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+
         volume = volume_lib.Volume(
             name='test',
             type='k8s-pvc',
+            infra='k8s',
             size='100Gi',
             labels={
                 'app': 'myapp',
                 'invalid-key-': 'value'  # Invalid key (ends with dash)
             })
 
+        # Set cloud info directly since we're testing _validate_config
+        volume.cloud = 'kubernetes'
         with pytest.raises(ValueError) as exc_info:
             volume._validate_config()
         assert 'Invalid label key' in str(exc_info.value)
 
-    def test_validate_config_with_invalid_label_value(self):
+    def test_validate_config_with_invalid_label_value(self, monkeypatch):
         """Test Volume._validate_config with invalid label value."""
+        # Mock infra_utils.InfraInfo.from_str
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+
         volume = volume_lib.Volume(
             name='test',
             type='k8s-pvc',
+            infra='k8s',
             size='100Gi',
             labels={
                 'app': 'myapp',
                 'environment': 'invalid-value-'  # Invalid value (ends with dash)
             })
 
+        # Set cloud info directly since we're testing _validate_config
+        volume.cloud = 'kubernetes'
         with pytest.raises(ValueError) as exc_info:
             volume._validate_config()
         assert 'Invalid label value' in str(exc_info.value)
 
-    def test_validate_config_with_empty_labels(self):
+    def test_validate_config_with_empty_labels(self, monkeypatch):
         """Test Volume._validate_config with empty labels."""
+        # Mock infra_utils.InfraInfo.from_str
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+
         volume = volume_lib.Volume(name='test',
                                    type='k8s-pvc',
+                                   infra='k8s',
                                    size='100Gi',
                                    labels={})
 
+        # First normalize config to set cloud info
+        volume.normalize_config()
         # Should not raise any exception
         volume._validate_config()
 
-    def test_validate_config_with_none_labels(self):
+    def test_validate_config_with_none_labels(self, monkeypatch):
         """Test Volume._validate_config with None labels."""
+        # Mock infra_utils.InfraInfo.from_str
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+
         volume = volume_lib.Volume(name='test',
                                    type='k8s-pvc',
+                                   infra='k8s',
                                    size='100Gi',
                                    labels=None)
 
+        # First normalize config to set cloud info
+        volume.normalize_config()
         # Should not raise any exception
         volume._validate_config()

@@ -1,21 +1,14 @@
 """Volume types and access modes."""
-import re
 from typing import Any, Dict, Optional
 
 from sky import sky_logging
 from sky.utils import common_utils
 from sky.utils import infra_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
-from sky.utils import volume
 
 logger = sky_logging.init_logger(__name__)
-
-K8S_LABEL_PREFIX_MAX_LENGTH = 253
-K8S_LABEL_NAME_MAX_LENGTH = 63
-K8S_LABEL_VALUE_MAX_LENGTH = 63
-K8S_LABEL_KEY_REGEX = r'^(([a-z0-9][-a-z0-9_.]*)?[a-z0-9]/)?([A-Za-z0-9][-A-Za-z0-9_.]*[A-Za-z0-9])$'  # pylint: disable=line-too-long
-K8S_LABEL_VALUE_REGEX = r'^([A-Za-z0-9][-A-Za-z0-9_.]*[A-Za-z0-9])?$'
 
 
 class Volume:
@@ -27,7 +20,7 @@ class Volume:
             type: Optional[str] = None,  # pylint: disable=redefined-builtin
             infra: Optional[str] = None,
             size: Optional[str] = None,
-            labels: Optional[Dict[str, Any]] = None,
+            labels: Optional[Dict[str, str]] = None,
             resource_name: Optional[str] = None,
             config: Optional[Dict[str, Any]] = None):
         """Initialize a Volume instance.
@@ -110,14 +103,14 @@ class Volume:
         # Adjust the volume config (e.g., parse size)
         self._adjust_config()
 
-        # Validate the volume config
-        self._validate_config()
-
         # Resolve the infrastructure options to cloud, region, zone
         infra_info = infra_utils.InfraInfo.from_str(self.infra)
         self.cloud = infra_info.cloud
         self.region = infra_info.region
         self.zone = infra_info.zone
+
+        # Validate the volume config
+        self._validate_config()
 
     def _adjust_config(self) -> None:
         """Adjust the volume config (e.g., parse size)."""
@@ -133,40 +126,6 @@ class Volume:
         except ValueError as e:
             raise ValueError(f'Invalid size {self.size}: {e}') from e
 
-    def is_valid_label_key(self, key: str) -> bool:
-        if self.type == volume.VolumeType.PVC.value:
-            if not re.fullmatch(K8S_LABEL_KEY_REGEX, key):
-                return False
-            parts = str.split(key, '/')
-            if len(parts) > 2:
-                return False
-            if len(parts) == 2:
-                prefix = parts[0]
-                name = parts[1]
-                if not prefix:
-                    return False
-                if len(prefix) > K8S_LABEL_PREFIX_MAX_LENGTH:
-                    return False
-            if len(parts) == 1:
-                name = parts[0]
-            if not name:
-                return False
-            if len(name) > K8S_LABEL_NAME_MAX_LENGTH:
-                return False
-            return True
-        else:
-            return False
-
-    def is_valid_label_value(self, value: str) -> bool:
-        if self.type == volume.VolumeType.PVC.value:
-            if not re.fullmatch(K8S_LABEL_VALUE_REGEX, value):
-                return False
-            if len(value) > K8S_LABEL_VALUE_MAX_LENGTH:
-                return False
-            return True
-        else:
-            return False
-
     def _validate_config(self) -> None:
         """Validate the volume config."""
         if not self.resource_name and not self.size:
@@ -174,8 +133,11 @@ class Volume:
                              'Please specify the size in the YAML file or '
                              'use the --size flag.')
         if self.labels:
+            assert self.cloud is not None, 'Cloud must be specified'
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
+            assert cloud_obj is not None
             for key, value in self.labels.items():
-                if not self.is_valid_label_key(key):
+                if not cloud_obj.is_valid_label_key(key):
                     raise ValueError(f'Invalid label key: {key}')
-                if not self.is_valid_label_value(value):
+                if not cloud_obj.is_valid_label_value(value):
                     raise ValueError(f'Invalid label value: {value}')

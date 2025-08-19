@@ -168,6 +168,16 @@ class Cloud:
         return None
 
     @classmethod
+    def is_valid_label_key(cls, key: str) -> bool:
+        """Returns whether the label key is valid for this cloud."""
+        return False
+
+    @classmethod
+    def is_valid_label_value(cls, value: str) -> bool:
+        """Returns whether the label value is valid for this cloud."""
+        return False
+
+    @classmethod
     def supports_service_account_on_remote(cls) -> bool:
         """Returns whether the cloud supports service account on remote cluster.
 

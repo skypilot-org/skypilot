@@ -57,6 +57,12 @@ class Kubernetes(clouds.Cloud):
     # where the suffix is 21 characters long.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
+    _LABEL_PREFIX_MAX_LENGTH = 253
+    _LABEL_NAME_MAX_LENGTH = 63
+    _LABEL_VALUE_MAX_LENGTH = 63
+    _LABEL_KEY_REGEX = r'^(([a-z0-9][-a-z0-9_.]*)?[a-z0-9]/)?([A-Za-z0-9][-A-Za-z0-9_.]*[A-Za-z0-9])$'  # pylint: disable=line-too-long
+    _LABEL_VALUE_REGEX = r'^([A-Za-z0-9][-A-Za-z0-9_.]*[A-Za-z0-9])?$'
+
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
     _DEFAULT_NUM_VCPUS = 2
@@ -138,6 +144,38 @@ class Kubernetes(clouds.Cloud):
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
+
+    @classmethod
+    def is_valid_label_key(cls, key: str) -> bool:
+        """Returns whether the label key is valid for k8s."""
+        if not re.fullmatch(cls._LABEL_KEY_REGEX, key):
+            return False
+        parts = str.split(key, '/')
+        if len(parts) > 2:
+            return False
+        if len(parts) == 2:
+            prefix = parts[0]
+            name = parts[1]
+            if not prefix:
+                return False
+            if len(prefix) > cls._LABEL_PREFIX_MAX_LENGTH:
+                return False
+        if len(parts) == 1:
+            name = parts[0]
+        if not name:
+            return False
+        if len(name) > cls._LABEL_NAME_MAX_LENGTH:
+            return False
+        return True
+
+    @classmethod
+    def is_valid_label_value(cls, value: str) -> bool:
+        """Returns whether the label value is valid for k8s."""
+        if not re.fullmatch(cls._LABEL_VALUE_REGEX, value):
+            return False
+        if len(value) > cls._LABEL_VALUE_MAX_LENGTH:
+            return False
+        return True
 
     @classmethod
     @annotations.lru_cache(scope='global', maxsize=1)
