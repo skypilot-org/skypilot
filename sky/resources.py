@@ -1337,7 +1337,8 @@ class Resources:
                     'Kubernetes, please explicitly specify the cloud.') from e
 
         if self._region is not None:
-            # If the image_id has None as key (region-agnostic), use it for any region
+            # If the image_id has None as key (region-agnostic),
+            # use it for any region
             if None in self._image_id:
                 # Replace None key with the actual region
                 self._image_id = {self._region: self._image_id[None]}
