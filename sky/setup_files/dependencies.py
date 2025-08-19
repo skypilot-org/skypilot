@@ -72,12 +72,17 @@ install_requires = [
     'aiohttp',
 ]
 
+# The grpc version at runtime has to be newer than the version
+# used to generate the code.
+GRPC = 'grpcio>=1.63.0'
+
 server_dependencies = [
     'casbin',
     'sqlalchemy_adapter',
     'passlib',
     'pyjwt',
     'aiohttp',
+    GRPC,
 ]
 
 local_ray = [
@@ -91,9 +96,7 @@ local_ray = [
 # See requirements-dev.txt for the version of grpc and protobuf
 # used to generate the code during development.
 remote = [
-    # The grpc version at runtime has to be newer than the version
-    # used to generate the code.
-    'grpcio>=1.63.0',
+    GRPC,
     # >= 5.26.1 because the runtime version can't be older than the version
     # used to generate the code.
     # < 7.0.0 because code generated for a major version V will be supported by
