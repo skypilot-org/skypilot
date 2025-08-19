@@ -524,6 +524,9 @@ def get_storage_schema():
                     mode.value for mode in storage.StorageMode
                 ]
             },
+            'mount_options': {
+                'type': 'string'
+            },
             'config': {
                 'type': 'object',
                 'properties': {
