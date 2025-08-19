@@ -2841,6 +2841,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 class LocalResourcesHandle(CloudVmRayResourceHandle):
     """A handle for local resources."""
 
+    def __init__(self):
+        super().__init__()
+        # TODO (kyuds): handle jobs consolidation mode. Currently,
+        # jobs consolidation mode will not run a skylet, hence
+        # grpc server will not run. In the future, we should
+        # figure out a way to start grpc in consolidation mode.
+        self.is_grpc_enabled = False
+
     @context_utils.cancellation_guard
     @annotations.lru_cache(scope='global')
     @timeline.event
