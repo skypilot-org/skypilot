@@ -6200,6 +6200,9 @@ def api_info():
         user = api_server_user
     else:
         user = models.User.get_current_user()
+    # Print client version and commit.
+    click.echo(f'SkyPilot client version: {sky.__version__} '
+               f'commit: {sky.__commit__}')
     click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '
