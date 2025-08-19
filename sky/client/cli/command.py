@@ -47,12 +47,15 @@ import sky
 from sky import backends
 from sky import catalog
 from sky import clouds
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import jobs as managed_jobs
 from sky import models
+from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
+from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
@@ -74,6 +77,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import directory_utils
 from sky.utils import env_options
 from sky.utils import git as git_utils
 from sky.utils import infra_utils
@@ -163,7 +167,7 @@ def _get_cluster_records_and_set_ssh_config(
                     handle.cluster_name, credentials)))
             escaped_executable_path = shlex.quote(sys.executable)
             escaped_websocket_proxy_path = shlex.quote(
-                f'{sky.__root_dir__}/templates/websocket_proxy.py')
+                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
             # Instead of directly use websocket_proxy.py, we add an
             # additional proxy, so that ssh can use the head pod in the
             # cluster to jump to worker pods.
@@ -683,7 +687,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
     git_ref: Optional[str] = None,
-) -> Union[sky.Task, sky.Dag]:
+) -> Union['task_lib.Task', 'dag_lib.Dag']:
     """Creates a task or a dag from an entrypoint with overrides.
 
     Returns:
@@ -746,8 +750,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
             f'If you see this, please file an issue; tasks: {dag.tasks}')
         task = dag.tasks[0]
     else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
-        task.set_resources({sky.Resources()})
+        task = task_lib.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({resources_lib.Resources()})
         # env update has been done for DAG in load_chain_dag_from_yaml for YAML.
         task.update_envs(env)
         task.update_secrets(secret)
@@ -770,7 +774,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     return task
 
 
-def _update_task_workdir(task: sky.Task, workdir: Optional[str],
+def _update_task_workdir(task: task_lib.Task, workdir: Optional[str],
                          git_url: Optional[str], git_ref: Optional[str]):
     """Updates the task workdir.
 
@@ -798,7 +802,7 @@ def _update_task_workdir(task: sky.Task, workdir: Optional[str],
     return
 
 
-def _update_task_workdir_and_secrets_from_workdir(task: sky.Task):
+def _update_task_workdir_and_secrets_from_workdir(task: task_lib.Task):
     """Updates the task secrets from the workdir.
 
     Args:
@@ -1109,7 +1113,7 @@ def launch(
         git_url=git_url,
         git_ref=git_ref,
     )
-    if isinstance(task_or_dag, sky.Dag):
+    if isinstance(task_or_dag, dag_lib.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky launch'))
     task = task_or_dag
@@ -1343,7 +1347,7 @@ def exec(
         git_ref=git_ref,
     )
 
-    if isinstance(task_or_dag, sky.Dag):
+    if isinstance(task_or_dag, dag_lib.Dag):
         raise click.UsageError('YAML specifies a DAG, while `sky exec` '
                                'supports a single task only.')
     task = task_or_dag
@@ -4455,9 +4459,9 @@ def jobs_launch(
         git_ref=git_ref,
     )
 
-    if not isinstance(task_or_dag, sky.Dag):
-        assert isinstance(task_or_dag, sky.Task), task_or_dag
-        with sky.Dag() as dag:
+    if not isinstance(task_or_dag, dag_lib.Dag):
+        assert isinstance(task_or_dag, task_lib.Task), task_or_dag
+        with dag_lib.Dag() as dag:
             dag.add(task_or_dag)
             dag.name = task_or_dag.name
     else:
@@ -4893,7 +4897,7 @@ def jobs_pool_apply(
     click.secho(
         'Each pool worker will use the following resources (estimated):',
         fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = managed_jobs.pool_apply(task,
@@ -5217,7 +5221,7 @@ def _generate_task_with_service(
         network_tier: Optional[str],
         not_supported_cmd: str,
         pool: bool,  # pylint: disable=redefined-outer-name
-) -> sky.Task:
+) -> task_lib.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
     yaml_name = 'SERVICE_YAML' if not pool else 'POOL_YAML'
@@ -5247,7 +5251,7 @@ def _generate_task_with_service(
         network_tier=network_tier,
         ports=ports,
     )
-    if isinstance(task, sky.Dag):
+    if isinstance(task, dag_lib.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command=not_supported_cmd))
 
@@ -5433,7 +5437,7 @@ def serve_up(
 
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = serve_lib.up(task, service_name, _need_confirmation=not yes)
@@ -5536,7 +5540,7 @@ def serve_update(
 
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = serve_lib.update(task,
