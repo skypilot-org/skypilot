@@ -48,10 +48,11 @@ _PROCESS_POOL_REFRESH_INTERVAL = 20
 _RETRY_INIT_GAP_SECONDS = 60
 _DEFAULT_DRAIN_SECONDS = 120
 
-# TODO(tian): Backward compatibility. We move the ProcessStatus to
-# common_utils.ProcessStatus in #6666, but old ReplicaInfo in database will
-# still tries to unpickle using ProcessStatus in replica_managers. We set this
-# alias to avoid breaking changes. See #6729 for more details.
+# TODO(tian): Backward compatibility. Remove this after 3 minor release, i.e.
+# 0.13.0. We move the ProcessStatus to common_utils.ProcessStatus in #6666, but
+# old ReplicaInfo in database will still tries to unpickle using ProcessStatus
+# in replica_managers. We set this alias to avoid breaking changes. See #6729
+# for more details.
 ProcessStatus = common_utils.ProcessStatus
 
 
