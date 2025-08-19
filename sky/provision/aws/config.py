@@ -690,4 +690,3 @@ def get_security_group_from_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
             return sg
 
     return None
-
