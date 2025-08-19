@@ -92,6 +92,7 @@ server_dependencies = [
     'pyjwt',
     'aiohttp',
     GRPC,
+    PROTOBUF,
 ]
 
 local_ray = [
