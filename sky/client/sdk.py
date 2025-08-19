@@ -16,7 +16,8 @@ import logging
 import os
 import subprocess
 import typing
-from typing import Any, Dict, Iterator, List, Literal, Optional, Tuple, TypeVar, Union
+from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
+                    TypeVar, Union)
 from urllib import parse as urlparse
 
 import click
@@ -795,12 +796,14 @@ def exec(  # pylint: disable=redefined-builtin
 
 
 @typing.overload
-def tail_logs(cluster_name: str,
-              job_id: Optional[int],
-              follow: bool,
-              tail: int = 0,
-              output_stream: Optional['io.TextIOBase'] = None,
-              preload_content: Literal[True] = ...) -> int:
+def tail_logs(
+        cluster_name: str,
+        job_id: Optional[int],
+        follow: bool,
+        tail: int = 0,
+        output_stream: Optional['io.TextIOBase'] = None,
+        *,  # keyword only separator
+        preload_content: Literal[True] = True) -> int:
     ...
 
 
@@ -809,23 +812,27 @@ def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
               tail: int = 0,
-              output_stream: Optional['io.TextIOBase'] = None,
-              preload_content: Literal[False] = ...) -> Iterator[Optional[str]]:
+              output_stream: None = None,
+              *,
+              preload_content: Literal[False]) -> Iterator[Optional[str]]:
     ...
 
 
-# TODO(aylei): when retry logs request, there will be duplciated log entries.
+# TODO(aylei): when retry logs request, there will be duplicated log entries.
 # We should fix this.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 @rest.retry_transient_errors()
-def tail_logs(cluster_name: str,
-              job_id: Optional[int],
-              follow: bool,
-              tail: int = 0,
-              output_stream: Optional['io.TextIOBase'] = None,
-              preload_content: bool = True) -> Union[int, Iterator[Optional[str]]]:
+def tail_logs(
+    cluster_name: str,
+    job_id: Optional[int],
+    follow: bool,
+    tail: int = 0,
+    output_stream: Optional['io.TextIOBase'] = None,
+    *,  # keyword only separator
+    preload_content: bool = True
+) -> Union[int, Iterator[Optional[str]]]:
     """Tails the logs of a job.
 
     Args:
@@ -836,15 +843,20 @@ def tail_logs(cluster_name: str,
         tail: if > 0, tail the last N lines of the logs.
         output_stream: the stream to write the logs to. If None, print to the
             console. Cannot be used with preload_content=False.
-        preload_content: if False, returns an Iterator[str | None] containing the
-            logs without the function blocking on the retrieval of entire log.
-            Iterator returns None when the log has been completely streamed.
-            Default True. Cannot be used with output_stream.
+        preload_content: if False, returns an Iterator[str | None] containing
+            the logs without the function blocking on the retrieval of entire
+            log. Iterator returns None when the log has been completely
+            streamed. Default True. Cannot be used with output_stream.
 
     Returns:
-        Exit code based on success or failure of the job. 0 if success,
-        100 if the job failed. See exceptions.JobExitCode for possible exit
-        codes.
+        If preload_content is True:
+            Exit code based on success or failure of the job. 0 if success,
+            100 if the job failed. See exceptions.JobExitCode for possible exit
+            codes.
+        If preload_content is False:
+            Iterator[str | None] containing the logs without the function
+            blocking on the retrieval of entire log. Iterator returns None
+            when the log has been completely streamed.
 
     Request Raises:
         ValueError: if arguments are invalid or the cluster is not supported.
