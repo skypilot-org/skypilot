@@ -1,0 +1,59 @@
+name: eval-head
+
+resources:
+  cpus: 8+
+  memory: 16+
+  # No GPU needed for eval head
+  # Open ports for dashboard and API
+  ports:
+    - 8080  # Dashboard and API
+  
+workdir: .
+
+setup: |
+  # Install uv for fast Python package management
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.cargo/bin:$PATH"
+  
+  # Create virtual environment and install dependencies
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
+  
+  # Install dependencies
+  uv pip install fastapi uvicorn numpy websockets aiofiles
+  
+  # Install PyTorch CPU version (using pip directly for compatibility)
+  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+  
+  # Install SkyPilot for cluster discovery
+  uv pip install "skypilot"
+  
+  # Create .sky.yaml if API server is provided
+  echo "Creating SkyPilot API configuration..."
+  cat > ./sky-config.yaml <<EOF
+  api_server:
+    endpoint: ${SKYPILOT_API_SERVER_ENDPOINT}
+    service_account_token: ${SKYPILOT_API_SERVER_SERVICE_ACCOUNT_TOKEN}
+  EOF
+  echo "SkyPilot API configured for: ${SKYPILOT_API_SERVER_ENDPOINT}"
+
+run: |
+  export PATH="$HOME/.cargo/bin:$PATH"
+  source .venv/bin/activate
+  
+  export SKYPILOT_PROJECT_CONFIG=sky-config.yaml
+  # Start the evaluation head server
+  python src/eval_head.py \
+    --port 8080 \
+    --game-server-prefix ${GAME_SERVER_PREFIX:-game-server} \
+    --checkpoint-bucket ${CHECKPOINT_BUCKET:-none}
+
+
+
+secrets:
+  SKYPILOT_API_SERVER_ENDPOINT: null
+  SKYPILOT_API_SERVER_SERVICE_ACCOUNT_TOKEN: null
+
+envs:
+  CHECKPOINT_BUCKET: none
+  GAME_SERVER_PREFIX: null

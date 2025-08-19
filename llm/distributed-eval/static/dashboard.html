@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Eval Head Dashboard - Auto Discovery</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8f9fa;
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #6c757d;
+            font-size: 1.1em;
+            margin-bottom: 30px;
+        }
+        
+        .instructions {
+            background: white;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            border: 1px solid #e9ecef;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .instructions-header {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+        }
+        
+        .instructions-header:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        }
+        
+        .instructions-header h2 {
+            margin: 0;
+            font-size: 1.3em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .toggle-icon {
+            font-size: 1.2em;
+            transition: transform 0.3s ease;
+        }
+        
+        .toggle-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+        
+        .instructions-content {
+            padding: 20px;
+            max-height: 2000px;
+            opacity: 1;
+            transition: all 0.3s ease;
+            overflow-y: auto;
+        }
+        
+        .instructions-content.collapsed {
+            max-height: 0;
+            opacity: 0;
+            padding: 0 20px;
+            overflow: hidden;
+        }
+        
+        .instructions code {
+            background: #f1f3f5;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            color: #d63384;
+            font-size: 0.9em;
+        }
+        
+        .instructions pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+            border: 1px solid #e9ecef;
+        }
+        
+        .instructions pre code {
+            background: none;
+            padding: 0;
+            color: #333;
+        }
+        
+        .instructions ol {
+            margin-left: 20px;
+            margin-top: 10px;
+        }
+        
+        .instructions li {
+            margin: 15px 0;
+            line-height: 1.6;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid #e9ecef;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        }
+        
+        .card:hover::before {
+            transform: scaleX(1);
+        }
+        
+        .card h2 {
+            font-size: 0.85em;
+            color: #6c757d;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            font-weight: 600;
+        }
+        
+        .card .value {
+            font-size: 2.8em;
+            font-weight: 700;
+            color: #2c3e50;
+            line-height: 1;
+        }
+        
+        .card .value .unit {
+            font-size: 0.35em;
+            color: #6c757d;
+            font-weight: 400;
+            margin-left: 4px;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            border: 1px solid #e9ecef;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .servers-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .servers-list {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid #e9ecef;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .server-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .server-status {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        
+        .status-active { 
+            background: #4ade80;
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
+        }
+        
+        .status-inactive { 
+            background: #f87171;
+            box-shadow: 0 0 10px rgba(248, 113, 113, 0.5);
+        }
+        
+        .status-discovered {
+            background: #60a5fa;
+            box-shadow: 0 0 10px rgba(96, 165, 250, 0.5);
+        }
+        
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 24px;
+            border-radius: 25px;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            font-weight: 500;
+            z-index: 1000;
+        }
+        
+        .connected {
+            background: rgba(74, 222, 128, 0.3);
+            border: 1px solid rgba(74, 222, 128, 0.5);
+        }
+        
+        .disconnected {
+            background: rgba(248, 113, 113, 0.3);
+            border: 1px solid rgba(248, 113, 113, 0.5);
+        }
+        
+        .refresh-btn {
+            padding: 10px 20px;
+            background: #007bff;
+            border: 1px solid #0056b3;
+            border-radius: 10px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1em;
+            text-decoration: none;
+        }
+        
+        .refresh-btn:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status" id="connectionStatus">Connecting...</div>
+    
+    <div class="container">
+        <h1>🧠 Evaluation Head Dashboard</h1>
+        <div class="subtitle">Auto-Discovery Mode with SkyPilot</div>
+        
+        <!-- Metrics Grid -->
+        <div class="grid">
+            <div class="card">
+                <h2>Total Requests</h2>
+                <div class="value" id="totalRequests">0</div>
+            </div>
+            <div class="card">
+                <h2>Throughput</h2>
+                <div class="value">
+                    <span id="requestsPerSecond">0</span>
+                    <span class="unit">req/s</span>
+                </div>
+            </div>
+            <div class="card">
+                <h2>Queue Size</h2>
+                <div class="value" id="queueSize">0</div>
+            </div>
+            <div class="card">
+                <h2>Discovered Servers</h2>
+                <div class="value" id="discoveredServers">0</div>
+            </div>
+            <div class="card">
+                <h2>Active Servers</h2>
+                <div class="value" id="activeServers">0</div>
+            </div>
+            <div class="card">
+                <h2>Avg Latency</h2>
+                <div class="value">
+                    <span id="avgLatency">0</span>
+                    <span class="unit">ms</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Charts -->
+        <div class="chart-container">
+            <h2>📈 System Performance</h2>
+            <canvas id="performanceChart" style="max-height: 300px;"></canvas>
+        </div>
+        
+        <!-- Server Lists -->
+        <div class="servers-section">
+            <div class="servers-list">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h2 style="margin: 0;">🔍 Discovered Clusters</h2>
+                    <a id="skyPilotDashboardLink" href="#" target="_blank" class="refresh-btn" style="text-decoration: none; display: inline-block; font-size: 0.9em; padding: 8px 16px;">
+                        🌐 SkyPilot Dashboard
+                    </a>
+                </div>
+                <div id="discoveredList"></div>
+            </div>
+            
+            <div class="servers-list">
+                <h2>🎮 Active Game Servers</h2>
+                <div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 8px; font-size: 0.9em;">
+                    <div style="display: flex; gap: 20px; justify-content: center;">
+                        <span><span class="server-status status-active"></span> Active (< 10s)</span>
+                        <span><span class="server-status status-discovered"></span> Connected (< 30s)</span>
+                        <span><span class="server-status status-inactive"></span> Inactive (> 30s)</span>
+                    </div>
+                </div>
+                <div id="activeList"></div>
+            </div>
+        </div>
+        
+        <!-- Instructions -->
+        <div class="instructions">
+            <div class="instructions-header" onclick="toggleInstructions()">
+                <h2>
+                    <span>📖</span>
+                    <span>Quick Start Guide</span>
+                </h2>
+                <span class="toggle-icon" id="toggleIcon">▼</span>
+            </div>
+            <div class="instructions-content" id="instructionsContent">
+                <h3>🚀 Launch the System</h3>
+                <ol>
+                    <li>
+                        <strong>Start the Evaluation Head:</strong>
+                        <pre><code># With API server for auto-discovery
+sky launch -c eval-head configs/eval_head.yaml \
+  --env GAME_SERVER_PREFIX=exp-game</code></pre>
+                    </li>
+                    <li>
+                        <strong>Get the Eval Head Endpoint:</strong>
+                        <pre><code>EVAL_HEAD_ENDPOINT=$(sky status --endpoint eval-head 8080)</code></pre>
+                    </li>
+                    <li>
+                        <strong>Launch Game Servers:</strong>
+                        <pre><code># Launch multiple game servers with matching prefix
+sky launch -c exp-game-1 configs/game_server.yaml \
+  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
+
+sky launch -c exp-game-2 configs/game_server.yaml \
+  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT</code></pre>
+                    </li>
+                    <li>
+                        <strong>Monitor Status:</strong>
+                        <pre><code>sky status  # Check all clusters</code></pre>
+                    </li>
+                </ol>
+                
+                <h3>🔄 Restart & Update</h3>
+                <p>To update code without terminating clusters:</p>
+                <pre><code># Restart eval head
+sky cancel -ay eval-head
+sky exec eval-head configs/eval_head.yaml \
+  --env GAME_SERVER_PREFIX=exp-game
+
+# Restart game server
+sky cancel -ay exp-game-1
+sky exec exp-game-1 configs/game_server.yaml \
+  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT</code></pre>
+                
+                <div style="margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px; border-left: 4px solid #2196f3;">
+                    <strong>💡 Tips:</strong>
+                    <ul style="margin: 10px 0 0 20px;">
+                        <li>Game servers with prefix <code>exp-game-*</code> are auto-discovered</li>
+                        <li>The dashboard auto-refreshes every 30 seconds</li>
+                        <li>Discovery checks for new clusters every 30 seconds</li>
+                        <li>Game servers run on spot instances for cost savings</li>
+                    </ul>
+                </div>
+                
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Toggle instructions panel
+        function toggleInstructions() {
+            const content = document.getElementById('instructionsContent');
+            const icon = document.getElementById('toggleIcon');
+            
+            if (content.classList.contains('collapsed')) {
+                content.classList.remove('collapsed');
+                icon.classList.remove('collapsed');
+            } else {
+                content.classList.add('collapsed');
+                icon.classList.add('collapsed');
+            }
+        }
+        
+        // Initialize chart
+        const ctx = document.getElementById('performanceChart').getContext('2d');
+        const performanceChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Requests/Second',
+                        data: [],
+                        borderColor: 'rgb(74, 222, 128)',
+                        backgroundColor: 'rgba(74, 222, 128, 0.1)',
+                        yAxisID: 'y',
+                    },
+                    {
+                        label: 'Queue Size',
+                        data: [],
+                        borderColor: 'rgb(96, 165, 250)',
+                        backgroundColor: 'rgba(96, 165, 250, 0.1)',
+                        yAxisID: 'y1',
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        grid: { color: 'rgba(0, 0, 0, 0.1)' },
+                        ticks: { color: '#666' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        grid: { drawOnChartArea: false },
+                        ticks: { color: '#666' }
+                    },
+                    x: {
+                        grid: { color: 'rgba(0, 0, 0, 0.05)' },
+                        ticks: { color: '#666' }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#333' }
+                    }
+                }
+            }
+        });
+        
+        // WebSocket connection
+        let ws;
+        const maxDataPoints = 60;
+        
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+            
+            ws.onopen = () => {
+                document.getElementById('connectionStatus').textContent = '🟢 Connected';
+                document.getElementById('connectionStatus').className = 'connection-status connected';
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('connectionStatus').textContent = '🔴 Disconnected';
+                document.getElementById('connectionStatus').className = 'connection-status disconnected';
+                setTimeout(connectWebSocket, 3000);
+            };
+            
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                if (message.type === 'stats_update') {
+                    updateDashboard(message.data);
+                }
+            };
+        }
+        
+        function updateDashboard(data) {
+            // Update metrics
+            document.getElementById('totalRequests').textContent = data.current.total_requests.toLocaleString();
+            document.getElementById('requestsPerSecond').textContent = data.current.requests_per_second.toFixed(1);
+            document.getElementById('queueSize').textContent = data.current.queue_size;
+            document.getElementById('discoveredServers').textContent = data.current.discovered_servers;
+            document.getElementById('avgLatency').textContent = data.current.avg_latency_ms.toFixed(1);
+            
+            // Count active servers
+            const activeCount = data.active ? data.active.filter(s => s.status === 'active').length : 0;
+            document.getElementById('activeServers').textContent = activeCount;
+            
+            // Update chart
+            if (data.history && data.history.length > 0) {
+                const labels = data.history.slice(-maxDataPoints).map(h => 
+                    new Date(h.timestamp).toLocaleTimeString([], { minute: '2-digit', second: '2-digit' })
+                );
+                
+                performanceChart.data.labels = labels;
+                performanceChart.data.datasets[0].data = data.history.slice(-maxDataPoints).map(h => h.requests_per_second);
+                performanceChart.data.datasets[1].data = data.history.slice(-maxDataPoints).map(h => h.queue_size);
+                performanceChart.update('none');
+            }
+            
+            // Update discovered servers list
+            const discoveredList = document.getElementById('discoveredList');
+            if (data.discovered && data.discovered.length > 0) {
+                discoveredList.innerHTML = data.discovered.map(server => `
+                    <div class="server-item">
+                        <div>
+                            <span class="server-status status-discovered"></span>
+                            <strong>${server.name}</strong>
+                        </div>
+                        <div style="opacity: 0.8;">
+                            ${server.ip || 'N/A'} | ${server.status}
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                discoveredList.innerHTML = '<div style="text-align: center; opacity: 0.5; padding: 20px;">No clusters discovered yet</div>';
+            }
+            
+            // Update active servers list with interaction status
+            const activeList = document.getElementById('activeList');
+            if (data.active && data.active.length > 0) {
+                activeList.innerHTML = data.active.map(server => {
+                    // Parse the timestamp and calculate seconds since last seen
+                    const lastSeenDate = new Date(server.last_seen);
+                    const now = new Date();
+                    const secondsSinceLastSeen = Math.max(0, (now - lastSeenDate) / 1000);
+                    
+                    // Determine interaction status
+                    let statusClass = 'status-inactive';
+                    let statusText = 'Inactive';
+                    let statusIcon = '⚫';
+                    
+                    if (server.status === 'active') {
+                        statusClass = 'status-active';
+                        statusText = 'Active';
+                        statusIcon = '🟢';
+                    } else if (secondsSinceLastSeen < 30) {
+                        statusClass = 'status-discovered';
+                        statusText = 'Connected';
+                        statusIcon = '🔵';
+                    }
+                    
+                    // Format time since last request
+                    let timeSinceText = '';
+                    if (isNaN(secondsSinceLastSeen) || secondsSinceLastSeen < 0) {
+                        timeSinceText = 'Unknown';
+                    } else if (secondsSinceLastSeen < 5) {
+                        timeSinceText = 'Just now';
+                    } else if (secondsSinceLastSeen < 60) {
+                        timeSinceText = `${Math.floor(secondsSinceLastSeen)}s ago`;
+                    } else if (secondsSinceLastSeen < 3600) {
+                        timeSinceText = `${Math.floor(secondsSinceLastSeen / 60)}m ago`;
+                    } else if (secondsSinceLastSeen < 86400) {
+                        timeSinceText = `${Math.floor(secondsSinceLastSeen / 3600)}h ago`;
+                    } else {
+                        timeSinceText = `${Math.floor(secondsSinceLastSeen / 86400)}d ago`;
+                    }
+                    
+                    return `
+                        <div class="server-item">
+                            <div>
+                                <span class="server-status ${statusClass}"></span>
+                                <strong>${server.id}</strong>
+                                <span style="margin-left: 10px; font-size: 0.9em; color: #666;">${statusIcon} ${statusText}</span>
+                            </div>
+                            <div style="opacity: 0.8; font-size: 0.9em;">
+                                📊 ${server.requests} requests | ⏱️ Last: ${timeSinceText}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                activeList.innerHTML = '<div style="text-align: center; opacity: 0.5; padding: 20px;">No game servers have connected yet</div>';
+            }
+        }
+        
+        // Initialize SkyPilot Dashboard link
+        async function initializeSkyPilotLink() {
+            try {
+                const response = await fetch('/discovered');
+                const data = await response.json();
+                const prefix = data.prefix || 'game-server';
+                
+                // Build the SkyPilot dashboard URL with the cluster prefix filter
+                const skyPilotUrl = `https://api.skypilot.co/dashboard/clusters?property=cluster&operator=%3A&value=${encodeURIComponent(prefix)}`;
+                document.getElementById('skyPilotDashboardLink').href = skyPilotUrl;
+                
+                console.log(`SkyPilot Dashboard link set for prefix: ${prefix}`);
+            } catch (error) {
+                console.error('Failed to initialize SkyPilot link:', error);
+                // Fallback to general dashboard
+                document.getElementById('skyPilotDashboardLink').href = 'https://api.skypilot.co/dashboard/clusters';
+            }
+        }
+        
+        // Start WebSocket connection and initialize links
+        connectWebSocket();
+        initializeSkyPilotLink();
+    </script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+name: game-server
+
+resources:
+  cpus: 4+
+  memory: 8+
+  # Optional GPU for more complex simulations
+  # accelerators: T4:1
+  
+  # Use spot instances for cost savings
+  any_of:
+    - use_spot: true
+    - use_spot: false
+
+  # Open port for management API
+  ports:
+    - 8081  # Management API
+
+workdir: .
+
+setup: |
+  # Install system dependencies
+  sudo apt-get update && sudo apt-get install -y jq
+  
+  # Install uv for fast Python package management
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.cargo/bin:$PATH"
+  
+  # Create virtual environment and install dependencies
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
+  
+  uv pip install fastapi uvicorn numpy requests
+
+run: |
+  export PATH="$HOME/.cargo/bin:$PATH"
+  source .venv/bin/activate
+  
+  # Get cluster name from SKYPILOT_CLUSTER_INFO or use hostname as fallback
+  echo "Using provided eval head endpoint: ${EVAL_HEAD_ENDPOINT}"
+  
+  echo "SKYPILOT_CLUSTER_INFO: ${SKYPILOT_CLUSTER_INFO}"
+  CLUSTER_NAME=$(echo "$SKYPILOT_CLUSTER_INFO" | jq -r '.cluster_name')
+  
+  echo "Using cluster name as server ID: ${CLUSTER_NAME}"
+  
+  # Start the game server
+  python src/game_server.py \
+    --port 8081 \
+    --server-id "${CLUSTER_NAME}" \
+    --eval-head-url ${EVAL_HEAD_ENDPOINT} \
+    --auto-start
+
+
+
+envs:
+  EVAL_HEAD_ENDPOINT: null
