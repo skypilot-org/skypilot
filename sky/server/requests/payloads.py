@@ -503,6 +503,7 @@ class JobsQueueBody(RequestBody):
     pool_match: Optional[str] = None
     page: Optional[int] = None
     limit: Optional[int] = None
+    statuses: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):

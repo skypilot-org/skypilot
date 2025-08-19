@@ -514,7 +514,7 @@ def queue_from_kubernetes_pod(
     except exceptions.CommandError as e:
         raise RuntimeError(str(e)) from e
 
-    jobs, _, result_type = managed_job_utils.load_managed_job_queue(
+    jobs, _, result_type, _, _ = managed_job_utils.load_managed_job_queue(
         job_table_payload)
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
@@ -587,31 +587,36 @@ def queue(
     pool_match: Optional[str] = None,
     page: Optional[int] = None,
     limit: Optional[int] = None,
-) -> Tuple[List[Dict[str, Any]], int]:
+    statuses: Optional[List[str]] = None,
+) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
 
     Returns:
-        [
-            {
-                'job_id': int,
-                'job_name': str,
-                'resources': str,
-                'submitted_at': (float) timestamp of submission,
-                'end_at': (float) timestamp of end,
-                'job_duration': (float) duration in seconds,
-                'recovery_count': (int) Number of retries,
-                'status': (sky.jobs.ManagedJobStatus) of the job,
-                'cluster_resources': (str) resources of the cluster,
-                'region': (str) region of the cluster,
-                'user_name': (Optional[str]) job creator's user name,
-                'user_hash': (str) job creator's user hash,
-                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
-                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
-            }
-        ]
+        jobs: List[Dict[str, Any]]
+            [
+                {
+                    'job_id': int,
+                    'job_name': str,
+                    'resources': str,
+                    'submitted_at': (float) timestamp of submission,
+                    'end_at': (float) timestamp of end,
+                    'job_duration': (float) duration in seconds,
+                    'recovery_count': (int) Number of retries,
+                    'status': (sky.jobs.ManagedJobStatus) of the job,
+                    'cluster_resources': (str) resources of the cluster,
+                    'region': (str) region of the cluster,
+                    'user_name': (Optional[str]) job creator's user name,
+                    'user_hash': (str) job creator's user hash,
+                    'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                    'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                }
+            ]
+        total: int, total number of jobs after filter
+        status_counts: Dict[str, int], status counts after filter
+        total_no_filter: int, total number of jobs before filter
     Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up or
             does not exist.
@@ -645,13 +650,13 @@ def queue(
     elif user_match is not None:
         users = global_user_state.get_user_by_name_match(user_match)
         if not users:
-            return [], 0
+            return [], 0, {}, 0
         user_hashes = [user.id for user in users]
 
     accessible_workspaces = list(workspaces_core.get_workspaces().keys())
     code = managed_job_utils.ManagedJobCodeGen.get_job_table(
         skip_finished, accessible_workspaces, job_ids, workspace_match,
-        name_match, pool_match, page, limit, user_hashes)
+        name_match, pool_match, page, limit, user_hashes, statuses)
     returncode, job_table_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -664,11 +669,11 @@ def queue(
         raise RuntimeError('Failed to fetch managed jobs with returncode: '
                            f'{returncode}.\n{job_table_payload + stderr}')
 
-    jobs, total, result_type = managed_job_utils.load_managed_job_queue(
-        job_table_payload)
+    (jobs, total, result_type, total_no_filter, status_counts
+    ) = managed_job_utils.load_managed_job_queue(job_table_payload)
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
-        return jobs, total
+        return jobs, total, status_counts, total_no_filter
 
     # Backward compatibility for old jobs controller without filtering
     # TODO(hailong): remove this after 0.12.0
@@ -702,14 +707,18 @@ def queue(
     if job_ids:
         jobs = [job for job in jobs if job['job_id'] in job_ids]
 
-    return managed_job_utils.filter_jobs(jobs,
-                                         workspace_match,
-                                         name_match,
-                                         pool_match,
-                                         page=page,
-                                         limit=limit,
-                                         user_match=user_match,
-                                         enable_user_match=True)
+    filtered_jobs, total, status_counts = managed_job_utils.filter_jobs(
+        jobs,
+        workspace_match,
+        name_match,
+        pool_match,
+        page=page,
+        limit=limit,
+        user_match=user_match,
+        enable_user_match=True,
+        statuses=statuses,
+    )
+    return filtered_jobs, total, status_counts, total_no_filter
 
 
 @usage_lib.entrypoint
