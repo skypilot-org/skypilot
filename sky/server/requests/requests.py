@@ -565,6 +565,18 @@ def get_request_tasks(
     return requests
 
 
+@init_db
+def get_api_request_ids_start_with(incomplete: str) -> List[str]:
+    """Get a list of API request names that start with the given incomplete string."""
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute(
+            f'SELECT request_id FROM {REQUEST_TABLE} WHERE request_id LIKE ?', 
+            (f'{incomplete}%',))
+        return [row[0] for row in cursor.fetchall()]
+
+
 def _add_or_update_request_no_lock(request: Request):
     """Add or update a REST request into the database."""
     row = request.to_row()
