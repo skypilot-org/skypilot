@@ -567,7 +567,7 @@ def get_request_tasks(
 
 @init_db
 def get_api_request_ids_start_with(incomplete: str) -> List[str]:
-    """Get a list of API request names that start with the given incomplete string."""
+    """Get a list of API request ids for shell completion."""
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
