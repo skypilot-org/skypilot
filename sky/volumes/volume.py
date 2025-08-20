@@ -1,14 +1,11 @@
 """Volume types and access modes."""
 from typing import Any, Dict, Optional
 
-from sky import sky_logging
 from sky.utils import common_utils
 from sky.utils import infra_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
-
-logger = sky_logging.init_logger(__name__)
 
 
 class Volume:
@@ -137,7 +134,6 @@ class Volume:
             cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
             assert cloud_obj is not None
             for key, value in self.labels.items():
-                if not cloud_obj.is_valid_label_key(key):
-                    raise ValueError(f'Invalid label key: {key}')
-                if not cloud_obj.is_valid_label_value(value):
-                    raise ValueError(f'Invalid label value: {value}')
+                valid, err_msg = cloud_obj.is_label_valid(key, value)
+                if not valid:
+                    raise ValueError(f'{err_msg}')
