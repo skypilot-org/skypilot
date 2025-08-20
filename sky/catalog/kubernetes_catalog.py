@@ -47,7 +47,7 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
         _image_df = common.read_catalog('kubernetes/images.csv',
                                         pull_frequency_hours=0)
         image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
-    image_id = 'zpoint/skypilot_k8s:20250812'
+    image_id = 'us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot-gpu:20250812'
     return image_id
 
 
