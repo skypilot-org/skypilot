@@ -186,8 +186,8 @@ _RESOURCES_UNAVAILABLE_LOG = (
 # Number of seconds to wait locking the cluster before communicating with user.
 _CLUSTER_LOCK_TIMEOUT = 5.0
 
-_ACK = 'ack'
-_FORWARDING_FROM = 'Forwarding from'
+_ACK_MESSAGE = 'ack'
+_FORWARDING_FROM_MESSAGE = 'Forwarding from'
 
 
 def _is_command_length_over_limit(command: str) -> bool:
@@ -2688,7 +2688,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 ssh_mode=command_runner.SshMode.NON_INTERACTIVE)
             if isinstance(head_runner, command_runner.SSHCommandRunner):
                 # cat so the command doesn't exit until we kill it
-                cmd += [f'"echo {_ACK} && cat"']
+                cmd += [f'"echo {_ACK_MESSAGE} && cat"']
             cmd_str = ' '.join(cmd)
             logger.debug(f'Running port forward command: {cmd_str}')
             ssh_tunnel_proc = subprocess.Popen(cmd_str,
@@ -2696,6 +2696,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                                stdin=subprocess.PIPE,
                                                stdout=subprocess.PIPE,
                                                stderr=subprocess.PIPE,
+                                               start_new_session=True,
                                                text=True)
             tunnel_info = SSHTunnelInfo(port=local_port,
                                         pid=ssh_tunnel_proc.pid)
@@ -2716,13 +2717,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     time.sleep(0.1)
                     continue
                 assert ack is not None
-                if isinstance(
-                        head_runner,
-                        command_runner.SSHCommandRunner) and ack == f'{_ACK}\n':
+                if isinstance(head_runner, command_runner.SSHCommandRunner
+                             ) and ack == f'{_ACK_MESSAGE}\n':
                     break
                 elif isinstance(head_runner,
                                 command_runner.KubernetesCommandRunner
-                               ) and _FORWARDING_FROM in ack:
+                               ) and _FORWARDING_FROM_MESSAGE in ack:
                     # For Kind clusters, there seems to be a race condition.
                     # Calling grpc.channel_ready_future immediately after
                     # results in a connection refused error, leading to
