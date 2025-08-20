@@ -97,6 +97,16 @@ Use high-performance networking
         See `GPUDirect-TCPX example <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
 
 
+Using Ray with SkyPilot
+~~~~~~~~~~~~~~~~~~~~~~~
+
+When running Ray workloads on SkyPilot:
+
+- **Always start your own Ray cluster on a port different from 6380** - SkyPilot uses port 6380 internally
+- **Never use** ``ray.init(address="auto")`` - It connects to SkyPilot's internal Ray cluster
+- **Start Ray head on rank 0, workers on other ranks** - See :ref:`distributed Ray example <dist-jobs>`
+- **Never call** ``ray stop`` - It may interfere with SkyPilot operations
+
 Use ``disk_tier: best``
 ~~~~~~~~~~~~~~~~~~~~~~~
 Fast storage is critical for loading and storing data and model checkpoints.

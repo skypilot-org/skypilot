@@ -146,6 +146,11 @@ SSH access is only available for :ref:`clusters <dev-cluster>` (designed for int
 
 Executing a distributed Ray program
 ------------------------------------
+
+.. note::
+
+   **Important**: Always start your own Ray cluster for user workloads. SkyPilot uses Ray internally on port 6380 for cluster management. Using ``ray.init(address="auto")`` connects to SkyPilot's internal Ray cluster, causing resource conflicts. The example below starts a separate Ray cluster on port 6379.
+
 To execute a distributed Ray program on many nodes, you can download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `job yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
 
 .. code-block:: console

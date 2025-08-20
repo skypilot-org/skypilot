@@ -213,6 +213,23 @@ You will need to install a PyTorch version that is compatible with your NVIDIA d
 Miscellaneous
 -------------
 
+Why can't I use ``ray.init(address="auto")`` directly in my SkyPilot job?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyPilot uses Ray internally on port 6380 for cluster management. When you use ``ray.init(address="auto")``, Ray connects to SkyPilot's internal cluster, causing resource bundling conflicts where user workloads interfere with SkyPilot's resource management.
+
+**Always start your own Ray cluster** on a different port (e.g., 6379). See the :ref:`distributed Ray example <dist-jobs>` for the correct pattern:
+
+.. code-block:: yaml
+
+  run: |
+    if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+      ray start --head --port 6379
+      python your_script.py
+    else
+      ray start --address $HEAD_IP:6379
+    fi
+
 How can I launch a VS Code tunnel using a SkyPilot task definition?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
