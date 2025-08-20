@@ -509,6 +509,10 @@ class ManagedJobScheduleState(enum.Enum):
     # This job may have been created before scheduler was introduced in #4458.
     # This state is not used by scheduler but just for backward compatibility.
     # TODO(cooperc): remove this in v0.11.0
+    # TODO(luca): the only states we need are INACTIVE, WAITING, ALIVE, and
+    # DONE. ALIVE = old LAUNCHING + ALIVE + ALIVE_BACKOFF + ALIVE_WAITING and
+    # will represent jobs that are claimed by a controller. Delete the rest
+    # in v0.13.0
     INVALID = None
     # The job should be ignored by the scheduler.
     INACTIVE = 'INACTIVE'
@@ -516,7 +520,6 @@ class ManagedJobScheduleState(enum.Enum):
     # scheduler should try to transition it, and when it does, it should start
     # the job controller.
     WAITING = 'WAITING'
-    WAITING_NEW = 'WAITING_NEW'
     # The job is already alive, but wants to transition back to LAUNCHING,
     # e.g. for recovery, or launching later tasks in the DAG. The scheduler
     # should try to transition it to LAUNCHING.
@@ -582,7 +585,7 @@ def update_job_to_new(job_id: int):
         session.execute(
             sqlalchemy.update(job_info_table).where(
                 job_info_table.c.spot_job_id == job_id).values(
-                    schedule_state=ManagedJobScheduleState.WAITING_NEW.value))
+                    schedule_state=ManagedJobScheduleState.WAITING.value))
         session.commit()
 
 
@@ -748,7 +751,7 @@ def set_pending_cancelled(job_id: int):
                 spot_table.c.status == ManagedJobStatus.PENDING.value,
                 sqlalchemy.or_(
                     job_info_table.c.schedule_state ==
-                    ManagedJobScheduleState.WAITING_NEW.value,
+                    ManagedJobScheduleState.WAITING.value,
                     job_info_table.c.schedule_state ==
                     ManagedJobScheduleState.INACTIVE.value,
                 ),
@@ -1074,7 +1077,7 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
             sqlalchemy.and_(job_info_table.c.spot_job_id == job_id,)
         ).update({
             job_info_table.c.schedule_state:
-                ManagedJobScheduleState.WAITING_NEW.value,
+                ManagedJobScheduleState.WAITING.value,
             job_info_table.c.dag_yaml_path: dag_yaml_path,
             job_info_table.c.original_user_yaml_path: original_user_yaml_path,
             job_info_table.c.env_file_path: env_file_path,
@@ -1305,7 +1308,7 @@ async def get_waiting_job_async(pid: int) -> Optional[Dict[str, Any]]:
             job_info_table.c.pool,
         ).where(
             job_info_table.c.schedule_state.in_([
-                ManagedJobScheduleState.WAITING_NEW.value,
+                ManagedJobScheduleState.WAITING.value,
             ])).order_by(
                 job_info_table.c.priority.desc(),
                 job_info_table.c.spot_job_id.asc(),

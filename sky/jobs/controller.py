@@ -788,7 +788,12 @@ class Controller:
         self.starting: Set[int] = set()
 
         # Lock for synchronizing access to global state dictionary
+        # Must always hold _job_tasks_lock when accessing the _starting_signal.
         self._job_tasks_lock = asyncio.Lock()
+        # We signal whenever a job leaves the api server launching state. Feel
+        # free to signal as much as you want to be safe from leaks (if you
+        # do not signal enough there may be some jobs forever waiting to
+        # launch).
         self._starting_signal = asyncio.Condition(lock=self._job_tasks_lock)
 
     async def _cleanup(self,
@@ -1138,8 +1143,6 @@ class Controller:
 
             schedule_state = waiting_job['schedule_state']
             if (schedule_state !=
-                    managed_job_state.ManagedJobScheduleState.WAITING_NEW and
-                    schedule_state !=
                     managed_job_state.ManagedJobScheduleState.WAITING):
                 # in this case it is already currently being restarted
 

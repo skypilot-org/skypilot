@@ -75,13 +75,10 @@ else:
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
-# The _MANAGED_JOB_SCHEDULER_LOCK should be held whenever we are checking the
-# parallelism control or updating the schedule_state of any job.
-# Any code that takes this lock must conclude by calling
-# maybe_schedule_next_jobs.
+# Job controller lock. This is used to synchronize writing/reading the
+# controller pid file.
 JOB_CONTROLLER_PID_LOCK = os.path.expanduser(
     '~/.sky/locks/job_controller_pid.lock')
-_ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
 
 JOB_CONTROLLER_PID_PATH = os.path.expanduser('~/.sky/job_controller_pid')
 JOB_CONTROLLER_ENV_PATH = os.path.expanduser('~/.sky/job_controller_env')
@@ -109,6 +106,20 @@ CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
 
 
 def get_number_of_controllers() -> int:
+    """Returns the number of controllers that should be running.
+
+    This is the number of controllers that should be running to maximize
+    resource utilization.
+
+    In consolidation mode, we use the existing API server so our resource
+    requirements are just for the job controllers. We try taking up as much
+    much memory as possible left over from the API server.
+
+    In non-consolidation mode, we have to take into account the memory of the
+    API server workers. We limit to only 8 launches per worker, so our logic is
+    each controller will take CONTROLLER_MEMORY_MB + 8 * WORKER_MEMORY_MB. We
+    leave some leftover room for ssh codegen and ray status overhead.
+    """
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
 
@@ -176,6 +187,10 @@ def get_alive_controllers() -> typing.Optional[int]:
     alive = 0
     for pid in pids:
         try:
+            # TODO(luca) there is a chance that the process that is alive is
+            # not the same controller process. a better solution is to also
+            # include a random UUID with each controller and store that in the
+            # db as well/in the command that spawns it.
             if subprocess_utils.is_process_alive(int(pid.strip())):
                 alive += 1
         except ValueError:
@@ -207,7 +222,8 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
                         # before the heat death of the universe. should get
                         # this fixed before then.
                         try:
-                            # this is likely a problem
+                            # this will stop all the controllers and the api
+                            # server.
                             sdk.api_stop()
                         except Exception as e:  # pylint: disable=broad-except
                             logger.error(f'Failed to stop the api server: {e}')

@@ -239,7 +239,6 @@ def ha_recovery_for_consolidation_mode():
             if job['schedule_state'] not in [
                     managed_job_state.ManagedJobScheduleState.DONE,
                     managed_job_state.ManagedJobScheduleState.WAITING,
-                    managed_job_state.ManagedJobScheduleState.WAITING_NEW
             ]:
                 script = managed_job_state.get_ha_recovery_script(job_id)
                 if script is None:
@@ -468,7 +467,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             elif (schedule_state in [
                     managed_job_state.ManagedJobScheduleState.INACTIVE,
                     managed_job_state.ManagedJobScheduleState.WAITING,
-                    managed_job_state.ManagedJobScheduleState.WAITING_NEW
             ]):
                 # It is expected that the controller hasn't been started yet.
                 continue
@@ -1217,8 +1215,7 @@ def dump_managed_job_queue(
                 # It's possible for a WAITING/ALIVE_WAITING job to be ready to
                 # launch, but the scheduler just hasn't run yet.
                 managed_job_state.ManagedJobScheduleState.WAITING,
-                managed_job_state.ManagedJobScheduleState.ALIVE_WAITING,
-                managed_job_state.ManagedJobScheduleState.WAITING_NEW):
+                managed_job_state.ManagedJobScheduleState.ALIVE_WAITING):
             # This job will not block others.
             continue
 
