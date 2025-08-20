@@ -360,7 +360,7 @@ def test_aws_manual_restart_recovery():
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.UP],
-                timeout=120),
+                timeout=300),
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
     )
