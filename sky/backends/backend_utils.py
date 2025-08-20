@@ -763,6 +763,43 @@ def write_cluster_config(
             assert region_name in ssh_proxy_command_config, (
                 region_name, ssh_proxy_command_config)
             ssh_proxy_command = ssh_proxy_command_config[region_name]
+
+    use_internal_ips = skypilot_config.get_effective_region_config(
+                    cloud=str(cloud).lower(),
+                    region=region.name,
+                    keys=('use_internal_ips',),
+                    default_value=False)
+    if isinstance(cloud, clouds.AWS):
+        # If the use_ssm flag is set to true, we use the ssm proxy command.
+        use_ssm = skypilot_config.get_effective_region_config(
+            cloud=str(cloud).lower(),
+            region=region.name,
+            keys=('use_ssm',),
+            default_value=False)
+        if use_ssm:
+            if ssh_proxy_command is None:
+                aws_profile = os.environ.get('AWS_PROFILE', 'default')
+                ip_address_filter = (
+                    "Name=private-ip-address,Values=%h"
+                    if use_internal_ips else
+                    "Name=ip-address,Values=%h"
+                )
+                ssm_proxy_command = "aws ssm start-session --target \"" + \
+                    "$(aws ec2 describe-instances --filter " + \
+                    f"{ip_address_filter} --region {region_name} " + \
+                    f"--profile {aws_profile} " + \
+                    "| jq -r '.Reservations[].Instances[]|.InstanceId')\" " + \
+                    f"--region {region_name} --profile {aws_profile} " + \
+                    "--document-name AWS-StartSSHSession " + \
+                    "--parameters portNumber=%p"
+                logger.warning('Using ssm proxy command: ' +
+                               f'{ssm_proxy_command!r}')
+                ssh_proxy_command = ssm_proxy_command
+                region_name = 'ssm-session' # TODO: change this to a random string
+            else:
+                logger.warning('use_ssm is set to true, but ssh_proxy_command' +
+                               ' is already set to ' +
+                               f'{ssh_proxy_command!r}')
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied global instance tags from ~/.sky/config.yaml.

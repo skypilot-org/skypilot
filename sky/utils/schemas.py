@@ -954,6 +954,9 @@ _NETWORK_CONFIG_SCHEMA = {
     'use_internal_ips': {
         'type': 'boolean',
     },
+    'use_ssm': {
+        'type': 'boolean',
+    },
     'ssh_proxy_command': {
         'oneOf': [{
             'type': 'string',
