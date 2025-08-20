@@ -16,7 +16,8 @@ on:
         type: boolean
 
 permissions:
-  contents: read
+  contents: write
+  pages: write
   actions: write
 
 jobs:
