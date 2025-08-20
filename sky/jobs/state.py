@@ -27,6 +27,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import context_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 
@@ -223,9 +224,7 @@ def _init_db_async(func):
             # this may happen multiple times since there is no locking
             # here but thats fine, this is just a short circuit for the
             # common case.
-            # pylint: disable=import-outside-toplevel
-            from sky.jobs import utils as job_utils
-            await job_utils.to_thread(initialize_and_get_db_async)
+            await context_utils.to_thread(initialize_and_get_db_async)
 
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
         last_exc = None
