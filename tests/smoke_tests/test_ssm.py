@@ -1,0 +1,46 @@
+# Smoke tests for SkyPilot for SSM functionality
+# Default options are set in pyproject.toml
+# Example usage:
+# Run all tests except for AWS and Lambda Cloud
+# > pytest tests/smoke_tests/test_ssm.py
+#
+# Terminate failed clusters after test finishes
+# > pytest tests/smoke_tests/test_ssm.py --terminate-on-failure
+
+from ast import Name
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+import textwrap
+import time
+
+import pytest
+from smoke_tests import smoke_tests_utils
+
+import sky
+from sky import skypilot_config
+from sky.skylet import constants
+from sky.skylet import events
+from sky.utils import common_utils
+
+
+@pytest.mark.aws
+def test_ssm_public():
+    """Test that ssm works with public IP addresses."""
+    name = smoke_tests_utils.get_cluster_name()
+    vpc = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
+    vpc_config = f'aws.vpc_name={vpc},aws.use_ssm=true,aws.security_group_name=lloyd-airgap-gw-sg'
+
+    test = smoke_tests_utils.Test(
+        'ssm_public',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} --config {vpc_config} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+        ],
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('aws'),
+    )
+    print(test.commands)
+    smoke_tests_utils.run_one_test(test)
