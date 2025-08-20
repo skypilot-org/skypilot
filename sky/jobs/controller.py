@@ -1211,24 +1211,4 @@ async def main():
 
 
 if __name__ == '__main__':
-    args = sys.argv[1:]
-    if len(args) != 1 or args[0] != 'new':
-        import argparse
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--job-id',
-                            required=True,
-                            type=int,
-                            help='Job id for the controller job.')
-        parser.add_argument('dag_yaml',
-                            type=str,
-                            help='The path to the user job yaml file.')
-        parser.add_argument('--pool',
-                            required=False,
-                            default=None,
-                            type=str,
-                            help='The pool to use for the controller job.')
-        args_old = parser.parse_args()
-        managed_job_state.update_job_to_new(args_old.job_id)
-        sys.exit(0)
-
     asyncio.run(main())

@@ -58,7 +58,8 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
     job_table_payload = output_parts[1]
 
     # Process locally: check version match and filter non-terminal jobs
-    version_matches = controller_version == local_version
+    version_matches = (controller_version == local_version or
+                       int(controller_version) > 17)
 
     # Load and filter jobs locally using existing method
     jobs, _, _, _, _ = managed_job_utils.load_managed_job_queue(
