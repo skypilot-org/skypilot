@@ -195,13 +195,14 @@ class DockerInitializer:
                     time.sleep(5)
                     continue
             break
-        subprocess_utils.handle_returncode(
-            rc,
-            cmd,
-            error_msg='Failed to run docker setup commands.',
-            stderr=stdout + stderr,
-            # Print out the error message if the command failed.
-            stream_logs=log_err_when_fail)
+        if "Conflict. The container name" not in stdout + stderr:
+            subprocess_utils.handle_returncode(
+                rc,
+                cmd,
+                error_msg='Failed to run docker setup commands.',
+                stderr=stdout + stderr,
+                # Print out the error message if the command failed.
+                stream_logs=log_err_when_fail)
         return stdout.strip()
 
     def initialize(self) -> str:
