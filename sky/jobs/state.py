@@ -232,19 +232,13 @@ def _init_db_async(func):
         for _ in range(_DB_RETRY_TIMES):
             try:
                 return await func(*args, **kwargs)
-            except sqlalchemy_exc.OperationalError as e:
-                last_exc = e
-            except asyncio.exceptions.TimeoutError as e:
-                last_exc = e
-            except OSError as e:
-                last_exc = e
-            except sqlalchemy.exc.TimeoutError as e:
-                last_exc = e
-            except sqlite3.OperationalError as e:
-                last_exc = e
-            except sqlalchemy.exc.InterfaceError as e:
-                last_exc = e
-            except sqlite3.InterfaceError as e:
+            except (sqlalchemy_exc.OperationalError,
+                    asyncio.exceptions.TimeoutError,
+                    OSError,
+                    sqlalchemy.exc.TimeoutError,
+                    sqlite3.OperationalError,
+                    sqlalchemy.exc.InterfaceError,
+                    sqlite3.InterfaceError) as e:
                 last_exc = e
             logger.debug(f'DB error: {last_exc}')
             await asyncio.sleep(backoff.current_backoff())
@@ -269,19 +263,13 @@ def _init_db(func):
         for _ in range(_DB_RETRY_TIMES):
             try:
                 return func(*args, **kwargs)
-            except sqlalchemy_exc.OperationalError as e:
-                last_exc = e
-            except asyncio.exceptions.TimeoutError as e:
-                last_exc = e
-            except OSError as e:
-                last_exc = e
-            except sqlalchemy.exc.TimeoutError as e:
-                last_exc = e
-            except sqlite3.OperationalError as e:
-                last_exc = e
-            except sqlalchemy.exc.InterfaceError as e:
-                last_exc = e
-            except sqlite3.InterfaceError as e:
+            except (sqlalchemy_exc.OperationalError,
+                    asyncio.exceptions.TimeoutError,
+                    OSError,
+                    sqlalchemy.exc.TimeoutError,
+                    sqlite3.OperationalError,
+                    sqlalchemy.exc.InterfaceError,
+                    sqlite3.InterfaceError) as e:
                 last_exc = e
             logger.debug(f'DB error: {last_exc}')
             time.sleep(backoff.current_backoff())
