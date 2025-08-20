@@ -805,7 +805,7 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
             # cli_config is a path to a config file
             parsed_config = parse_and_validate_config_file(maybe_config_path)
         else:  # cli_config is a comma-separated list of key-value pairs
-            parsed_config = _parse_dotlist(cli_config)
+            parsed_config = _parse_dotlist(cli_config[0].split(','))
         _validate_config(parsed_config, config_source)
     except ValueError as e:
         raise ValueError(f'Invalid config override: {cli_config}. '

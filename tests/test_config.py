@@ -797,6 +797,26 @@ def test_parse_dotlist():
     assert config.get_nested(('key1',), None) == 'a,b,c=d'
 
 
+def test_compose_cli_config(tmp_path):
+    cli_config = ('aws.vpc_name=vpc-123,aws.security_group_name=sg-123',)
+    config = skypilot_config._compose_cli_config(cli_config)
+    assert config.get_nested(('aws', 'vpc_name'), None) == 'vpc-123'
+    assert config.get_nested(('aws', 'security_group_name'), None) == 'sg-123'
+
+    # Write to temp file and read it
+    config_path = tmp_path / 'config.yaml'
+    yaml_str = '''
+    aws:
+        vpc_name: vpc-123
+        security_group_name: sg-123
+    '''
+    with open(config_path, 'w') as f:
+        f.write(yaml_str)
+    config = skypilot_config._compose_cli_config([str(config_path)])
+    assert config.get_nested(('aws', 'vpc_name'), None) == 'vpc-123'
+    assert config.get_nested(('aws', 'security_group_name'), None) == 'sg-123'
+
+
 @mock.patch('sky.skylet.constants.SKIPPED_CLIENT_OVERRIDE_KEYS',
             [('aws', 'vpc_name')])
 def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
