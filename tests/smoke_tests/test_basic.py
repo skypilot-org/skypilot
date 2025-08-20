@@ -350,7 +350,7 @@ def test_aws_manual_restart_recovery():
             # instance would get a new IP address.
             # We should see a warning message on how to recover
             # from this state.
-            f'sky status -r {name} | grep -i "SSH connection timed out" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            f'sky status -r {name} | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
             # Recover the cluster.
             f'sky start -y {name}',
             # Wait for the cluster to be up.
