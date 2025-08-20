@@ -158,23 +158,37 @@ jobs:
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
-  smoke-tests-kubernetes:
+  smoke-tests-kubernetes-resource-heavy:
     needs: [gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ github.sha }}
       branch: ${{ github.ref_name }}
-      message: "nightly-build-pypi --kubernetes --no-resource-heavy on test_cluster_job.py"
+      message: "nightly-build-pypi --kubernetes --resource-heavy"
       pipeline: "smoke-tests"
-      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy", "FILE_PATTERN": "test_cluster_job.py,test_region_and_zone.py,test_basic.py"}'
+      build_env_vars: '{"ARGS": "--kubernetes --resource-heavy"}'
+      timeout_minutes: 80
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  smoke-tests-kubernetes-no-resource-heavy:
+    needs: [gate-tests, nightly-build-pypi]
+    if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ github.sha }}
+      branch: ${{ github.ref_name }}
+      message: "nightly-build-pypi --kubernetes --no-resource-heavy"
+      pipeline: "smoke-tests"
+      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy"}'
       timeout_minutes: 40
       sleep_seconds: 1200  # 20-minute delay to reduce buildkite resource usage
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   smoke-tests-remote-server:
-    needs: [gate-tests, smoke-tests-kubernetes]
+    needs: [gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
