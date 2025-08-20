@@ -25,7 +25,6 @@ import colorama
 import psutil
 import yaml
 
-import sky
 from sky import backends
 from sky import catalog
 from sky import check as sky_check
@@ -66,6 +65,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import controller_utils
+from sky.utils import directory_utils
 from sky.utils import env_options
 from sky.utils import locks
 from sky.utils import log_utils
@@ -169,7 +169,7 @@ _LOG_DIR_PATTERN = re.compile(r'Log Dir: ([^ ]+)')
 # We don't do import then __file__ because that script needs to be filled in
 # (so import would fail).
 _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
-    pathlib.Path(sky.__file__).resolve().parent / 'backends' /
+    pathlib.Path(directory_utils.get_sky_dir()) / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
 # The maximum size of a command line arguments is 128 KB, i.e. the command
@@ -3323,8 +3323,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # Do not remove the stopped cluster from the global state
                     # if failed to start.
                     if not e.no_failover:
+                        global_user_state.add_cluster_event(
+                            cluster_name,
+                            None,
+                            'Provision failed: ' + str(e),
+                            global_user_state.ClusterEventType.STATUS_CHANGE,
+                            nop_if_duplicate=True)
                         global_user_state.remove_cluster(cluster_name,
-                                                         terminate=True)
+                                                         terminate=True,
+                                                         remove_events=False)
                         usage_lib.messages.usage.update_final_cluster_status(
                             None)
                     logger.error(
@@ -4170,7 +4177,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # In this case, we reset the resources for the task, so that the
             # detached setup does not need to wait for the task resources to be
             # ready (which is not used for setup anyway).
-            valid_resource = sky.Resources()
+            valid_resource = resources_lib.Resources()
         else:
             # Check the task resources vs the cluster resources. Since
             # `sky exec` will not run the provision and _check_existing_cluster
@@ -4223,7 +4230,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _teardown(self,
                   handle: CloudVmRayResourceHandle,
                   terminate: bool,
-                  purge: bool = False):
+                  purge: bool = False,
+                  explicitly_requested: bool = False):
         """Tear down or stop the cluster.
 
         Args:
@@ -4298,7 +4306,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # ClusterOwnerIdentityMismatchError. The argument/flag
                         # `purge` should bypass such ID mismatch errors.
                         refresh_cluster_status=(
-                            not is_identity_mismatch_and_purge))
+                            not is_identity_mismatch_and_purge),
+                        explicitly_requested=explicitly_requested)
                 if terminate:
                     lock.force_unlock()
                 break
@@ -4737,7 +4746,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          purge: bool = False,
                          post_teardown_cleanup: bool = True,
                          refresh_cluster_status: bool = True,
-                         remove_from_db: bool = True) -> None:
+                         remove_from_db: bool = True,
+                         explicitly_requested: bool = False) -> None:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -4801,7 +4811,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                            f'provision yaml so it '
                            'has not been provisioned. Skipped.')
             global_user_state.remove_cluster(handle.cluster_name,
-                                             terminate=terminate)
+                                             terminate=terminate,
+                                             remove_events=False)
             return
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
@@ -4858,8 +4869,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise
 
             if post_teardown_cleanup:
-                self.post_teardown_cleanup(handle, terminate, purge,
-                                           remove_from_db)
+                self.post_teardown_cleanup(
+                    handle,
+                    terminate,
+                    purge,
+                    remove_from_db,
+                    explicitly_requested=explicitly_requested)
             return
 
         if (isinstance(cloud, clouds.IBM) and terminate and
@@ -4959,7 +4974,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               terminate: bool,
                               purge: bool = False,
                               remove_from_db: bool = True,
-                              failover: bool = False) -> None:
+                              failover: bool = False,
+                              explicitly_requested: bool = False) -> None:
         """Cleanup local configs/caches and delete TPUs after teardown.
 
         This method will handle the following cleanup steps:
@@ -5065,8 +5081,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         else:
                             raise
 
-        sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
-            handle.cluster_name)
+        cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
 
         def _detect_abnormal_non_terminated_nodes(
                 handle: CloudVmRayResourceHandle) -> None:
@@ -5138,7 +5153,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if not terminate or remove_from_db:
             global_user_state.remove_cluster(handle.cluster_name,
-                                             terminate=terminate)
+                                             terminate=terminate,
+                                             remove_events=explicitly_requested)
 
     def remove_cluster_config(self, handle: CloudVmRayResourceHandle) -> None:
         """Remove the YAML config of a cluster."""

@@ -2022,7 +2022,15 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     if handle.cluster_yaml is None:
         # Remove cluster from db since this cluster does not have a config file
         # or any other ongoing requests
-        global_user_state.remove_cluster(cluster_name, terminate=True)
+        global_user_state.add_cluster_event(
+            cluster_name,
+            None,
+            'Cluster has no YAML file. Removing the cluster from cache.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
+        global_user_state.remove_cluster(cluster_name,
+                                         terminate=True,
+                                         remove_events=True)
         logger.debug(f'Cluster {cluster_name!r} has no YAML file. '
                      'Removing the cluster from cache.')
         return None
@@ -2357,10 +2365,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
     backend = backends.CloudVmRayBackend()
-    backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     global_user_state.add_cluster_event(
-        cluster_name, None, 'All nodes stopped, terminating cluster.',
+        cluster_name, None, 'All nodes terminated, cleaning up the cluster.',
         global_user_state.ClusterEventType.STATUS_CHANGE)
+    backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 

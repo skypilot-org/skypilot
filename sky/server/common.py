@@ -561,15 +561,13 @@ def _start_api_server(deploy: bool = False,
         # For spawn mode, copy the environ to avoid polluting the SDK process.
         server_env = os.environ.copy()
         server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-        _set_metrics_env_var(server_env, metrics, deploy)
         # Start the API server process in the background and don't wait for it.
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
-        server_env = os.environ.copy()
-        server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         if enable_basic_auth:
             server_env[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
+        _set_metrics_env_var(server_env, metrics, deploy)
         with open(log_path, 'w', encoding='utf-8') as log_file:
             # Because the log file is opened using a with statement, it may seem
             # that the file will be closed when the with statement is exited
@@ -643,7 +641,7 @@ def _set_metrics_env_var(env: Union[Dict[str, str], os._Environ], metrics: bool,
         deploy: Whether the server is running in deploy mode, which means
             multiple processes might be running.
     """
-    if metrics:
+    if metrics or os.getenv(constants.ENV_VAR_SERVER_METRICS_ENABLED) == 'true':
         env[constants.ENV_VAR_SERVER_METRICS_ENABLED] = 'true'
         if deploy:
             metrics_dir = os.path.join(tempfile.gettempdir(), 'metrics')
