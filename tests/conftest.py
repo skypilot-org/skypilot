@@ -199,6 +199,12 @@ def pytest_addoption(parser):
               '(The config change is made in buildkite so this is a flag to '
               'ensure the tests will not be skipped but no actual effect)'),
     )
+    parser.addoption(
+        '--grpc',
+        action='store_true',
+        default=False,
+        help='Run tests with GRPC enabled',
+    )
 
 
 def pytest_configure(config):
