@@ -7,6 +7,7 @@ import json
 import math
 import os
 import pathlib
+import queue as queue_lib
 import re
 import shlex
 import signal
@@ -184,6 +185,9 @@ _RESOURCES_UNAVAILABLE_LOG = (
 
 # Number of seconds to wait locking the cluster before communicating with user.
 _CLUSTER_LOCK_TIMEOUT = 5.0
+
+_ACK = 'ack'
+_FORWARDING_FROM = 'Forwarding from'
 
 
 def _is_command_length_over_limit(command: str) -> bool:
@@ -2660,19 +2664,93 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def open_and_update_skylet_tunnel(self) -> None:
         """Opens an SSH tunnel to the Skylet on the head node,
         updates the cluster handle, and persists it to the database."""
-        local_port = common_utils.find_free_port(10000)
-        runners = self.get_command_runners()
-        head_runner = runners[0]
-        if isinstance(head_runner, command_runner.SSHCommandRunner):
-            # Disabling ControlMaster makes things easier to reason about
-            # with respect to resource management/ownership,
-            # as killing the process will close the tunnel too.
-            head_runner.disable_control_master = True
+        max_attempts = 3
+        # There could be a race condition here, as find_free_port
+        # can return the same port to multiple threads/processes.
+        for attempt in range(max_attempts):
+            local_port = common_utils.find_free_port(10000)
+            runners = self.get_command_runners()
+            head_runner = runners[0]
+            if isinstance(head_runner, command_runner.SSHCommandRunner):
+                # Disabling ControlMaster makes things easier to reason about
+                # with respect to resource management/ownership,
+                # as killing the process will close the tunnel too.
+                head_runner.disable_control_master = True
+                head_runner.port_forward_execute_remote_command = True
 
-        cmd = head_runner.port_forward_command([(local_port,
-                                                 constants.SKYLET_GRPC_PORT)])
-        ssh_tunnel_proc = subprocess.Popen(cmd)
-        tunnel_info = SSHTunnelInfo(port=local_port, pid=ssh_tunnel_proc.pid)
+            # The default connect_timeout of 1s is too short for
+            # connecting to clusters using a jump server.
+            # We use NON_INTERACTIVE mode to avoid allocating a pseudo-tty,
+            # which is counted towards non-idleness.
+            cmd: List[str] = head_runner.port_forward_command(
+                [(local_port, constants.SKYLET_GRPC_PORT)],
+                connect_timeout=5,
+                ssh_mode=command_runner.SshMode.NON_INTERACTIVE)
+            if isinstance(head_runner, command_runner.SSHCommandRunner):
+                # cat so the command doesn't exit until we kill it
+                cmd += [f'"echo {_ACK} && cat"']
+            cmd_str = ' '.join(cmd)
+            logger.debug(f'Running port forward command: {cmd_str}')
+            ssh_tunnel_proc = subprocess.Popen(cmd_str,
+                                               shell=True,
+                                               stdin=subprocess.PIPE,
+                                               stdout=subprocess.PIPE,
+                                               stderr=subprocess.PIPE,
+                                               text=True)
+            tunnel_info = SSHTunnelInfo(port=local_port,
+                                        pid=ssh_tunnel_proc.pid)
+
+            # Wait until we receive an ack from the remote cluster or
+            # the SSH connection times out.
+            queue: queue_lib.Queue = queue_lib.Queue()
+            stdout_thread = threading.Thread(
+                target=lambda queue, stdout: queue.put(stdout.readline()),
+                args=(queue, ssh_tunnel_proc.stdout),
+                daemon=True)
+            stdout_thread.start()
+            while ssh_tunnel_proc.poll() is None:
+                try:
+                    ack = queue.get_nowait()
+                except queue_lib.Empty:
+                    ack = None
+                    time.sleep(0.1)
+                    continue
+                assert ack is not None
+                if isinstance(
+                        head_runner,
+                        command_runner.SSHCommandRunner) and ack == f'{_ACK}\n':
+                    break
+                elif isinstance(head_runner,
+                                command_runner.KubernetesCommandRunner
+                               ) and _FORWARDING_FROM in ack:
+                    # For Kind clusters, there seems to be a race condition.
+                    # Calling grpc.channel_ready_future immediately after
+                    # results in a connection refused error, leading to
+                    # the process dying and the health check timing out.
+                    # We did not observe this for non-Kind clusters.
+                    # TODO(kevin): Find a better way to handle this.
+                    time.sleep(0.5)
+                    break
+
+            if ssh_tunnel_proc.poll() is not None:
+                stdout, stderr = ssh_tunnel_proc.communicate()
+                # Don't retry if the error is due to timeout,
+                # connection refused, Kubernetes pods not found,
+                # or an in-progress termination.
+                if (backend_utils.SSH_CONNECTION_ERROR_PATTERN.search(stderr) or
+                        backend_utils.K8S_PODS_NOT_FOUND_PATTERN.search(stderr)
+                        or attempt == max_attempts - 1):
+                    raise exceptions.CommandError(
+                        returncode=ssh_tunnel_proc.returncode,
+                        command=cmd_str,
+                        error_msg='Port forward failed',
+                        detailed_reason=stderr)
+                logger.warning(f'Port forward failed on port {local_port} '
+                               f'({attempt + 1}/{max_attempts}). '
+                               f'stdout: {stdout}, stderr: {stderr}')
+                continue
+            break
+
         try:
             grpc.channel_ready_future(
                 grpc.insecure_channel(f'localhost:{tunnel_info.port}')).result(
