@@ -85,9 +85,6 @@ def check_docker_image(cname, docker_cmd):
 
 def maybe_remove_container_cmds(container_name, docker_cmd):
     """Remove the container if it exists. If not, it will be a no-op.
-
-    This is to prevent name collisions when the container is stopped 
-    but not removed.
     """
     docker_rm = [
         docker_cmd,
