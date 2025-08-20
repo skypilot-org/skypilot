@@ -55,6 +55,13 @@ _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24.0
 MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
 
+_UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
+    # sqlite
+    'UNIQUE constraint failed',
+    # postgres
+    'duplicate key value violates unique constraint',
+]
+
 Base = declarative.declarative_base()
 
 config_table = sqlalchemy.Table(
@@ -735,17 +742,17 @@ def add_cluster_event(cluster_name: str,
                 ))
             session.commit()
         except sqlalchemy.exc.IntegrityError as e:
-            if 'UNIQUE constraint failed' in str(e):
-                # This can happen if the cluster event is added twice.
-                # We can ignore this error unless the caller requests
-                # to expose the error.
-                if expose_duplicate_error:
-                    raise db_utils.UniqueConstraintViolationError(
-                        value=reason, message=str(e))
-                else:
-                    pass
-            else:
-                raise e
+            for msg in _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS:
+                if msg in str(e):
+                    # This can happen if the cluster event is added twice.
+                    # We can ignore this error unless the caller requests
+                    # to expose the error.
+                    if expose_duplicate_error:
+                        raise db_utils.UniqueConstraintViolationError(
+                            value=reason, message=str(e))
+                    else:
+                        return
+            raise e
 
 
 def get_last_cluster_event(cluster_hash: str,

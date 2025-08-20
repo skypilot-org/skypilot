@@ -83,6 +83,8 @@ else:
 
 P = ParamSpec('P')
 
+_SERVER_USER_HASH_KEY = 'server_user_hash'
+
 
 def _add_timestamp_prefix_for_server_logs() -> None:
     server_logger = sky_logging.init_logger('sky.server')
@@ -1821,6 +1823,35 @@ async def root():
     return fastapi.responses.RedirectResponse(url='/dashboard/')
 
 
+def _init_or_restore_server_user_hash():
+    """Restores the server user hash from the global user state db.
+
+    The API server must have a stable user hash across restarts and potential
+    multiple replicas. Thus we persist the user hash in db and restore it on
+    startup. When upgrading from old version, the user hash will be read from
+    the local file (if any) to keep the user hash consistent.
+    """
+
+    def apply_user_hash(user_hash: str) -> None:
+        # For local API server, the user hash in db and local file should be
+        # same so there is no harm to override here.
+        common_utils.set_user_hash_locally(user_hash)
+        # Refresh the server user hash for current process after restore or
+        # initialize the user hash in db, child processes will get the correct
+        # server id from the local cache file.
+        common_lib.refresh_server_id()
+
+    user_hash = global_user_state.get_system_config(_SERVER_USER_HASH_KEY)
+    if user_hash is not None:
+        apply_user_hash(user_hash)
+        return
+
+    # Initial deployment, generate a user hash and save it to the db.
+    user_hash = common_utils.get_user_hash()
+    global_user_state.set_system_config(_SERVER_USER_HASH_KEY, user_hash)
+    apply_user_hash(user_hash)
+
+
 if __name__ == '__main__':
     import uvicorn
 
@@ -1830,6 +1861,8 @@ if __name__ == '__main__':
     global_user_state.initialize_and_get_db()
     # Initialize request db
     requests_lib.reset_db_and_logs()
+    # Restore the server user hash
+    _init_or_restore_server_user_hash()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')

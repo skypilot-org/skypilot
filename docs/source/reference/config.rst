@@ -293,7 +293,7 @@ Supported bucket types:
 
 Force-disable using a cloud bucket for storing intermediate job files (optional).
 
-If set to ``true``, SkyPilot will not use cloud object storage as an intermediate storage for files for managed jobs, even if cloud storage is available. 
+If set to ``true``, SkyPilot will not use cloud object storage as an intermediate storage for files for managed jobs, even if cloud storage is available.
 
 Files will be uploaded directly to the jobs controller and downloaded on to the job nodes from there (two-hop trasnfer). Useful in environments where use of cloud buckets must be avoided.
 
@@ -880,7 +880,7 @@ Default: ``false``.
 Should instances in a vpc where communicated with via internal IPs still
 have an external IP? (optional).
 
-Set to ``true`` to force VMs to be assigned an exteral IP even when
+Set to ``true`` to force VMs to be assigned an external IP even when
 ``vpc_name`` and ``use_internal_ips`` are set.
 
 Default: ``false``.
@@ -1559,4 +1559,3 @@ Valid daemon names are:
       log_level: INFO
     managed-job-status-refresh-daemon:
       log_level: WARNING
-
