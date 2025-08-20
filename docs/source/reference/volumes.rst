@@ -51,6 +51,8 @@ Quickstart
      type: k8s-pvc
      infra: kubernetes  # or k8s or k8s/context
      size: 10Gi
+     labels:
+       key: value
      config:
        namespace: default  # optional
        storage_class_name: csi-mounted-fs-path-sc  # optional

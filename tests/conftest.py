@@ -174,6 +174,12 @@ def pytest_addoption(parser):
         help='Skip tests marked as resource_heavy',
     )
     parser.addoption(
+        '--resource-heavy',
+        action='store_true',
+        default=False,
+        help='Only run tests marked as resource_heavy',
+    )
+    parser.addoption(
         '--helm-version',
         type=str,
         default='',
@@ -252,6 +258,8 @@ def pytest_collection_modifyitems(config, items):
         reason='test requires local API server')
     skip_marks['no_resource_heavy'] = pytest.mark.skip(
         reason='skipped, because --no-resource-heavy option is set')
+    skip_marks['resource_heavy'] = pytest.mark.skip(
+        reason='skipped, because --resource-heavy option is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -297,6 +305,10 @@ def pytest_collection_modifyitems(config, items):
         if 'resource_heavy' in marks and config.getoption(
                 '--no-resource-heavy'):
             item.add_marker(skip_marks['no_resource_heavy'])
+        # Skip tests not marked as resource_heavy if --resource-heavy is set
+        if 'resource_heavy' not in marks and config.getoption(
+                '--resource-heavy'):
+            item.add_marker(skip_marks['resource_heavy'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -361,13 +373,16 @@ def setup_policy_server(request, tmp_path_factory):
         yield
         return
 
-    # Only run the policy server for smoke tests.
     has_smoke_tests = False
+    has_backward_compat_test = False
     if hasattr(request.session, 'items'):
         has_smoke_tests = any(
             'smoke_tests' in item.location[0] for item in request.session.items)
+        has_backward_compat_test = any('backward_compat' in item.location[0]
+                                       for item in request.session.items)
 
-    if not has_smoke_tests:
+    # Only run the policy server for smoke tests and skip backward compatibility tests.
+    if not has_smoke_tests or has_backward_compat_test:
         yield
         return
 

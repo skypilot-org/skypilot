@@ -2021,7 +2021,15 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     if handle.cluster_yaml is None:
         # Remove cluster from db since this cluster does not have a config file
         # or any other ongoing requests
-        global_user_state.remove_cluster(cluster_name, terminate=True)
+        global_user_state.add_cluster_event(
+            cluster_name,
+            None,
+            'Cluster has no YAML file. Removing the cluster from cache.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
+        global_user_state.remove_cluster(cluster_name,
+                                         terminate=True,
+                                         remove_events=True)
         logger.debug(f'Cluster {cluster_name!r} has no YAML file. '
                      'Removing the cluster from cache.')
         return None
@@ -2162,7 +2170,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         global_user_state.add_cluster_event(
             cluster_name,
             status_lib.ClusterStatus.UP,
-            'All nodes up + ray cluster healthy.',
+            'All nodes up; SkyPilot runtime healthy.',
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
         global_user_state.add_or_update_cluster(cluster_name,
@@ -2302,9 +2310,12 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                             -1,
                             autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
                             stream_logs=False)
-                    except exceptions.CommandError as e:
+                    except (exceptions.CommandError,
+                            grpc.FutureTimeoutError) as e:
                         success = False
-                        if e.returncode == 255:
+                        if isinstance(e, grpc.FutureTimeoutError) or (
+                                isinstance(e, exceptions.CommandError) and
+                                e.returncode == 255):
                             word = 'autostopped' if noun == 'autostop' else 'autodowned'
                             logger.debug(f'The cluster is likely {word}.')
                             reset_local_autostop = False
@@ -2354,10 +2365,14 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             # are only stored for an hour by default), so it is possible that
             # the previous event has a status reason, but now it does not.
             init_reason_regex = f'^Cluster is abnormal because {init_reason} .*'
+        log_message = f'Cluster is abnormal because {init_reason}'
+        if status_reason:
+            log_message += f' ({status_reason})'
+        log_message += '. Transitioned to INIT.'
         global_user_state.add_cluster_event(
             cluster_name,
             status_lib.ClusterStatus.INIT,
-            f'Cluster is abnormal because {init_reason} ({status_reason}). Transitioned to INIT.',
+            log_message,
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True,
             duplicate_regex=init_reason_regex)
@@ -2370,10 +2385,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
     backend = backends.CloudVmRayBackend()
-    backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     global_user_state.add_cluster_event(
-        cluster_name, None, 'All nodes stopped, terminating cluster.',
+        cluster_name, None, 'All nodes terminated, cleaning up the cluster.',
         global_user_state.ClusterEventType.STATUS_CHANGE)
+    backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 

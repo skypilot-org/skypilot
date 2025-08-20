@@ -14,17 +14,26 @@ Welcome to SkyPilot!
 
 .. raw:: html
 
-   <p></p>
    <p style="text-align:center">
-   <strong>Run AI on Any Infra</strong> — Unified, Faster, Cheaper
+   <strong>Simplify & scale any AI infrastructure</strong>
    </p>
+
+   <p></p>
+
    <p style="text-align:center">
    <a class="github-button" href="https://github.com/skypilot-org/skypilot" data-show-count="true" data-size="large" aria-label="Star skypilot-org/skypilot on GitHub">Star</a>
-   <a class="github-button" href="https://github.com/skypilot-org/skypilot/subscription" data-icon="octicon-eye" data-size="large" aria-label="Watch skypilot-org/skypilot on GitHub">Watch</a>
    <a class="reference external image-reference" style="vertical-align:9.5px" href="http://slack.skypilot.co"><img src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack" style="height:27px"></a>
    <script async defer src="https://buttons.github.io/buttons.js"></script>
    </p>
 
+SkyPilot is a system for running, managing, and scaling AI workloads on any AI infrastructure.
+
+SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
+**Infra teams** get a unified control plane to manage any AI compute — with advanced scheduling, scaling, and orchestration.
+
+.. image:: ../images/skypilot-abstractions-long-2.png
+    :width: 90%
+    :align: center
 
 .. grid:: 1 1 1 1
     :gutter: 3
@@ -36,18 +45,16 @@ Welcome to SkyPilot!
 
         🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour
 
-
-
-SkyPilot is an open-source system for running AI and batch workloads on any infra.
-
+Why SkyPilot
+----------------------
 
 SkyPilot **is easy to use for AI users**:
 
-- Quickly spin up jobs on your own infra
+- Quickly spin up compute on your own infra
 - Environment and job as code --- simple and portable
-- Easy management: queue, run, and auto-recover many jobs
+- Easy job management: queue, run, and auto-recover many jobs
 
-SkyPilot **makes Kubernetes easy for AI teams**:
+SkyPilot **makes Kubernetes easy for AI & Infra teams**:
 
 - Slurm-like ease of use, cloud-native robustness
 - Local dev experience on K8s: SSH into pods, sync code, or connect IDE
@@ -197,8 +204,6 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-
-
 Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
 RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
 VMware vSphere, Nebius.
@@ -212,7 +217,7 @@ VMware vSphere, Nebius.
    </picture>
    </p>
 
-Ready to get started?
+Getting started
 ----------------------
 
 :ref:`Install SkyPilot <installation>` in 1 minute. Then, launch your first cluster in 2 minutes in :ref:`Quickstart <quickstart>`.
@@ -247,7 +252,9 @@ Learn more
 
 To learn more, see :ref:`SkyPilot Overview <overview>` and `SkyPilot blog <https://blog.skypilot.co/>`_.
 
-Case Studies and integrations: `Community Spotlights <https://blog.skypilot.co/community/>`_
+SkyPilot adopters: `Testimonials and Case Studies <https://blog.skypilot.co/case-studies/>`_
+
+Partners and integrations: `Community Spotlights <https://blog.skypilot.co/community/>`_
 
 Follow updates:
 

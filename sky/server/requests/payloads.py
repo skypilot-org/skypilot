@@ -453,6 +453,7 @@ class VolumeApplyBody(RequestBody):
     zone: Optional[str] = None
     size: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
+    labels: Optional[Dict[str, str]] = None
 
 
 class VolumeDeleteBody(RequestBody):
@@ -497,6 +498,13 @@ class JobsQueueBody(RequestBody):
     skip_finished: bool = False
     all_users: bool = False
     job_ids: Optional[List[int]] = None
+    user_match: Optional[str] = None
+    workspace_match: Optional[str] = None
+    name_match: Optional[str] = None
+    pool_match: Optional[str] = None
+    page: Optional[int] = None
+    limit: Optional[int] = None
+    statuses: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):

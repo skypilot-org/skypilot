@@ -29,6 +29,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
+    :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 24
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -37,6 +38,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`jobs <config-yaml-jobs>`:
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
+    :ref:`force_disable_cloud_bucket <config-yaml-jobs-force-disable-cloud-bucket>`: false
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
@@ -225,7 +227,7 @@ Retention period for finished requests in hours (optional). Set to a negative va
 
 Requests GC will remove request entries in `sky api status`, i.e., the logs and status of the requests. All the launched resources (clusters/jobs) will still be correctly running.
 
-Default: ``24`` (1 day).
+Default: ``24.0`` (1 day).
 
 Example:
 
@@ -233,6 +235,24 @@ Example:
 
   api_server:
     requests_retention_hours: -1 # Disable requests GC
+
+.. _config-yaml-api-server-cluster-event-retention-hours:
+
+``api_server.cluster_event_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for cluster events in hours (optional). Set to a negative value to disable cluster event GC.
+
+Cluster event GC will remove cluster event entries in `sky status -v`, i.e., the logs and status of the cluster events.
+
+Default: ``24.0`` (1 day).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    cluster_event_retention_hours: -1 # Disable cluster event GC
 
 .. _config-yaml-jobs:
 
@@ -265,6 +285,26 @@ Supported bucket types:
     # bucket: https://<azure_storage_account>.blob.core.windows.net/<container>
     # bucket: r2://my-bucket/
     # bucket: cos://<region>/<bucket>
+
+.. _config-yaml-jobs-force-disable-cloud-bucket:
+
+``jobs.force_disable_cloud_bucket``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Force-disable using a cloud bucket for storing intermediate job files (optional).
+
+If set to ``true``, SkyPilot will not use cloud object storage as an intermediate storage for files for managed jobs, even if cloud storage is available.
+
+Files will be uploaded directly to the jobs controller and downloaded on to the job nodes from there (two-hop trasnfer). Useful in environments where use of cloud buckets must be avoided.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    force_disable_cloud_bucket: true
 
 .. _config-yaml-jobs-controller:
 .. _config-yaml-jobs-controller-resources:
@@ -840,7 +880,7 @@ Default: ``false``.
 Should instances in a vpc where communicated with via internal IPs still
 have an external IP? (optional).
 
-Set to ``true`` to force VMs to be assigned an exteral IP even when
+Set to ``true`` to force VMs to be assigned an external IP even when
 ``vpc_name`` and ``use_internal_ips`` are set.
 
 Default: ``false``.
@@ -1519,4 +1559,3 @@ Valid daemon names are:
       log_level: INFO
     managed-job-status-refresh-daemon:
       log_level: WARNING
-

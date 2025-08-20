@@ -47,12 +47,15 @@ import sky
 from sky import backends
 from sky import catalog
 from sky import clouds
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import jobs as managed_jobs
 from sky import models
+from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
+from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
@@ -60,6 +63,7 @@ from sky.client.cli import git
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import requests
@@ -73,6 +77,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import directory_utils
 from sky.utils import env_options
 from sky.utils import git as git_utils
 from sky.utils import infra_utils
@@ -123,7 +128,7 @@ def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> List[dict]:
+) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
     Args:
@@ -162,7 +167,7 @@ def _get_cluster_records_and_set_ssh_config(
                     handle.cluster_name, credentials)))
             escaped_executable_path = shlex.quote(sys.executable)
             escaped_websocket_proxy_path = shlex.quote(
-                f'{sky.__root_dir__}/templates/websocket_proxy.py')
+                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
             # Instead of directly use websocket_proxy.py, we add an
             # additional proxy, so that ssh can use the head pod in the
             # cluster to jump to worker pods.
@@ -682,7 +687,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
     git_ref: Optional[str] = None,
-) -> Union[sky.Task, sky.Dag]:
+) -> Union['task_lib.Task', 'dag_lib.Dag']:
     """Creates a task or a dag from an entrypoint with overrides.
 
     Returns:
@@ -745,8 +750,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
             f'If you see this, please file an issue; tasks: {dag.tasks}')
         task = dag.tasks[0]
     else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
-        task.set_resources({sky.Resources()})
+        task = task_lib.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({resources_lib.Resources()})
         # env update has been done for DAG in load_chain_dag_from_yaml for YAML.
         task.update_envs(env)
         task.update_secrets(secret)
@@ -769,7 +774,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     return task
 
 
-def _update_task_workdir(task: sky.Task, workdir: Optional[str],
+def _update_task_workdir(task: task_lib.Task, workdir: Optional[str],
                          git_url: Optional[str], git_ref: Optional[str]):
     """Updates the task workdir.
 
@@ -797,7 +802,7 @@ def _update_task_workdir(task: sky.Task, workdir: Optional[str],
     return
 
 
-def _update_task_workdir_and_secrets_from_workdir(task: sky.Task):
+def _update_task_workdir_and_secrets_from_workdir(task: task_lib.Task):
     """Updates the task secrets from the workdir.
 
     Args:
@@ -1108,7 +1113,7 @@ def launch(
         git_url=git_url,
         git_ref=git_ref,
     )
-    if isinstance(task_or_dag, sky.Dag):
+    if isinstance(task_or_dag, dag_lib.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky launch'))
     task = task_or_dag
@@ -1342,7 +1347,7 @@ def exec(
         git_ref=git_ref,
     )
 
-    if isinstance(task_or_dag, sky.Dag):
+    if isinstance(task_or_dag, dag_lib.Dag):
         raise click.UsageError('YAML specifies a DAG, while `sky exec` '
                                'supports a single task only.')
     task = task_or_dag
@@ -1562,7 +1567,7 @@ def _status_kubernetes(show_all: bool):
 
 
 def _show_endpoint(query_clusters: Optional[List[str]],
-                   cluster_records: List[Dict[str, Any]], ip: bool,
+                   cluster_records: List[responses.StatusResponse], ip: bool,
                    endpoints: bool, endpoint: Optional[int]) -> None:
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
@@ -2171,6 +2176,10 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 
 @cli.command()
 @flags.config_option(expose_value=False)
+@click.option('--provision',
+              is_flag=True,
+              default=False,
+              help='Stream the cluster provisioning logs (provision.log).')
 @click.option(
     '--sync-down',
     '-s',
@@ -2207,6 +2216,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
+    provision: bool,
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2236,6 +2246,11 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
     """
+    if provision and (sync_down or status or job_ids):
+        raise click.UsageError(
+            '--provision cannot be combined with job log options '
+            '(--sync-down/--status/job IDs).')
+
     if sync_down and status:
         raise click.UsageError(
             'Both --sync_down and --status are specified '
@@ -2247,6 +2262,10 @@ def logs(
             '\nPass -s/--sync-down to download the logs instead.')
 
     job_ids = None if not job_ids else job_ids
+
+    if provision:
+        # Stream provision logs
+        sys.exit(sdk.tail_provision_logs(cluster, follow=follow, tail=tail))
 
     if sync_down:
         with rich_utils.client_status(
@@ -4440,9 +4459,9 @@ def jobs_launch(
         git_ref=git_ref,
     )
 
-    if not isinstance(task_or_dag, sky.Dag):
-        assert isinstance(task_or_dag, sky.Task), task_or_dag
-        with sky.Dag() as dag:
+    if not isinstance(task_or_dag, dag_lib.Dag):
+        assert isinstance(task_or_dag, task_lib.Task), task_or_dag
+        with dag_lib.Dag() as dag:
             dag.add(task_or_dag)
             dag.name = task_or_dag.name
     else:
@@ -4786,7 +4805,7 @@ def pool():
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@click.option('--pool-name',
+@click.option('--pool',
               '-p',
               default=None,
               type=str,
@@ -4808,7 +4827,7 @@ def pool():
 @usage_lib.entrypoint
 def jobs_pool_apply(
     pool_yaml: Tuple[str, ...],
-    pool_name: Optional[str],
+    pool: Optional[str],  # pylint: disable=redefined-outer-name
     workdir: Optional[str],
     infra: Optional[str],
     cloud: Optional[str],
@@ -4841,11 +4860,11 @@ def jobs_pool_apply(
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
-    if pool_name is None:
-        pool_name = serve_lib.generate_service_name(pool=True)
+    if pool is None:
+        pool = serve_lib.generate_service_name(pool=True)
 
     task = _generate_task_with_service(
-        service_name=pool_name,
+        service_name=pool,
         service_yaml_args=pool_yaml,
         workdir=workdir,
         cloud=cloud,
@@ -4878,11 +4897,11 @@ def jobs_pool_apply(
     click.secho(
         'Each pool worker will use the following resources (estimated):',
         fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = managed_jobs.pool_apply(task,
-                                         pool_name,
+                                         pool,
                                          mode=serve_lib.UpdateMode(mode),
                                          _need_confirmation=not yes)
     _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
@@ -5120,7 +5139,7 @@ def _handle_serve_logs(
 @usage_lib.entrypoint
 # TODO(tian): Add default argument for this CLI if none of the flags are
 # specified.
-def pool_logs(
+def jobs_pool_logs(
     pool_name: str,
     follow: bool,
     controller: bool,
@@ -5202,7 +5221,7 @@ def _generate_task_with_service(
         network_tier: Optional[str],
         not_supported_cmd: str,
         pool: bool,  # pylint: disable=redefined-outer-name
-) -> sky.Task:
+) -> task_lib.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
     yaml_name = 'SERVICE_YAML' if not pool else 'POOL_YAML'
@@ -5232,7 +5251,7 @@ def _generate_task_with_service(
         network_tier=network_tier,
         ports=ports,
     )
-    if isinstance(task, sky.Dag):
+    if isinstance(task, dag_lib.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command=not_supported_cmd))
 
@@ -5418,7 +5437,7 @@ def serve_up(
 
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = serve_lib.up(task, service_name, _need_confirmation=not yes)
@@ -5521,7 +5540,7 @@ def serve_update(
 
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = serve_lib.update(task,
@@ -6037,7 +6056,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
     # server accepts log_path-only streaming.
     req_id = (server_common.RequestId[None](request_id)
               if request_id is not None else None)
-    sdk.stream_and_get(req_id, log_path, tail, follow=follow)
+    sdk.stream_and_get(req_id, log_path, tail, follow)
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)

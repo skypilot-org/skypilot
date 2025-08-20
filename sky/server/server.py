@@ -83,6 +83,8 @@ else:
 
 P = ParamSpec('P')
 
+_SERVER_USER_HASH_KEY = 'server_user_hash'
+
 
 def _add_timestamp_prefix_for_server_logs() -> None:
     server_logger = sky_logging.init_logger('sky.server')
@@ -792,8 +794,6 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     ctx.override_envs(validate_body.env_vars)
 
     def validate_dag(dag: dag_utils.dag_lib.Dag):
-        # Resolve the volumes before admin policy and validation.
-        dag.resolve_and_validate_volumes()
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
@@ -802,6 +802,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         with admin_policy_utils.apply_and_use_config_in_current_request(
                 dag,
                 request_options=validate_body.get_request_options()) as dag:
+            dag.resolve_and_validate_volumes()
             # Skip validating workdir and file_mounts, as those need to be
             # validated after the files are uploaded to the SkyPilot API server
             # with `upload_mounts_to_api_server`.
@@ -1233,7 +1234,8 @@ async def download_logs(
 
 
 @app.post('/download')
-async def download(download_body: payloads.DownloadBody) -> None:
+async def download(download_body: payloads.DownloadBody,
+                   request: fastapi.Request) -> None:
     """Downloads a folder from the cluster to the local machine."""
     folder_paths = [
         pathlib.Path(folder_path) for folder_path in download_body.folder_paths
@@ -1262,7 +1264,16 @@ async def download(download_body: payloads.DownloadBody) -> None:
             str(folder_path.expanduser().resolve())
             for folder_path in folder_paths
         ]
-        storage_utils.zip_files_and_folders(folders, zip_path)
+        # Check for optional query parameter to control zip entry structure
+        relative = request.query_params.get('relative', 'home')
+        if relative == 'items':
+            # Dashboard-friendly: entries relative to selected folders
+            storage_utils.zip_files_and_folders(folders,
+                                                zip_path,
+                                                relative_to_items=True)
+        else:
+            # CLI-friendly (default): entries with full paths for mapping
+            storage_utils.zip_files_and_folders(folders, zip_path)
 
         # Add home path to the response headers, so that the client can replace
         # the remote path in the zip file to the local path.
@@ -1282,6 +1293,46 @@ async def download(download_body: payloads.DownloadBody) -> None:
     except Exception as e:
         raise fastapi.HTTPException(status_code=500,
                                     detail=f'Error creating zip file: {str(e)}')
+
+
+@app.post('/provision_logs')
+async def provision_logs(cluster_body: payloads.ClusterNameBody,
+                         follow: bool = True,
+                         tail: int = 0) -> fastapi.responses.StreamingResponse:
+    """Streams the provision.log for the latest launch request of a cluster."""
+    # Prefer clusters table first, then cluster_history as fallback.
+    log_path_str = global_user_state.get_cluster_provision_log_path(
+        cluster_body.cluster_name)
+    if not log_path_str:
+        log_path_str = global_user_state.get_cluster_history_provision_log_path(
+            cluster_body.cluster_name)
+    if not log_path_str:
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=('Provision log path is not recorded for this cluster. '
+                    'Please relaunch to generate provisioning logs.'))
+
+    log_path = pathlib.Path(log_path_str).expanduser().resolve()
+    if not log_path.exists():
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=f'Provision log path does not exist: {str(log_path)}')
+
+    # Tail semantics: 0 means print all lines. Convert 0 -> None for streamer.
+    effective_tail = None if tail is None or tail <= 0 else tail
+
+    return fastapi.responses.StreamingResponse(
+        content=stream_utils.log_streamer(None,
+                                          log_path,
+                                          tail=effective_tail,
+                                          follow=follow),
+        media_type='text/plain',
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no',
+            'Transfer-Encoding': 'chunked',
+        },
+    )
 
 
 @app.post('/cost_report')
@@ -1541,13 +1592,7 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
     Returns:
-        A dictionary with the following keys:
-        - status: str; The status of the API server.
-        - api_version: str; The API version of the API server.
-        - version: str; The version of SkyPilot used for API server.
-        - version_on_disk: str; The version of the SkyPilot installation on
-          disk, which can be used to warn about restarting the API server
-        - commit: str; The commit hash of SkyPilot used for API server.
+        responses.APIHealthResponse: The health response.
     """
     user = request.state.auth_user
     server_status = common.ApiServerStatus.HEALTHY
@@ -1607,7 +1652,10 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
-    cluster_records = core.status(cluster_name, all_users=True)
+    # Run core.status in another thread to avoid blocking the event loop.
+    cluster_records = await context_utils.to_thread(core.status,
+                                                    cluster_name,
+                                                    all_users=True)
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         raise fastapi.HTTPException(
@@ -1775,6 +1823,35 @@ async def root():
     return fastapi.responses.RedirectResponse(url='/dashboard/')
 
 
+def _init_or_restore_server_user_hash():
+    """Restores the server user hash from the global user state db.
+
+    The API server must have a stable user hash across restarts and potential
+    multiple replicas. Thus we persist the user hash in db and restore it on
+    startup. When upgrading from old version, the user hash will be read from
+    the local file (if any) to keep the user hash consistent.
+    """
+
+    def apply_user_hash(user_hash: str) -> None:
+        # For local API server, the user hash in db and local file should be
+        # same so there is no harm to override here.
+        common_utils.set_user_hash_locally(user_hash)
+        # Refresh the server user hash for current process after restore or
+        # initialize the user hash in db, child processes will get the correct
+        # server id from the local cache file.
+        common_lib.refresh_server_id()
+
+    user_hash = global_user_state.get_system_config(_SERVER_USER_HASH_KEY)
+    if user_hash is not None:
+        apply_user_hash(user_hash)
+        return
+
+    # Initial deployment, generate a user hash and save it to the db.
+    user_hash = common_utils.get_user_hash()
+    global_user_state.set_system_config(_SERVER_USER_HASH_KEY, user_hash)
+    apply_user_hash(user_hash)
+
+
 if __name__ == '__main__':
     import uvicorn
 
@@ -1784,6 +1861,8 @@ if __name__ == '__main__':
     global_user_state.initialize_and_get_db()
     # Initialize request db
     requests_lib.reset_db_and_logs()
+    # Restore the server user hash
+    _init_or_restore_server_user_hash()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')
@@ -1815,6 +1894,9 @@ if __name__ == '__main__':
             global_tasks.append(background.create_task(metrics_server.serve()))
         global_tasks.append(
             background.create_task(requests_lib.requests_gc_daemon()))
+        global_tasks.append(
+            background.create_task(
+                global_user_state.cluster_event_retention_daemon()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)
