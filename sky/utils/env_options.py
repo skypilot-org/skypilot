@@ -24,6 +24,9 @@ class Options(enum.Enum):
     # running in a Buildkite container environment, which requires special
     # handling for networking between containers.
     RUNNING_IN_BUILDKITE = ('BUILDKITE', False)
+    # Internal: This is used for testing to enable grpc for communication
+    # between the API server and the Skylet.
+    ENABLE_GRPC = ('SKYPILOT_ENABLE_GRPC', False)
 
     def __init__(self, env_var: str, default: bool) -> None:
         super().__init__()

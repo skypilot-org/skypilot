@@ -74,12 +74,27 @@ install_requires = [
     'aiohttp',
 ]
 
+# See requirements-dev.txt for the version of grpc and protobuf
+# used to generate the code during development.
+
+# The grpc version at runtime has to be newer than the version
+# used to generate the code.
+GRPC = 'grpcio>=1.63.0'
+# >= 5.26.1 because the runtime version can't be older than the version
+# used to generate the code.
+# < 7.0.0 because code generated for a major version V will be supported by
+# protobuf runtimes of version V and V+1.
+# https://protobuf.dev/support/cross-version-runtime-guarantee
+PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
+
 server_dependencies = [
     'casbin',
     'sqlalchemy_adapter',
     'passlib',
     'pyjwt',
     'aiohttp',
+    GRPC,
+    PROTOBUF,
 ]
 
 local_ray = [
@@ -90,18 +105,9 @@ local_ray = [
     'ray[default] >= 2.2.0, != 2.6.0',
 ]
 
-# See requirements-dev.txt for the version of grpc and protobuf
-# used to generate the code during development.
 remote = [
-    # The grpc version at runtime has to be newer than the version
-    # used to generate the code.
-    'grpcio>=1.63.0',
-    # >= 5.26.1 because the runtime version can't be older than the version
-    # used to generate the code.
-    # < 7.0.0 because code generated for a major version V will be supported by
-    # protobuf runtimes of version V and V+1.
-    # https://protobuf.dev/support/cross-version-runtime-guarantee
-    'protobuf >= 5.26.1, < 7.0.0',
+    GRPC,
+    PROTOBUF,
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the

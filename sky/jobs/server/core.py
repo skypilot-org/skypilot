@@ -190,7 +190,6 @@ def launch(
 
     dag_uuid = str(uuid.uuid4().hex[:4])
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag.resolve_and_validate_volumes()
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
@@ -203,6 +202,7 @@ def launch(
                  ipaddress.ip_address(parsed.hostname).is_loopback)):
                 mutated_user_config.pop('db', None)
 
+    dag.resolve_and_validate_volumes()
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
