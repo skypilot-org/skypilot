@@ -38,14 +38,14 @@ class GameEnvironment:
         """Execute action and return next state, done flag."""
         self.steps += 1
         next_state = np.random.randn(self.state_dim)
-        
+
         # Episode ends when reaching max steps
         done = self.steps >= self.max_steps
-        
+
         # Add 1% chance of early termination (simulating task completion or failure)
         if not done and np.random.random() < 0.01:
             done = True
-            
+
         return next_state, done
 
 
@@ -75,15 +75,15 @@ class GameServer:
         self.current_state = self.env.reset()
         self.stats["current_episode_steps"] = 0
         return self.current_state
-    
+
     def step(self, action):
         """Execute an action and return the new state."""
         # Execute action in environment
         self.current_state, done = self.env.step(action)
-        
+
         self.stats["total_steps"] += 1
         self.stats["current_episode_steps"] += 1
-        
+
         if done:
             self.stats["episodes"] += 1
             print(f"Episode {self.stats['episodes']} completed "
@@ -91,7 +91,7 @@ class GameServer:
             # Auto-reset for next episode
             self.current_state = self.env.reset()
             self.stats["current_episode_steps"] = 0
-        
+
         return {
             "state": self.current_state.tolist(),
             "done": done,
@@ -142,7 +142,9 @@ def main():
     parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--server-id",
                         default=f"game-server-{uuid.uuid4().hex[:8]}")
-    parser.add_argument("--max-steps", type=int, default=100,
+    parser.add_argument("--max-steps",
+                        type=int,
+                        default=100,
                         help="Maximum steps per episode (default: 100)")
     args = parser.parse_args()
 
