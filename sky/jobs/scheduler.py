@@ -147,7 +147,7 @@ def start_controller() -> None:
 
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
     run_controller_cmd = (f'{sys.executable} -u -m'
-                          'sky.jobs.controller')
+                          'sky.jobs.controller new')
 
     run_cmd = (f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')

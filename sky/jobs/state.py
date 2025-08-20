@@ -233,8 +233,8 @@ def _init_db_async(func):
                 return await func(*args, **kwargs)
             except (sqlalchemy_exc.OperationalError,
                     asyncio.exceptions.TimeoutError, OSError,
-                    sqlalchemy.exc.TimeoutError, sqlite3.OperationalError,
-                    sqlalchemy.exc.InterfaceError, sqlite3.InterfaceError) as e:
+                    sqlalchemy_exc.TimeoutError, sqlite3.OperationalError,
+                    sqlalchemy_exc.InterfaceError, sqlite3.InterfaceError) as e:
                 last_exc = e
             logger.debug(f'DB error: {last_exc}')
             await asyncio.sleep(backoff.current_backoff())
@@ -261,8 +261,8 @@ def _init_db(func):
                 return func(*args, **kwargs)
             except (sqlalchemy_exc.OperationalError,
                     asyncio.exceptions.TimeoutError, OSError,
-                    sqlalchemy.exc.TimeoutError, sqlite3.OperationalError,
-                    sqlalchemy.exc.InterfaceError, sqlite3.InterfaceError) as e:
+                    sqlalchemy_exc.TimeoutError, sqlite3.OperationalError,
+                    sqlalchemy_exc.InterfaceError, sqlite3.InterfaceError) as e:
                 last_exc = e
             logger.debug(f'DB error: {last_exc}')
             time.sleep(backoff.current_backoff())
@@ -573,6 +573,17 @@ def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
             return ret
         else:
             raise ValueError('Unsupported database dialect')
+
+
+@_init_db
+def update_job_to_new(job_id: int):
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.update(job_info_table).where(
+                job_info_table.c.spot_job_id == job_id).values(
+                    schedule_state=ManagedJobScheduleState.WAITING_NEW.value))
+        session.commit()
 
 
 @_init_db
