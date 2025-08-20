@@ -14,12 +14,6 @@ from typing import Dict, Optional, Set, Tuple
 import dotenv
 import psutil
 
-# This import ensures backward compatibility. Controller processes may not have
-# imported this module initially, but will attempt to import it during job
-# termination on the fly. If a job was launched with an old SkyPilot runtime
-# and a new job is launched with a newer runtime, the old job's termination
-# will try to import code from a different SkyPilot runtime, causing exceptions.
-# pylint: disable=unused-import
 import sky
 from sky import core
 from sky import exceptions
