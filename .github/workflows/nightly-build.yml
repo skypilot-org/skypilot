@@ -15,11 +15,6 @@ on:
         default: false
         type: boolean
 
-permissions:
-  contents: write
-  pages: write
-  actions: write
-
 jobs:
   check-date:
     runs-on: ubuntu-latest
