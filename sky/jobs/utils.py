@@ -5,12 +5,9 @@ jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
 import asyncio
-from asyncio import events
 import collections
-import contextvars
 import datetime
 import enum
-import functools
 import logging
 import os
 import pathlib
@@ -35,7 +32,6 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
-from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -43,6 +39,7 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
@@ -267,7 +264,7 @@ async def get_job_status(
     FAILED_SETUP or CANCELLED.
     """
     # TODO(luca) make this async
-    handle = await managed_job_utils.to_thread(
+    handle = await context_utils.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
     if handle is None:
         # This can happen if the cluster was preempted and background status
@@ -279,10 +276,10 @@ async def get_job_status(
     for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
         try:
             job_logger.info('=== Checking the job status... ===')
-            statuses = await managed_job_utils.to_thread(backend.get_job_status,
-                                                         handle,
-                                                         job_ids=job_ids,
-                                                         stream_logs=False)
+            statuses = await context_utils.to_thread(backend.get_job_status,
+                                                     handle,
+                                                     job_ids=job_ids,
+                                                     stream_logs=False)
             status = list(statuses.values())[0]
             if status is None:
                 job_logger.info('No job found.')
@@ -635,7 +632,7 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
 
         # In async context
         async def async_callback_func(status: str):
-            return await to_thread(callback_func, status)
+            return await context_utils.to_thread(callback_func, status)
 
         return async_callback_func
     except RuntimeError:
@@ -1987,17 +1984,3 @@ class ManagedJobCodeGen:
             f'export {constants.USER_ID_ENV_VAR}='
             f'"{common_utils.get_user_hash()}"; '
             f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}')
-
-
-async def to_thread(func, /, *args, **kwargs):
-    """This is an identical copy of asyncio.to_thread, however,
-    asyncio.to_thread was added in python 3.9, so we use this for compatibility
-    for 3.7 and 3.8.
-
-    For full documentation, see:
-    https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread
-    """
-    loop = events.get_running_loop()
-    ctx = contextvars.copy_context()
-    func_call = functools.partial(ctx.run, func, *args, **kwargs)
-    return await loop.run_in_executor(None, func_call)

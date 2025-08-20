@@ -42,7 +42,6 @@ from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
-from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger('sky.jobs.controller')
@@ -225,8 +224,8 @@ class JobsController:
         if cluster_name is None:
             return
         if self._pool is None:
-            await managed_job_utils.to_thread(
-                managed_job_utils.terminate_cluster, cluster_name)
+            await context_utils.to_thread(managed_job_utils.terminate_cluster,
+                                          cluster_name)
 
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
@@ -463,7 +462,7 @@ class JobsController:
                 self._logger.info(f'Task {task_id} succeeded! '
                                   'Getting end time and cleaning up')
                 try:
-                    success_end_time = await managed_job_utils.to_thread(
+                    success_end_time = await context_utils.to_thread(
                         managed_job_utils.try_to_get_job_end_time,
                         self._backend, cluster_name, job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
@@ -486,7 +485,7 @@ class JobsController:
                 try:
                     logger.info(f'Downloading logs on cluster {cluster_name} '
                                 f'and job id {job_id_on_pool_cluster}.')
-                    clusters = await managed_job_utils.to_thread(
+                    clusters = await context_utils.to_thread(
                         backend_utils.get_clusters,
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
@@ -496,7 +495,7 @@ class JobsController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        await managed_job_utils.to_thread(
+                        await context_utils.to_thread(
                             self._download_log_and_stream, task_id, handle,
                             job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
@@ -563,7 +562,7 @@ class JobsController:
                     # The user code has probably crashed, fail immediately.
                     self._logger.info(
                         f'Task {task_id} failed with status: {job_status}')
-                    end_time = await managed_job_utils.to_thread(
+                    end_time = await context_utils.to_thread(
                         managed_job_utils.try_to_get_job_end_time,
                         self._backend, cluster_name, job_id_on_pool_cluster)
                     self._logger.info(
@@ -571,9 +570,9 @@ class JobsController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    await managed_job_utils.to_thread(
-                        self._download_log_and_stream, task_id, handle,
-                        job_id_on_pool_cluster)
+                    await context_utils.to_thread(self._download_log_and_stream,
+                                                  task_id, handle,
+                                                  job_id_on_pool_cluster)
 
                     failure_reason = (
                         'To see the details, run: '
@@ -890,7 +889,7 @@ class Controller:
         for task in dag.tasks:
             # most things in this function are blocking
             try:
-                await managed_job_utils.to_thread(task_cleanup, task, job_id)
+                await context_utils.to_thread(task_cleanup, task, job_id)
             except Exception as e:  # pylint: disable=broad-except
                 error = e
 
@@ -1132,7 +1131,7 @@ class Controller:
 
             # Check if there are any jobs that are waiting to launch
             try:
-                waiting_job = await managed_job_state.get_waiting_job(
+                waiting_job = await managed_job_state.get_waiting_job_async(
                     pid=-os.getpid())
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Failed to get waiting job: {e}')
