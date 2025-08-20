@@ -15,6 +15,10 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   check-date:
     runs-on: ubuntu-latest
@@ -38,6 +42,18 @@ jobs:
             # For manual dispatches, always run
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Cancel workflow early (scheduled run with no recent commits)
+        if: ${{ github.event_name == 'schedule' && steps.compute_should_run.outputs.should_run == 'false' }}
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            core.info('Cancelling workflow: SHOULD_RUN=false for scheduled run.');
+            await github.rest.actions.cancelWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId
+            });
 
   gate-tests:
     runs-on: ubuntu-latest
@@ -204,7 +220,7 @@ jobs:
 
   publish-and-validate-both:
     needs: [gate-tests, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-remote-server, backward-compat-test]
-    if: ${{ needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-remote-server.result == 'success' && needs.backward-compat-test.result == 'success') }}
+    if: ${{ always() && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-remote-server.result == 'success' && needs.backward-compat-test.result == 'success')) }}
     uses: ./.github/workflows/publish-and-validate-both.yml
     with:
       package_name: skypilot-nightly
