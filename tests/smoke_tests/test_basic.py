@@ -331,20 +331,23 @@ def test_aws_manual_restart_recovery():
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=180),
-            # Wait for the instance state to be updated on AWS' side.
-            'sleep 30',
             # Restart the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                cmd=
-                (f'id=`aws ec2 describe-instances --region {region} --filters '
-                 f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
-                 f'--query Reservations[].Instances[].InstanceId '
-                 f'--output text` && '
-                 f'aws ec2 start-instances --region {region} '
-                 f'--instance-ids $id && '
-                 f'aws ec2 wait instance-running --region {region} '
-                 f'--instance-ids $id'),
+                cmd=(
+                    f'id=`aws ec2 describe-instances --region {region} --filters '
+                    f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+                    f'--query Reservations[].Instances[].InstanceId '
+                    f'--output text` && '
+                    # Wait for the instance to be stopped before restarting.
+                    f'aws ec2 wait instance-stopped --region {region} '
+                    f'--instance-ids $id && '
+                    # Start the instance.
+                    f'aws ec2 start-instances --region {region} '
+                    f'--instance-ids $id && '
+                    # Wait for the instance to be running.
+                    f'aws ec2 wait instance-running --region {region} '
+                    f'--instance-ids $id'),
                 skip_remote_server_check=True),
             # Status refresh should time out, as the restarted
             # instance would get a new IP address.
