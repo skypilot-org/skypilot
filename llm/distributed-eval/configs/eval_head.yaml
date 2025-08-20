@@ -20,7 +20,7 @@ setup: |
   source .venv/bin/activate
   
   # Install dependencies
-  uv pip install fastapi uvicorn numpy websockets aiofiles
+  uv pip install fastapi uvicorn numpy websockets aiofiles aiohttp
   
   # Install PyTorch CPU version (using pip directly for compatibility)
   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
@@ -46,6 +46,7 @@ run: |
   python src/eval_head.py \
     --port 8080 \
     --game-server-prefix ${GAME_SERVER_PREFIX:-game-server} \
+    --game-server-port ${GAME_SERVER_PORT:-8081} \
     --checkpoint-bucket ${CHECKPOINT_BUCKET:-none}
 
 
@@ -57,3 +58,4 @@ secrets:
 envs:
   CHECKPOINT_BUCKET: none
   GAME_SERVER_PREFIX: null
+  GAME_SERVER_PORT: 8081  # Port where game servers listen

@@ -6,16 +6,16 @@ A scalable system for distributed AI model evaluation using SkyPilot. The system
 
 ```
 ┌─────────────────┐
-│   Eval Head     │  ← Batch inference, auto-discovery
-│   (1 node)      │    Web dashboard at :8080
-└────────┬────────┘
+│   Eval Head     │  ← Auto-discovers game servers via sky.endpoints()
+│   (1 node)      │    Sends actions to control game simulations
+└────────┬────────┘    Web dashboard at :8080
          │
     ┌────┴────┬──────────┬─────────┐
     ↓         ↓          ↓         ↓
 ┌─────────┐ ┌─────────┐ ┌─────────┐
 │ Game    │ │ Game    │ │ Game    │  ← Simulation servers
-│ Server  │ │ Server  │ │ Server  │    Auto-discovered by prefix
-└─────────┘ └─────────┘ └─────────┘
+│ Server  │ │ Server  │ │ Server  │    Wait for actions on port 8081
+└─────────┘ └─────────┘ └─────────┘    Controlled by eval head
 ```
 
 ## Features
@@ -41,15 +41,9 @@ sky launch -c eval-head configs/eval_head.yaml \
   --secret SKYPILOT_API_SERVER_ENDPOINT \
   --secret SKYPILOT_API_SERVER_SERVICE_ACCOUNT_TOKEN
 
-# Get the eval head endpoint for game servers (IP:port format)
-EVAL_HEAD_ENDPOINT=http://$(sky status --endpoint eval-head 8080)
-
-# Launch game servers as clusters
-sky launch -c exp-game-1 configs/game_server.yaml \
-  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
-
-sky launch -c exp-game-2 configs/game_server.yaml \
-  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
+# Launch game servers (eval head will auto-discover them)
+sky launch -c exp-game-1 configs/game_server.yaml
+sky launch -c exp-game-2 configs/game_server.yaml
 ```
 
 The eval head will automatically discover all clusters and services with the matching prefix through the API server.
@@ -63,13 +57,9 @@ Deploy game servers as SkyServe services for automatic failover and scaling usin
 sky launch -c eval-head configs/eval_head.yaml \
   --env GAME_SERVER_PREFIX=exp-game
 
-# Get the eval head endpoint
-EVAL_HEAD_ENDPOINT=$(sky status --endpoint eval-head 8080)
-
 # Deploy game servers as SkyServe services (with autoscaling and failover)
 # Note: Uses the same game_server.yaml - the service field is used by sky serve
-sky serve up -n exp-game-svc configs/game_server.yaml \
-  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
+sky serve up -n exp-game-svc configs/game_server.yaml
 ```
 
 SkyServe provides:
@@ -87,15 +77,9 @@ For local development or simple deployments without auto-discovery:
 sky launch -c eval-head configs/eval_head.yaml \
   --env GAME_SERVER_PREFIX=exp-game
 
-# Get the eval head endpoint
-EVAL_HEAD_ENDPOINT=$(sky status --endpoint eval-head 8080)
-
-# Launch game servers with eval head endpoint
-sky launch -c exp-game-1 configs/game_server.yaml \
-  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
-
-sky launch -c exp-game-2 configs/game_server.yaml \
-  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
+# Launch game servers (eval head will auto-discover them)
+sky launch -c exp-game-1 configs/game_server.yaml
+sky launch -c exp-game-2 configs/game_server.yaml
 ```
 
 ### 3. Monitor the System

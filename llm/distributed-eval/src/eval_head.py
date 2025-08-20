@@ -26,6 +26,7 @@ import uvicorn
 # Try importing sky for cluster discovery
 try:
     import sky
+    from sky.client import sdk_async
     from sky.utils import status_lib
     SKY_AVAILABLE = True
 except ImportError:
@@ -62,7 +63,8 @@ class EvaluationHead:
     """
     
     def __init__(self, model_path: str = None, batch_size: int = 32, 
-                 game_server_prefix: str = "game-server"):
+                 game_server_prefix: str = "game-server",
+                 game_server_port: int = 8081):
         # Load or create model
         self.model = DemoModel()
         if model_path:
@@ -80,6 +82,7 @@ class EvaluationHead:
         
         # Game server discovery
         self.game_server_prefix = game_server_prefix
+        self.game_server_port = game_server_port
         self.discovered_servers = {}  # cluster_name -> info
         
         # Statistics
@@ -90,8 +93,15 @@ class EvaluationHead:
             "requests_per_second": 0.0,
             "avg_batch_size": 0.0,
             "avg_latency_ms": 0.0,
-            "start_time": datetime.now()
+            "start_time": datetime.now(),
+            "active_episodes": 0  # Track number of active episodes
         }
+        
+        # Track active episodes per server to prevent negative counts
+        self.active_episodes_per_server = {}
+        
+        # Track which servers are being controlled to prevent duplicates
+        self.controlled_servers = set()
         
         # Response storage
         self.responses = {}
@@ -117,8 +127,8 @@ class EvaluationHead:
         try:
             game_servers = []
             
-            # Get all clusters using correct SDK
-            clusters = sky.stream_and_get(sky.status())
+            # Get all clusters using async SDK
+            clusters = await sdk_async.status()
             
             # Filter for game servers from clusters
             for cluster in clusters:
@@ -129,58 +139,73 @@ class EvaluationHead:
                         "status": cluster['status'].value if hasattr(cluster['status'], 'value') else str(cluster['status']),
                         "cloud": cluster.get('cloud', 'unknown'),
                         "region": cluster.get('region', 'unknown'),
-                        "resources": cluster.get('resources_str', 'unknown')
+                        "resources": cluster.get('resources_str', 'unknown'),
+                        "endpoint": None
                     }
                     
-                    # Get IP if cluster is UP
+                    # Get endpoint if cluster is UP
                     if SKY_AVAILABLE and status_lib:
                         if cluster.get('status') == status_lib.ClusterStatus.UP:
-                            # Try to get IP from handle if available
-                            handle = cluster.get('handle')
-                            if handle and hasattr(handle, 'head_ip'):
-                                server_info['ip'] = handle.head_ip
-                            else:
-                                server_info['ip'] = None
+                            try:
+                                # Get the endpoint for game server port using async SDK
+                                print(f"  Getting endpoint for {cluster['name']} port {self.game_server_port}...")
+                                endpoints = await sdk_async.endpoints(cluster['name'], port=self.game_server_port)
+                                print(f"  Endpoints returned: {endpoints}")
+                                port_str = str(self.game_server_port)
+                                if endpoints and port_str in endpoints:
+                                    server_info['endpoint'] = endpoints[port_str]
+                                    print(f"  ✓ Found endpoint for {cluster['name']}: {server_info['endpoint']}")
+                                    
+                                    # Start controlling this game server if not already controlled
+                                    if cluster['name'] not in self.controlled_servers:
+                                        self.controlled_servers.add(cluster['name'])
+                                        asyncio.create_task(self.control_game_server(server_info))
+                                else:
+                                    print(f"  ✗ No endpoint found for port {port_str} in {endpoints}")
+                            except Exception as e:
+                                print(f"  ✗ Could not get endpoint for {cluster['name']}: {e}")
+                                server_info['endpoint'] = None
                         else:
-                            server_info['ip'] = None
+                            server_info['endpoint'] = None
                     else:
-                        server_info['ip'] = None
+                        server_info['endpoint'] = None
                     
                     game_servers.append(server_info)
             
             # Also check SkyServe services
             try:
-                import sky.serve as serve
+                from sky.serve.client import sdk_async as serve_async
                 
-                # Get all services by passing None for service_names
-                services = serve.status(service_names=None)
+                # Get all services by passing None for service_names using async SDK
+                services = await serve_async.status(service_names=None)
                 
-                # Filter for game servers from services
-                for service in services:
-                    if service['name'].startswith(self.game_server_prefix):
-                        server_info = {
-                            "name": service['name'],
-                            "type": "service",
-                            "status": service.get('status', 'unknown'),
-                            "replicas": service.get('active_replicas', 0),
-                            "endpoint": service.get('endpoint', None)
-                        }
-                        
-                        # For services, we get the endpoint URL instead of IP
-                        if server_info['endpoint']:
-                            # Extract host from endpoint URL if it's a full URL
-                            import urllib.parse
-                            parsed = urllib.parse.urlparse(server_info['endpoint'])
-                            server_info['ip'] = parsed.hostname if parsed.hostname else server_info['endpoint']
-                        else:
-                            server_info['ip'] = None
-                        
-                        game_servers.append(server_info)
+                # services is a list of service records
+                if services:
+                    for service in services:
+                        if service.get('name', '').startswith(self.game_server_prefix):
+                            server_info = {
+                                "name": service['name'],
+                                "type": "service",
+                                "status": str(service.get('status', 'unknown')),
+                                "replicas": len(service.get('replica_info', [])),
+                                "endpoint": service.get('endpoint', None)
+                            }
+                            
+                            # For services, we get the endpoint URL
+                            if server_info['endpoint']:
+                                # Start controlling this game server if not already controlled
+                                if service['name'] not in self.controlled_servers:
+                                    self.controlled_servers.add(service['name'])
+                                    asyncio.create_task(self.control_game_server(server_info))
+                            
+                            game_servers.append(server_info)
                         
             except ImportError:
                 print("Note: SkyServe not available for service discovery")
             except Exception as e:
-                print(f"Note: Could not check SkyServe services: {e}")
+                # Only print if it's a real error, not just no services
+                if "No service" not in str(e):
+                    print(f"Note: Could not check SkyServe services: {e}")
             
             # Update discovered servers
             self.discovered_servers = {s["name"]: s for s in game_servers}
@@ -191,11 +216,144 @@ class EvaluationHead:
                     endpoint_str = server.get('endpoint', 'No endpoint')
                     print(f"  - {server['name']} (service): {endpoint_str} ({server.get('replicas', 0)} replicas)")
                 else:
-                    ip_str = server['ip'] if server['ip'] else 'IP not available'
-                    print(f"  - {server['name']} (cluster): {ip_str} ({server['status']})")
+                    endpoint_str = server.get('endpoint', 'No endpoint')
+                    print(f"  - {server['name']} (cluster): {endpoint_str} ({server['status']})")
                 
         except Exception as e:
             print(f"Error discovering game servers: {e}")
+    
+    async def control_game_server(self, server_info):
+        """Control a game server by sending actions to drive the simulation."""
+        import aiohttp
+        
+        server_name = server_info['name']
+        endpoint = server_info.get('endpoint')
+        
+        if not endpoint:
+            print(f"No endpoint for {server_name}, skipping control")
+            return
+            
+        # Ensure endpoint has http:// prefix
+        if not endpoint.startswith('http'):
+            endpoint = f'http://{endpoint}'
+            
+        print(f"Starting to control game server: {server_name} at {endpoint}")
+        
+        # Initialize episode tracking for this server
+        self.active_episodes_per_server[server_name] = False
+        
+        # Control the game server continuously
+        while server_name in self.discovered_servers:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    # Reset the game environment
+                    print(f"  Resetting {server_name}...")
+                    async with session.post(f'{endpoint}/reset', 
+                                           timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        if response.status == 200:
+                            reset_data = await response.json()
+                            state = np.array(reset_data['state'])
+                            print(f"  Reset successful for {server_name}, starting episode")
+                            
+                            # Track active episode for this server
+                            if not self.active_episodes_per_server.get(server_name, False):
+                                self.active_episodes_per_server[server_name] = True
+                                self.stats["active_episodes"] += 1
+                            
+                            # Run one episode
+                            done = False
+                            steps = 0
+                            while not done and steps < 1000:  # Safety limit
+                                # Get action from model
+                                with torch.no_grad():
+                                    state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+                                    action = self.model(state_tensor).squeeze().numpy()
+                                
+                                # Send action to game server
+                                try:
+                                    async with session.post(f'{endpoint}/step', 
+                                                           json={"action": action.tolist()},
+                                                           timeout=aiohttp.ClientTimeout(total=60)) as step_response:
+                                        if step_response.status == 200:
+                                            step_data = await step_response.json()
+                                            state = np.array(step_data['state'])
+                                            done = step_data['done']
+                                            
+                                            # Update metrics
+                                            if server_name not in self.server_metrics:
+                                                self.server_metrics[server_name] = {
+                                                    "requests": 0,
+                                                    "last_seen": datetime.now(),
+                                                    "avg_latency": 0,
+                                                    "episodes": 0,
+                                                    "total_steps": 0
+                                                }
+                                            
+                                            self.server_metrics[server_name].update({
+                                                "episodes": step_data.get('episode', 0),
+                                                "total_steps": step_data.get('total_steps', 0),
+                                                "last_seen": datetime.now(),
+                                                "requests": self.server_metrics[server_name]["requests"] + 1
+                                            })
+                                            
+                                            # Register the server as connected
+                                            self.stats["connected_servers"].add(server_name)
+                                            self.stats["total_requests"] += 1
+                                            self.request_count_since_update += 1
+                                            
+                                            steps += 1
+                                            
+                                            # Small delay to not overwhelm the server
+                                            await asyncio.sleep(0.01)  # Reduced from 0.1 to 0.01 for faster evaluation
+                                        else:
+                                            print(f"Error in step for {server_name}: HTTP {step_response.status} (episode interrupted at step {steps})")
+                                            done = True  # Force episode to end
+                                            break
+                                except asyncio.TimeoutError:
+                                    print(f"Timeout in step for {server_name} (episode interrupted at step {steps})")
+                                    done = True  # Force episode to end
+                                    break
+                                except Exception as e:
+                                    print(f"Exception in step for {server_name}: {e} (episode interrupted at step {steps})")
+                                    done = True  # Force episode to end
+                                    break
+                            
+                            # Episode complete - decrement active episodes for this server
+                            if self.active_episodes_per_server.get(server_name, False):
+                                self.active_episodes_per_server[server_name] = False
+                                self.stats["active_episodes"] = max(0, self.stats["active_episodes"] - 1)
+                            
+                            # Get episode number from server metrics
+                            episode_num = self.server_metrics.get(server_name, {}).get("episodes", 0)
+                            print(f"Completed episode #{episode_num} for {server_name}: {steps} steps")
+                        else:
+                            print(f"  Failed to reset {server_name}: HTTP {response.status}")
+                            await asyncio.sleep(5)
+                                        
+            except aiohttp.ClientConnectorError as e:
+                print(f"Cannot connect to {server_name} at {endpoint}: {e}")
+                # Only decrement if this server had an active episode
+                if self.active_episodes_per_server.get(server_name, False):
+                    self.active_episodes_per_server[server_name] = False
+                    self.stats["active_episodes"] = max(0, self.stats["active_episodes"] - 1)
+                await asyncio.sleep(10)  # Wait longer before retrying connection
+            except Exception as e:
+                print(f"Error controlling {server_name}: {e}")
+                # Only decrement if this server had an active episode
+                if self.active_episodes_per_server.get(server_name, False):
+                    self.active_episodes_per_server[server_name] = False
+                    self.stats["active_episodes"] = max(0, self.stats["active_episodes"] - 1)
+                await asyncio.sleep(5)  # Wait before retrying
+        
+        # Clean up when server is no longer discovered
+        if server_name in self.active_episodes_per_server:
+            if self.active_episodes_per_server[server_name]:
+                self.stats["active_episodes"] = max(0, self.stats["active_episodes"] - 1)
+            del self.active_episodes_per_server[server_name]
+        
+        # Remove from controlled servers set
+        self.controlled_servers.discard(server_name)
+        print(f"Stopped controlling {server_name}")
     
     async def discovery_loop(self):
         """Periodically discover new game servers."""
@@ -277,11 +435,12 @@ class EvaluationHead:
             self.metrics_history.append({
                 "timestamp": datetime.now().isoformat(),
                 "requests_per_second": self.stats["requests_per_second"],
-                "queue_size": len(self.pending_requests),
+                "queue_size": self.stats["active_episodes"],  # Now tracks active episodes
                 "connected_servers": len(self.stats["connected_servers"]),
                 "discovered_servers": len(self.discovered_servers),
                 "avg_batch_size": self.stats["avg_batch_size"],
-                "avg_latency_ms": self.stats["avg_latency_ms"]
+                "avg_latency_ms": self.stats["avg_latency_ms"],
+                "active_episodes": self.stats["active_episodes"]
             })
             
             # Reset counters
@@ -304,12 +463,13 @@ class EvaluationHead:
                 "current": {
                     "total_requests": self.stats["total_requests"],
                     "total_batches": self.stats["total_batches"],
-                    "queue_size": len(self.pending_requests),
+                    "queue_size": self.stats["active_episodes"],  # Now shows active episodes
                     "connected_servers": len(self.stats["connected_servers"]),
                     "discovered_servers": len(self.discovered_servers),
                     "requests_per_second": round(self.stats["requests_per_second"], 2),
                     "avg_batch_size": round(self.stats["avg_batch_size"], 2),
-                    "avg_latency_ms": round(self.stats["avg_latency_ms"], 2)
+                    "avg_latency_ms": round(self.stats["avg_latency_ms"], 2),
+                    "active_episodes": self.stats["active_episodes"]
                 },
                 "discovered": list(self.discovered_servers.values()),
                 "active": [
@@ -348,11 +508,13 @@ async def lifespan(app: FastAPI):
     
     # Get configuration from environment or defaults
     game_server_prefix = os.environ.get("GAME_SERVER_PREFIX", "game-server")
+    game_server_port = int(os.environ.get("GAME_SERVER_PORT", "8081"))
     checkpoint_bucket = os.environ.get("CHECKPOINT_BUCKET", None)
     
     eval_head = EvaluationHead(
         model_path=None,  # Could load from checkpoint_bucket
-        game_server_prefix=game_server_prefix
+        game_server_prefix=game_server_prefix,
+        game_server_port=game_server_port
     )
     
     # Start background tasks
@@ -364,6 +526,7 @@ async def lifespan(app: FastAPI):
     
     print(f"✓ Evaluation head started")
     print(f"  Game server prefix: {game_server_prefix}")
+    print(f"  Game server port: {game_server_port}")
     if checkpoint_bucket:
         print(f"  Checkpoint bucket: {checkpoint_bucket}")
     
@@ -439,8 +602,9 @@ async def get_discovered_servers():
 @app.post("/discover")
 async def trigger_discovery():
     """Manually trigger game server discovery."""
-    await eval_head.discover_game_servers()
-    return {"discovered": len(eval_head.discovered_servers)}
+    # Run discovery in background to avoid blocking
+    asyncio.create_task(eval_head.discover_game_servers())
+    return {"discovered": len(eval_head.discovered_servers), "status": "discovery started"}
 
 
 @app.websocket("/ws")
@@ -484,12 +648,16 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--game-server-prefix", default="game-server",
                         help="Prefix for game server cluster names")
+    parser.add_argument("--game-server-port", type=int, default=8081,
+                        help="Port where game servers are listening")
     parser.add_argument("--checkpoint-bucket", help="S3/GCS bucket for checkpoints")
     args = parser.parse_args()
     
     # Set environment variables for startup handler
     if args.game_server_prefix:
         os.environ["GAME_SERVER_PREFIX"] = args.game_server_prefix
+    if args.game_server_port:
+        os.environ["GAME_SERVER_PORT"] = str(args.game_server_port)
     if args.checkpoint_bucket:
         os.environ["CHECKPOINT_BUCKET"] = args.checkpoint_bucket
     
@@ -500,6 +668,7 @@ def main():
     ║  Port: {args.port:<32}║
     ║  Batch Size: {args.batch_size:<26}║
     ║  Server Prefix: {args.game_server_prefix:<23}║
+    ║  Server Port: {args.game_server_port:<25}║
     ║  Auto-Discovery: {'Enabled' if SKY_AVAILABLE else 'Disabled':<22}║
     ╚════════════════════════════════════════╝
     """)

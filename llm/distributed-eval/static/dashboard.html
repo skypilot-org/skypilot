@@ -212,6 +212,42 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }
         
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .pagination button {
+            padding: 6px 12px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9em;
+        }
+        
+        .pagination button:hover:not(:disabled) {
+            background: #e9ecef;
+            border-color: #adb5bd;
+        }
+        
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .pagination .page-info {
+            padding: 0 10px;
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        
         .server-item {
             display: flex;
             justify-content: space-between;
@@ -308,8 +344,8 @@
                 </div>
             </div>
             <div class="card">
-                <h2>Queue Size</h2>
-                <div class="value" id="queueSize">0</div>
+                <h2>Active Episodes</h2>
+                <div class="value" id="activeEpisodes">0</div>
             </div>
             <div class="card">
                 <h2>Discovered Servers</h2>
@@ -338,7 +374,7 @@
         <div class="servers-section">
             <div class="servers-list">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h2 style="margin: 0;">🔍 Discovered Clusters</h2>
+                    <h2 style="margin: 0;">🔍 Discovered Clusters/Services</h2>
                     <a id="skyPilotDashboardLink" href="#" target="_blank" class="refresh-btn" style="text-decoration: none; display: inline-block; font-size: 0.9em; padding: 8px 16px;">
                         🌐 SkyPilot Dashboard
                     </a>
@@ -373,28 +409,32 @@
                 <ol>
                     <li>
                         <strong>Start the Evaluation Head:</strong>
-                        <pre><code># With API server for auto-discovery
+                        <pre><code># Start with auto-discovery enabled
 sky launch -c eval-head configs/eval_head.yaml \
-  --env GAME_SERVER_PREFIX=exp-game</code></pre>
+  --env GAME_SERVER_PREFIX=exp-game \
+  --env GAME_SERVER_PORT=8081</code></pre>
                     </li>
                     <li>
-                        <strong>Get the Eval Head Endpoint:</strong>
-                        <pre><code>EVAL_HEAD_ENDPOINT=$(sky status --endpoint eval-head 8080)</code></pre>
+                        <strong>Access the Dashboard:</strong>
+                        <pre><code># Get the dashboard URL
+sky status --endpoint eval-head 8080
+
+# Open in browser: http://&lt;endpoint&gt;/dashboard</code></pre>
                     </li>
                     <li>
                         <strong>Launch Game Servers:</strong>
-                        <pre><code># Option A: As regular clusters
-sky launch -c exp-game-1 configs/game_server.yaml \
-  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
+                        <pre><code># Option A: As regular clusters (no eval head endpoint needed!)
+sky launch -c exp-game-1 configs/game_server.yaml
+sky launch -c exp-game-2 configs/game_server.yaml
+sky launch -c exp-game-3 configs/game_server.yaml
 
-# Option B: As SkyServe services (with autoscaling)
-# Note: Same YAML file - service config is used by sky serve
-sky serve up -n exp-game-svc configs/game_server.yaml \
-  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT</code></pre>
+# Option B: As SkyServe service (with autoscaling)
+sky serve up -n exp-game-svc configs/game_server.yaml</code></pre>
                     </li>
                     <li>
                         <strong>Monitor Status:</strong>
-                        <pre><code>sky status  # Check all clusters</code></pre>
+                        <pre><code>sky status         # Check all clusters
+sky serve status   # Check services</code></pre>
                     </li>
                 </ol>
                 
@@ -403,19 +443,25 @@ sky serve up -n exp-game-svc configs/game_server.yaml \
                 <pre><code># Restart eval head
 sky cancel -ay eval-head
 sky exec eval-head configs/eval_head.yaml \
-  --env GAME_SERVER_PREFIX=exp-game
+  --env GAME_SERVER_PREFIX=exp-game \
+  --env GAME_SERVER_PORT=8081
 
-# Restart game server
+# Restart game servers
 sky cancel -ay exp-game-1
-sky exec exp-game-1 configs/game_server.yaml \
-  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT</code></pre>
+sky exec exp-game-1 configs/game_server.yaml
+
+# For services
+sky serve update exp-game-svc configs/game_server.yaml</code></pre>
                 
                 <div style="margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px; border-left: 4px solid #2196f3;">
                     <strong>💡 Tips:</strong>
                     <ul style="margin: 10px 0 0 20px;">
-                        <li>Both clusters and SkyServe services with prefix <code>exp-game-*</code> are auto-discovered</li>
-                        <li>SkyServe provides automatic failover and autoscaling (1-5 replicas)</li>
-                        <li>The dashboard auto-refreshes every 30 seconds</li>
+                        <li>Game servers are auto-discovered - no need to pass eval head endpoint!</li>
+                        <li>Both clusters and SkyServe services with prefix <code>exp-game-*</code> are discovered</li>
+                        <li>Episodes have randomized lengths (±30% variation + 1% early termination)</li>
+                        <li>The eval head actively controls game servers via HTTP endpoints</li>
+                        <li>SkyServe provides automatic failover and autoscaling</li>
+                        <li>The dashboard auto-refreshes with real-time metrics</li>
                         <li>Discovery checks for new clusters/services every 30 seconds</li>
                         <li>Game servers can run on spot instances for 70-90% cost savings</li>
                     </ul>
@@ -455,7 +501,7 @@ sky exec exp-game-1 configs/game_server.yaml \
                         yAxisID: 'y',
                     },
                     {
-                        label: 'Queue Size',
+                        label: 'Active Episodes',
                         data: [],
                         borderColor: 'rgb(96, 165, 250)',
                         backgroundColor: 'rgba(96, 165, 250, 0.1)',
@@ -502,6 +548,13 @@ sky exec exp-game-1 configs/game_server.yaml \
         let ws;
         const maxDataPoints = 60;
         
+        // Pagination state
+        const itemsPerPage = 5;
+        let discoveredPage = 1;
+        let activePage = 1;
+        let discoveredData = [];
+        let activeData = [];
+        
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
@@ -525,34 +578,49 @@ sky exec exp-game-1 configs/game_server.yaml \
             };
         }
         
-        function updateDashboard(data) {
-            // Update metrics
-            document.getElementById('totalRequests').textContent = data.current.total_requests.toLocaleString();
-            document.getElementById('requestsPerSecond').textContent = data.current.requests_per_second.toFixed(1);
-            document.getElementById('queueSize').textContent = data.current.queue_size;
-            document.getElementById('discoveredServers').textContent = data.current.discovered_servers;
-            document.getElementById('avgLatency').textContent = data.current.avg_latency_ms.toFixed(1);
+        function createPagination(currentPage, totalItems, itemsPerPage, onPageChange) {
+            const totalPages = Math.ceil(totalItems / itemsPerPage);
+            if (totalPages <= 1) return '';
             
-            // Count active servers
-            const activeCount = data.active ? data.active.filter(s => s.status === 'active').length : 0;
-            document.getElementById('activeServers').textContent = activeCount;
-            
-            // Update chart
-            if (data.history && data.history.length > 0) {
-                const labels = data.history.slice(-maxDataPoints).map(h => 
-                    new Date(h.timestamp).toLocaleTimeString([], { minute: '2-digit', second: '2-digit' })
-                );
-                
-                performanceChart.data.labels = labels;
-                performanceChart.data.datasets[0].data = data.history.slice(-maxDataPoints).map(h => h.requests_per_second);
-                performanceChart.data.datasets[1].data = data.history.slice(-maxDataPoints).map(h => h.queue_size);
-                performanceChart.update('none');
+            return `
+                <div class="pagination">
+                    <button onclick="${onPageChange}(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+                        ← Previous
+                    </button>
+                    <span class="page-info">
+                        Page ${currentPage} of ${totalPages} (${totalItems} items)
+                    </span>
+                    <button onclick="${onPageChange}(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>
+                        Next →
+                    </button>
+                </div>
+            `;
+        }
+        
+        function changeDiscoveredPage(page) {
+            const totalPages = Math.ceil(discoveredData.length / itemsPerPage);
+            if (page >= 1 && page <= totalPages) {
+                discoveredPage = page;
+                renderDiscoveredServers();
             }
-            
-            // Update discovered servers list
+        }
+        
+        function changeActivePage(page) {
+            const totalPages = Math.ceil(activeData.length / itemsPerPage);
+            if (page >= 1 && page <= totalPages) {
+                activePage = page;
+                renderActiveServers();
+            }
+        }
+        
+        function renderDiscoveredServers() {
             const discoveredList = document.getElementById('discoveredList');
-            if (data.discovered && data.discovered.length > 0) {
-                discoveredList.innerHTML = data.discovered.map(server => {
+            const startIdx = (discoveredPage - 1) * itemsPerPage;
+            const endIdx = startIdx + itemsPerPage;
+            const pageData = discoveredData.slice(startIdx, endIdx);
+            
+            if (pageData.length > 0) {
+                discoveredList.innerHTML = pageData.map(server => {
                     let typeLabel = '';
                     let detailInfo = '';
                     
@@ -561,7 +629,9 @@ sky exec exp-game-1 configs/game_server.yaml \
                         detailInfo = `${server.endpoint || 'No endpoint'} | ${server.replicas || 0} replicas`;
                     } else {
                         typeLabel = '☁️ Cluster';
-                        detailInfo = `${server.ip || 'N/A'} | ${server.status}`;
+                        // Fix: Show just status instead of "N/A | status"
+                        const statusText = server.status || 'UP';
+                        detailInfo = server.ip ? `${server.ip} | ${statusText}` : statusText;
                     }
                     
                     return `
@@ -576,15 +646,20 @@ sky exec exp-game-1 configs/game_server.yaml \
                             </div>
                         </div>
                     `;
-                }).join('');
+                }).join('') + createPagination(discoveredPage, discoveredData.length, itemsPerPage, 'changeDiscoveredPage');
             } else {
                 discoveredList.innerHTML = '<div style="text-align: center; opacity: 0.5; padding: 20px;">No clusters or services discovered yet</div>';
             }
-            
-            // Update active servers list with interaction status
+        }
+        
+        function renderActiveServers() {
             const activeList = document.getElementById('activeList');
-            if (data.active && data.active.length > 0) {
-                activeList.innerHTML = data.active.map(server => {
+            const startIdx = (activePage - 1) * itemsPerPage;
+            const endIdx = startIdx + itemsPerPage;
+            const pageData = activeData.slice(startIdx, endIdx);
+            
+            if (pageData.length > 0) {
+                activeList.innerHTML = pageData.map(server => {
                     // Parse the timestamp and calculate seconds since last seen
                     const lastSeenDate = new Date(server.last_seen);
                     const now = new Date();
@@ -633,9 +708,56 @@ sky exec exp-game-1 configs/game_server.yaml \
                             </div>
                         </div>
                     `;
-                }).join('');
+                }).join('') + createPagination(activePage, activeData.length, itemsPerPage, 'changeActivePage');
             } else {
                 activeList.innerHTML = '<div style="text-align: center; opacity: 0.5; padding: 20px;">No game servers have connected yet</div>';
+            }
+        }
+        
+        function updateDashboard(data) {
+            // Update metrics
+            document.getElementById('totalRequests').textContent = data.current.total_requests.toLocaleString();
+            document.getElementById('requestsPerSecond').textContent = data.current.requests_per_second.toFixed(1);
+            document.getElementById('activeEpisodes').textContent = data.current.active_episodes || data.current.queue_size || 0;
+            document.getElementById('discoveredServers').textContent = data.current.discovered_servers;
+            document.getElementById('avgLatency').textContent = data.current.avg_latency_ms.toFixed(1);
+            
+            // Count active servers
+            const activeCount = data.active ? data.active.filter(s => s.status === 'active').length : 0;
+            document.getElementById('activeServers').textContent = activeCount;
+            
+            // Update chart
+            if (data.history && data.history.length > 0) {
+                const labels = data.history.slice(-maxDataPoints).map(h => 
+                    new Date(h.timestamp).toLocaleTimeString([], { minute: '2-digit', second: '2-digit' })
+                );
+                
+                performanceChart.data.labels = labels;
+                performanceChart.data.datasets[0].data = data.history.slice(-maxDataPoints).map(h => h.requests_per_second);
+                performanceChart.data.datasets[1].data = data.history.slice(-maxDataPoints).map(h => h.queue_size);
+                performanceChart.update('none');
+            }
+            
+            // Update discovered servers data and render
+            if (data.discovered) {
+                discoveredData = data.discovered;
+                // Reset to page 1 if current page would be out of bounds
+                const maxPage = Math.ceil(discoveredData.length / itemsPerPage);
+                if (discoveredPage > maxPage && maxPage > 0) {
+                    discoveredPage = 1;
+                }
+                renderDiscoveredServers();
+            }
+            
+            // Update active servers data and render
+            if (data.active) {
+                activeData = data.active;
+                // Reset to page 1 if current page would be out of bounds
+                const maxPage = Math.ceil(activeData.length / itemsPerPage);
+                if (activePage > maxPage && maxPage > 0) {
+                    activePage = 1;
+                }
+                renderActiveServers();
             }
         }
         

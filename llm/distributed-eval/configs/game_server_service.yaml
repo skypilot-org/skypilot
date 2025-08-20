@@ -1,18 +1,27 @@
 # This YAML works with both:
-# - `sky launch` for regular clusters
+# - `sky serve up` for SkyServe deployments (service field is used)
 
 name: game-server
 
+service:
+  # Readiness probe to check if the game server is healthy
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 30
+  
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 1
+    dynamic_ondemand_fallback: true
+
 resources:
-  cpus: 1+
-  memory: 1+
+  cpus: 4+
+  memory: 8+
   # Optional GPU for more complex simulations
   # accelerators: T4:1
   
   # Use spot instances for cost savings
-  any_of:
-    - use_spot: true
-    - use_spot: false
+  use_spot: true
 
   # Open port for management API
   ports:

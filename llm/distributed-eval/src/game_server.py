@@ -12,7 +12,6 @@ import uuid
 
 from fastapi import FastAPI
 import numpy as np
-import requests
 import uvicorn
 
 
@@ -21,21 +20,32 @@ class GameEnvironment:
     Simple game environment for demonstration.
     """
 
-    def __init__(self):
+    def __init__(self, max_steps=100):
         self.state_dim = 100
         self.action_dim = 10
-        self.max_steps = 20  # Reduced from 100 to make episodes quicker
+        self.base_max_steps = max_steps  # Base episode length
+        self.max_steps = max_steps  # Actual max steps for current episode
 
     def reset(self):
         """Reset environment and return initial state."""
         self.steps = 0
+        # Add some randomness to episode length (±30% variation)
+        variation = np.random.uniform(0.7, 1.3)
+        self.max_steps = int(self.base_max_steps * variation)
         return np.random.randn(self.state_dim)
 
     def step(self, action):
         """Execute action and return next state, done flag."""
         self.steps += 1
         next_state = np.random.randn(self.state_dim)
+        
+        # Episode ends when reaching max steps
         done = self.steps >= self.max_steps
+        
+        # Add 1% chance of early termination (simulating task completion or failure)
+        if not done and np.random.random() < 0.01:
+            done = True
+            
         return next_state, done
 
 
@@ -47,10 +57,9 @@ class GameServer:
     3. Executes returned actions
     """
 
-    def __init__(self, server_id: str, eval_head_url: Optional[str] = None):
+    def __init__(self, server_id: str, max_steps: int = 100):
         self.server_id = server_id
-        self.eval_head_url = eval_head_url
-        self.env = GameEnvironment()
+        self.env = GameEnvironment(max_steps=max_steps)
 
         # Statistics
         self.stats = {
@@ -61,77 +70,34 @@ class GameServer:
 
         self.running = False
 
-    def get_action(self, state):
-        """Get action from evaluation head or use random action."""
-        if not self.eval_head_url:
-            # No eval head - use random actions
-            return np.random.randn(self.env.action_dim) * 0.1
-
-        try:
-            # Request action from evaluation head
-            url = f"{self.eval_head_url}/evaluate"
-            request_data = {
-                "server_id": self.server_id,
-                "state": state.tolist(),
-                "request_id": str(uuid.uuid4())
-            }
-            response = requests.post(url, json=request_data, timeout=5.0)
-
-            if response.status_code == 200:
-                # Successfully got action from eval head
-                return np.array(response.json()["action"])
-            else:
-                print(f"Error from eval head: {response.status_code} - "
-                      f"{response.text}")
-                return np.random.randn(self.env.action_dim) * 0.1
-
-        except Exception as e:
-            print(f"Failed to get action: {e}")
-            return np.random.randn(self.env.action_dim) * 0.1
-
-    async def run_episode(self):
-        """Run one episode of the game."""
-        state = self.env.reset()
+    def reset(self):
+        """Reset the environment and return initial state."""
+        self.current_state = self.env.reset()
         self.stats["current_episode_steps"] = 0
-
-        while True:
-            # Get action from evaluation head
-            action = self.get_action(state)
-
-            # Execute action in environment
-            state, done = self.env.step(action)
-
-            self.stats["total_steps"] += 1
-            self.stats["current_episode_steps"] += 1
-
-            if done:
-                self.stats["episodes"] += 1
-                print(f"Episode {self.stats['episodes']} completed "
-                      f"({self.stats['current_episode_steps']} steps)")
-                break
-
-            # Delay to simulate real game computation time
-            await asyncio.sleep(0.5)  # 500ms per step for more realistic simulation
-
-    async def game_loop(self):
-        """Main game loop - runs episodes continuously."""
-        self.running = True
-        print(f"🎮 Starting game loop for {self.server_id}")
-        print(f"📡 Eval head URL: {self.eval_head_url}")
-
-        while self.running:
-            await self.run_episode()
-
-            # Every 10 episodes, log connection status
-            if self.stats["episodes"] % 10 == 0:
-                if self.eval_head_url:
-                    print(f"📊 Status: {self.stats['episodes']} episodes, "
-                          f"{self.stats['total_steps']} total steps sent to "
-                          f"{self.eval_head_url}")
-                else:
-                    print(f"📊 Status: {self.stats['episodes']} episodes, "
-                          f"{self.stats['total_steps']} total steps (no eval head)")
-            await asyncio.sleep(2.0)  # 2 second pause between episodes
+        return self.current_state
+    
+    def step(self, action):
+        """Execute an action and return the new state."""
+        # Execute action in environment
+        self.current_state, done = self.env.step(action)
+        
+        self.stats["total_steps"] += 1
+        self.stats["current_episode_steps"] += 1
+        
+        if done:
+            self.stats["episodes"] += 1
+            print(f"Episode {self.stats['episodes']} completed "
+                  f"({self.stats['current_episode_steps']} steps)")
+            # Auto-reset for next episode
+            self.current_state = self.env.reset()
+            self.stats["current_episode_steps"] = 0
+        
+        return {
+            "state": self.current_state.tolist(),
+            "done": done,
+            "episode": self.stats["episodes"],
+            "total_steps": self.stats["total_steps"]
+        }
 
 
 # Create FastAPI app
@@ -139,27 +105,24 @@ app = FastAPI(title="Game Server")
 game_server = None
 
 
-@app.post("/start")
-async def start_game():
-    """Start the game loop."""
-    if not game_server.running:
-        asyncio.create_task(game_server.game_loop())
-        return {"status": "started"}
-    return {"status": "already running"}
+@app.post("/reset")
+async def reset_game():
+    """Reset the game environment and return initial state."""
+    state = game_server.reset()
+    return {
+        "state": state.tolist(),
+        "server_id": game_server.server_id,
+        "episode": game_server.stats["episodes"]
+    }
 
 
-@app.post("/stop")
-async def stop_game():
-    """Stop the game loop."""
-    game_server.running = False
-    return {"status": "stopped"}
-
-
-@app.post("/set_eval_head")
-async def set_eval_head(request: dict):
-    """Set the evaluation head URL."""
-    game_server.eval_head_url = request["url"]
-    return {"status": "updated", "url": game_server.eval_head_url}
+@app.post("/step")
+async def step_game(request: dict):
+    """Execute an action and return the new state."""
+    action = np.array(request["action"])
+    result = game_server.step(action)
+    result["server_id"] = game_server.server_id
+    return result
 
 
 @app.get("/stats")
@@ -179,15 +142,13 @@ def main():
     parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--server-id",
                         default=f"game-server-{uuid.uuid4().hex[:8]}")
-    parser.add_argument("--eval-head-url", help="URL of evaluation head")
-    parser.add_argument("--auto-start",
-                        action="store_true",
-                        help="Start game loop automatically")
+    parser.add_argument("--max-steps", type=int, default=100,
+                        help="Maximum steps per episode (default: 100)")
     args = parser.parse_args()
 
     # Initialize global game server with command line args
     global game_server
-    game_server = GameServer(args.server_id, args.eval_head_url)
+    game_server = GameServer(args.server_id, max_steps=args.max_steps)
 
     print(f"""
     ╔═════════════════════════════════════╗
@@ -195,34 +156,15 @@ def main():
     ╠═════════════════════════════════════╣
     ║  Server ID: {args.server_id:<24}║
     ║  Port: {args.port:<29}║
-    ║  Eval Head: {args.eval_head_url or 'Not connected':<25}║
-    ╚═════════════════════════════════════╝
+    ║  Max Steps: {args.max_steps:<24}║
+    ║  Mode: {'Eval Head Controlled':<29}║
+    ╚═════════════════════════════════════════╝
+    
+    Waiting for eval head to send actions...
     """)
 
-    if args.auto_start:
-        # Start game loop automatically
-        async def auto_start():
-            await asyncio.sleep(2)  # Wait for server to be ready
-            print("✓ Auto-starting game loop")
-            await game_server.game_loop()
-
-        # Run server and game loop together
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        config = uvicorn.Config(app,
-                                host="0.0.0.0",
-                                port=args.port,
-                                log_level="warning")
-        server = uvicorn.Server(config)
-
-        # Run both server and game loop
-        loop.create_task(server.serve())
-        loop.create_task(auto_start())
-        loop.run_forever()
-    else:
-        # Just run the server
-        uvicorn.run(app, host="0.0.0.0", port=args.port)
+    # Just run the server - eval head will control it
+    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="info")
 
 
 if __name__ == "__main__":
