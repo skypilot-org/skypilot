@@ -98,6 +98,7 @@ def maybe_remove_container_cmds(container_name, docker_cmd):
     ]
     return ' '.join(docker_rm)
 
+
 def docker_start_cmds(
     image,
     container_name,
@@ -301,7 +302,7 @@ class DockerInitializer:
                 'sudo systemctl restart docker; } || true')
             user_docker_run_options = self.docker_config.get('run_options', [])
             remove_container_cmd = maybe_remove_container_cmds(
-                self.container_name, 
+                self.container_name,
                 self.docker_cmd,
             )
             start_command = docker_start_cmds(
