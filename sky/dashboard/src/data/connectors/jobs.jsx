@@ -22,6 +22,7 @@ export async function getManagedJobs(options = {}) {
       poolMatch,
       page,
       limit,
+      statuses,
     } = options;
 
     const body = {
@@ -34,6 +35,7 @@ export async function getManagedJobs(options = {}) {
     if (poolMatch !== undefined) body.pool_match = poolMatch;
     if (page !== undefined) body.page = page;
     if (limit !== undefined) body.limit = limit;
+    if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
 
     const response = await apiClient.post(`/jobs/queue`, body);
     const id = response.headers.get('X-Skypilot-Request-ID');
@@ -64,6 +66,8 @@ export async function getManagedJobs(options = {}) {
     const total = Array.isArray(parsed)
       ? managedJobs.length
       : (parsed?.total ?? managedJobs.length);
+    const totalNoFilter = parsed?.total_no_filter || total;
+    const statusCounts = parsed?.status_counts || {};
 
     // Process jobs data
     const jobData = managedJobs.map((job) => {
@@ -127,6 +131,7 @@ export async function getManagedJobs(options = {}) {
 
       return {
         id: job.job_id,
+        task_job_id: job._job_id,
         task: job.task_name,
         name: job.job_name,
         job_duration: job.job_duration,
@@ -158,10 +163,22 @@ export async function getManagedJobs(options = {}) {
       };
     });
 
-    return { jobs: jobData, total, controllerStopped: false };
+    return {
+      jobs: jobData,
+      total,
+      totalNoFilter,
+      controllerStopped: false,
+      statusCounts,
+    };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
-    return { jobs: [], total: 0, controllerStopped: false };
+    return {
+      jobs: [],
+      total: 0,
+      totalNoFilter: 0,
+      controllerStopped: false,
+      statusCounts: {},
+    };
   }
 }
 

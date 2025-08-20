@@ -311,6 +311,7 @@ export function ManagedJobsTable({
 }) {
   const [data, setData] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [totalNoFilter, setTotalNoFilter] = useState(0);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -323,6 +324,7 @@ export function ManagedJobsTable({
   const expandedRowRef = useRef(null);
   const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [statusCounts, setStatusCounts] = useState({});
+  const [apiStatusCounts, setApiStatusCounts] = useState({});
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -371,12 +373,31 @@ export function ManagedJobsTable({
           );
           return f && f.value ? String(f.value) : undefined;
         };
+        // Determine statuses parameter based on current state
+        let statusesParam = undefined;
+
+        // If specific statuses are selected, use those
+        if (selectedStatuses.length > 0) {
+          statusesParam = selectedStatuses;
+        } else if (!showAllMode) {
+          // If not in "show all" mode but no specific statuses selected, show no jobs
+          statusesParam = [];
+        } else if (activeTab === 'active') {
+          // Show all active jobs
+          statusesParam = statusGroups.active;
+        } else if (activeTab === 'finished') {
+          // Show all finished jobs
+          statusesParam = statusGroups.finished;
+        }
+        // For activeTab === 'all' and showAllMode === true, don't set statuses (show all jobs)
+
         const params = {
           allUsers: true,
           nameMatch: getFilterValue('name'),
           userMatch: getFilterValue('user'),
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
+          statuses: statusesParam,
           page: currentPage, // page index starting from 1
           limit: pageSize,
         };
@@ -403,8 +424,10 @@ export function ManagedJobsTable({
         const {
           jobs = [],
           total = 0,
+          totalNoFilter = 0,
           controllerStopped = false,
           cacheStatus = 'unknown',
+          statusCounts = {},
         } = jobsResponse || {};
 
         let isControllerStopped = !!controllerStopped;
@@ -426,8 +449,10 @@ export function ManagedJobsTable({
 
         setData(jobs);
         setTotalCount(total || 0);
+        setTotalNoFilter(totalNoFilter || 0);
         setControllerStopped(!!isControllerStopped);
         setControllerLaunching(!!isLaunching);
+        setApiStatusCounts(statusCounts);
         setIsInitialLoad(false);
 
         // Log cache status for debugging
@@ -438,6 +463,7 @@ export function ManagedJobsTable({
             isDataLoading,
             jobCount: jobs.length,
             totalCount: total,
+            totalNoFilter: totalNoFilter,
           });
         }
       } catch (err) {
@@ -451,7 +477,15 @@ export function ManagedJobsTable({
         setLoading(false); // Clear parent loading state
       }
     },
-    [setLoading, filters, currentPage, pageSize]
+    [
+      setLoading,
+      filters,
+      currentPage,
+      pageSize,
+      selectedStatuses,
+      showAllMode,
+      activeTab,
+    ]
   );
 
   // Expose fetchData to parent component
@@ -481,6 +515,11 @@ export function ManagedJobsTable({
   React.useEffect(() => {
     fetchData({ includeStatus: true });
   }, [filters, pageSize]);
+
+  // Fetch on status filter changes (activeTab, selectedStatuses, showAllMode)
+  React.useEffect(() => {
+    fetchData({ includeStatus: true });
+  }, [activeTab, selectedStatuses, showAllMode]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -555,30 +594,10 @@ export function ManagedJobsTable({
     return statusGroups[activeTab].includes(status);
   };
 
-  // Filter data based on filters and selected statuses
+  // Server already applied all filters including status filtering
   const filteredData = React.useMemo(() => {
-    // Server already applied name/user/workspace/pool filters.
-    let filtered = data;
-
-    // If specific statuses are selected, show jobs with any of those statuses
-    if (selectedStatuses.length > 0) {
-      return filtered.filter((item) => selectedStatuses.includes(item.status));
-    }
-
-    // If no statuses are selected but we're in "show all" mode
-    if (showAllMode) {
-      // Show all jobs if activeTab is 'all', otherwise filter by active/finished
-      if (activeTab === 'all') {
-        return filtered; // Show all jobs regardless of status
-      }
-      return filtered.filter((item) =>
-        statusGroups[activeTab].includes(item.status)
-      );
-    }
-
-    // If no statuses are selected and we're not in "show all" mode, show no jobs
-    return [];
-  }, [data, activeTab, selectedStatuses, showAllMode]);
+    return data;
+  }, [data]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -625,17 +644,15 @@ export function ManagedJobsTable({
       // We're not in "show all" mode if there are specific statuses selected
       setShowAllMode(false);
     }
+
+    // Reset to first page when changing status filters
+    setCurrentPage(1);
   };
 
-  // Update status counts when data changes
+  // Update status counts from API data
   useEffect(() => {
-    const safeData = data || [];
-    const counts = safeData.reduce((acc, job) => {
-      acc[job.status] = (acc[job.status] || 0) + 1;
-      return acc;
-    }, {});
-    setStatusCounts(counts);
-  }, [data]);
+    setStatusCounts(apiStatusCounts);
+  }, [apiStatusCounts]);
 
   // Page navigation handlers
   const goToPreviousPage = () => {
@@ -662,7 +679,7 @@ export function ManagedJobsTable({
           <div className="flex flex-wrap items-center">
             <span className="mr-2 text-sm font-medium">Statuses:</span>
             <div className="flex flex-wrap gap-2 items-center">
-              {!loading && (!data || data.length === 0) && !isInitialLoad && (
+              {!loading && totalNoFilter === 0 && !isInitialLoad && (
                 <span className="text-gray-500 mr-2">No jobs found</span>
               )}
               {Object.entries(statusCounts).map(([status, count]) => (
@@ -684,15 +701,19 @@ export function ManagedJobsTable({
                   </span>
                 </button>
               ))}
-              {data && data.length > 0 && (
+              {totalNoFilter > 0 && (
                 <div className="flex items-center ml-2 gap-2">
                   <span className="text-gray-500">(</span>
                   <button
                     onClick={() => {
                       // When showing all jobs, clear all selected statuses
-                      setActiveTab('all');
-                      setSelectedStatuses([]);
-                      setShowAllMode(true);
+                      // Use React.startTransition to batch state updates
+                      React.startTransition(() => {
+                        setActiveTab('all');
+                        setSelectedStatuses([]);
+                        setShowAllMode(true);
+                        setCurrentPage(1);
+                      });
                     }}
                     className={`text-sm font-medium ${
                       activeTab === 'all' && showAllMode
@@ -706,9 +727,13 @@ export function ManagedJobsTable({
                   <button
                     onClick={() => {
                       // When showing all active jobs, clear all selected statuses
-                      setActiveTab('active');
-                      setSelectedStatuses([]);
-                      setShowAllMode(true);
+                      // Use React.startTransition to batch state updates
+                      React.startTransition(() => {
+                        setActiveTab('active');
+                        setSelectedStatuses([]);
+                        setShowAllMode(true);
+                        setCurrentPage(1);
+                      });
                     }}
                     className={`text-sm font-medium ${
                       activeTab === 'active' && showAllMode
@@ -722,9 +747,13 @@ export function ManagedJobsTable({
                   <button
                     onClick={() => {
                       // When showing all finished jobs, clear all selected statuses
-                      setActiveTab('finished');
-                      setSelectedStatuses([]);
-                      setShowAllMode(true);
+                      // Use React.startTransition to batch state updates
+                      React.startTransition(() => {
+                        setActiveTab('finished');
+                        setSelectedStatuses([]);
+                        setShowAllMode(true);
+                        setCurrentPage(1);
+                      });
                     }}
                     className={`text-sm font-medium ${
                       activeTab === 'finished' && showAllMode
@@ -901,7 +930,7 @@ export function ManagedJobsTable({
               ) : paginatedData.length > 0 ? (
                 <>
                   {paginatedData.map((item) => (
-                    <React.Fragment key={item.id}>
+                    <React.Fragment key={item.task_job_id}>
                       <TableRow>
                         <TableCell>
                           <Link
