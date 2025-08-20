@@ -108,6 +108,8 @@ _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
 _SSH_CONNECTION_TIMED_OUT_PATTERN = re.compile(r'^ssh:.*timed out$',
                                                re.IGNORECASE)
+_RAY_CLUSTER_NOT_FOUND_PATTERN = re.compile(r'.*Ray cluster is not found.*',
+                                            re.IGNORECASE)
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We check network connection by going through _TEST_IP_LIST. We may need to
@@ -2080,23 +2082,25 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                                  f' {i}: {common_utils.format_exception(e)}')
                     if cloud_name != 'kubernetes':
                         # Non-k8s clusters can be manually restarted and:
-                        # 1. Get new IP addresses
+                        # 1. Get new IP addresses, or
                         # 2. Not have the SkyPilot runtime setup
                         #
                         # So we should surface a message to the user to
                         # help them recover from this inconsistent state.
-                        if (e.detailed_reason is not None and
-                                _SSH_CONNECTION_TIMED_OUT_PATTERN.search(
-                                    e.detailed_reason.strip()) is not None):
+                        if (_RAY_CLUSTER_NOT_FOUND_PATTERN.search(
+                                e.error_msg) is not None or
+                            (e.detailed_reason is not None and
+                             _SSH_CONNECTION_TIMED_OUT_PATTERN.search(
+                                 e.detailed_reason.strip()) is not None)):
                             yellow = colorama.Fore.YELLOW
                             bright = colorama.Style.BRIGHT
                             reset = colorama.Style.RESET_ALL
                             ux_utils.console_newline()
                             logger.warning(
-                                f'{yellow}SSH connection timed out despite all nodes '
+                                f'{yellow}Failed getting cluster status despite all nodes '
                                 f'being up ({cluster_name!r}). '
                                 f'If the cluster was restarted manually, try running: '
-                                f'{reset}{bright}sky start -f {cluster_name}{reset} '
+                                f'{reset}{bright}sky start {cluster_name}{reset} '
                                 f'{yellow}to recover from INIT status.{reset}')
                             return False
                         raise e
