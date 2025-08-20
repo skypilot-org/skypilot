@@ -108,7 +108,6 @@ _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
 SSH_CONNECTION_ERROR_PATTERN = re.compile(
     r'^ssh:.*(timed out|connection refused)$', re.IGNORECASE)
-# Pattern for Kubernetes port forward errors that should not be retried
 K8S_PODS_NOT_FOUND_PATTERN = re.compile(r'.*(NotFound|pods .* not found).*',
                                         re.IGNORECASE)
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
