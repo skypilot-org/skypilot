@@ -4354,6 +4354,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         run_timestamp = list(run_timestamps.values())[0]
         job_id = list(run_timestamps.keys())[0]
+
+        # If run_timestamp contains the full path with SKY_LOGS_DIRECTORY,
+        # strip the prefix to get just the relative part to avoid duplication
+        # when constructing local paths.
+        if run_timestamp.startswith(constants.SKY_LOGS_DIRECTORY):
+            run_timestamp = run_timestamp[len(constants.SKY_LOGS_DIRECTORY
+                                             ):].lstrip('/')
         local_log_dir = ''
         if controller:  # download controller logs
             remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
