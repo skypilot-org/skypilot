@@ -129,11 +129,11 @@ def up(
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    dag.resolve_and_validate_volumes()
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(dag)
+    dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]
     assert task.service is not None

@@ -4,13 +4,13 @@ import time
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-import sky
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import directory_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 
@@ -80,7 +80,7 @@ def get_networking_mode(
 def fill_loadbalancer_template(namespace: str, context: Optional[str],
                                service_name: str, ports: List[int],
                                selector_key: str, selector_value: str) -> Dict:
-    template_path = os.path.join(sky.__root_dir__, 'templates',
+    template_path = os.path.join(directory_utils.get_sky_dir(), 'templates',
                                  _LOADBALANCER_TEMPLATE_NAME)
     if not os.path.exists(template_path):
         raise FileNotFoundError(
@@ -116,7 +116,7 @@ def fill_ingress_template(namespace: str, context: Optional[str],
                           service_details: List[Tuple[str, int,
                                                       str]], ingress_name: str,
                           selector_key: str, selector_value: str) -> Dict:
-    template_path = os.path.join(sky.__root_dir__, 'templates',
+    template_path = os.path.join(directory_utils.get_sky_dir(), 'templates',
                                  _INGRESS_TEMPLATE_NAME)
     if not os.path.exists(template_path):
         raise FileNotFoundError(

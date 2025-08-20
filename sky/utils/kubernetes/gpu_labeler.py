@@ -8,9 +8,9 @@ from typing import Dict, Optional, Tuple
 import colorama
 import yaml
 
-import sky
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import directory_utils
 from sky.utils import rich_utils
 
 
@@ -71,8 +71,8 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
             f'Found {len(unlabeled_gpu_nodes)} '
             'unlabeled GPU nodes in the cluster', colorama.Fore.YELLOW))
 
-    sky_dir = os.path.dirname(sky.__file__)
-    manifest_dir = os.path.join(sky_dir, 'utils/kubernetes')
+    manifest_dir = os.path.join(directory_utils.get_sky_dir(),
+                                'utils/kubernetes')
 
     # Apply the RBAC manifest using kubectl since it contains multiple resources
     with rich_utils.client_status('Setting up GPU labeling'):
