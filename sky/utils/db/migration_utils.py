@@ -45,16 +45,17 @@ def get_engine(db_name: str):
     if is_api_server:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
-        # For remote databases, cache the engine to share connection pools
-        # across different database contexts (global_user_state, jobs, serve)
-        with _engine_cache_lock:
-            if conn_string in _remote_engine_cache:
-                return _remote_engine_cache[conn_string]
+        # Use pooling for PostgreSQL on API server processes, but keep
+        # NullPool as default for other processes to avoid overloading
+        # the database
+        if is_api_server and conn_string.startswith('postgresql'):
+            # For PostgreSQL with connection pooling, cache the engine to share
+            # connection pools across different database contexts
+            # (global_user_state, jobs, serve)
+            with _engine_cache_lock:
+                if conn_string in _remote_engine_cache:
+                    return _remote_engine_cache[conn_string]
 
-            # Use pooling for PostgreSQL on API server processes, but keep
-            # NullPool as default for other processes to avoid overloading
-            # the database
-            if is_api_server and conn_string.startswith('postgresql'):
                 # Use QueuePool for PostgreSQL on API server processes for
                 # better performance
                 engine = sqlalchemy.create_engine(conn_string,
@@ -62,14 +63,15 @@ def get_engine(db_name: str):
                                                   max_overflow=20,
                                                   pool_pre_ping=True,
                                                   pool_recycle=3600)
-            else:
-                # Use NullPool for non-API server processes or non-PostgreSQL
-                # databases
-                engine = sqlalchemy.create_engine(conn_string,
-                                                  poolclass=sqlalchemy.NullPool)
 
-            _remote_engine_cache[conn_string] = engine
-            return engine
+                _remote_engine_cache[conn_string] = engine
+                return engine
+        else:
+            # Use NullPool for non-API server processes or non-PostgreSQL
+            # databases. No caching needed since NullPool doesn't maintain
+            # connections.
+            return sqlalchemy.create_engine(conn_string,
+                                            poolclass=sqlalchemy.NullPool)
     else:
         # For local SQLite databases, don't cache since each has a different
         # file path based on db_name
