@@ -1298,7 +1298,7 @@ def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
     # the VM is terminated.
-    autodown_timeout = 180 if generic_cloud in ('azure', 'kubernetes') else 240
+    autodown_timeout = 900 if generic_cloud in ('azure', 'kubernetes') else 240
     total_timeout_minutes = 90 if generic_cloud in ('azure',
                                                     'kubernetes') else 20
     check_autostop_set = f's=$(sky status) && echo "$s" && echo "==check autostop set==" && echo "$s" | grep {name} | grep "1m (down)"'
