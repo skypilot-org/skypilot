@@ -220,6 +220,9 @@ class AddVolumesPolicy(sky.AdminPolicy):
     def validate_and_mutate(
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
         task = user_request.task
+        if task.is_controller_task():
+            # Skip applying admin policy to job/serve controller
+            return sky.MutatedUserRequest(task, user_request.skypilot_config)
         # Use `task.set_volumes` to set the volumes.
         # Or use `task.update_volumes` to update in-place
         # instead of overwriting.
