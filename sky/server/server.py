@@ -445,6 +445,20 @@ async def cleanup_upload_ids():
                  upload_id).with_suffix('.zip').unlink(missing_ok=True)
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
 
+async def start_loop_lag_monitor(
+        loop: asyncio.AbstractEventLoop,
+        interval: float = 0.1) -> None:
+    target = loop.time() + interval
+
+    def tick():
+        nonlocal target
+        now = loop.time()
+        lag = max(0.0, now - target)
+        metrics.sky_apiserver_event_loop_lag_seconds.observe(lag)
+        target = now + interval
+        loop.call_at(target, tick)
+
+    loop.call_at(target, tick)
 
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
@@ -471,6 +485,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             # can safely ignore the error if the task is already scheduled.
             logger.debug(f'Request {event.id} already exists.')
     asyncio.create_task(cleanup_upload_ids())
+    asyncio.create_task(start_loop_lag_monitor(asyncio.get_running_loop()))
     yield
     # Shutdown: Add any cleanup code here if needed
 

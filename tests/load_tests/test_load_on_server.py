@@ -99,21 +99,24 @@ def run_concurrent_requests(num_requests, cmd):
         thread.join()
 
 
-def run_concurrent_api_requests(num_requests, fn, kind):
+def run_concurrent_api_requests(num_requests, fn, kind, include_idx=False):
     threads = []
     for i in range(num_requests):
         thread = threading.Thread(target=run_single_api_request,
-                                  args=(i + 1, fn, kind))
+                                  args=(i + 1, fn, kind, include_idx))
         threads.append(thread)
         thread.start()
     for thread in threads:
         thread.join()
 
 
-def run_single_api_request(idx, fn, kind):
+def run_single_api_request(idx, fn, kind, include_idx=False):
     print(f"API Request {idx} submitted")
     begin = time.time()
-    fn()
+    if include_idx:
+        fn(idx)
+    else:
+        fn()
     duration = time.time() - begin
     with results_lock:
         request_latencies[kind].append(duration)
@@ -246,11 +249,12 @@ def test_launch_and_logs_api(num_requests):
         with sky.Dag() as dag:
             dag.name = name
             sky.Task(name=name, run='for i in {1..10000}; do echo $i; sleep 1; done')
-        sdk.launch(dag)
+        sdk.stream_and_get(sdk.launch(dag, cluster_name=name))
         sdk.tail_logs(name, 1, follow=True)
 
     run_concurrent_api_requests(num_requests, launch_and_logs,
-                                'API /launch_and_logs')
+                                'API /launch_and_logs',
+                                include_idx=True)
 
 
 

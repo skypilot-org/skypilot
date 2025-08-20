@@ -34,6 +34,15 @@ F = TypeVar('F', bound=Callable[..., Any])
 _RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
 
 _session = requests.Session()
+# Tune connection pool size, otherwise the default max is just 10.
+adapter = requests.adapters.HTTPAdapter(
+    pool_connections=50,
+    pool_maxsize=200,
+    # We handle retries by ourselves in SDK.
+    max_retries=0,
+)
+_session.mount('http://', adapter)
+_session.mount('https://', adapter)
 _session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
 _session.headers[constants.VERSION_HEADER] = (
     versions.get_local_readable_version())

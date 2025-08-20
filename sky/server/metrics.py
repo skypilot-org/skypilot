@@ -9,6 +9,7 @@ from prometheus_client import multiprocess
 import prometheus_client as prom
 import starlette.middleware.base
 import uvicorn
+import functools
 
 from sky import sky_logging
 
@@ -27,9 +28,35 @@ sky_apiserver_request_duration_seconds = prom.Histogram(
     'sky_apiserver_request_duration_seconds',
     'Time spent processing API server requests',
     ['path', 'method', 'status'],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
              float('inf')),
 )
+
+# Time spent processing requests in executor.
+sky_apiserver_request_execution_duration_seconds = prom.Histogram(
+    'sky_apiserver_request_execution_duration_seconds',
+    'Time spent executing requests in executor',
+    ['request', 'worker'],
+    buckets=(0.5, 1, 2.5, 5.0, 10.0, 15.0, 25.0, 40.0, 60.0, 90.0, 120.0, 180.0,
+             float('inf')),
+)
+
+# Time spent processing database operations.
+sky_apiserver_function_duration_seconds = prom.Histogram(
+    'sky_apiserver_function_duration_seconds',
+    'Time spent processing functions',
+    ['function'],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
+             float('inf')),
+)
+
+sky_apiserver_event_loop_lag_seconds = prom.Histogram(
+    "sky_apiserver_event_loop_lag_seconds",
+    "Scheduling delay of the event loop (positive drift)",
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, float('inf')),
+)
+
+
 
 metrics_app = fastapi.FastAPI()
 
@@ -102,3 +129,24 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     status=status_code_group).observe(duration)
 
         return response
+
+
+def measure_duration(func):
+    """Decorator to measure and record function execution duration.
+    
+    Records the duration in the sky_apiserver_function_duration_seconds
+    histogram with the function name as a label.
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        try:
+            result = func(*args, **kwargs)
+            return result
+        finally:
+            duration = time.time() - start_time
+            sky_apiserver_function_duration_seconds.labels(
+                function=func.__name__
+            ).observe(duration)
+    
+    return wrapper
