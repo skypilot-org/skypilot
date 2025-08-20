@@ -1,4 +1,20 @@
+# This YAML works with both:
+# - `sky launch` for regular clusters (service field is ignored)
+# - `sky serve up` for SkyServe deployments (service field is used)
+
 name: game-server
+
+# Service configuration (only used by `sky serve up`, ignored by `sky launch`)
+service:
+  # Readiness probe to check if the game server is healthy
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 30
+  
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 1
+    dynamic_ondemand_fallback: true
 
 resources:
   cpus: 4+
@@ -7,9 +23,7 @@ resources:
   # accelerators: T4:1
   
   # Use spot instances for cost savings
-  any_of:
-    - use_spot: true
-    - use_spot: false
+  use_spot: true
 
   # Open port for management API
   ports:
@@ -35,18 +49,27 @@ run: |
   export PATH="$HOME/.cargo/bin:$PATH"
   source .venv/bin/activate
   
-  # Get cluster name from SKYPILOT_CLUSTER_INFO or use hostname as fallback
   echo "Using provided eval head endpoint: ${EVAL_HEAD_ENDPOINT}"
   
-  echo "SKYPILOT_CLUSTER_INFO: ${SKYPILOT_CLUSTER_INFO}"
-  CLUSTER_NAME=$(echo "$SKYPILOT_CLUSTER_INFO" | jq -r '.cluster_name')
-  
-  echo "Using cluster name as server ID: ${CLUSTER_NAME}"
+  # Determine server ID based on deployment type
+  if [ -n "${SKYPILOT_SERVICE_NAME}" ]; then
+    # Running as a SkyServe service
+    SERVER_ID="${SKYPILOT_SERVICE_NAME}"
+    echo "Running as SkyServe service: ${SERVER_ID}"
+  elif [ -n "${SKYPILOT_CLUSTER_INFO}" ]; then
+    # Running as a regular cluster
+    SERVER_ID=$(echo "$SKYPILOT_CLUSTER_INFO" | jq -r '.cluster_name')
+    echo "Running as cluster: ${SERVER_ID}"
+  else
+    # Fallback
+    SERVER_ID="game-server-$(hostname)"
+    echo "Using fallback server ID: ${SERVER_ID}"
+  fi
   
   # Start the game server
   python src/game_server.py \
     --port 8081 \
-    --server-id "${CLUSTER_NAME}" \
+    --server-id "${SERVER_ID}" \
     --eval-head-url ${EVAL_HEAD_ENDPOINT} \
     --auto-start
 

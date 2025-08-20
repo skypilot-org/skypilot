@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Eval Head Dashboard - Auto Discovery</title>
+    <title>Distributed Game Evaluation Dashboard</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -291,7 +291,7 @@
     <div class="connection-status" id="connectionStatus">Connecting...</div>
     
     <div class="container">
-        <h1>🧠 Evaluation Head Dashboard</h1>
+        <h1>🎮 Distributed Game Evaluation Dashboard</h1>
         <div class="subtitle">Auto-Discovery Mode with SkyPilot</div>
         
         <!-- Metrics Grid -->
@@ -383,11 +383,13 @@ sky launch -c eval-head configs/eval_head.yaml \
                     </li>
                     <li>
                         <strong>Launch Game Servers:</strong>
-                        <pre><code># Launch multiple game servers with matching prefix
+                        <pre><code># Option A: As regular clusters
 sky launch -c exp-game-1 configs/game_server.yaml \
   --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
 
-sky launch -c exp-game-2 configs/game_server.yaml \
+# Option B: As SkyServe services (with autoscaling)
+# Note: Same YAML file - service config is used by sky serve
+sky serve up -n exp-game-svc configs/game_server.yaml \
   --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT</code></pre>
                     </li>
                     <li>
@@ -411,10 +413,11 @@ sky exec exp-game-1 configs/game_server.yaml \
                 <div style="margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px; border-left: 4px solid #2196f3;">
                     <strong>💡 Tips:</strong>
                     <ul style="margin: 10px 0 0 20px;">
-                        <li>Game servers with prefix <code>exp-game-*</code> are auto-discovered</li>
+                        <li>Both clusters and SkyServe services with prefix <code>exp-game-*</code> are auto-discovered</li>
+                        <li>SkyServe provides automatic failover and autoscaling (1-5 replicas)</li>
                         <li>The dashboard auto-refreshes every 30 seconds</li>
-                        <li>Discovery checks for new clusters every 30 seconds</li>
-                        <li>Game servers run on spot instances for cost savings</li>
+                        <li>Discovery checks for new clusters/services every 30 seconds</li>
+                        <li>Game servers can run on spot instances for 70-90% cost savings</li>
                     </ul>
                 </div>
                 
@@ -549,19 +552,33 @@ sky exec exp-game-1 configs/game_server.yaml \
             // Update discovered servers list
             const discoveredList = document.getElementById('discoveredList');
             if (data.discovered && data.discovered.length > 0) {
-                discoveredList.innerHTML = data.discovered.map(server => `
-                    <div class="server-item">
-                        <div>
-                            <span class="server-status status-discovered"></span>
-                            <strong>${server.name}</strong>
+                discoveredList.innerHTML = data.discovered.map(server => {
+                    let typeLabel = '';
+                    let detailInfo = '';
+                    
+                    if (server.type === 'service') {
+                        typeLabel = '🔧 Service';
+                        detailInfo = `${server.endpoint || 'No endpoint'} | ${server.replicas || 0} replicas`;
+                    } else {
+                        typeLabel = '☁️ Cluster';
+                        detailInfo = `${server.ip || 'N/A'} | ${server.status}`;
+                    }
+                    
+                    return `
+                        <div class="server-item">
+                            <div>
+                                <span class="server-status status-discovered"></span>
+                                <strong>${server.name}</strong>
+                                <span style="margin-left: 10px; font-size: 0.85em; color: #666;">${typeLabel}</span>
+                            </div>
+                            <div style="opacity: 0.8; font-size: 0.9em;">
+                                ${detailInfo}
+                            </div>
                         </div>
-                        <div style="opacity: 0.8;">
-                            ${server.ip || 'N/A'} | ${server.status}
-                        </div>
-                    </div>
-                `).join('');
+                    `;
+                }).join('');
             } else {
-                discoveredList.innerHTML = '<div style="text-align: center; opacity: 0.5; padding: 20px;">No clusters discovered yet</div>';
+                discoveredList.innerHTML = '<div style="text-align: center; opacity: 0.5; padding: 20px;">No clusters or services discovered yet</div>';
             }
             
             // Update active servers list with interaction status

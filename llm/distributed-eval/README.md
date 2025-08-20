@@ -44,7 +44,7 @@ sky launch -c eval-head configs/eval_head.yaml \
 # Get the eval head endpoint for game servers (IP:port format)
 EVAL_HEAD_ENDPOINT=http://$(sky status --endpoint eval-head 8080)
 
-# Launch game servers with eval head endpoint
+# Launch game servers as clusters
 sky launch -c exp-game-1 configs/game_server.yaml \
   --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
 
@@ -52,9 +52,33 @@ sky launch -c exp-game-2 configs/game_server.yaml \
   --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
 ```
 
-The eval head will automatically discover all clusters with the matching prefix through the API server.
+The eval head will automatically discover all clusters and services with the matching prefix through the API server.
 
-### Option 2: Without API Server (Simple Setup)
+### Option 2: Using SkyServe for Game Servers (Recommended for Reliability)
+
+Deploy game servers as SkyServe services for automatic failover and scaling using the same YAML:
+
+```bash
+# Launch the evaluation head first
+sky launch -c eval-head configs/eval_head.yaml \
+  --env GAME_SERVER_PREFIX=exp-game
+
+# Get the eval head endpoint
+EVAL_HEAD_ENDPOINT=$(sky status --endpoint eval-head 8080)
+
+# Deploy game servers as SkyServe services (with autoscaling and failover)
+# Note: Uses the same game_server.yaml - the service field is used by sky serve
+sky serve up -n exp-game-svc configs/game_server.yaml \
+  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
+```
+
+SkyServe provides:
+- Automatic failover if a replica fails
+- Autoscaling based on load (1-5 replicas)
+- Health checks and automatic restarts
+- Load balancing across replicas
+
+### Option 3: Without API Server (Simple Setup)
 
 For local development or simple deployments without auto-discovery:
 
@@ -200,13 +224,13 @@ python game_server.py --port 8081 --eval-head-url http://localhost:8080
 distributed-eval/
 ├── configs/
 │   ├── eval_head.yaml      # Eval head SkyPilot config
-│   └── game_server.yaml    # Game server SkyPilot config
+│   └── game_server.yaml    # Game server config (works with both sky launch and sky serve)
 ├── src/
 │   ├── eval_head.py        # Evaluation head with auto-discovery
 │   └── game_server.py      # Game simulation server
 ├── static/
 │   └── dashboard.html       # Web dashboard
-└── .sky.yaml.template       # Template for API server configuration
+└── README.md                # This file
 ```
 
 ## Environment Setup

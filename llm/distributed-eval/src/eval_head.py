@@ -110,20 +110,22 @@ class EvaluationHead:
         self.latencies = deque(maxlen=100)
     
     async def discover_game_servers(self):
-        """Discover game servers from SkyPilot clusters."""
+        """Discover game servers from SkyPilot clusters and SkyServe services."""
         if not SKY_AVAILABLE:
             return
         
         try:
+            game_servers = []
+            
             # Get all clusters using correct SDK
             clusters = sky.stream_and_get(sky.status())
             
-            # Filter for game servers
-            game_servers = []
+            # Filter for game servers from clusters
             for cluster in clusters:
                 if cluster['name'].startswith(self.game_server_prefix):
                     server_info = {
                         "name": cluster['name'],
+                        "type": "cluster",
                         "status": cluster['status'].value if hasattr(cluster['status'], 'value') else str(cluster['status']),
                         "cloud": cluster.get('cloud', 'unknown'),
                         "region": cluster.get('region', 'unknown'),
@@ -146,13 +148,51 @@ class EvaluationHead:
                     
                     game_servers.append(server_info)
             
+            # Also check SkyServe services
+            try:
+                import sky.serve as serve
+                
+                # Get all services by passing None for service_names
+                services = serve.status(service_names=None)
+                
+                # Filter for game servers from services
+                for service in services:
+                    if service['name'].startswith(self.game_server_prefix):
+                        server_info = {
+                            "name": service['name'],
+                            "type": "service",
+                            "status": service.get('status', 'unknown'),
+                            "replicas": service.get('active_replicas', 0),
+                            "endpoint": service.get('endpoint', None)
+                        }
+                        
+                        # For services, we get the endpoint URL instead of IP
+                        if server_info['endpoint']:
+                            # Extract host from endpoint URL if it's a full URL
+                            import urllib.parse
+                            parsed = urllib.parse.urlparse(server_info['endpoint'])
+                            server_info['ip'] = parsed.hostname if parsed.hostname else server_info['endpoint']
+                        else:
+                            server_info['ip'] = None
+                        
+                        game_servers.append(server_info)
+                        
+            except ImportError:
+                print("Note: SkyServe not available for service discovery")
+            except Exception as e:
+                print(f"Note: Could not check SkyServe services: {e}")
+            
             # Update discovered servers
             self.discovered_servers = {s["name"]: s for s in game_servers}
             
             print(f"✓ Discovered {len(game_servers)} game servers with prefix '{self.game_server_prefix}'")
             for server in game_servers:
-                ip_str = server['ip'] if server['ip'] else 'IP not available'
-                print(f"  - {server['name']}: {ip_str} ({server['status']})")
+                if server.get('type') == 'service':
+                    endpoint_str = server.get('endpoint', 'No endpoint')
+                    print(f"  - {server['name']} (service): {endpoint_str} ({server.get('replicas', 0)} replicas)")
+                else:
+                    ip_str = server['ip'] if server['ip'] else 'IP not available'
+                    print(f"  - {server['name']} (cluster): {ip_str} ({server['status']})")
                 
         except Exception as e:
             print(f"Error discovering game servers: {e}")
