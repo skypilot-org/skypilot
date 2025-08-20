@@ -194,7 +194,7 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
     """
     try:
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
-            if from_scheduler:
+            if from_scheduler and not managed_job_utils.is_consolidation_mode():
                 cur = pathlib.Path(CURRENT_HASH)
                 old = pathlib.Path(f'{CURRENT_HASH}.old')
 
