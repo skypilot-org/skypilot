@@ -30,8 +30,6 @@ DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
 
 DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
 
-DOCKER_CONFLICT_STR = ('Conflict. The container name')
-
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
 
@@ -197,14 +195,13 @@ class DockerInitializer:
                     time.sleep(5)
                     continue
             break
-        if DOCKER_CONFLICT_STR not in stdout + stderr:
-            subprocess_utils.handle_returncode(
-                rc,
-                cmd,
-                error_msg='Failed to run docker setup commands.',
-                stderr=stdout + stderr,
-                # Print out the error message if the command failed.
-                stream_logs=log_err_when_fail)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            error_msg='Failed to run docker setup commands.',
+            stderr=stdout + stderr,
+            # Print out the error message if the command failed.
+            stream_logs=log_err_when_fail)
         return stdout.strip()
 
     def initialize(self) -> str:
