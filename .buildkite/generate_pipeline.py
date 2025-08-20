@@ -116,6 +116,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--helm-version')
     parser.add_argument('--helm-package')
     parser.add_argument('--jobs-consolidation', action="store_true")
+    # parser.add_argument('--grpc', action="store_true")
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
@@ -155,6 +156,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--helm-package {parsed_args.helm_package}')
     if parsed_args.jobs_consolidation:
         extra_args.append('--jobs-consolidation')
+    # if parsed_args.grpc:
+    #     extra_args.append('--grpc')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
@@ -354,8 +357,13 @@ def _convert_release(test_files: List[str], args: str, trigger_command: str):
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
-    _dump_pipeline_to_file(yaml_file_path, output_file_pipelines,
-                           trigger_command)
+    extra_env = {}
+    if '--grpc' in args:
+        extra_env['SKYPILOT_ENABLE_GRPC'] = '1'
+    _dump_pipeline_to_file(yaml_file_path,
+                           output_file_pipelines,
+                           trigger_command,
+                           extra_env=extra_env)
 
 
 def _convert_quick_tests_core(test_files: List[str], args: str,
@@ -370,10 +378,13 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
         pipeline = _generate_pipeline(test_file, args, auto_retry=True)
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
+    extra_env = {'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1'}
+    if '--grpc' in args:
+        extra_env['SKYPILOT_ENABLE_GRPC'] = '1'
     _dump_pipeline_to_file(yaml_file_path,
                            output_file_pipelines,
                            trigger_command,
-                           extra_env={'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1'})
+                           extra_env=extra_env)
 
 
 @click.command()
