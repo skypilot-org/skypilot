@@ -30,6 +30,8 @@ DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
 
 DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
 
+DOCKER_CONFLICT_STR = ('Conflict. The container name')
+
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
 
@@ -195,7 +197,7 @@ class DockerInitializer:
                     time.sleep(5)
                     continue
             break
-        if "Conflict. The container name" not in stdout + stderr:
+        if DOCKER_CONFLICT_STR not in stdout + stderr:
             subprocess_utils.handle_returncode(
                 rc,
                 cmd,
