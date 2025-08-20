@@ -208,7 +208,7 @@ class EvaluationHead:
                 try:
                     services = await serve_async.status(service_names=None)
                 except Exception as e:
-                    print(f"Error getting SkyServe services: {e}")
+                    # print(f"Error getting SkyServe services: {e}")
                     services = []
                 print(f"Services: {services}")
 
