@@ -1042,17 +1042,7 @@ def get_log_dir_for_jobs(job_ids: List[Optional[str]]) -> str:
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
         if row[JobInfoLoc.LOG_PATH.value]:
-            log_path = row[JobInfoLoc.LOG_PATH.value]
-            # If LOG_PATH contains the full path with SKY_LOGS_DIRECTORY,
-            # strip the prefix to get just the relative part.
-            # This allows callers to construct the appropriate path based on
-            # their context (local filesystem vs API server directory).
-            if log_path.startswith(constants.SKY_LOGS_DIRECTORY):
-                relative_path = log_path[len(constants.SKY_LOGS_DIRECTORY
-                                            ):].lstrip('/')
-                job_to_dir[str(job_id)] = relative_path
-            else:
-                job_to_dir[str(job_id)] = log_path
+            job_to_dir[str(job_id)] = row[JobInfoLoc.LOG_PATH.value]
         else:
             run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
             job_to_dir[str(job_id)] = os.path.join(constants.SKY_LOGS_DIRECTORY,
