@@ -156,10 +156,14 @@ class EvaluationHead:
                                     server_info['endpoint'] = endpoints[port_str]
                                     print(f"  ✓ Found endpoint for {cluster['name']}: {server_info['endpoint']}")
                                     
-                                    # Start controlling this game server if not already controlled
+                                    # Add to discovered servers immediately
+                                    self.discovered_servers[cluster['name']] = server_info
+                                    
+                                    # Start controlling this game server immediately if not already controlled
                                     if cluster['name'] not in self.controlled_servers:
                                         self.controlled_servers.add(cluster['name'])
                                         asyncio.create_task(self.control_game_server(server_info))
+                                        print(f"  ▶ Started controlling {cluster['name']}")
                                 else:
                                     print(f"  ✗ No endpoint found for port {port_str} in {endpoints}")
                             except Exception as e:
@@ -169,6 +173,10 @@ class EvaluationHead:
                             server_info['endpoint'] = None
                     else:
                         server_info['endpoint'] = None
+                    
+                    # Add to discovered servers even if no endpoint (for visibility)
+                    if cluster['name'] not in self.discovered_servers:
+                        self.discovered_servers[cluster['name']] = server_info
                     
                     game_servers.append(server_info)
             
@@ -193,10 +201,18 @@ class EvaluationHead:
                             
                             # For services, we get the endpoint URL
                             if server_info['endpoint']:
-                                # Start controlling this game server if not already controlled
+                                # Add to discovered servers immediately
+                                self.discovered_servers[service['name']] = server_info
+                                
+                                # Start controlling this game server immediately if not already controlled
                                 if service['name'] not in self.controlled_servers:
                                     self.controlled_servers.add(service['name'])
                                     asyncio.create_task(self.control_game_server(server_info))
+                                    print(f"  ▶ Started controlling service {service['name']}")
+                            else:
+                                # Add to discovered servers even without endpoint
+                                if service['name'] not in self.discovered_servers:
+                                    self.discovered_servers[service['name']] = server_info
                             
                             game_servers.append(server_info)
                         
@@ -207,17 +223,26 @@ class EvaluationHead:
                 if "No service" not in str(e):
                     print(f"Note: Could not check SkyServe services: {e}")
             
-            # Update discovered servers
-            self.discovered_servers = {s["name"]: s for s in game_servers}
+            # Update discovered servers (merge, don't replace since we added them incrementally)
+            # This ensures we keep all discovered servers including those added during discovery
+            for server in game_servers:
+                if server["name"] not in self.discovered_servers:
+                    self.discovered_servers[server["name"]] = server
             
-            print(f"✓ Discovered {len(game_servers)} game servers with prefix '{self.game_server_prefix}'")
+            # Summarize discovery results
+            active_count = sum(1 for s in game_servers if s.get('endpoint'))
+            print(f"✓ Discovery complete: Found {len(game_servers)} game servers with prefix '{self.game_server_prefix}'")
+            print(f"  • {active_count} servers are being controlled")
+            print(f"  • {len(game_servers) - active_count} servers have no endpoint")
+            
+            # List servers with their status
             for server in game_servers:
                 if server.get('type') == 'service':
-                    endpoint_str = server.get('endpoint', 'No endpoint')
-                    print(f"  - {server['name']} (service): {endpoint_str} ({server.get('replicas', 0)} replicas)")
+                    status = "🎮 ACTIVE" if server.get('endpoint') else "⏸ NO ENDPOINT"
+                    print(f"  - {server['name']} (service): {status}")
                 else:
-                    endpoint_str = server.get('endpoint', 'No endpoint')
-                    print(f"  - {server['name']} (cluster): {endpoint_str} ({server['status']})")
+                    status = "🎮 ACTIVE" if server.get('endpoint') else "⏸ NO ENDPOINT"
+                    print(f"  - {server['name']} (cluster): {status}")
                 
         except Exception as e:
             print(f"Error discovering game servers: {e}")
@@ -358,8 +383,9 @@ class EvaluationHead:
     async def discovery_loop(self):
         """Periodically discover new game servers."""
         while True:
+            # Wait before next discovery (first discovery runs immediately on startup)
+            await asyncio.sleep(15)  # Check every 15 seconds for faster response
             await self.discover_game_servers()
-            await asyncio.sleep(30)  # Check every 30 seconds
     
     async def process_batch(self):
         """Process a batch of game states through the model."""
@@ -522,6 +548,11 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(eval_head.metrics_collection_loop())
     
     if SKY_AVAILABLE:
+        # Run discovery immediately on startup (don't wait for first interval)
+        print("🔍 Starting initial game server discovery...")
+        asyncio.create_task(eval_head.discover_game_servers())
+        
+        # Also start the periodic discovery loop
         asyncio.create_task(eval_head.discovery_loop())
     
     print(f"✓ Evaluation head started")
@@ -614,8 +645,35 @@ async def websocket_endpoint(websocket: WebSocket):
     eval_head.websockets.add(websocket)
     
     try:
-        # Send initial stats
-        await eval_head.broadcast_stats()
+        # Send initial stats immediately to new client
+        stats_message = json.dumps({
+            "type": "stats_update",
+            "data": {
+                "current": {
+                    "total_requests": eval_head.stats["total_requests"],
+                    "total_batches": eval_head.stats["total_batches"],
+                    "queue_size": eval_head.stats["active_episodes"],
+                    "connected_servers": len(eval_head.stats["connected_servers"]),
+                    "discovered_servers": len(eval_head.discovered_servers),
+                    "requests_per_second": round(eval_head.stats["requests_per_second"], 2),
+                    "avg_batch_size": round(eval_head.stats["avg_batch_size"], 2),
+                    "avg_latency_ms": round(eval_head.stats["avg_latency_ms"], 2),
+                    "active_episodes": eval_head.stats["active_episodes"]
+                },
+                "discovered": list(eval_head.discovered_servers.values()),
+                "active": [
+                    {
+                        "id": sid,
+                        "requests": metrics["requests"],
+                        "last_seen": metrics["last_seen"].isoformat(),
+                        "status": "active" if (datetime.now() - metrics["last_seen"]).seconds < 10 else "inactive"
+                    }
+                    for sid, metrics in eval_head.server_metrics.items()
+                ],
+                "history": list(eval_head.metrics_history)
+            }
+        })
+        await websocket.send_text(stats_message)
         
         # Keep connection alive
         while True:

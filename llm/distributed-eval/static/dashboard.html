@@ -210,6 +210,13 @@
             padding: 25px;
             border: 1px solid #e9ecef;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            min-height: 400px;
+        }
+        
+        .servers-list-content {
+            flex: 1;
         }
         
         .pagination {
@@ -280,6 +287,11 @@
         .status-discovered {
             background: #60a5fa;
             box-shadow: 0 0 10px rgba(96, 165, 250, 0.5);
+        }
+        
+        .status-up {
+            background: #4ade80;
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
         }
         
         .connection-status {
@@ -562,6 +574,8 @@ sky serve update exp-game-svc configs/game_server.yaml</code></pre>
             ws.onopen = () => {
                 document.getElementById('connectionStatus').textContent = '🟢 Connected';
                 document.getElementById('connectionStatus').className = 'connection-status connected';
+                // Show loading state while waiting for first data
+                showLoadingState();
             };
             
             ws.onclose = () => {
@@ -620,24 +634,35 @@ sky serve update exp-game-svc configs/game_server.yaml</code></pre>
             const pageData = discoveredData.slice(startIdx, endIdx);
             
             if (pageData.length > 0) {
-                discoveredList.innerHTML = pageData.map(server => {
+                let content = '<div class="servers-list-content">';
+                content += pageData.map(server => {
                     let typeLabel = '';
                     let detailInfo = '';
+                    let statusClass = 'status-discovered';
                     
                     if (server.type === 'service') {
                         typeLabel = '🔧 Service';
                         detailInfo = `${server.endpoint || 'No endpoint'} | ${server.replicas || 0} replicas`;
+                        // Services with endpoint are green
+                        if (server.endpoint) {
+                            statusClass = 'status-up';
+                        }
                     } else {
                         typeLabel = '☁️ Cluster';
-                        // Fix: Show just status instead of "N/A | status"
                         const statusText = server.status || 'UP';
                         detailInfo = server.ip ? `${server.ip} | ${statusText}` : statusText;
+                        // UP clusters are green
+                        if (statusText === 'UP') {
+                            statusClass = 'status-up';
+                        } else if (statusText === 'INIT') {
+                            statusClass = 'status-discovered';
+                        }
                     }
                     
                     return `
                         <div class="server-item">
                             <div>
-                                <span class="server-status status-discovered"></span>
+                                <span class="server-status ${statusClass}"></span>
                                 <strong>${server.name}</strong>
                                 <span style="margin-left: 10px; font-size: 0.85em; color: #666;">${typeLabel}</span>
                             </div>
@@ -646,7 +671,10 @@ sky serve update exp-game-svc configs/game_server.yaml</code></pre>
                             </div>
                         </div>
                     `;
-                }).join('') + createPagination(discoveredPage, discoveredData.length, itemsPerPage, 'changeDiscoveredPage');
+                }).join('');
+                content += '</div>';
+                content += createPagination(discoveredPage, discoveredData.length, itemsPerPage, 'changeDiscoveredPage');
+                discoveredList.innerHTML = content;
             } else {
                 discoveredList.innerHTML = '<div style="text-align: center; opacity: 0.5; padding: 20px;">No clusters or services discovered yet</div>';
             }
@@ -659,7 +687,8 @@ sky serve update exp-game-svc configs/game_server.yaml</code></pre>
             const pageData = activeData.slice(startIdx, endIdx);
             
             if (pageData.length > 0) {
-                activeList.innerHTML = pageData.map(server => {
+                let content = '<div class="servers-list-content">';
+                content += pageData.map(server => {
                     // Parse the timestamp and calculate seconds since last seen
                     const lastSeenDate = new Date(server.last_seen);
                     const now = new Date();
@@ -708,7 +737,10 @@ sky serve update exp-game-svc configs/game_server.yaml</code></pre>
                             </div>
                         </div>
                     `;
-                }).join('') + createPagination(activePage, activeData.length, itemsPerPage, 'changeActivePage');
+                }).join('');
+                content += '</div>';
+                content += createPagination(activePage, activeData.length, itemsPerPage, 'changeActivePage');
+                activeList.innerHTML = content;
             } else {
                 activeList.innerHTML = '<div style="text-align: center; opacity: 0.5; padding: 20px;">No game servers have connected yet</div>';
             }
@@ -759,6 +791,13 @@ sky serve update exp-game-svc configs/game_server.yaml</code></pre>
                 }
                 renderActiveServers();
             }
+        }
+        
+        function showLoadingState() {
+            // Show loading message in server lists
+            const loadingHtml = '<div style="text-align: center; opacity: 0.7; padding: 40px;"><div>🔍 Discovering game servers...</div><div style="margin-top: 10px; font-size: 0.9em;">This may take a few seconds</div></div>';
+            document.getElementById('discoveredList').innerHTML = loadingHtml;
+            document.getElementById('activeList').innerHTML = '<div style="text-align: center; opacity: 0.7; padding: 40px;">⏳ Waiting for game servers to connect...</div>';
         }
         
         // Initialize SkyPilot Dashboard link
