@@ -1768,3 +1768,59 @@ async def scheduler_set_done_async(job_id: int,
         await session.commit()
         if not idempotent:
             assert updated_count == 1, (job_id, updated_count)
+
+
+# ==== needed for codegen ====
+# functions have no use outside of codegen, remove at your own peril
+
+
+@_init_db
+def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str,
+                 pool: Optional[str], pool_hash: Optional[str]):
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmt = insert_func(job_info_table).values(
+            spot_job_id=job_id,
+            name=name,
+            schedule_state=ManagedJobScheduleState.INACTIVE.value,
+            workspace=workspace,
+            entrypoint=entrypoint,
+            pool=pool,
+            pool_hash=pool_hash,
+        )
+        session.execute(insert_stmt)
+        session.commit()
+
+
+@_init_db
+def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
+    """Get all job ids by name."""
+    assert _SQLALCHEMY_ENGINE is not None
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        query = sqlalchemy.select(
+            spot_table.c.spot_job_id.distinct()).select_from(
+                spot_table.outerjoin(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
+        if name is not None:
+            # We match the job name from `job_info` for the jobs submitted after
+            # #1982, and from `spot` for the jobs submitted before #1982, whose
+            # job_info is not available.
+            name_condition = sqlalchemy.or_(
+                job_info_table.c.name == name,
+                sqlalchemy.and_(job_info_table.c.name.is_(None),
+                                spot_table.c.task_name == name))
+            query = query.where(name_condition)
+        query = query.order_by(spot_table.c.spot_job_id.desc())
+        rows = session.execute(query).fetchall()
+        job_ids = [row[0] for row in rows if row[0] is not None]
+        return job_ids
