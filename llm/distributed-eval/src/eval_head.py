@@ -205,7 +205,12 @@ class EvaluationHead:
                 from sky.serve.client import sdk_async as serve_async
 
                 # Get all services by passing None for service_names using async SDK
-                services = await serve_async.status(service_names=None)
+                try:
+                    services = await serve_async.status(service_names=None)
+                except Exception as e:
+                    print(f"Error getting SkyServe services: {e}")
+                    services = []
+                print(f"Services: {services}")
 
                 # services is a list of service records
                 if services:
