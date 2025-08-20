@@ -190,7 +190,7 @@ def _validate_consolidation_mode_config(
 # Use LRU Cache so that the check is only done once.
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
-    if os.environ.get(constants.ENV_VAR_IS_JOB_CONTROLLER) is not None:
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         return True
 
     consolidation_mode = skypilot_config.get_nested(
