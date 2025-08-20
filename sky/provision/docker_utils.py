@@ -311,8 +311,7 @@ class DockerInitializer:
                     self._auto_configure_shm(user_docker_run_options)),
                 self.docker_cmd,
             )
-            self._run(remove_container_cmd)
-            self._run(start_command)
+            self._run(f'{remove_container_cmd}; {start_command}')
 
         # SkyPilot: Setup Commands.
         # TODO(zhwu): the following setups should be aligned with the kubernetes
