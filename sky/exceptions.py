@@ -6,11 +6,12 @@ import types
 import typing
 from typing import Any, Dict, List, Optional, Sequence
 
+from sky.backends import backend
 from sky.utils import env_options
+from sky.utils import serialize_utils
 
 if typing.TYPE_CHECKING:
     from sky import jobs as managed_jobs
-    from sky.backends import backend
     from sky.skylet import job_lib
     from sky.utils import status_lib
 
@@ -92,6 +93,10 @@ def serialize_exception(e: BaseException) -> Dict[str, Any]:
         attr_v = attributes[attr_k]
         if isinstance(attr_v, types.TracebackType):
             attributes[attr_k] = traceback.format_tb(attr_v)
+        if isinstance(attr_v, backend.ResourceHandle):
+            attributes[attr_k] = (
+                serialize_utils.prepare_handle_for_backwards_compatibility(
+                    attr_v))
 
     data = {
         'type': e.__class__.__name__,
