@@ -233,12 +233,9 @@ def _init_db_async(func):
             try:
                 return await func(*args, **kwargs)
             except (sqlalchemy_exc.OperationalError,
-                    asyncio.exceptions.TimeoutError,
-                    OSError,
-                    sqlalchemy.exc.TimeoutError,
-                    sqlite3.OperationalError,
-                    sqlalchemy.exc.InterfaceError,
-                    sqlite3.InterfaceError) as e:
+                    asyncio.exceptions.TimeoutError, OSError,
+                    sqlalchemy.exc.TimeoutError, sqlite3.OperationalError,
+                    sqlalchemy.exc.InterfaceError, sqlite3.InterfaceError) as e:
                 last_exc = e
             logger.debug(f'DB error: {last_exc}')
             await asyncio.sleep(backoff.current_backoff())
@@ -264,12 +261,9 @@ def _init_db(func):
             try:
                 return func(*args, **kwargs)
             except (sqlalchemy_exc.OperationalError,
-                    asyncio.exceptions.TimeoutError,
-                    OSError,
-                    sqlalchemy.exc.TimeoutError,
-                    sqlite3.OperationalError,
-                    sqlalchemy.exc.InterfaceError,
-                    sqlite3.InterfaceError) as e:
+                    asyncio.exceptions.TimeoutError, OSError,
+                    sqlalchemy.exc.TimeoutError, sqlite3.OperationalError,
+                    sqlalchemy.exc.InterfaceError, sqlite3.InterfaceError) as e:
                 last_exc = e
             logger.debug(f'DB error: {last_exc}')
             time.sleep(backoff.current_backoff())
