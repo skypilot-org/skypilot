@@ -227,8 +227,8 @@ def test_validate_api(num_requests):
 
     def validate():
         with sky.Dag() as dag:
-            dag.add(sky.Task(name='echo', run='echo hello'))
-            sdk.validate(dag)
+            sky.Task(name='echo', run='echo hello')
+        sdk.validate(dag)
 
     run_concurrent_api_requests(num_requests, validate, 'API /validate')
 
@@ -238,8 +238,24 @@ def test_api_status(num_requests):
     run_concurrent_api_requests(num_requests, sdk.api_status, 'API /status')
 
 
+def test_launch_and_logs_api(num_requests):
+    print(f"Testing {num_requests} launch and logs API requests")
+
+    def launch_and_logs(idx):
+        name = f'echo{idx}'
+        with sky.Dag() as dag:
+            dag.name = name
+            sky.Task(name=name, run='for i in {1..10000}; do echo $i; sleep 1; done')
+        sdk.launch(dag)
+        sdk.tail_logs(name, 1, follow=True)
+
+    run_concurrent_api_requests(num_requests, launch_and_logs,
+                                'API /launch_and_logs')
+
+
+
 all_requests = ['launch', 'status', 'logs', 'jobs', 'serve']
-all_apis = ['status', 'cli_status', 'tail_logs', 'validate', 'api_status']
+all_apis = ['status', 'cli_status', 'tail_logs', 'validate', 'api_status', 'launch_and_logs']
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -326,6 +342,9 @@ if __name__ == '__main__':
                                           args=(args.n,))
             elif api == 'api_status':
                 thread = threading.Thread(target=test_api_status,
+                                          args=(args.n,))
+            elif api == 'launch_and_logs':
+                thread = threading.Thread(target=test_launch_and_logs_api,
                                           args=(args.n,))
             if thread:
                 test_threads.append(thread)
