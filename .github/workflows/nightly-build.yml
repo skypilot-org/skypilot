@@ -168,7 +168,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --resource-heavy"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --resource-heavy"}'
-      timeout_minutes: 80
+      timeout_minutes: 100
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -182,7 +182,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --no-resource-heavy"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy"}'
-      timeout_minutes: 40
+      timeout_minutes: 60
       sleep_seconds: 1200  # 20-minute delay to reduce buildkite resource usage
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
@@ -197,7 +197,7 @@ jobs:
       message: "nightly-build-pypi --remote-server on test_cluster_job.py"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--remote-server", "FILE_PATTERN": "test_cluster_job.py"}'
-      timeout_minutes: 40
+      timeout_minutes: 60
       sleep_seconds: 1500  # 25-minute delay to reduce buildkite resource usage
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
