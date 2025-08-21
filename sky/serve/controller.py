@@ -127,8 +127,8 @@ class SkyServeController:
             replica_infos = serve_state.get_replica_infos(self._service_name)
             ready_replica_urls = self._replica_manager.get_active_replica_urls()
 
-            # Prepare replica info for load balancer
-            replica_info = []
+            # Use URL-to-info mapping to avoid duplication
+            replica_info = {}
             for info in replica_infos:
                 if info.url in ready_replica_urls:
                     # Get GPU type from handle.launched_resources.accelerators
@@ -141,17 +141,10 @@ class SkyServeController:
                             # Get the first accelerator type
                             gpu_type = list(accelerators.keys())[0]
 
-                    replica_info.append({
-                        'url': info.url,
-                        'gpu_type': gpu_type,
-                        'replica_id': info.replica_id
-                    })
+                    replica_info[info.url] = {'gpu_type': gpu_type}
 
-            return responses.JSONResponse(content={
-                'ready_replica_urls': ready_replica_urls,
-                'replica_info': replica_info
-            },
-                                          status_code=200)
+            return responses.JSONResponse(
+                content={'replica_info': replica_info}, status_code=200)
 
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request) -> fastapi.Response:

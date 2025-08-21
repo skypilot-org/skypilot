@@ -86,7 +86,7 @@ class SkyServeLoadBalancer:
     async def _sync_with_controller_once(self) -> List[asyncio.Task]:
         close_client_tasks = []
         ready_replica_urls = []
-        replica_info = []
+        replica_info = {}
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -103,9 +103,8 @@ class SkyServeLoadBalancer:
                     self._request_aggregator.clear()
                     response.raise_for_status()
                     response_json = await response.json()
-                    ready_replica_urls = response_json.get(
-                        'ready_replica_urls', [])
-                    replica_info = response_json.get('replica_info', [])
+                    replica_info = response_json.get('replica_info', {})
+                    ready_replica_urls = list(replica_info.keys())
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.error(f'An error occurred when syncing with '
                              f'the controller: {e}'

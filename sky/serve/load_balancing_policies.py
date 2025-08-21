@@ -179,10 +179,15 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy,
                 if replica not in self.load_map:
                     self.load_map[replica] = 0
 
-    def set_replica_info(self, replica_info: List[Dict[str, Any]]) -> None:
-        """Set replica information including accelerator types."""
+    def set_replica_info(self, replica_info: Dict[str, Dict[str, Any]]) -> None:
+        """Set replica information including accelerator types.
+
+        Args:
+            replica_info: Dict mapping replica URL to replica information
+                         e.g., {'http://url1': {'gpu_type': 'A100'}}
+        """
         with self.lock:
-            self.replica_info = {info['url']: info for info in replica_info}
+            self.replica_info = replica_info
             logger.debug('Set replica info: %s', self.replica_info)
 
     def set_target_qps_per_accelerator(
