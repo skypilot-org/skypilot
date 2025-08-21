@@ -23,6 +23,7 @@ import uuid
 import cachetools
 import colorama
 import filelock
+from passlib.context import CryptContext
 from typing_extensions import ParamSpec
 
 from sky import exceptions
@@ -102,6 +103,7 @@ logger = sky_logging.init_logger(__name__)
 
 hinted_for_server_install_version_mismatch = False
 
+crypt_ctx = CryptContext(["bcrypt", "sha256_crypt", "sha512_crypt", "des_crypt", "apr_md5_crypt", "ldap_sha1"])
 
 class ApiServerStatus(enum.Enum):
     HEALTHY = 'healthy'
