@@ -13,7 +13,7 @@ RUN apt-get update && \
     /var/lib/apt/lists/*
 
 # Stage 2: Main image
-FROM python:3.10-slim
+FROM continuumio/miniconda3:23.3.1-0
 
 # Copy Google Cloud SDK from Stage 1
 COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
