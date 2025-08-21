@@ -53,6 +53,18 @@ def process_source_file(source_path, md_path):
                 content, source_path,
                 r'\.\. literalinclude:: ([^\n]+)\n(?:   :language: (\w+)\n)?(?:   :[^\n]*\n)*'
             )
+            
+            # Pre-process emoji substitutions to avoid pandoc reference errors
+            # Convert RST emoji syntax |:emoji:| to Unicode characters
+            emoji_map = {
+                '|:yellow_circle:|': '🟡',
+                '|:white_check_mark:|': '✅',
+                '|:x:|': '❌',
+                '|:tada:|': '🎉'
+            }
+            for rst_emoji, unicode_emoji in emoji_map.items():
+                content = content.replace(rst_emoji, unicode_emoji)
+            
             # Convert via pandoc
             temp_rst = md_path.with_suffix('.temp.rst')
             temp_rst.write_text(content, encoding='utf-8')
@@ -103,4 +115,3 @@ def resolve_literalincludes(content, source_path, pattern):
 def setup(app: Sphinx):
     app.connect('build-finished', export_markdown_files)
     return {'version': '1.0', 'parallel_read_safe': True}
-

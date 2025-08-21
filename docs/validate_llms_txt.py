@@ -46,4 +46,3 @@ if __name__ == "__main__":
         sys.exit(1)
 
     sys.exit(0 if validate_llms_txt(path) else 1)
-
