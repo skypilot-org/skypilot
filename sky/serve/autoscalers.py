@@ -213,6 +213,10 @@ class Autoscaler:
         # TODO(MaoZiming): use NAME to get the class.
         if spec.use_ondemand_fallback:
             return FallbackRequestRateAutoscaler(service_name, spec)
+        elif isinstance(spec.target_qps_per_replica, dict):
+            # Use instance-aware autoscaler
+            # when target_qps_per_replica is a dict
+            return InstanceAwareRequestRateAutoscaler(service_name, spec)
         else:
             return RequestRateAutoscaler(service_name, spec)
 
@@ -464,12 +468,15 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
             request_timestamps: All request timestamps within the window.
         """
         super().__init__(service_name, spec)
-        self.target_qps_per_replica: Optional[Union[float, Dict[
-            str, float]]] = spec.target_qps_per_replica
+        # RequestRateAutoscaler should only handle float values
+        if isinstance(spec.target_qps_per_replica, dict):
+            raise ValueError('RequestRateAutoscaler does not support dict '
+                             'target_qps_per_replica. Should use '
+                             'InstanceAwareRequestRateAutoscaler instead.')
+        self.target_qps_per_replica: Optional[
+            float] = spec.target_qps_per_replica
         self.qps_window_size: int = constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS
         self.request_timestamps: List[float] = []
-        # Warn once if instance-aware scale-down by QPS is unavailable
-        self._warned_non_instance_aware_scale_down: bool = False
 
     def _calculate_target_num_replicas(self) -> int:
         if self.target_qps_per_replica is None:
@@ -477,217 +484,22 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
         num_requests_per_second = len(
             self.request_timestamps) / self.qps_window_size
 
-        # Handle both float and dict types for target_qps_per_replica
-        if isinstance(self.target_qps_per_replica, dict):
-            # For instance-aware autoscaling,
-            # we need replica_infos to get current replica count
-            # Since we don't have replica_infos here,
-            # we'll need to store minimal state or get this info differently.
-            # For now, return min_replicas as fallback
-            # This will be properly handled in _generate_scaling_decisions()
-            # where we have access to replica_infos
-            return self.min_replicas
-        else:
-            # default case
-            target_qps = self.target_qps_per_replica
-            raw_target_num = math.ceil(num_requests_per_second / target_qps)
-            target_num_replicas = self._clip_target_num_replicas(raw_target_num)
-            logger.info(f'Requests per second: {num_requests_per_second}. '
-                        f'Target number of replicas: {raw_target_num}.')
+        target_qps = self.target_qps_per_replica
+        raw_target_num = math.ceil(num_requests_per_second / target_qps)
+        target_num_replicas = self._clip_target_num_replicas(raw_target_num)
+        logger.info(f'Requests per second: {num_requests_per_second}. '
+                    f'Target number of replicas: {raw_target_num}.')
 
         return target_num_replicas
-
-    def _calculate_total_qps_from_replicas(
-            self, replica_infos: List['replica_managers.ReplicaInfo']) -> float:
-        """Calculate total QPS based on current replica GPU types."""
-        if not isinstance(self.target_qps_per_replica, dict):
-            return 0.0
-
-        total_qps = 0.0
-        logger.info(f'Calculating total QPS from {len(replica_infos)} replicas')
-
-        for replica_info in replica_infos:
-            # Skip non-valid replicas
-            valid_statuses = [
-                serve_state.ReplicaStatus.READY,
-                serve_state.ReplicaStatus.STARTING,
-                serve_state.ReplicaStatus.PROVISIONING
-            ]
-            if replica_info.status not in valid_statuses:
-                logger.info(f'Skipping replica {replica_info.replica_id} '
-                            f'with status: {replica_info.status}')
-                continue
-
-            gpu_type = self._get_gpu_type_from_replica_info(replica_info)
-            logger.info(f'Processing replica {replica_info.replica_id} '
-                        f'with GPU type: {gpu_type}')
-
-            # Use flexible matching logic
-            qps_for_this_gpu = self._get_target_qps_for_gpu_type(gpu_type)
-            total_qps += qps_for_this_gpu
-            logger.info(f'GPU type {gpu_type} -> {qps_for_this_gpu} QPS')
-
-        logger.info(f'Calculated total QPS: {total_qps}')
-        return total_qps
-
-    def _get_target_qps_for_gpu_type(self, gpu_type: str) -> float:
-        """Get target QPS for GPU type with flexible matching."""
-        if not isinstance(self.target_qps_per_replica, dict):
-            if isinstance(self.target_qps_per_replica, (int, float)):
-                return float(self.target_qps_per_replica)
-            # Fallback for invalid types
-            logger.warning(
-                f'Invalid target_qps_per_replica type: '
-                f'{type(self.target_qps_per_replica)}. Using 1.0 as fallback.')
-            return 1.0
-
-        # Direct match first
-        if gpu_type in self.target_qps_per_replica:
-            return self.target_qps_per_replica[gpu_type]
-
-        # Try matching by base name (e.g., 'A100' matches 'A100:1')
-        for config_gpu_type in self.target_qps_per_replica.keys():
-            base_config_gpu_type = config_gpu_type.split(':')[0]
-            if gpu_type == base_config_gpu_type:
-                return self.target_qps_per_replica[config_gpu_type]
-
-        # Fallback to maximum QPS
-        logger.warning(
-            f'No matching target QPS found for GPU type: {gpu_type}. '
-            f'Available types: {list(self.target_qps_per_replica.keys())}. '
-            f'Using target_qps=1.0 as fallback.')
-        return 1.0
-
-    def _get_gpu_type_from_replica_info(
-            self, replica_info: 'replica_managers.ReplicaInfo') -> str:
-        """Extract GPU type from ReplicaInfo object."""
-        gpu_type = 'unknown'
-        handle = replica_info.handle()
-        if handle is not None and hasattr(handle, 'launched_resources'):
-            accelerators = handle.launched_resources.accelerators
-            if accelerators and len(accelerators) > 0:
-                # Get the first accelerator type
-                gpu_type = list(accelerators.keys())[0]
-        return gpu_type
-
-    def _extract_target_qps_list_from_ready_replicas(
-            self,
-            replica_infos: List['replica_managers.ReplicaInfo']) -> List[float]:
-        """Extract target QPS list from current READY replicas."""
-        if not isinstance(self.target_qps_per_replica, dict):
-            return []
-
-        ready_replica_qps = []
-
-        for replica_info in replica_infos:
-            # Check if replica is READY
-            if replica_info.status != serve_state.ReplicaStatus.READY:
-                logger.info(
-                    f'Replica {replica_info.replica_id} '
-                    f'not ready (status: {replica_info.status}), skipping')
-                continue
-
-            gpu_type = self._get_gpu_type_from_replica_info(replica_info)
-
-            # Use flexible matching logic
-            qps_for_this_gpu = self._get_target_qps_for_gpu_type(gpu_type)
-            ready_replica_qps.append(qps_for_this_gpu)
-            logger.info(f'Ready replica {replica_info.replica_id} '
-                        f'with GPU {gpu_type}: {qps_for_this_gpu} QPS')
-
-        if ready_replica_qps:
-            logger.info(
-                f'Target QPS list from ready replicas: {ready_replica_qps}')
-            return ready_replica_qps
-
-        return []
-
-    def _select_replicas_to_scale_down_by_qps(
-        self,
-        num_replicas_to_scale_down: int,
-        replica_infos: List['replica_managers.ReplicaInfo'],
-    ) -> List[int]:
-        """Select replicas to scale down based on target QPS (lowest QPS first).
-
-        We sort the replicas based on the following order:
-        1. Based on the `scale_down_decision_order` of the status. We terminate
-            the replicas that is in earlier stage first, as the replicas in
-            later stage may become ready soon.
-        2. Based on the target QPS in ascending order,
-            so we scale down the replicas with low QPS first.
-        3. Based on the version in ascending order, so we scale down the older
-            versions first.
-        4. Based on the replica_id in descending order, which is also the order
-            of the replicas being launched. We scale down the replicas that are
-            launched earlier first, as the replicas that are launched later may
-            become ready soon.
-
-
-        """
-        if not isinstance(self.target_qps_per_replica, dict):
-            # Fallback to original logic if not instance-aware
-            if not self._warned_non_instance_aware_scale_down:  # warn once
-                logger.warning(
-                    'Instance-aware scale-down by QPS is disabled because '
-                    'target_qps_per_replica is not a dict; falling back to '
-                    'nonterminal-replica selection.')
-                self._warned_non_instance_aware_scale_down = True
-            return _select_nonterminal_replicas_to_scale_down(
-                num_replicas_to_scale_down, replica_infos)
-
-        # Create a list of (replica_info, target_qps) tuples
-        replica_qps_pairs: List[Tuple['replica_managers.ReplicaInfo',
-                                      float]] = []
-
-        for info in replica_infos:
-            # Include old-version replicas as well so they also get a target_qps
-            # assigned. Skip terminal replicas only.
-            if info.is_terminal:
-                continue
-
-            # Get GPU type directly from replica info
-            gpu_type = self._get_gpu_type_from_replica_info(info)
-
-            # Use flexible matching logic
-            target_qps = self._get_target_qps_for_gpu_type(gpu_type)
-
-            replica_qps_pairs.append((info, float(target_qps)))
-            logger.info(f'Replica {info.replica_id} '
-                        f'with GPU {gpu_type}: {target_qps} QPS')
-
-        # Create a mapping from replica_id to target_qps for sorting
-        replica_qps_map = {
-            info.replica_id: qps for info, qps in replica_qps_pairs
-        }
-
-        # Sort replicas with status as 1st priority, target_qps as 2nd priority
-        replicas = list(replica_infos)
-        status_order = serve_state.ReplicaStatus.scale_down_decision_order()
-        assert all(info.status in status_order for info in replicas), (
-            'All replicas to scale down should be in provisioning or launched '
-            'status.', replicas)
-        replicas = sorted(
-            replicas,
-            key=lambda info: (
-                status_order.index(info.status),  # 1st priority: status
-                replica_qps_map.get(info.replica_id, float('inf')
-                                   ),  # 2nd priority: target_qps (lowest first)
-                info.version,  # 3rd priority: version in ascending order
-                -info.replica_id)
-        )  # 4th priority: replica_id in descending order
-        assert len(replicas) >= num_replicas_to_scale_down, (
-            'Not enough replicas to scale down. '
-            f'Available replicas: {replicas}, '
-            f'num_replicas_to_scale_down: {num_replicas_to_scale_down}.')
-
-        selected_ids = [info.replica_id for info in replicas
-                       ][:num_replicas_to_scale_down]
-        logger.info(f'Selected replicas to scale down: {selected_ids}')
-        return selected_ids
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
         super().update_version(version, spec, update_mode)
+        # RequestRateAutoscaler should only handle float values
+        if isinstance(spec.target_qps_per_replica, dict):
+            raise ValueError('RequestRateAutoscaler does not support dict '
+                             'target_qps_per_replica. Should use '
+                             'InstanceAwareRequestRateAutoscaler instead.')
         self.target_qps_per_replica = spec.target_qps_per_replica
 
     def collect_request_information(
@@ -715,14 +527,8 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
     ) -> List[AutoscalerDecision]:
         """Generate Autoscaling decisions based on request rate."""
 
-        # For instance-aware autoscaling,
-        # we need to calculate target replicas here
-        # where we have access to replica_infos.
-        if isinstance(self.target_qps_per_replica, dict):
-            self._set_target_num_replicas_with_instance_aware_logic(
-                replica_infos)
-        else:
-            self._set_target_num_replicas_with_hysteresis()
+        # Use standard hysteresis-based logic (non-instance-aware)
+        self._set_target_num_replicas_with_hysteresis()
 
         latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
 
@@ -750,16 +556,10 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
         if len(latest_nonterminal_replicas) > target_num_replicas:
             num_replicas_to_scale_down = (len(latest_nonterminal_replicas) -
                                           target_num_replicas)
-            # Use instance-aware downscaling (lowest QPS first) if available
-            if isinstance(self.target_qps_per_replica, dict):
-                replicas_to_scale_down = \
-                    self._select_replicas_to_scale_down_by_qps(
-                    num_replicas_to_scale_down, latest_nonterminal_replicas)
-            else:
-                replicas_to_scale_down = (
-                    _select_nonterminal_replicas_to_scale_down(
-                        num_replicas_to_scale_down,
-                        latest_nonterminal_replicas))
+            # Use standard downscaling logic
+            replicas_to_scale_down = (
+                _select_nonterminal_replicas_to_scale_down(
+                    num_replicas_to_scale_down, latest_nonterminal_replicas))
             logger.info(
                 'Number of replicas to scale down: '
                 f'{num_replicas_to_scale_down} {replicas_to_scale_down}')
@@ -769,12 +569,102 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
 
         return scaling_decisions
 
+
+# Instance-aware logic moved to InstanceAwareRequestRateAutoscaler
+
+    def _dump_dynamic_states(self) -> Dict[str, Any]:
+        return {
+            'request_timestamps': self.request_timestamps,
+        }
+
+    def _load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
+        if 'request_timestamps' in dynamic_states:
+            self.request_timestamps = dynamic_states.pop('request_timestamps')
+        if dynamic_states:
+            logger.info(f'Remaining dynamic states: {dynamic_states}')
+
+
+class InstanceAwareRequestRateAutoscaler(RequestRateAutoscaler):
+    """Instance-aware RequestRateAutoscaler:
+    Autoscale based on each replica's GPU-specific QPS.
+
+    This autoscaler considers different QPS targets for different GPU types
+    when target_qps_per_replica is provided as a dictionary mapping GPU types
+    to their respective QPS targets.
+    """
+
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
+        super().__init__(service_name, spec)
+        # Ensure target_qps_per_replica is a dict for instance-aware logic
+        assert isinstance(spec.target_qps_per_replica, dict), \
+            'InstanceAware Autoscaler requires dict type target_qps_per_replica'
+        # Re-assign with correct type using setattr to avoid typing issues
+        setattr(self, 'target_qps_per_replica', spec.target_qps_per_replica)
+
+    def _generate_scaling_decisions(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+        """Generate autoscaling decisions with instance-aware logic."""
+        # Always use instance-aware logic
+        # since target_qps_per_replica is guaranteed to be dict
+        self._set_target_num_replicas_with_instance_aware_logic(replica_infos)
+
+        latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
+
+        for info in replica_infos:
+            if not info.is_terminal and info.version == self.latest_version:
+                latest_nonterminal_replicas.append(info)
+
+        target_num_replicas = self.get_final_target_num_replicas()
+        current_num_replicas = len(latest_nonterminal_replicas)
+
+        scaling_decisions: List[AutoscalerDecision] = []
+
+        # Decide if to scale up or down.
+        if target_num_replicas > current_num_replicas:
+            for _ in range(target_num_replicas - current_num_replicas):
+                # No resources_override to use when scaling up
+                scaling_decisions.append(
+                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                                       target=None))
+        elif target_num_replicas < current_num_replicas:
+            num_replicas_to_scale_down = \
+                current_num_replicas - target_num_replicas
+
+            # Use instance-aware scale down logic
+            replicas_to_scale_down = self._select_replicas_to_scale_down_by_qps(
+                num_replicas_to_scale_down, latest_nonterminal_replicas)
+            for replica_id in replicas_to_scale_down:
+                scaling_decisions.append(
+                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                       target=replica_id))
+
+        # Outdated replicas are handled by base class generate_scaling_decisions
+        # No need to handle them here
+
+        upscale_decisions = [
+            d for d in scaling_decisions
+            if d.operator == AutoscalerDecisionOperator.SCALE_UP
+        ]
+        downscale_decisions = [
+            d for d in scaling_decisions
+            if d.operator == AutoscalerDecisionOperator.SCALE_DOWN
+        ]
+        logger.info(f'Scaling decisions: '
+                    f'{len(upscale_decisions)} scale up, '
+                    f'{len(downscale_decisions)} scale down '
+                    f'(latest nonterminal: {current_num_replicas}, '
+                    f'target: {target_num_replicas})')
+
+        return scaling_decisions
+
     def _set_target_num_replicas_with_instance_aware_logic(
             self, replica_infos: List['replica_managers.ReplicaInfo']) -> None:
-        """Set target_num_replicas with
-        instance-aware logic using replica_infos."""
-        # This method is only called when target_qps_per_replica is a dict
-        assert isinstance(self.target_qps_per_replica, dict)
+        """Set target_num_replicas using instance-aware logic."""
+        assert isinstance(self.target_qps_per_replica,
+                          dict), 'Expected dict for instance-aware logic'
         target_qps_dict = self.target_qps_per_replica
 
         num_requests_per_second = len(
@@ -819,22 +709,18 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
 
                 target_num_replicas = self._clip_target_num_replicas(
                     raw_target_num)
-
                 logger.info(
-                    f'Instance-aware autoscaling: total QPS {total_qps} '
-                    f'ready_target_qps_list: {ready_target_qps_list}, '
+                    f'Instance-aware autoscaling: total QPS {total_qps}, '
                     f'num_requests_per_second: {num_requests_per_second}, '
-                    f'current num replicas {len(replica_infos)}, '
-                    f'raw target num: {raw_target_num}, '
-                    f'clipped target replicas: {target_num_replicas}')
+                    f'downscaling, using ready QPS list '
+                    f'{ready_target_qps_list}, '
+                    f'target replicas: {target_num_replicas}')
         else:
-            # No replicas yet, use maximum QPS as fallback
-            target_qps = max(target_qps_dict.values())
-            raw_target_num = math.ceil(num_requests_per_second / target_qps)
-            target_num_replicas = self._clip_target_num_replicas(raw_target_num)
-            logger.info(f'no replicas, using maximum QPS {target_qps} '
-                        f'from {target_qps_dict}, '
-                        f'target replicas: {target_num_replicas}')
+            # no replica is ready; use the normal min_replicas
+            target_num_replicas = self._clip_target_num_replicas(
+                self.min_replicas)
+            logger.info(f'Instance-aware autoscaling: no replica QPS available,'
+                        f' target replicas: {target_num_replicas}')
 
         # Apply hysteresis logic
         old_target_num_replicas = self.target_num_replicas
@@ -868,16 +754,162 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
             f'Downscale counter: {self.downscale_counter}/'
             f'{self.scale_down_threshold}. ')
 
-    def _dump_dynamic_states(self) -> Dict[str, Any]:
-        return {
-            'request_timestamps': self.request_timestamps,
+    def _calculate_total_qps_from_replicas(
+            self, replica_infos: List['replica_managers.ReplicaInfo']) -> float:
+        """Calculate total QPS based on current replica GPU types."""
+        total_qps = 0.0
+        logger.info(f'Calculating total QPS from {len(replica_infos)} replicas')
+
+        for replica_info in replica_infos:
+            # Skip non-valid replicas
+            valid_statuses = [
+                serve_state.ReplicaStatus.READY,
+                serve_state.ReplicaStatus.STARTING,
+                serve_state.ReplicaStatus.PROVISIONING
+            ]
+            if replica_info.status not in valid_statuses:
+                logger.info(f'Skipping replica {replica_info.replica_id} '
+                            f'with status: {replica_info.status}')
+                continue
+
+            gpu_type = self._get_gpu_type_from_replica_info(replica_info)
+            logger.info(f'Processing replica {replica_info.replica_id} '
+                        f'with GPU type: {gpu_type}')
+
+            # Use flexible matching logic
+            qps_for_this_gpu = self._get_target_qps_for_gpu_type(gpu_type)
+            total_qps += qps_for_this_gpu
+            logger.info(f'GPU type {gpu_type} -> {qps_for_this_gpu} QPS')
+
+        logger.info(f'Calculated total QPS: {total_qps}')
+        return total_qps
+
+    def _get_target_qps_for_gpu_type(self, gpu_type: str) -> float:
+        """Get target QPS for a specific GPU type with flexible matching."""
+        assert isinstance(self.target_qps_per_replica,
+                          dict), 'Expected dict for instance-aware logic'
+        target_qps_dict = self.target_qps_per_replica
+
+        # Direct match first
+        if gpu_type in target_qps_dict:
+            return target_qps_dict[gpu_type]
+
+        # Try matching by base name (e.g., 'A100' matches 'A100:1')
+        for config_key in target_qps_dict.keys():
+            # Remove count suffix (e.g., 'A100:1' -> 'A100')
+            base_name = config_key.split(':')[0]
+            if gpu_type == base_name:
+                return target_qps_dict[config_key]
+
+        # Fallback to minimum QPS
+        logger.warning(f'No matching QPS found for GPU type: {gpu_type}. '
+                       f'Available types: {list(target_qps_dict.keys())}. '
+                       f'Using minimum QPS as fallback.')
+        return min(target_qps_dict.values())
+
+    def _get_gpu_type_from_replica_info(
+            self, replica_info: 'replica_managers.ReplicaInfo') -> str:
+        """Extract GPU type from ReplicaInfo object."""
+        gpu_type = 'unknown'
+        handle = replica_info.handle()
+        if handle is not None and hasattr(handle, 'launched_resources'):
+            accelerators = handle.launched_resources.accelerators
+            if accelerators and len(accelerators) > 0:
+                # Get the first accelerator type
+                gpu_type = list(accelerators.keys())[0]
+        return gpu_type
+
+    def _extract_target_qps_list_from_ready_replicas(
+            self,
+            replica_infos: List['replica_managers.ReplicaInfo']) -> List[float]:
+        """Extract target QPS list from current READY replicas."""
+        ready_replica_qps = []
+
+        for replica_info in replica_infos:
+            # Check if replica is READY
+            if replica_info.status != serve_state.ReplicaStatus.READY:
+                logger.info(
+                    f'Replica {replica_info.replica_id} '
+                    f'not ready (status: {replica_info.status}), skipping')
+                continue
+
+            gpu_type = self._get_gpu_type_from_replica_info(replica_info)
+
+            # Use flexible matching logic
+            qps_for_this_gpu = self._get_target_qps_for_gpu_type(gpu_type)
+            ready_replica_qps.append(qps_for_this_gpu)
+            logger.info(f'Ready replica {replica_info.replica_id} '
+                        f'with GPU {gpu_type}: {qps_for_this_gpu} QPS')
+
+        if ready_replica_qps:
+            logger.info(
+                f'Target QPS list from ready replicas: {ready_replica_qps}')
+            return ready_replica_qps
+
+        return []
+
+    def _select_replicas_to_scale_down_by_qps(
+            self, num_replicas_to_scale_down: int,
+            replica_infos: List['replica_managers.ReplicaInfo']) -> List[int]:
+        """Select replicas to scale down (lowest QPS first)."""
+        # Create a list of (replica_info, target_qps) tuples
+        replica_qps_pairs: List[Tuple['replica_managers.ReplicaInfo',
+                                      float]] = []
+
+        for info in replica_infos:
+            # Include old-version replicas as well so they also get a target_qps
+            # assigned. Skip terminal replicas only.
+            if info.is_terminal:
+                continue
+
+            # Get GPU type directly from replica info
+            gpu_type = self._get_gpu_type_from_replica_info(info)
+
+            # Use flexible matching logic
+            target_qps = self._get_target_qps_for_gpu_type(gpu_type)
+
+            replica_qps_pairs.append((info, float(target_qps)))
+            logger.info(f'Replica {info.replica_id} '
+                        f'with GPU {gpu_type}: {target_qps} QPS')
+
+        # Create a mapping from replica_id to target_qps for sorting
+        replica_qps_map = {
+            info.replica_id: target_qps
+            for info, target_qps in replica_qps_pairs
         }
 
-    def _load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
-        if 'request_timestamps' in dynamic_states:
-            self.request_timestamps = dynamic_states.pop('request_timestamps')
-        if dynamic_states:
-            logger.info(f'Remaining dynamic states: {dynamic_states}')
+        # Sort replicas by: 1. status order, 2. target_qps (asc),
+        # 3. version (asc), 4. replica_id (desc)
+        sorted_replicas = sorted(
+            replica_infos,
+            key=lambda info: (
+                info.status.scale_down_decision_order(),
+                replica_qps_map.get(info.replica_id, float('inf')),
+                info.version,
+                -info.replica_id,
+            ))
+
+        selected_replica_ids = []
+        for info in sorted_replicas:
+            if info.is_terminal:
+                continue
+            selected_replica_ids.append(info.replica_id)
+            if len(selected_replica_ids) >= num_replicas_to_scale_down:
+                break
+
+        logger.info(
+            f'Selected {len(selected_replica_ids)} replicas to scale down: '
+            f'{selected_replica_ids}')
+        return selected_replica_ids
+
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       update_mode: serve_utils.UpdateMode) -> None:
+        super(RequestRateAutoscaler,
+              self).update_version(version, spec, update_mode)
+        # Ensure it's a dict and re-assign using setattr to avoid typing
+        assert isinstance(spec.target_qps_per_replica, dict), \
+            'InstanceAware Autoscaler requires dict type target_qps_per_replica'
+        setattr(self, 'target_qps_per_replica', spec.target_qps_per_replica)
 
 
 class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
