@@ -121,6 +121,10 @@ _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
 
+_NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT = (
+    f' (See: {colorama.Style.BRIGHT}sky serve -h'
+    f'{colorama.Style.RESET_ALL})')
+
 T = TypeVar('T')
 
 
@@ -1477,8 +1481,7 @@ def _handle_services_request(
         controller_status = e.cluster_status
         msg = str(e)
         if controller_status is None:
-            msg += (f' (See: {colorama.Style.BRIGHT}sky serve -h'
-                    f'{colorama.Style.RESET_ALL})')
+            msg += _NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT
     except RuntimeError as e:
         msg = ''
         try:
@@ -5670,9 +5673,12 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Services{colorama.Style.RESET_ALL}')
     click.echo(msg)
-    # if num_services is None, it means exception happened
-    # and we should exit with non-zero status
-    sys.exit(int(num_services is None))
+    # Exit with nonzero if num_services is None (error), except when
+    # _NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT is in msg, which means no
+    # active controller and is treated as a normal empty query (success).
+    sys.exit(
+        int(num_services is None and
+            _NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT not in msg))
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
