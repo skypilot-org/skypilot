@@ -39,8 +39,8 @@ def test_ssm_public():
     test = smoke_tests_utils.Test(
         'ssm_public',
         [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-        ],
+            f'export s=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml)',
+        ] + list(smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT_EXPORTED),
         teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('aws'),
     )
@@ -57,15 +57,18 @@ def test_ssm_private():
     vpc = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
     vpc_config = f'--config aws.vpc_name={vpc} ' \
         f'--config aws.use_ssm=true ' \
-        f'--config aws.security_group_name=lloyd-airgap-gw-sg' \
+        f'--config aws.security_group_name=lloyd-airgap-gw-sg ' \
         f'--config aws.use_internal_ips=true'
 
     test = smoke_tests_utils.Test(
         'ssm_private',
         [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml',
         ],
         teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('aws'),
     )
+    outputs = smoke_tests_utils.run_one_test(test)
+    for output in outputs:
+        print(output)
     smoke_tests_utils.run_one_test(test)

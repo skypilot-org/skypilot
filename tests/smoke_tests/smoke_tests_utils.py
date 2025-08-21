@@ -457,6 +457,8 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     if check_sky_status:
         test.commands.insert(0, 'sky status')
 
+    outputs = []
+
     log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
     if log_to_stdout:
         write = test.echo
@@ -483,14 +485,18 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             flush()
             proc = subprocess.Popen(
                 command,
-                stdout=subprocess_out,
-                stderr=subprocess.STDOUT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 shell=True,
                 executable='/bin/bash',
                 env=env_dict,
             )
             try:
                 proc.wait(timeout=test.timeout)
+                output = proc.stdout.read().decode('utf-8')
+                outputs.append(output)
+                # Also send output to log file.
+                subprocess_out.write(output)
             except subprocess.TimeoutExpired as e:
                 flush()
                 test.echo(f'Timeout after {test.timeout} seconds.')
@@ -636,6 +642,49 @@ VALIDATE_LAUNCH_OUTPUT = (
     'echo "==Validating task output ending 2==" && '
     'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
     'grep "Job ID:" && '
+    'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
+
+VALIDATE_LAUNCH_OUTPUT_EXPORTED = (
+    # Validate the output of the job submission:
+    # ⚙️ Launching on Kubernetes.
+    #   Pod is up.
+    # ✓ Cluster launched: test. View logs at: ~/sky_logs/sky-2024-10-07-19-44-18-177288/provision.log
+    # ✓ Setup Detached.
+    # ⚙️ Job submitted, ID: 1.
+    # ├── Waiting for task resources on 1 node.
+    # └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
+    # (setup pid=1277) running setup
+    # (min, pid=1277) # conda environments:
+    # (min, pid=1277) #
+    # (min, pid=1277) base                  *  /opt/conda
+    # (min, pid=1277)
+    # (min, pid=1277) task run finish
+    # ✓ Job finished (status: SUCCEEDED).
+    #
+    # Job ID: 1
+    # 📋 Useful Commands
+    # ├── To cancel the job:          sky cancel test 1
+    # ├── To stream job logs:         sky logs test 1
+    # └── To view job queue:          sky queue test
+    #
+    # Cluster name: test
+    # ├── To log into the head VM:    ssh test
+    # ├── To submit a job:            sky exec test yaml_file
+    # ├── To stop the cluster:        sky stop test
+    # └── To teardown the cluster:    sky down test
+    'echo "$s" && echo "\n==Validating launching=="',
+    'echo "$s" | grep -A 1 "Launching on" | grep "is up."',
+    'echo "$s" && echo "==Validating setup output=="',
+    'echo "$s" | grep -A 1 "Setup detached" | grep "Job submitted"',
+    'echo "==Validating running output hints=="',
+    'echo "$s" | grep -A 1 "Job submitted, ID:" | grep "Waiting for task resources on "',
+    'echo "==Validating task setup/run output starting=="',
+    'echo "$s" | grep -A 1 "Job started. Streaming logs..." | grep "(setup" | grep "running setup"',
+    'echo "$s" | grep -A 1 "(setup" | grep "(min, pid="',
+    'echo "==Validating task output ending=="',
+    'echo "$s" | grep -A 1 "task run finish" | grep "Job finished (status: SUCCEEDED)"',
+    'echo "==Validating task output ending 2=="',
+    'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | grep "Job ID:"',
     'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
 
 _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
