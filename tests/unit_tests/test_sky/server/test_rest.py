@@ -206,7 +206,8 @@ class TestRetryTransientErrorsDecorator:
         assert mock_logger.debug.call_count == 11
         debug_calls = mock_logger.debug.call_args_list
         for call in debug_calls:
-            assert 'Retry function_failing_after_making_progress due to' in call[0][0]
+            assert 'Retry function_failing_after_making_progress due to' in call[
+                0][0]
 
     def test_different_http_error_status_codes(self):
         """Test behavior with different HTTP error status codes."""
