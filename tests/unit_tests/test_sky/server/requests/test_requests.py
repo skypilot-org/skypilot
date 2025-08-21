@@ -273,3 +273,79 @@ async def test_requests_gc_daemon_disabled(isolated_database):
                 # Verify sleep was called with max(-1, 3600) = 3600
                 assert mock_sleep.call_count == 2
                 mock_sleep.assert_any_call(3600)
+
+
+def test_get_api_request_ids_start_with(isolated_database):
+    """Test request ID completion prioritizes alive requests and orders correctly."""
+    current_time = time.time()
+    
+    # Create test requests with various statuses and timestamps
+    requests_data = [
+        # Alive requests (should be prioritized)
+        ('pending-new', RequestStatus.PENDING, current_time - 10),    # newest alive
+        ('pending-old', RequestStatus.PENDING, current_time - 100),   # older alive
+        ('running-mid', RequestStatus.RUNNING, current_time - 50),    # middle alive
+        
+        # Finished requests (should come after alive ones)
+        ('succeeded-new', RequestStatus.SUCCEEDED, current_time - 5),  # newest finished
+        ('failed-old', RequestStatus.FAILED, current_time - 200),      # oldest finished
+        ('cancelled-mid', RequestStatus.CANCELLED, current_time - 75), # middle finished
+        
+        # Non-matching prefixes (should not appear)
+        ('other-request', RequestStatus.RUNNING, current_time - 20),
+    ]
+    
+    # Create all test requests
+    for request_id, status, created_at in requests_data:
+        request = requests.Request(
+            request_id=request_id,
+            name='test-request',
+            entrypoint=dummy,
+            request_body=payloads.RequestBody(),
+            status=status,
+            created_at=created_at,
+            finished_at=created_at + 1 if status in RequestStatus.finished_status() else None,
+            user_id='test-user'
+        )
+        requests.create_if_not_exists(request)
+    
+    # Test completion with prefix that matches multiple requests
+    result = requests.get_api_request_ids_start_with('pen')  # matches pending-*
+    
+    # Should return only pending requests, ordered by newest first
+    expected = ['pending-new', 'pending-old']
+    assert result == expected
+    
+    # Test completion with broader prefix
+    result = requests.get_api_request_ids_start_with('')  # matches all except 'other-request'
+    
+    # Should return alive requests first (newest first), then finished (newest first)
+    expected_alive = ['pending-new', 'running-mid', 'pending-old']  # alive, newest first
+    expected_finished = ['succeeded-new', 'cancelled-mid', 'failed-old']  # finished, newest first
+    expected_all = expected_alive + expected_finished
+    
+    # Filter out 'other-request' which doesn't match our tested prefixes
+    result_filtered = [r for r in result if not r.startswith('other')]
+    assert result_filtered == expected_all
+    
+    # Test empty result for non-matching prefix
+    result = requests.get_api_request_ids_start_with('nonexistent')
+    assert result == []
+    
+    # Test limit functionality by creating many requests
+    for i in range(1005):  # More than the 1000 limit
+        request = requests.Request(
+            request_id=f'bulk-{i:04d}',
+            name='test-request', 
+            entrypoint=dummy,
+            request_body=payloads.RequestBody(),
+            status=RequestStatus.SUCCEEDED,
+            created_at=current_time + i,  # newest first due to ordering
+            finished_at=current_time + i + 1,
+            user_id='test-user'
+        )
+        requests.create_if_not_exists(request)
+    
+    # Test that limit is respected
+    bulk_result = requests.get_api_request_ids_start_with('bulk-')
+    assert len(bulk_result) == 1000  # Should be limited to 1000
