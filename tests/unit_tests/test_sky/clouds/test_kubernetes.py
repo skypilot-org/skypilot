@@ -4,7 +4,10 @@ import unittest
 from unittest import mock
 from unittest.mock import patch
 
+import pytest
+
 from sky.clouds import kubernetes
+from sky.clouds.utils import gcp_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 
