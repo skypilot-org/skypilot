@@ -4364,7 +4364,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if controller:  # download controller logs
             remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
                                       f'{job_id}.log')
-            local_log_dir = os.path.join(local_dir, run_timestamp)
+            local_log_dir = os.path.join(local_dir, 'managed_jobs',
+                                         run_timestamp)
             os.makedirs(os.path.dirname(os.path.expanduser(local_log_dir)),
                         exist_ok=True)
 
