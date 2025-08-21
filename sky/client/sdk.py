@@ -1506,16 +1506,20 @@ def endpoints(
     response = server_common.make_authenticated_request(
         'POST', '/endpoints', json=json.loads(body.model_dump_json()))
     if port is None:
-        no_port_request_id: server_common.RequestId[Dict[int, str]] = (
-            server_common.get_request_id(response))
+        # Returns a dictionary of port numbers to endpoints when
+        # get / stream_and_get is called.
+        cluster_endpoints_request_id: server_common.RequestId[Dict[
+            int, str]] = (server_common.get_request_id(response))
 
         def response_transform(result: Dict[str, str]) -> Dict[int, str]:
             return {int(k): v for k, v in result.items()}
 
-        no_port_request_id.set_transform_func(response_transform)
-        return no_port_request_id
+        cluster_endpoints_request_id.set_transform_func(response_transform)
+        return cluster_endpoints_request_id
     else:
-        port_request_id: server_common.RequestId[Optional[str]] = (
+        # Returns a string endpoint for the given port when
+        # get / stream_and_get is called.
+        cluster_endpoint_request_id: server_common.RequestId[Optional[str]] = (
             server_common.get_request_id(response))
 
         # Create a transformation function to extract
@@ -1523,8 +1527,8 @@ def endpoints(
         def port_extractor(result: Dict[str, str]) -> Optional[str]:
             return result.get(str(port), None)
 
-        port_request_id.set_transform_func(port_extractor)
-        return port_request_id
+        cluster_endpoint_request_id.set_transform_func(port_extractor)
+        return cluster_endpoint_request_id
 
 
 @usage_lib.entrypoint
