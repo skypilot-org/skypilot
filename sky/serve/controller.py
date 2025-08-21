@@ -71,6 +71,9 @@ class SkyServeController:
             try:
                 replica_infos = serve_state.get_replica_infos(
                     self._service_name)
+                # Use the active versions set by replica manager to make
+                # sure we only scale down the outdated replicas that are
+                # not used by the load balancer.
                 record = serve_state.get_service_from_name(self._service_name)
                 assert record is not None, ('No service record found for '
                                             f'{self._service_name}')
