@@ -94,7 +94,7 @@ def retry_transient_errors(max_retries: int = 3,
             failed_retry_cnt = 0
 
             with _retry_in_context() as context:
-                previous_line_processed = context.line_processed # should be 0
+                previous_line_processed = context.line_processed  # should be 0
 
                 def _handle_exception():
                     # If the function made progress on a retry,
@@ -102,7 +102,8 @@ def retry_transient_errors(max_retries: int = 3,
                     # Otherwise, increments the failed retry count.
                     nonlocal backoff, failed_retry_cnt, previous_line_processed
                     if context.line_processed > previous_line_processed:
-                        backoff = common_utils.Backoff(initial_backoff, max_backoff_factor)
+                        backoff = common_utils.Backoff(initial_backoff,
+                                                       max_backoff_factor)
                         previous_line_processed = context.line_processed
                         failed_retry_cnt = 0
                     else:
@@ -126,8 +127,9 @@ def retry_transient_errors(max_retries: int = 3,
                         if not is_transient_error(e):
                             # Permanent error, no need to retry.
                             raise
-                        logger.debug(f'Retry {func.__name__} due to {e}, '
-                                     f'attempt {failed_retry_cnt}/{max_retries}')
+                        logger.debug(
+                            f'Retry {func.__name__} due to {e}, '
+                            f'attempt {failed_retry_cnt}/{max_retries}')
                         time.sleep(backoff.current_backoff())
 
         return cast(F, wrapper)
