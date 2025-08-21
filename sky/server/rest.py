@@ -47,9 +47,10 @@ class RetryContext:
 
 @contextlib.contextmanager
 def _retry_in_context():
-    token = _RETRY_CONTEXT.set(RetryContext())
+    context = RetryContext()
+    token = _RETRY_CONTEXT.set(context)
     try:
-        yield
+        yield context
     finally:
         _RETRY_CONTEXT.reset(token)
 
@@ -90,25 +91,43 @@ def retry_transient_errors(max_retries: int = 3,
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             backoff = common_utils.Backoff(initial_backoff, max_backoff_factor)
-            with _retry_in_context():
-                for retry_cnt in range(max_retries):
+            failed_retry_cnt = 0
+
+            with _retry_in_context() as context:
+                previous_line_processed = context.line_processed # should be 0
+
+                def _handle_exception():
+                    # If the function made progress on a retry,
+                    # clears the backoff and resets the failed retry count.
+                    # Otherwise, increments the failed retry count.
+                    nonlocal backoff, failed_retry_cnt, previous_line_processed
+                    if context.line_processed > previous_line_processed:
+                        backoff = common_utils.Backoff(initial_backoff, max_backoff_factor)
+                        previous_line_processed = context.line_processed
+                        failed_retry_cnt = 0
+                    else:
+                        failed_retry_cnt += 1
+
+                while failed_retry_cnt < max_retries:
                     try:
                         return func(*args, **kwargs)
                     # Occurs when the server proactively interrupts the request
                     # during rolling update, we can retry immediately on the
                     # new replica.
                     except exceptions.RequestInterruptedError:
+                        _handle_exception()
                         logger.debug('Request interrupted. Retry immediately.')
                         continue
                     except Exception as e:  # pylint: disable=broad-except
-                        if retry_cnt >= max_retries - 1:
+                        _handle_exception()
+                        if failed_retry_cnt >= max_retries:
                             # Retries exhausted.
                             raise
                         if not is_transient_error(e):
                             # Permanent error, no need to retry.
                             raise
                         logger.debug(f'Retry {func.__name__} due to {e}, '
-                                     f'attempt {retry_cnt + 1}/{max_retries}')
+                                     f'attempt {failed_retry_cnt}/{max_retries}')
                         time.sleep(backoff.current_backoff())
 
         return cast(F, wrapper)
