@@ -127,6 +127,7 @@ class SSHCommandRunner(CommandRunner):
     ssh_control_name: Optional[str]
     docker_user: str
     disable_control_master: Optional[bool]
+    port_forward_execute_remote_command: Optional[bool]
 
     def __init__(
         self,

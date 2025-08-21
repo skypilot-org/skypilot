@@ -106,6 +106,11 @@ _LAUNCHED_RESERVED_WORKER_PATTERN = re.compile(
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
+SSH_CONNECTION_ERROR_PATTERN = re.compile(
+    r'^ssh:.*(timed out|connection refused)$', re.IGNORECASE)
+# Pattern for Kubernetes port forward errors that should not be retried
+K8S_PODS_NOT_FOUND_PATTERN = re.compile(r'.*(NotFound|pods .* not found).*',
+                                        re.IGNORECASE)
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We check network connection by going through _TEST_IP_LIST. We may need to
@@ -3416,26 +3421,36 @@ def invoke_skylet_with_retries(
             return func()
         except grpc.RpcError as e:
             last_exception = e
-            if e.code() == grpc.StatusCode.INTERNAL:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.SkyletInternalError(e.details())
-            elif e.code() == grpc.StatusCode.UNAVAILABLE:
-                recreate_tunnel = True
-                try:
-                    if handle.skylet_ssh_tunnel is not None:
-                        proc = psutil.Process(handle.skylet_ssh_tunnel.pid)
-                        if proc.is_running(
-                        ) and proc.status() != psutil.STATUS_ZOMBIE:
-                            recreate_tunnel = False
-                except psutil.NoSuchProcess:
-                    pass
-
-                if recreate_tunnel:
-                    handle.open_and_update_skylet_tunnel()
-
-                time.sleep(backoff.current_backoff())
-            else:
-                raise e
+            _handle_grpc_error(e, handle, backoff.current_backoff())
 
     raise RuntimeError(f'Failed to invoke Skylet after {max_attempts} attempts'
                       ) from last_exception
+
+
+def _handle_grpc_error(e: grpc.RpcError,
+                       handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+                       current_backoff: float) -> None:
+    if e.code() == grpc.StatusCode.INTERNAL:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.SkyletInternalError(e.details())
+    elif e.code() == grpc.StatusCode.UNAVAILABLE:
+        recreate_tunnel = True
+        try:
+            if handle.skylet_ssh_tunnel is not None:
+                proc = psutil.Process(handle.skylet_ssh_tunnel.pid)
+                if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+                    recreate_tunnel = False
+        except psutil.NoSuchProcess:
+            pass
+
+        if recreate_tunnel:
+            handle.open_and_update_skylet_tunnel()
+        time.sleep(current_backoff)
+    elif e.code() == grpc.StatusCode.UNIMPLEMENTED:
+        # Handle backwards compatibility: old server doesn't implement this RPC.
+        # Let the caller fall back to legacy execution.
+        raise exceptions.SkyletMethodNotImplementedError(
+            f'gRPC method not implemented on server, falling back to legacy execution: {e.details()}'
+        )
+    else:
+        raise e
