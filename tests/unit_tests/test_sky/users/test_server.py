@@ -7,6 +7,7 @@ import fastapi
 import pytest
 
 from sky import models
+from sky.server.common import crypt_ctx
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import rbac
@@ -191,10 +192,11 @@ class TestUsersEndpoints:
                                 password='old_password')
         mock_get_user.return_value = test_user
         mock_request.state.auth_user = None
+        new_password = 'new_password'
 
         update_body = payloads.UserUpdateBody(user_id='test_user',
                                               role='admin',
-                                              password='new_password')
+                                              password=new_password)
 
         # Execute
         result = await server.user_update(mock_request, update_body)
@@ -208,7 +210,8 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert user_obj.password.startswith('$apr1$')
+        assert crypt_ctx.identify(user_obj.password) is not None
+        assert user_obj.password != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @pytest.mark.asyncio
@@ -360,8 +363,9 @@ class TestUsersEndpoints:
         mock_get_user_by_name.return_value = None
         mock_get_supported_roles.return_value = ['admin', 'user']
         mock_get_default_role.return_value = 'user'
+        password = 'pw123'
         create_body = payloads.UserCreateBody(username='alice',
-                                              password='pw123',
+                                              password=password,
                                               role=None)
 
         # Execute
@@ -377,7 +381,8 @@ class TestUsersEndpoints:
         args, kwargs = mock_add_or_update_user.call_args
         user_obj = args[0]
         assert user_obj.name == 'alice'
-        assert user_obj.password.startswith('$apr1$')
+        assert crypt_ctx.identify(user_obj.password) is not None
+        assert user_obj.password != password
 
     @mock.patch('sky.global_user_state.get_user_by_name')
     @pytest.mark.asyncio
@@ -494,9 +499,10 @@ class TestUsersEndpoints:
         mock_request.state.auth_user = models.User(id='admin_user',
                                                    name='Admin')
         mock_get_user_roles.return_value = ['admin']
+        new_password = 'new_password'
 
         update_body = payloads.UserUpdateBody(user_id='test_user',
-                                              password='new_password')
+                                              password=new_password)
 
         # Execute
         result = await server.user_update(mock_request, update_body)
@@ -510,7 +516,8 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert user_obj.password.startswith('$apr1$')
+        assert crypt_ctx.identify(user_obj.password) is not None
+        assert user_obj.password != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
@@ -530,9 +537,10 @@ class TestUsersEndpoints:
         # Mock current user as the same user
         mock_request.state.auth_user = test_user
         mock_get_user_roles.return_value = ['user']
+        new_password = 'new_password'
 
         update_body = payloads.UserUpdateBody(user_id='test_user',
-                                              password='new_password')
+                                              password=new_password)
 
         # Execute
         result = await server.user_update(mock_request, update_body)
@@ -546,7 +554,8 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert user_obj.password.startswith('$apr1$')
+        assert crypt_ctx.identify(user_obj.password) is not None
+        assert user_obj.password != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
@@ -651,10 +660,11 @@ class TestUsersEndpoints:
         mock_request.state.auth_user = models.User(id='admin_user',
                                                    name='Admin')
         mock_get_user_roles.return_value = ['admin']
+        new_password = 'new_password'
 
         update_body = payloads.UserUpdateBody(user_id='test_user',
                                               role='user',
-                                              password='new_password')
+                                              password=new_password)
 
         # Execute
         result = await server.user_update(mock_request, update_body)
@@ -669,7 +679,8 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert user_obj.password.startswith('$apr1$')
+        assert crypt_ctx.identify(user_obj.password) is not None
+        assert user_obj.password != new_password
 
     @mock.patch('sky.global_user_state.get_user')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
