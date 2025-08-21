@@ -579,17 +579,6 @@ def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
 
 
 @_init_db
-def update_job_to_new(job_id: int):
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.execute(
-            sqlalchemy.update(job_info_table).where(
-                job_info_table.c.spot_job_id == job_id).values(
-                    schedule_state=ManagedJobScheduleState.WAITING.value))
-        session.commit()
-
-
-@_init_db
 def set_pending(
     job_id: int,
     task_id: int,
