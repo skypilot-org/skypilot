@@ -731,7 +731,8 @@ def query_instances(
                        STOPPED,  # Fixed: should be STOPPED, not INIT
     }
 
-    result: Dict[str, Tuple[Optional[status_lib.ClusterStatus], Optional[str]]] = {}
+    result: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
+                            Optional[str]]] = {}
     for name, seeweb_status in seeweb_instances.items():
         if non_terminated_only and seeweb_status in ('Terminated', 'Deleted'):
             continue
@@ -794,7 +795,7 @@ def open_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    
+
     # Convert Dict to ProvisionConfig for SeewebNodeProvider
     from sky.provision import common
     config = common.ProvisionConfig(
