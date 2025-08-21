@@ -68,7 +68,7 @@ class PermissionService:
                 username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
             user_info = global_user_state.get_user(user_hash)
             if user_info:
-                logger.info(f'Basic auth user {username} already exists')
+                logger.debug(f'Basic auth user {username} already exists')
                 return
             global_user_state.add_or_update_user(
                 models.User(id=user_hash, name=username, password=password))
@@ -169,8 +169,6 @@ class PermissionService:
         """
         user_roles = self.enforcer.get_roles_for_user(user_id)
         if not user_roles:
-            logger.info(f'User {user_id} has no roles, adding'
-                        f' default role {rbac.get_default_role()}')
             self.enforcer.add_grouping_policy(user_id, rbac.get_default_role())
             return True
         return False
@@ -184,7 +182,7 @@ class PermissionService:
             # Avoid calling get_user_roles, as it will require the lock.
             current_roles = self.enforcer.get_roles_for_user(user_id)
             if not current_roles:
-                logger.warning(f'User {user_id} has no roles')
+                logger.debug(f'User {user_id} has no roles')
                 return
             self.enforcer.remove_grouping_policy(user_id, current_roles[0])
             self.enforcer.save_policy()
@@ -198,12 +196,12 @@ class PermissionService:
             # Avoid calling get_user_roles, as it will require the lock.
             current_roles = self.enforcer.get_roles_for_user(user_id)
             if not current_roles:
-                logger.warning(f'User {user_id} has no roles')
+                logger.debug(f'User {user_id} has no roles')
             else:
                 # TODO(hailong): how to handle multiple roles?
                 current_role = current_roles[0]
                 if current_role == new_role:
-                    logger.info(f'User {user_id} already has role {new_role}')
+                    logger.debug(f'User {user_id} already has role {new_role}')
                     return
                 self.enforcer.remove_grouping_policy(user_id, current_role)
 
