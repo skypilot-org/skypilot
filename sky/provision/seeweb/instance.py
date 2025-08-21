@@ -6,7 +6,7 @@ Prerequisites:
 """
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ecsapi import Api
 from ecsapi import ServerCreateRequest
@@ -264,8 +264,6 @@ class SeewebNodeProvider:
         if not ports:
             return
 
-        logger.info(f"Opening ports {ports} on Seeweb server using iptables")
-
         # Get server IP to run iptables commands
         cluster_nodes = self._query_cluster_nodes()
         if not cluster_nodes:
@@ -281,13 +279,10 @@ class SeewebNodeProvider:
                     f"Failed to open ports on server {server.name}: {e}")
 
     def cleanup_ports(self):
-        """Cleanup ports using iptables on the server."""
-        logger.info("Cleaning up ports on Seeweb server using iptables")
 
         # Get server IP to run iptables commands
         cluster_nodes = self._query_cluster_nodes()
         if not cluster_nodes:
-            logger.warning("No cluster nodes found for port cleanup")
             return
 
         for server in cluster_nodes:
@@ -311,8 +306,6 @@ class SeewebNodeProvider:
             ports_to_open = [port for port in ports if port not in already_open]
 
             if not ports_to_open:
-                logger.info(
-                    f"All ports {ports} are already open on server {server_ip}")
                 return
 
             # Create iptables rules to open ports
@@ -340,16 +333,8 @@ class SeewebNodeProvider:
                                     capture_output=True,
                                     timeout=30)
 
-            if result.returncode == 0:
-                logger.info(
-                    f"Successfully opened ports {ports_to_open} on server {server_ip}"
-                )
-                if already_open:
-                    logger.info(
-                        f"Ports {already_open} were already open on server {server_ip}"
-                    )
-            else:
-                logger.warning(
+            if result.returncode != 0:
+                logger.error(
                     f"Failed to open ports on server {server_ip}: {result.stderr.decode()}"
                 )
 
@@ -702,13 +687,19 @@ def _check_ssh_ready_standalone(server_ip: str) -> bool:
 
 
 def query_instances(
+    provider_name: str,
+    cluster_name: str,
     cluster_name_on_cloud: str,
-    provider_config: Dict[str, Any],
+    provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional['status_lib.ClusterStatus']]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Query instances status for Seeweb cluster."""
     from sky.provision import common
     from sky.utils import status_lib
+
+    # Use the provided provider_config or default to empty dict
+    if provider_config is None:
+        provider_config = {}
 
     # Convert Dict to ProvisionConfig for SeewebNodeProvider
     config = common.ProvisionConfig(
@@ -740,13 +731,14 @@ def query_instances(
                        STOPPED,  # Fixed: should be STOPPED, not INIT
     }
 
-    result: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    result: Dict[str, Tuple[Optional[status_lib.ClusterStatus], Optional[str]]] = {}
     for name, seeweb_status in seeweb_instances.items():
         if non_terminated_only and seeweb_status in ('Terminated', 'Deleted'):
             continue
         mapped_status = status_map.get(seeweb_status,
                                        status_lib.ClusterStatus.INIT)
-        result[name] = mapped_status
+        # Return tuple of (status, reason) where reason is None for Seeweb
+        result[name] = (mapped_status, None)
 
     return result
 
@@ -802,17 +794,7 @@ def open_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Open ports for Seeweb cluster.
     
-    Since Seeweb doesn't support security groups/firewall rules at the cloud level,
-    we manage ports using iptables on the server itself.
-    """
-    if not ports:
-        return
-
-    logger.info(
-        f"Opening ports {ports} for Seeweb cluster {cluster_name_on_cloud}")
-
     # Convert Dict to ProvisionConfig for SeewebNodeProvider
     from sky.provision import common
     config = common.ProvisionConfig(
@@ -831,9 +813,6 @@ def open_ports(
         # Convert port strings to integers for the provider
         port_ints = [int(port) for port in ports]
         provider.open_ports(port_ints)
-        logger.info(
-            f"Successfully opened ports {ports} for cluster {cluster_name_on_cloud}"
-        )
     except Exception as e:
         logger.error(
             f"Failed to open ports {ports} for cluster {cluster_name_on_cloud}: {e}"
@@ -851,7 +830,6 @@ def cleanup_ports(
     Since Seeweb doesn't support security groups/firewall rules at the cloud level,
     we manage ports using iptables on the server itself.
     """
-    logger.info(f"Cleaning up ports for Seeweb cluster {cluster_name_on_cloud}")
 
     # Convert Dict to ProvisionConfig for SeewebNodeProvider
     from sky.provision import common
@@ -869,9 +847,6 @@ def cleanup_ports(
     try:
         provider = SeewebNodeProvider(config, cluster_name_on_cloud)
         provider.cleanup_ports()
-        logger.info(
-            f"Successfully cleaned up ports for cluster {cluster_name_on_cloud}"
-        )
     except Exception as e:
         logger.error(
             f"Failed to cleanup ports for cluster {cluster_name_on_cloud}: {e}")

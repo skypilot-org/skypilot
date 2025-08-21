@@ -37,6 +37,7 @@ Install SkyPilot using pip:
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
           pip install "skypilot[nebius]"
+          pip install "skypilot[seeweb]"
           pip install "skypilot[all]"
 
 
@@ -99,6 +100,7 @@ Install SkyPilot using pip:
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
           pip install -e ".[nebius]"
+          pip install -e ".[seeweb]"
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
@@ -187,6 +189,7 @@ This will produce a summary like:
     Cudo: enabled
     IBM: enabled
     SCP: enabled
+    Seeweb: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled

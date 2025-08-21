@@ -379,9 +379,15 @@ class Seeweb(clouds.Cloud):
         # (e.g., 'sky-bfbb-root-8f6f0399'), so we use it directly
         cluster_name_on_cloud = name
 
-        result = seeweb_instance.query_instances(cluster_name_on_cloud, {})
-        # Convert Dict[str, Optional[ClusterStatus]] to List[ClusterStatus]
-        return [status for status in result.values() if status is not None]
+        result = seeweb_instance.query_instances(
+            provider_name=repr(cls),
+            cluster_name=name,
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            provider_config={},
+            non_terminated_only=True
+        )
+        # Convert Dict[str, Tuple[Optional[ClusterStatus], Optional[str]]] to List[ClusterStatus]
+        return [status for status, _ in result.values() if status is not None]
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the credential files to mount."""
