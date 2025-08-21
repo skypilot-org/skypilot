@@ -384,8 +384,7 @@ class Seeweb(clouds.Cloud):
             cluster_name=name,
             cluster_name_on_cloud=cluster_name_on_cloud,
             provider_config={},
-            non_terminated_only=True
-        )
+            non_terminated_only=True)
         # Convert Dict[str, Tuple[Optional[ClusterStatus], Optional[str]]] to List[ClusterStatus]
         return [status for status, _ in result.values() if status is not None]
 
