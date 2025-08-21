@@ -25,7 +25,7 @@ def get_seeweb_catalog_path() -> str:
 
 
 def clean_gpu_name(gpu_name: str) -> str:
-    """Clean GPU name by replacing spaces with hyphens for SkyPilot compatibility."""
+    """Clean GPU name for SkyPilot compatibility."""
     if not gpu_name or pd.isna(gpu_name):
         return ''
     return str(gpu_name).replace(' ', '-')

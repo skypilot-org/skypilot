@@ -28,6 +28,8 @@ GPU_TO_MEMORY = {
     'L4-24GB': 24576,  # 24GB
     'L40s-48GB': 49152,  # 48GB
     'MI300X': 131072,  # 128GB (8x16GB)
+    'H200': 141312,  # 141GB
+    'H200-141GB': 141312,  # 141GB
     'GENERAL': None  # No GPU
 }
 
@@ -160,6 +162,24 @@ FALLBACK_PLANS = [
         'price': 0.29,
         'gpu_name': 'A30',
         'gpu_count': 1
+    },
+
+    # GPU instances - H200
+    {
+        'plan_name': 'ECS1GPU10',
+        'vcpus': 8,
+        'memory_gb': 32,
+        'price': 0.85,
+        'gpu_name': 'H200',
+        'gpu_count': 1
+    },
+    {
+        'plan_name': 'ECS2GPU10',
+        'vcpus': 16,
+        'memory_gb': 64,
+        'price': 1.7,
+        'gpu_name': 'H200',
+        'gpu_count': 2
     },
 
     # GPU instances - RTX-A6000-48GB
