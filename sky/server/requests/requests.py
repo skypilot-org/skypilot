@@ -574,16 +574,15 @@ def get_api_request_ids_start_with(incomplete: str) -> List[str]:
         # Prioritize alive requests (PENDING, RUNNING) over finished ones,
         # then order by creation time (newest first) within each category.
         cursor.execute(
-            f'''SELECT request_id FROM {REQUEST_TABLE} 
-                WHERE request_id LIKE ? 
-                ORDER BY 
-                    CASE 
-                        WHEN status IN ('PENDING', 'RUNNING') THEN 0 
-                        ELSE 1 
+            f"""SELECT request_id FROM {REQUEST_TABLE}
+                WHERE request_id LIKE ?
+                ORDER BY
+                    CASE
+                        WHEN status IN ('PENDING', 'RUNNING') THEN 0
+                        ELSE 1
                     END,
-                    created_at DESC 
-                LIMIT 1000''',
-            (f'{incomplete}%',))
+                    created_at DESC
+                LIMIT 1000""", (f'{incomplete}%',))
         return [row[0] for row in cursor.fetchall()]
 
 
