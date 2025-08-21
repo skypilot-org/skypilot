@@ -130,7 +130,12 @@ def retry_transient_errors(max_retries: int = 3,
                         logger.debug(
                             f'Retry {func.__name__} due to {e}, '
                             f'attempt {failed_retry_cnt}/{max_retries}')
-                        time.sleep(backoff.current_backoff())
+                        # Only sleep if this is not the first retry.
+                        # The idea is that if the function made progress on a
+                        # retry, we should try again immediately to reduce the
+                        # waiting time.
+                        if failed_retry_cnt > 0:
+                            time.sleep(backoff.current_backoff())
 
         return cast(F, wrapper)
 
