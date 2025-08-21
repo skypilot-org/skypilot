@@ -148,7 +148,7 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
             self.load_map[replica_url] -= 1
 
 
-class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy,
+class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
                                    name='instance_aware_least_load'):
     """Instance-aware least load load balancing policy.
 
@@ -159,11 +159,9 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy,
 
     def __init__(self) -> None:
         super().__init__()
-        self.load_map: Dict[str, int] = collections.defaultdict(int)
         self.replica_info: Dict[str, Dict[str, Any]] = {}  # replica_url -> info
         self.target_qps_per_accelerator: Dict[str, float] = {
         }  # accelerator_type -> target_qps
-        self.lock = threading.Lock()
 
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         if set(self.ready_replicas) == set(ready_replicas):
@@ -261,14 +259,4 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy,
             logger.debug('Selected replica: %s', selected_replica)
             return selected_replica
 
-    def pre_execute_hook(self, replica_url: str,
-                         request: 'fastapi.Request') -> None:
-        del request  # Unused.
-        with self.lock:
-            self.load_map[replica_url] += 1
-
-    def post_execute_hook(self, replica_url: str,
-                          request: 'fastapi.Request') -> None:
-        del request  # Unused.
-        with self.lock:
-            self.load_map[replica_url] -= 1
+    # pre_execute_hook and post_execute_hook are inherited from LeastLoadPolicy
