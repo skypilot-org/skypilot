@@ -514,10 +514,10 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
 
 
 def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
-    """Parse a comma-separated list of key-value pairs into a dictionary.
+    """Parse a single key-value pair into a dictionary.
 
     Args:
-        dotlist: A comma-separated list of key-value pairs.
+        dotlist: A single key-value pair.
 
     Returns:
         A config_utils.Config object with the parsed key-value pairs.
@@ -788,7 +788,7 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
     """Composes the skypilot CLI config.
     CLI config can either be:
     - A path to a config file
-    - A comma-separated list of key-value pairs
+    - A single key-value pair
     """
 
     if not cli_config:
@@ -804,7 +804,7 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
             config_source = maybe_config_path
             # cli_config is a path to a config file
             parsed_config = parse_and_validate_config_file(maybe_config_path)
-        else:  # cli_config is a comma-separated list of key-value pairs
+        else:  # cli_config is a single key-value pair
             parsed_config = _parse_dotlist(cli_config)
         _validate_config(parsed_config, config_source)
     except ValueError as e:
