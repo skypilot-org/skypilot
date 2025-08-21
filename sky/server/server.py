@@ -1198,8 +1198,12 @@ async def logs(
     )
     task = asyncio.create_task(executor.execute_request_coroutine(request_task))
 
-    def cancel_task():
-        task.cancel()
+    async def cancel_task():
+        try:
+            task.cancel()
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # Cancel the task after the request is done or client disconnects
     background_tasks.add_task(cancel_task)
