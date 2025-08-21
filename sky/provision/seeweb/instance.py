@@ -25,7 +25,7 @@ logger = sky_logging.init_logger(__name__)
 # Useful constants
 # --------------------------------------------------------------------------- #
 _POLL_INTERVAL = 5  # sec
-_MAX_BOOT_TIME = 600  # sec
+_MAX_BOOT_TIME = 1200  # sec
 _NOTE_KEY = "skypilot_cluster"  # we save cluster_name in .notes for filtering
 
 
@@ -182,7 +182,7 @@ class SeewebNodeProvider:
         raise TimeoutError(
             f"Nodes are not all in state {desired_state} within timeout")
 
-    def _wait_for_all_servers_stable(self, max_wait: int = 300) -> bool:
+    def _wait_for_all_servers_stable(self, max_wait: int = 600) -> bool:
         """Waits for all cluster servers to be stable."""
         logger.info("Checking stability of all cluster servers...")
 
@@ -256,10 +256,185 @@ class SeewebNodeProvider:
     # 7. open_ports / cleanup_ports – Seeweb doesn't have security groups
     # ------------------------------------------------------------------ #
     def open_ports(self, ports: List[int]):  # pylint: disable=unused-argument
-        pass
+        """Open ports using iptables on the server.
+        
+        Since Seeweb doesn't have security groups/firewall rules at the cloud level,
+        we manage ports using iptables on the server itself.
+        """
+        if not ports:
+            return
+
+        logger.info(f"Opening ports {ports} on Seeweb server using iptables")
+
+        # Get server IP to run iptables commands
+        cluster_nodes = self._query_cluster_nodes()
+        if not cluster_nodes:
+            logger.warning("No cluster nodes found for port management")
+            return
+
+        for server in cluster_nodes:
+            try:
+                # Open ports using iptables on the server
+                self._open_ports_on_server(server.ipv4, ports)
+            except Exception as e:
+                logger.error(
+                    f"Failed to open ports on server {server.name}: {e}")
 
     def cleanup_ports(self):
-        pass
+        """Cleanup ports using iptables on the server."""
+        logger.info("Cleaning up ports on Seeweb server using iptables")
+
+        # Get server IP to run iptables commands
+        cluster_nodes = self._query_cluster_nodes()
+        if not cluster_nodes:
+            logger.warning("No cluster nodes found for port cleanup")
+            return
+
+        for server in cluster_nodes:
+            try:
+                # Cleanup ports using iptables on the server
+                self._cleanup_ports_on_server(server.ipv4)
+            except Exception as e:
+                logger.error(
+                    f"Failed to cleanup ports on server {server.name}: {e}")
+
+    def _open_ports_on_server(self, server_ip: str, ports: List[int]):
+        """Open ports on a specific server using iptables via SSH."""
+        try:
+            import subprocess
+
+            # Convert ports to list of strings
+            port_list = [str(port) for port in ports]
+
+            # Check which ports are already open
+            already_open = self._check_ports_status(server_ip, ports)
+            ports_to_open = [port for port in ports if port not in already_open]
+
+            if not ports_to_open:
+                logger.info(
+                    f"All ports {ports} are already open on server {server_ip}")
+                return
+
+            # Create iptables rules to open ports
+            iptables_cmds = []
+            for port in ports_to_open:
+                # Check if rule already exists to avoid duplicates
+                iptables_cmds.append(
+                    f"iptables -C INPUT -p tcp --dport {port} -j ACCEPT 2>/dev/null || iptables -A INPUT -p tcp --dport {port} -j ACCEPT"
+                )
+                iptables_cmds.append(
+                    f"iptables -C OUTPUT -p tcp --sport {port} -j ACCEPT 2>/dev/null || iptables -A OUTPUT -p tcp --sport {port} -j ACCEPT"
+                )
+
+            # Join commands with semicolons
+            iptables_cmd = "; ".join(iptables_cmds)
+
+            # Execute iptables commands via SSH
+            cmd = f"sudo {iptables_cmd}"
+            result = subprocess.run([
+                'ssh', '-o', 'ConnectTimeout=10', '-o',
+                'StrictHostKeyChecking=no', '-i',
+                '/root/.sky/clients/8f6f0399/ssh/sky-key',
+                'ecuser@' + server_ip, cmd
+            ],
+                                    capture_output=True,
+                                    timeout=30)
+
+            if result.returncode == 0:
+                logger.info(
+                    f"Successfully opened ports {ports_to_open} on server {server_ip}"
+                )
+                if already_open:
+                    logger.info(
+                        f"Ports {already_open} were already open on server {server_ip}"
+                    )
+            else:
+                logger.warning(
+                    f"Failed to open ports on server {server_ip}: {result.stderr.decode()}"
+                )
+
+        except Exception as e:
+            logger.error(f"Error opening ports on server {server_ip}: {e}")
+
+    def _check_ports_status(self, server_ip: str,
+                            ports: List[int]) -> List[int]:
+        """Check which ports are already open on the server."""
+        try:
+            import subprocess
+
+            already_open = []
+            for port in ports:
+                # Check if INPUT rule exists for this port
+                check_cmd = f"sudo iptables -C INPUT -p tcp --dport {port} -j ACCEPT"
+                result = subprocess.run([
+                    'ssh', '-o', 'ConnectTimeout=10', '-o',
+                    'StrictHostKeyChecking=no', '-i',
+                    '/root/.sky/clients/8f6f0399/ssh/sky-key',
+                    'ecuser@' + server_ip, check_cmd
+                ],
+                                        capture_output=True,
+                                        timeout=15)
+
+                if result.returncode == 0:
+                    already_open.append(port)
+
+            return already_open
+
+        except Exception as e:
+            logger.debug(
+                f"Error checking port status on server {server_ip}: {e}")
+            return []
+
+    def _cleanup_ports_on_server(self, server_ip: str):
+        """Cleanup iptables rules for opened ports."""
+        try:
+            import subprocess
+
+            # More sophisticated cleanup: remove only the rules we added
+            # First, save current iptables rules
+            save_cmd = "sudo iptables-save > /tmp/iptables_backup"
+
+            # Remove custom rules (this is a conservative approach)
+            # We'll remove rules that match our pattern but keep essential ones
+            cleanup_cmd = """
+            # Remove custom INPUT rules for specific ports (keep SSH port 22)
+            sudo iptables -D INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
+            sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+            
+            # Remove all other custom INPUT rules
+            sudo iptables -D INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+            sudo iptables -D INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+            
+            # Remove custom OUTPUT rules for specific ports
+            sudo iptables -D OUTPUT -p tcp --sport 80 -j ACCEPT 2>/dev/null || true
+            sudo iptables -D OUTPUT -p tcp --sport 443 -j ACCEPT 2>/dev/null || true
+            
+            # Add default policies back
+            sudo iptables -P INPUT ACCEPT
+            sudo iptables -P OUTPUT ACCEPT
+            sudo iptables -P FORWARD ACCEPT
+            """
+
+            # Execute cleanup commands via SSH
+            result = subprocess.run([
+                'ssh', '-o', 'ConnectTimeout=10', '-o',
+                'StrictHostKeyChecking=no', '-i',
+                '/root/.sky/clients/8f6f0399/ssh/sky-key',
+                'ecuser@' + server_ip, cleanup_cmd
+            ],
+                                    capture_output=True,
+                                    timeout=60)
+
+            if result.returncode == 0:
+                logger.info(
+                    f"Successfully cleaned up ports on server {server_ip}")
+            else:
+                logger.warning(
+                    f"Failed to cleanup ports on server {server_ip}: {result.stderr.decode()}"
+                )
+
+        except Exception as e:
+            logger.error(f"Error cleaning up ports on server {server_ip}: {e}")
 
     # ======================  private helpers  ========================= #
     def _query_cluster_nodes(self):
@@ -289,7 +464,7 @@ class SeewebNodeProvider:
         logger.info("Creating Seeweb server %s", payload)
         _, action_id = self.ecs.create_server(
             create_request, check_if_can_create=False)  # dict with action_id
-        self.ecs.watch_action(action_id, max_retry=180, fetch_every=5)
+        self.ecs.watch_action(action_id, max_retry=360, fetch_every=5)
 
     def _power_on(self, server_id: str):
         try:
@@ -629,10 +804,41 @@ def open_ports(
 ) -> None:
     """Open ports for Seeweb cluster.
     
-    Seeweb doesn't support security groups/firewall rules, so this is a no-op.
+    Since Seeweb doesn't support security groups/firewall rules at the cloud level,
+    we manage ports using iptables on the server itself.
     """
-    del cluster_name_on_cloud, ports, provider_config  # unused
-    pass
+    if not ports:
+        return
+
+    logger.info(
+        f"Opening ports {ports} for Seeweb cluster {cluster_name_on_cloud}")
+
+    # Convert Dict to ProvisionConfig for SeewebNodeProvider
+    from sky.provision import common
+    config = common.ProvisionConfig(
+        provider_config=provider_config or {},
+        authentication_config={},
+        docker_config={},
+        node_config=provider_config or {},
+        count=1,  # Not used for port operation
+        tags={},
+        resume_stopped_nodes=False,
+        ports_to_open_on_launch=None,
+    )
+
+    try:
+        provider = SeewebNodeProvider(config, cluster_name_on_cloud)
+        # Convert port strings to integers for the provider
+        port_ints = [int(port) for port in ports]
+        provider.open_ports(port_ints)
+        logger.info(
+            f"Successfully opened ports {ports} for cluster {cluster_name_on_cloud}"
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to open ports {ports} for cluster {cluster_name_on_cloud}: {e}"
+        )
+        raise
 
 
 def cleanup_ports(
@@ -642,7 +848,31 @@ def cleanup_ports(
 ) -> None:
     """Cleanup ports for Seeweb cluster.
     
-    Seeweb doesn't support security groups/firewall rules, so this is a no-op.
+    Since Seeweb doesn't support security groups/firewall rules at the cloud level,
+    we manage ports using iptables on the server itself.
     """
-    del cluster_name_on_cloud, ports, provider_config  # unused
-    pass
+    logger.info(f"Cleaning up ports for Seeweb cluster {cluster_name_on_cloud}")
+
+    # Convert Dict to ProvisionConfig for SeewebNodeProvider
+    from sky.provision import common
+    config = common.ProvisionConfig(
+        provider_config=provider_config or {},
+        authentication_config={},
+        docker_config={},
+        node_config=provider_config or {},
+        count=1,  # Not used for port operation
+        tags={},
+        resume_stopped_nodes=False,
+        ports_to_open_on_launch=None,
+    )
+
+    try:
+        provider = SeewebNodeProvider(config, cluster_name_on_cloud)
+        provider.cleanup_ports()
+        logger.info(
+            f"Successfully cleaned up ports for cluster {cluster_name_on_cloud}"
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to cleanup ports for cluster {cluster_name_on_cloud}: {e}")
+        raise

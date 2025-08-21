@@ -593,7 +593,7 @@ Prerequisites
 * A Seeweb Cloud account.
 * A Seeweb API token with permissions to create servers.
 * (Recommended) An SSH public key added to your Seeweb profile.
-* **ecsapi** 0.1.3 installed <https://pypi.org/project/ecsapi/> :
+* **ecsapi** 0.2.0 installed <https://pypi.org/project/ecsapi/> :
 
 .. code-block:: bash
 
