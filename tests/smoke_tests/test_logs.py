@@ -14,6 +14,7 @@ from sky import skypilot_config
 
 @pytest.mark.no_vast  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
+@pytest.mark.no_seeweb  # Seeweb does not support GCP Cloud Logging
 def test_log_collection_to_gcp(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Calculate timestamp 1 hour ago in ISO format

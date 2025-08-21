@@ -4,9 +4,8 @@ This module loads the service catalog file and can be used to
 query instance types and pricing information for Seeweb.
 """
 
-import os
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -17,43 +16,12 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-
-# Use standard SkyPilot catalog path for Seeweb
-def get_seeweb_catalog_path() -> str:
-    """Get the standard catalog path for Seeweb."""
-    return common.get_catalog_path('seeweb/vms.csv')
-
-
-def clean_gpu_name(gpu_name: str) -> str:
-    """Clean GPU name for SkyPilot compatibility."""
-    if not gpu_name or pd.isna(gpu_name):
-        return ''
-    return str(gpu_name).replace(' ', '-')
-
-
-def clean_accelerator_names_in_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Clean accelerator names in the DataFrame by replacing spaces with underscores."""
-    if 'AcceleratorName' in df.columns:
-        df = df.copy()
-        df['AcceleratorName'] = df['AcceleratorName'].apply(clean_gpu_name)
-    return df
-
-
-# Load catalog using standard SkyPilot system
-try:
-    catalog_path = get_seeweb_catalog_path()
-    if os.path.exists(catalog_path):
-        _df = pd.read_csv(catalog_path)
-        # Clean accelerator names
-        _df = clean_accelerator_names_in_df(_df)
-    else:
-        # Create empty DataFrame if catalog doesn't exist
-        # This allows SkyPilot to work even without a catalog file
-        _df = pd.DataFrame()
-except Exception as e:
-    # Create empty DataFrame as fallback
-    # This ensures SkyPilot doesn't crash if catalog loading fails
-    _df = pd.DataFrame()
+_PULL_FREQUENCY_HOURS = 8
+_df = common.read_catalog('seeweb/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+# _df = common.read_catalog('seeweb/vms.csv',
+# pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+# prima della pull request togliere TODOPR
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -111,7 +79,8 @@ def get_accelerators_from_instance_type(
     if df_filtered.empty:
         return None
 
-    # Get the first row (all rows for same instance type should have same accelerator info)
+    # Get the first row (all rows for same instance
+    # type should have same accelerator info)
     row = df_filtered.iloc[0]
     acc_name = row['AcceleratorName']
     acc_count = row['AcceleratorCount']
@@ -142,10 +111,8 @@ def get_instance_type_for_accelerator(
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
-    """
-    Restituisce i dati per l'elenco finale che 
-    arriva all'utente.
-    """
+    """Returns a list of instance types satisfying
+    the required count of accelerators."""
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Seeweb does not support zones.')
@@ -169,11 +136,21 @@ def regions() -> List['cloud.Region']:
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool = False
                                       ) -> List['cloud.Region']:
-    df = _df[_df['InstanceType'] == instance_type]
-    region_list = common.get_region_zones(df, use_spot)
+    """Returns a list of regions for a given instance type."""
+    # Filter the dataframe for the specific instance type
+    df_filtered = _df[_df['InstanceType'] == instance_type]
+    if df_filtered.empty:
+        return []
+
+    # Use common.get_region_zones() like all other providers
+    region_list = common.get_region_zones(df_filtered, use_spot)
 
     # Hack: Enforce hierarchical region priority
-    # Priority order: 1. Frosinone (it-fr2), 2. Milano (it-mi2), 3. Lugano (ch-lug1), 4. Bulgaria (bg-sof1)
+    # Priority order:
+    # 1. Frosinone (it-fr2),
+    # 2. Milano (it-mi2),
+    # 3. Lugano (ch-lug1),
+    # 4. Bulgaria (bg-sof1)
     priority_regions = ['it-fr2', 'it-mi2', 'ch-lug1', 'bg-sof1']
     prioritized_regions = []
     other_regions = []
@@ -200,9 +177,13 @@ def list_accelerators(
         region_filter: Optional[str],
         quantity_filter: Optional[int],
         case_sensitive: bool = True,
-        all_regions: bool = False,
-        require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
-    result = common.list_accelerators_impl('Seeweb', _df, gpus_only,
+        all_regions: bool = False) -> Dict[str, List[common.InstanceTypeInfo]]:
+    """Lists accelerators offered in Seeweb."""
+    # Filter out rows with empty or null regions (indicating unavailability)
+    df_filtered = _df.dropna(subset=['Region'])
+    df_filtered = df_filtered[df_filtered['Region'].str.strip() != '']
+
+    result = common.list_accelerators_impl('Seeweb', df_filtered, gpus_only,
                                            name_filter, region_filter,
                                            quantity_filter, case_sensitive,
                                            all_regions)
