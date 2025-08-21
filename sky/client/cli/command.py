@@ -5659,16 +5659,20 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
     # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking services[/]'):
         service_status_request_id = serve_lib.status(service_names_to_query)
-        _, msg = _handle_services_request(service_status_request_id,
-                                          service_names=service_names_to_query,
-                                          show_all=verbose,
-                                          show_endpoint=endpoint,
-                                          is_called_by_user=True)
+        num_services, msg = _handle_services_request(
+            service_status_request_id,
+            service_names=service_names_to_query,
+            show_all=verbose,
+            show_endpoint=endpoint,
+            is_called_by_user=True)
 
     if not endpoint:
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Services{colorama.Style.RESET_ALL}')
     click.echo(msg)
+    # if num_services is None, it means exception happened
+    # and we should exit with non-zero status
+    sys.exit(int(num_services is None))
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
