@@ -468,19 +468,21 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
             request_timestamps: All request timestamps within the window.
         """
         super().__init__(service_name, spec)
-        # RequestRateAutoscaler should only handle float values
-        if isinstance(spec.target_qps_per_replica, dict):
-            raise ValueError('RequestRateAutoscaler does not support dict '
-                             'target_qps_per_replica. Should use '
-                             'InstanceAwareRequestRateAutoscaler instead.')
-        self.target_qps_per_replica: Optional[
-            float] = spec.target_qps_per_replica
+        self.target_qps_per_replica: Optional[Union[float, Dict[
+            str, float]]] = spec.target_qps_per_replica
         self.qps_window_size: int = constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS
         self.request_timestamps: List[float] = []
 
     def _calculate_target_num_replicas(self) -> int:
         if self.target_qps_per_replica is None:
             return self.min_replicas
+
+        # RequestRateAutoscaler should only handle float values
+        if isinstance(self.target_qps_per_replica, dict):
+            raise ValueError('RequestRateAutoscaler does not support dict '
+                             'target_qps_per_replica. Should use '
+                             'InstanceAwareRequestRateAutoscaler instead.')
+
         num_requests_per_second = len(
             self.request_timestamps) / self.qps_window_size
 
@@ -495,11 +497,6 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
         super().update_version(version, spec, update_mode)
-        # RequestRateAutoscaler should only handle float values
-        if isinstance(spec.target_qps_per_replica, dict):
-            raise ValueError('RequestRateAutoscaler does not support dict '
-                             'target_qps_per_replica. Should use '
-                             'InstanceAwareRequestRateAutoscaler instead.')
         self.target_qps_per_replica = spec.target_qps_per_replica
 
     def collect_request_information(
