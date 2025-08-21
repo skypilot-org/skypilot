@@ -18,6 +18,7 @@ from sky.clouds import aws as aws_cloud
 from sky.clouds.utils import aws_utils
 from sky.provision import common
 from sky.provision import constants
+from sky.provision.aws import config as aws_config
 from sky.provision.aws import utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -527,6 +528,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 to_start_count,
                 associate_public_ip_address=(
                     not config.provider_config['use_internal_ips']))
+
             created_instances.extend(created_remaining_instances)
         created_instances.sort(key=lambda x: x.id)
 
@@ -684,49 +686,48 @@ def terminate_instances(
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
-    instances_list = list(instances)
-    instances.terminate()
-    if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
-            not managed_by_skypilot):
-        # Using default AWS SG or user specified security group. We don't need
-        # to wait for the termination of the instances, as we do not need to
-        # delete the SG.
-        return
-    # If ports are specified, we need to delete the newly created Security
-    # Group. Here we wait for all instances to be terminated, since the
-    # Security Group dependent on them.
-    for instance in instances_list:
-        instance.wait_until_terminated()
+    default_sg = aws_config.get_security_group_from_vpc_id(
+        ec2, _get_vpc_id(provider_config),
+        aws_cloud.DEFAULT_SECURITY_GROUP_NAME)
+    if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
+        # Case 1: The default SG is used, we don't need to ensure instance are
+        # terminated.
+        instances.terminate()
+    elif not managed_by_skypilot:
+        # Case 2: We are not managing the non-default sg. We don't need to
+        # ensure instances are terminated.
+        instances.terminate()
+    elif (managed_by_skypilot and default_sg is not None):
+        # Case 3: We are managing the non-default sg. The default SG exists
+        # so we can move the instances to the default SG and terminate them
+        # without blocking.
+
+        # Make this multithreaded: modify all instances' SGs in parallel.
+        def modify_instance_sg(instance):
+            instance.modify_attribute(Groups=[default_sg.id])
+            logger.debug(f'Instance {instance.id} modified to use default SG:'
+                         f'{default_sg.id} for quick deletion.')
+
+        with pool.ThreadPool() as thread_pool:
+            thread_pool.map(modify_instance_sg, instances)
+            thread_pool.close()
+            thread_pool.join()
+
+        instances.terminate()
+    else:
+        # Case 4: We are managing the non-default sg. The default SG does not
+        # exist. We must block on instance termination so that we can
+        # delete the security group.
+        instances.terminate()
+        for instance in instances:
+            instance.wait_until_terminated()
+
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
     #  trigger the termination process (via http call) and then return.
     #  It's not clear that which behavior should be expected. We will not
     #  wait for the termination for now, since this is the default behavior
     #  of most cloud implementations (including AWS).
-
-
-def _get_sg_from_name(
-    ec2: Any,
-    sg_name: str,
-) -> Any:
-    # GroupNames will only filter SGs in the default VPC, so we need to use
-    # Filters here. Ref:
-    # https://boto3.amazonaws.com/v1/documentation/api/1.26.112/reference/services/ec2/service-resource/security_groups.html  # pylint: disable=line-too-long
-    sgs = ec2.security_groups.filter(Filters=[{
-        'Name': 'group-name',
-        'Values': [sg_name]
-    }])
-    num_sg = len(list(sgs))
-    if num_sg == 0:
-        logger.warning(f'Expected security group {sg_name} not found. ')
-        return None
-    if num_sg > 1:
-        # TODO(tian): Better handle this case. Maybe we can check when creating
-        # the SG and throw an error if there is already an existing SG with the
-        # same name.
-        logger.warning(f'Found {num_sg} security groups with name {sg_name}. ')
-        return None
-    return list(sgs)[0]
 
 
 def _maybe_move_to_new_sg(
@@ -781,7 +782,9 @@ def open_ports(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Instance with cluster name '
                              f'{cluster_name_on_cloud} not found.')
-    sg = _get_sg_from_name(ec2, sg_name)
+    sg = aws_config.get_security_group_from_vpc_id(ec2,
+                                                   _get_vpc_id(provider_config),
+                                                   sg_name)
     if sg is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot find new security group '
@@ -877,7 +880,9 @@ def cleanup_ports(
         # We only want to delete the SG that is dedicated to this cluster (i.e.,
         # this cluster have opened some ports).
         return
-    sg = _get_sg_from_name(ec2, sg_name)
+    sg = aws_config.get_security_group_from_vpc_id(ec2,
+                                                   _get_vpc_id(provider_config),
+                                                   sg_name)
     if sg is None:
         logger.warning(
             'Find security group failed. Skip cleanup security group.')
@@ -988,3 +993,23 @@ def get_cluster_info(
         provider_name='aws',
         provider_config=provider_config,
     )
+
+
+def _get_vpc_id(provider_config: Dict[str, Any]) -> str:
+    region = provider_config['region']
+    ec2 = _default_ec2_resource(provider_config['region'])
+    if 'vpc_name' in provider_config:
+        return aws_config.get_vpc_id_by_name(ec2, provider_config['vpc_name'],
+                                             region)
+    else:
+        # Retrieve the default VPC name from the region.
+        response = ec2.meta.client.describe_vpcs(Filters=[{
+            'Name': 'isDefault',
+            'Values': ['true']
+        }])
+        if len(response['Vpcs']) == 0:
+            raise ValueError(f'No default VPC found in region {region}')
+        elif len(response['Vpcs']) > 1:
+            raise ValueError(f'Multiple default VPCs found in region {region}')
+        else:
+            return response['Vpcs'][0]['VpcId']

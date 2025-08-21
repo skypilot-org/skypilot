@@ -488,8 +488,24 @@ export const getInfraSummary = (replicaInfo) => {
   const cloudData = {};
   readyWorkers.forEach((worker) => {
     try {
-      const cloud = worker.cloud;
-      const region = worker.region;
+      // Handle undefined/null/empty cloud values
+      const hasCloud =
+        worker.cloud &&
+        worker.cloud.trim() !== '' &&
+        worker.cloud !== 'undefined';
+      const hasRegion =
+        worker.region &&
+        worker.region !== 'undefined' &&
+        worker.region !== null &&
+        worker.region.trim() !== '';
+
+      // Skip if both cloud and region are missing
+      if (!hasCloud && !hasRegion) {
+        return;
+      }
+
+      const cloud = hasCloud ? worker.cloud : 'Unknown';
+      const region = hasRegion ? worker.region : null;
 
       if (!cloudData[cloud]) {
         cloudData[cloud] = {

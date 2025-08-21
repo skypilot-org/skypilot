@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import colorama
 
-import sky
 from sky import catalog
 from sky import check as sky_check
 from sky import clouds
@@ -38,7 +37,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_DEFAULT_DISK_SIZE_GB = 256
+DEFAULT_DISK_SIZE_GB = 256
 
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
@@ -288,7 +287,7 @@ class Resources:
         if infra is not None:
             infra_info = infra_utils.InfraInfo.from_str(infra)
             # Infra takes precedence over individually specified parameters
-            cloud = sky.CLOUD_REGISTRY.from_str(infra_info.cloud)
+            cloud = registry.CLOUD_REGISTRY.from_str(infra_info.cloud)
             region = infra_info.region
             zone = infra_info.zone
 
@@ -320,7 +319,7 @@ class Resources:
             self._disk_size = int(
                 resources_utils.parse_memory_resource(disk_size, 'disk_size'))
         else:
-            self._disk_size = _DEFAULT_DISK_SIZE_GB
+            self._disk_size = DEFAULT_DISK_SIZE_GB
 
         self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
@@ -483,7 +482,7 @@ class Resources:
             network_tier = f', network_tier={self.network_tier.value}'
 
         disk_size = ''
-        if self.disk_size != _DEFAULT_DISK_SIZE_GB:
+        if self.disk_size != DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
         ports = ''
@@ -1261,10 +1260,14 @@ class Resources:
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
             return None
-        if len(self.image_id) == 1 and self.region in self.image_id:
-            image_id = self.image_id[self.region]
-            if image_id.startswith('docker:'):
-                return image_id[len('docker:'):]
+        # Handle dict image_id
+        if len(self.image_id) == 1:
+            # Check if the single key matches the region or is None (any region)
+            image_key = list(self.image_id.keys())[0]
+            if image_key == self.region or image_key is None:
+                image_id = self.image_id[image_key]
+                if image_id.startswith('docker:'):
+                    return image_id[len('docker:'):]
         return None
 
     def _try_validate_image_id(self) -> None:
@@ -1334,13 +1337,19 @@ class Resources:
                     'Kubernetes, please explicitly specify the cloud.') from e
 
         if self._region is not None:
-            if self._region not in self._image_id:
+            # If the image_id has None as key (region-agnostic),
+            # use it for any region
+            if None in self._image_id:
+                # Replace None key with the actual region
+                self._image_id = {self._region: self._image_id[None]}
+            elif self._region not in self._image_id:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'image_id {self._image_id} should contain the image '
                         f'for the specified region {self._region}.')
-            # Narrow down the image_id to the specified region.
-            self._image_id = {self._region: self._image_id[self._region]}
+            else:
+                # Narrow down the image_id to the specified region.
+                self._image_id = {self._region: self._image_id[self._region]}
 
         # Check the image_id's are valid.
         for region, image_id in self._image_id.items():
@@ -1767,7 +1776,7 @@ class Resources:
             self._accelerators is None,
             self._accelerator_args is None,
             not self._use_spot_specified,
-            self._disk_size == _DEFAULT_DISK_SIZE_GB,
+            self._disk_size == DEFAULT_DISK_SIZE_GB,
             self._disk_tier is None,
             self._network_tier is None,
             self._image_id is None,
@@ -2256,7 +2265,7 @@ class Resources:
             accelerator_args = state.pop('accelerator_args', None)
             state['_accelerator_args'] = accelerator_args
 
-            disk_size = state.pop('disk_size', _DEFAULT_DISK_SIZE_GB)
+            disk_size = state.pop('disk_size', DEFAULT_DISK_SIZE_GB)
             state['_disk_size'] = disk_size
 
         if version < 2:

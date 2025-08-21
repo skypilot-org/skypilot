@@ -142,6 +142,8 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
+@mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+            return_value='/dev/sda1')
 @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
@@ -169,6 +171,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
         'region': 'fake-region',
         'image_id': 'fake-image',
         'disk_encrypted': False,
+        'ssh_user': 'ubuntu',
         'disk_tier': 'gp3',
         'disk_throughput': 218,
         'disk_iops': 3500,
@@ -177,7 +180,8 @@ def test_aws_make_deploy_variables(*mocks) -> None:
         'docker_login_config': None,
         'docker_run_options': [],
         'initial_setup_commands': [],
-        'zones': 'fake-zone'
+        'zones': 'fake-zone',
+        'root_device_name': '/dev/sda1'
     }
 
     # test using defaults
@@ -218,6 +222,61 @@ def test_aws_make_deploy_variables(*mocks) -> None:
                                             zones,
                                             num_nodes=1,
                                             dryrun=True)
+    assert config == expected_config, ('unexpected resource '
+                                       'variables generated')
+
+
+@mock.patch('sky.catalog.instance_type_exists', return_value=True)
+@mock.patch('sky.catalog.get_accelerators_from_instance_type',
+            return_value={'fake-acc': 2})
+@mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+            return_value='/dev/xvda')
+@mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+@mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
+def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_aws_config_ssh_user.yaml'
+    importlib.reload(skypilot_config)
+
+    cloud = clouds.AWS()
+    cluster_name = resources_utils.ClusterName(display_name='display',
+                                               name_on_cloud='cloud')
+    region = clouds.Region(name='fake-region')
+    zones = [clouds.Zone(name='fake-zone')]
+    resource = Resources(cloud=cloud, instance_type='fake-type: 3')
+    config = resource.make_deploy_variables(cluster_name,
+                                            region,
+                                            zones,
+                                            num_nodes=1,
+                                            dryrun=True)
+
+    expected_config_base = {
+        'instance_type': resource.instance_type,
+        'custom_resources': '{"fake-acc":2}',
+        'use_spot': False,
+        'region': 'fake-region',
+        'image_id': 'fake-image',
+        'disk_encrypted': False,
+        'ssh_user': 'test-user',
+        'disk_tier': 'gp3',
+        'disk_throughput': 218,
+        'disk_iops': 3500,
+        'docker_image': None,
+        'docker_container_name': 'sky_container',
+        'docker_login_config': None,
+        'docker_run_options': [],
+        'initial_setup_commands': [],
+        'zones': 'fake-zone',
+        'root_device_name': '/dev/xvda'
+    }
+
+    # test using defaults
+    expected_config = expected_config_base.copy()
+    expected_config.update({
+        'security_group': 'fake-default-sg',
+        'security_group_managed_by_skypilot': 'true'
+    })
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')
 
@@ -401,6 +460,51 @@ def test_resources_ordered_preference():
 
     assert resources_list[2].infra.cloud.lower() == 'azure'
     assert resources_list[2].infra.region == 'eastus'
+
+
+def test_resources_any_of_dump_in_serve_version_bump():
+    any_of_1 = [
+        {
+            'accelerators': {
+                'H200': 1
+            },
+            'disk_size': 256,
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'H100': 1
+            },
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'L4': 4
+            },
+        },
+    ]
+    any_of_2 = [
+        {
+            'accelerators': {
+                'H100': 1
+            },
+            'disk_size': 256,
+        },
+        {
+            'accelerators': {
+                'L4': 4
+            },
+            'disk_size': 256,
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'H200': 1
+            },
+        },
+    ]
+    assert (resources_utils.normalize_any_of_resources_config(any_of_1) ==
+            resources_utils.normalize_any_of_resources_config(any_of_2))
 
 
 def test_resources_any_of_ordered_exclusive():

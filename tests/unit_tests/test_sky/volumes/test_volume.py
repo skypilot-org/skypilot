@@ -170,6 +170,9 @@ class TestVolume:
             'name': 'test-volume',
             'type': 'k8s-pvc',
             'infra': 'k8s',
+            'labels': {
+                'key': 'value'
+            },
             'size': '100Gi',
             'resource_name': 'existing-pvc',
             'config': {
@@ -182,6 +185,7 @@ class TestVolume:
         assert volume.name == 'test-volume'
         assert volume.type == 'k8s-pvc'
         assert volume.infra == 'k8s'
+        assert volume.labels == {'key': 'value'}
         assert volume.size == '100Gi'
         assert volume.resource_name == 'existing-pvc'
         assert volume.config == {'access_mode': 'ReadWriteMany'}
@@ -193,6 +197,7 @@ class TestVolume:
                                    infra='k8s',
                                    size='100Gi',
                                    resource_name='existing-pvc',
+                                   labels={'key': 'value'},
                                    config={'access_mode': 'ReadWriteMany'})
 
         # Set cloud, region, zone
@@ -206,6 +211,9 @@ class TestVolume:
             'name': 'test-volume',
             'type': 'k8s-pvc',
             'infra': 'k8s',
+            'labels': {
+                'key': 'value'
+            },
             'size': '100Gi',
             'resource_name': 'existing-pvc',
             'config': {
@@ -243,6 +251,9 @@ class TestVolume:
                 'name': 'test-volume',
                 'type': 'k8s-pvc',
                 'infra': 'k8s',
+                'labels': {
+                    'key': 'value'
+                },
                 'resource_name': 'existing-pvc'
             },
             {
@@ -495,3 +506,123 @@ class TestVolume:
             }
             volume = volume_lib.Volume.from_dict(config)
             volume.normalize_config()  # Should not raise
+
+    def test_validate_config_with_valid_labels(self, monkeypatch):
+        """Test Volume._validate_config with valid labels."""
+        # Mock infra_utils.InfraInfo.from_str
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+
+        volume = volume_lib.Volume(name='test',
+                                   type='k8s-pvc',
+                                   infra='k8s',
+                                   size='100Gi',
+                                   labels={
+                                       'app': 'myapp',
+                                       'environment': 'production',
+                                       'app.kubernetes.io/name': 'myapp',
+                                       'app.kubernetes.io/version': 'v1.0.0'
+                                   })
+
+        # First normalize config to set cloud info
+        volume.normalize_config()
+        # Should not raise any exception
+        volume._validate_config()
+
+    def test_validate_config_with_invalid_label_key(self, monkeypatch):
+        """Test Volume._validate_config with invalid label key."""
+        # Mock infra_utils.InfraInfo.from_str
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+
+        volume = volume_lib.Volume(
+            name='test',
+            type='k8s-pvc',
+            infra='k8s',
+            size='100Gi',
+            labels={
+                'app': 'myapp',
+                'invalid-key-': 'value'  # Invalid key (ends with dash)
+            })
+
+        # Set cloud info directly since we're testing _validate_config
+        volume.cloud = 'kubernetes'
+        with pytest.raises(ValueError) as exc_info:
+            volume._validate_config()
+        assert 'Invalid label key' in str(exc_info.value)
+
+    def test_validate_config_with_invalid_label_value(self, monkeypatch):
+        """Test Volume._validate_config with invalid label value."""
+        # Mock infra_utils.InfraInfo.from_str
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+
+        volume = volume_lib.Volume(
+            name='test',
+            type='k8s-pvc',
+            infra='k8s',
+            size='100Gi',
+            labels={
+                'app': 'myapp',
+                'environment': 'invalid-value-'  # Invalid value (ends with dash)
+            })
+
+        # Set cloud info directly since we're testing _validate_config
+        volume.cloud = 'kubernetes'
+        with pytest.raises(ValueError) as exc_info:
+            volume._validate_config()
+        assert 'Invalid label value' in str(exc_info.value)
+
+    def test_validate_config_with_empty_labels(self, monkeypatch):
+        """Test Volume._validate_config with empty labels."""
+        # Mock infra_utils.InfraInfo.from_str
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+
+        volume = volume_lib.Volume(name='test',
+                                   type='k8s-pvc',
+                                   infra='k8s',
+                                   size='100Gi',
+                                   labels={})
+
+        # First normalize config to set cloud info
+        volume.normalize_config()
+        # Should not raise any exception
+        volume._validate_config()
+
+    def test_validate_config_with_none_labels(self, monkeypatch):
+        """Test Volume._validate_config with None labels."""
+        # Mock infra_utils.InfraInfo.from_str
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+
+        volume = volume_lib.Volume(name='test',
+                                   type='k8s-pvc',
+                                   infra='k8s',
+                                   size='100Gi',
+                                   labels=None)
+
+        # First normalize config to set cloud info
+        volume.normalize_config()
+        # Should not raise any exception
+        volume._validate_config()

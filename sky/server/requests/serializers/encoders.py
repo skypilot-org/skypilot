@@ -8,7 +8,9 @@ import pickle
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky.schemas.api import responses
 from sky.server import constants as server_constants
+from sky.utils import serialize_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -21,6 +23,9 @@ handlers: Dict[str, Any] = {}
 
 def pickle_and_encode(obj: Any) -> str:
     try:
+        # Apply backwards compatibility processing at the lowest level
+        # to catch any handles that might have bypassed the encoders
+        obj = serialize_utils.prepare_handle_for_backwards_compatibility(obj)
         return base64.b64encode(pickle.dumps(obj)).decode('utf-8')
     except TypeError as e:
         raise ValueError(f'Failed to pickle object: {obj}') from e
@@ -51,13 +56,19 @@ def default_encoder(return_value: Any) -> Any:
 
 
 @register_encoder('status')
-def encode_status(clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def encode_status(
+        clusters: List[responses.StatusResponse]) -> List[Dict[str, Any]]:
+    response = []
     for cluster in clusters:
-        cluster['status'] = cluster['status'].value
-        cluster['handle'] = pickle_and_encode(cluster['handle'])
-        cluster['storage_mounts_metadata'] = pickle_and_encode(
-            cluster['storage_mounts_metadata'])
-    return clusters
+        response_cluster = cluster.model_dump()
+        response_cluster['status'] = cluster['status'].value
+        handle = serialize_utils.prepare_handle_for_backwards_compatibility(
+            cluster['handle'])
+        response_cluster['handle'] = pickle_and_encode(handle)
+        response_cluster['storage_mounts_metadata'] = pickle_and_encode(
+            response_cluster['storage_mounts_metadata'])
+        response.append(response_cluster)
+    return response
 
 
 @register_encoder('launch', 'exec', 'jobs.launch')
@@ -65,6 +76,7 @@ def encode_launch(
     job_id_handle: Tuple[Optional[int], Optional['backends.ResourceHandle']]
 ) -> Dict[str, Any]:
     job_id, handle = job_id_handle
+    handle = serialize_utils.prepare_handle_for_backwards_compatibility(handle)
     return {
         'job_id': job_id,
         'handle': pickle_and_encode(handle),
@@ -73,6 +85,9 @@ def encode_launch(
 
 @register_encoder('start')
 def encode_start(resource_handle: 'backends.CloudVmRayResourceHandle') -> str:
+    resource_handle = (
+        serialize_utils.prepare_handle_for_backwards_compatibility(
+            resource_handle))
     return pickle_and_encode(resource_handle)
 
 
@@ -106,10 +121,30 @@ def encode_status_kubernetes(
 
 
 @register_encoder('jobs.queue')
-def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
+def encode_jobs_queue(jobs_or_tuple):
+    # Support returning either a plain jobs list or a (jobs, total) tuple
+    status_counts = {}
+    if isinstance(jobs_or_tuple, tuple):
+        if len(jobs_or_tuple) == 2:
+            jobs, total = jobs_or_tuple
+            total_no_filter = total
+        elif len(jobs_or_tuple) == 4:
+            jobs, total, status_counts, total_no_filter = jobs_or_tuple
+        else:
+            raise ValueError(f'Invalid jobs tuple: {jobs_or_tuple}')
+    else:
+        jobs = jobs_or_tuple
+        total = None
     for job in jobs:
         job['status'] = job['status'].value
-    return jobs
+    if total is None:
+        return jobs
+    return {
+        'jobs': jobs,
+        'total': total,
+        'total_no_filter': total_no_filter,
+        'status_counts': status_counts
+    }
 
 
 def _encode_serve_status(
@@ -118,7 +153,9 @@ def _encode_serve_status(
         service_status['status'] = service_status['status'].value
         for replica_info in service_status.get('replica_info', []):
             replica_info['status'] = replica_info['status'].value
-            replica_info['handle'] = pickle_and_encode(replica_info['handle'])
+            handle = serialize_utils.prepare_handle_for_backwards_compatibility(
+                replica_info['handle'])
+            replica_info['handle'] = pickle_and_encode(handle)
     return service_statuses
 
 

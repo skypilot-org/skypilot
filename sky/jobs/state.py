@@ -441,7 +441,8 @@ class ManagedJobScheduleState(enum.Enum):
 
 # === Status transition functions ===
 @_init_db
-def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
+def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str,
+                 pool: Optional[str], pool_hash: Optional[str]):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -457,7 +458,10 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
             name=name,
             schedule_state=ManagedJobScheduleState.INACTIVE.value,
             workspace=workspace,
-            entrypoint=entrypoint)
+            entrypoint=entrypoint,
+            pool=pool,
+            pool_hash=pool_hash,
+        )
         session.execute(insert_stmt)
         session.commit()
 
@@ -1524,7 +1528,7 @@ def get_nonterminal_job_ids_by_pool(pool: str,
 
 
 @_init_db
-def get_waiting_job(pool: Optional[str]) -> Optional[Dict[str, Any]]:
+def get_waiting_job() -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job, provided its
@@ -1555,8 +1559,6 @@ def get_waiting_job(pool: Optional[str]) -> Optional[Dict[str, Any]]:
             job_info_table.c.priority >= sqlalchemy.func.coalesce(
                 max_priority_subquery, 0),
         ]
-        if pool is not None:
-            select_conds.append(job_info_table.c.pool == pool)
         query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,

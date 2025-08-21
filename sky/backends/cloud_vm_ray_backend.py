@@ -1,5 +1,6 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import copy
+import dataclasses
 import enum
 import inspect
 import json
@@ -20,9 +21,9 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
 import colorama
+import psutil
 import yaml
 
-import sky
 from sky import backends
 from sky import catalog
 from sky import check as sky_check
@@ -37,6 +38,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
@@ -62,6 +64,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import controller_utils
+from sky.utils import directory_utils
 from sky.utils import env_options
 from sky.utils import locks
 from sky.utils import log_utils
@@ -76,7 +79,18 @@ from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
+    import grpc
+
     from sky import dag
+    from sky.schemas.generated import autostopv1_pb2
+    from sky.schemas.generated import autostopv1_pb2_grpc
+else:
+    # To avoid requiring grpcio to be installed on the client side.
+    grpc = adaptors_common.LazyImport('grpc')
+    autostopv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.autostopv1_pb2')
+    autostopv1_pb2_grpc = adaptors_common.LazyImport(
+        'sky.schemas.generated.autostopv1_pb2_grpc')
 
 Path = str
 
@@ -149,7 +163,7 @@ _LOG_DIR_PATTERN = re.compile(r'Log Dir: ([^ ]+)')
 # We don't do import then __file__ because that script needs to be filled in
 # (so import would fail).
 _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
-    pathlib.Path(sky.__file__).resolve().parent / 'backends' /
+    pathlib.Path(directory_utils.get_sky_dir()) / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
 # The maximum size of a command line arguments is 128 KB, i.e. the command
@@ -1355,8 +1369,11 @@ class RetryingVmProvisioner(object):
         if not dryrun:
             os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
             os.system(f'touch {log_path}')
+
         rich_utils.force_update_status(
-            ux_utils.spinner_message('Launching', log_path))
+            ux_utils.spinner_message('Launching',
+                                     log_path,
+                                     cluster_name=cluster_name))
 
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
@@ -1526,6 +1543,7 @@ class RetryingVmProvisioner(object):
                 requested_resources=requested_resources,
                 ready=False,
                 is_managed=self._is_managed,
+                provision_log_path=log_abs_path,
             )
 
             # Add cluster event for actual provisioning start.
@@ -1671,7 +1689,9 @@ class RetryingVmProvisioner(object):
                 config_dict['handle'] = handle
                 logger.info(
                     ux_utils.finishing_message(
-                        f'Cluster launched: {cluster_name!r}.', log_path))
+                        f'Cluster launched: {cluster_name!r}.',
+                        log_path,
+                        cluster_name=cluster_name))
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
@@ -1805,7 +1825,8 @@ class RetryingVmProvisioner(object):
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at='Shared connection to',
-                line_processor=log_utils.RayUpLineProcessor(log_abs_path),
+                line_processor=log_utils.RayUpLineProcessor(
+                    log_abs_path, cluster_name=cluster_handle.cluster_name),
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(
@@ -2207,6 +2228,12 @@ class RetryingVmProvisioner(object):
         return config_dict
 
 
+@dataclasses.dataclass
+class SSHTunnelInfo:
+    port: int
+    pid: int
+
+
 class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """A pickle-able handle to a cluster created by CloudVmRayBackend.
 
@@ -2226,10 +2253,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Launched resources
     - (optional) Docker user name
     - (optional) If TPU(s) are managed, a path to a deletion script.
+    - (optional) Skylet SSH tunnel info.
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 10
+    _VERSION = 11
 
     def __init__(
             self,
@@ -2262,6 +2290,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
+        self.is_grpc_enabled = True
+        self.skylet_ssh_tunnel: Optional[SSHTunnelInfo] = None
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2277,7 +2307,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'\n\tlaunched_resources={self.launched_nodes}x '
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
-                f'\n\tssh_user={self.ssh_user}')
+                f'\n\tssh_user={self.ssh_user},'
+                f'\n\tis_grpc_enabled={self.is_grpc_enabled},'
+                f'\n\tskylet_ssh_tunnel={self.skylet_ssh_tunnel}')
 
     def get_cluster_name(self):
         return self.cluster_name
@@ -2601,6 +2633,66 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                                     cluster_config_file)
         self.docker_user = docker_user
 
+    def get_grpc_channel(self) -> 'grpc.Channel':
+        if self.skylet_ssh_tunnel is None:
+            self.open_and_update_skylet_tunnel()
+        assert self.skylet_ssh_tunnel is not None
+        return grpc.insecure_channel(f'localhost:{self.skylet_ssh_tunnel.port}')
+
+    def _cleanup_ssh_tunnel(self, tunnel_info: SSHTunnelInfo) -> None:
+        """Clean up an SSH tunnel by terminating the process."""
+        try:
+            proc = psutil.Process(tunnel_info.pid)
+            if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+                logger.debug(
+                    f'Terminating SSH tunnel process {tunnel_info.pid}')
+                proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except psutil.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=1)
+        except psutil.NoSuchProcess:
+            pass
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to cleanup SSH tunnel process {tunnel_info.pid}: {e}')
+
+    def open_and_update_skylet_tunnel(self) -> None:
+        """Opens an SSH tunnel to the Skylet on the head node,
+        updates the cluster handle, and persists it to the database."""
+        local_port = common_utils.find_free_port(10000)
+        runners = self.get_command_runners()
+        head_runner = runners[0]
+        if isinstance(head_runner, command_runner.SSHCommandRunner):
+            # Disabling ControlMaster makes things easier to reason about
+            # with respect to resource management/ownership,
+            # as killing the process will close the tunnel too.
+            head_runner.disable_control_master = True
+
+        cmd = head_runner.port_forward_command([(local_port,
+                                                 constants.SKYLET_GRPC_PORT)])
+        ssh_tunnel_proc = subprocess.Popen(cmd)
+        tunnel_info = SSHTunnelInfo(port=local_port, pid=ssh_tunnel_proc.pid)
+        try:
+            grpc.channel_ready_future(
+                grpc.insecure_channel(f'localhost:{tunnel_info.port}')).result(
+                    timeout=constants.SKYLET_GRPC_TIMEOUT_SECONDS)
+            # Clean up existing tunnel before setting up the new one.
+            if self.skylet_ssh_tunnel is not None:
+                self._cleanup_ssh_tunnel(self.skylet_ssh_tunnel)
+            self.skylet_ssh_tunnel = tunnel_info
+            global_user_state.update_cluster_handle(self.cluster_name, self)
+        except grpc.FutureTimeoutError as e:
+            self._cleanup_ssh_tunnel(tunnel_info)
+            logger.warning(
+                f'Skylet gRPC channel for cluster {self.cluster_name} not '
+                f'ready after {constants.SKYLET_GRPC_TIMEOUT_SECONDS}s')
+            raise e
+        except Exception as e:
+            self._cleanup_ssh_tunnel(tunnel_info)
+            raise e
+
     @property
     def cluster_yaml(self) -> Optional[str]:
         if self._cluster_yaml is None:
@@ -2698,6 +2790,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     os.path.expanduser(state['_cluster_yaml'])):
                 state['_cluster_yaml'] = None
 
+        if version < 11:
+            state['is_grpc_enabled'] = False
+            state['skylet_ssh_tunnel'] = None
+
         self.__dict__.update(state)
 
         # Because the update_cluster_ips and update_ssh_ports
@@ -2735,6 +2831,27 @@ class LocalResourcesHandle(CloudVmRayResourceHandle):
         """Returns a list of local command runners."""
         del force_cached, avoid_ssh_control  # Unused.
         return [command_runner.LocalProcessCommandRunner()]
+
+
+class SkyletClient:
+    """The client to interact with a remote cluster through Skylet."""
+
+    def __init__(self, channel: 'grpc.Channel'):
+        self._autostop_stub = autostopv1_pb2_grpc.AutostopServiceStub(channel)
+
+    def set_autostop(
+        self,
+        request: 'autostopv1_pb2.SetAutostopRequest',
+        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'autostopv1_pb2.SetAutostopResponse':
+        return self._autostop_stub.SetAutostop(request, timeout=timeout)
+
+    def is_autostopping(
+        self,
+        request: 'autostopv1_pb2.IsAutostoppingRequest',
+        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'autostopv1_pb2.IsAutostoppingResponse':
+        return self._autostop_stub.IsAutostopping(request, timeout=timeout)
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
@@ -3011,7 +3128,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         is_managed=self._is_managed)
                     log_path = os.path.join(self.log_dir, 'provision.log')
                     rich_utils.force_update_status(
-                        ux_utils.spinner_message('Launching', log_path))
+                        ux_utils.spinner_message('Launching',
+                                                 log_path,
+                                                 cluster_name=cluster_name))
                     config_dict = retry_provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs,
                         skip_unnecessary_provisioning)
@@ -3050,8 +3169,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # Do not remove the stopped cluster from the global state
                     # if failed to start.
                     if not e.no_failover:
+                        global_user_state.add_cluster_event(
+                            cluster_name,
+                            None,
+                            'Provision failed: ' + str(e),
+                            global_user_state.ClusterEventType.STATUS_CHANGE,
+                            nop_if_duplicate=True)
                         global_user_state.remove_cluster(cluster_name,
-                                                         terminate=True)
+                                                         terminate=True,
+                                                         remove_events=False)
                         usage_lib.messages.usage.update_final_cluster_status(
                             None)
                     logger.error(
@@ -3800,7 +3926,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # In this case, we reset the resources for the task, so that the
             # detached setup does not need to wait for the task resources to be
             # ready (which is not used for setup anyway).
-            valid_resource = sky.Resources()
+            valid_resource = resources_lib.Resources()
         else:
             # Check the task resources vs the cluster resources. Since
             # `sky exec` will not run the provision and _check_existing_cluster
@@ -3853,7 +3979,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _teardown(self,
                   handle: CloudVmRayResourceHandle,
                   terminate: bool,
-                  purge: bool = False):
+                  purge: bool = False,
+                  explicitly_requested: bool = False):
         """Tear down or stop the cluster.
 
         Args:
@@ -3928,7 +4055,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # ClusterOwnerIdentityMismatchError. The argument/flag
                         # `purge` should bypass such ID mismatch errors.
                         refresh_cluster_status=(
-                            not is_identity_mismatch_and_purge))
+                            not is_identity_mismatch_and_purge),
+                        explicitly_requested=explicitly_requested)
                 if terminate:
                     lock.force_unlock()
                 break
@@ -4226,11 +4354,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         run_timestamp = list(run_timestamps.values())[0]
         job_id = list(run_timestamps.keys())[0]
+
+        # If run_timestamp contains the full path with SKY_LOGS_DIRECTORY,
+        # strip the prefix to get just the relative part to avoid duplication
+        # when constructing local paths.
+        if run_timestamp.startswith(constants.SKY_LOGS_DIRECTORY):
+            run_timestamp = run_timestamp[len(constants.SKY_LOGS_DIRECTORY
+                                             ):].lstrip('/')
         local_log_dir = ''
         if controller:  # download controller logs
             remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
                                       f'{job_id}.log')
-            local_log_dir = os.path.join(local_dir, run_timestamp)
+            local_log_dir = os.path.join(local_dir, 'managed_jobs',
+                                         run_timestamp)
             os.makedirs(os.path.dirname(os.path.expanduser(local_log_dir)),
                         exist_ok=True)
 
@@ -4309,7 +4445,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          purge: bool = False,
                          post_teardown_cleanup: bool = True,
                          refresh_cluster_status: bool = True,
-                         remove_from_db: bool = True) -> None:
+                         remove_from_db: bool = True,
+                         explicitly_requested: bool = False) -> None:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -4373,7 +4510,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                            f'provision yaml so it '
                            'has not been provisioned. Skipped.')
             global_user_state.remove_cluster(handle.cluster_name,
-                                             terminate=terminate)
+                                             terminate=terminate,
+                                             remove_events=False)
             return
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
@@ -4430,8 +4568,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise
 
             if post_teardown_cleanup:
-                self.post_teardown_cleanup(handle, terminate, purge,
-                                           remove_from_db)
+                self.post_teardown_cleanup(
+                    handle,
+                    terminate,
+                    purge,
+                    remove_from_db,
+                    explicitly_requested=explicitly_requested)
             return
 
         if (isinstance(cloud, clouds.IBM) and terminate and
@@ -4531,7 +4673,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               terminate: bool,
                               purge: bool = False,
                               remove_from_db: bool = True,
-                              failover: bool = False) -> None:
+                              failover: bool = False,
+                              explicitly_requested: bool = False) -> None:
         """Cleanup local configs/caches and delete TPUs after teardown.
 
         This method will handle the following cleanup steps:
@@ -4637,8 +4780,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         else:
                             raise
 
-        sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
-            handle.cluster_name)
+        cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
 
         def _detect_abnormal_non_terminated_nodes(
                 handle: CloudVmRayResourceHandle) -> None:
@@ -4710,7 +4852,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if not terminate or remove_from_db:
             global_user_state.remove_cluster(handle.cluster_name,
-                                             terminate=terminate)
+                                             terminate=terminate,
+                                             remove_events=explicitly_requested)
 
     def remove_cluster_config(self, handle: CloudVmRayResourceHandle) -> None:
         """Remove the YAML config of a cluster."""
@@ -4770,17 +4913,27 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
-            code = autostop_lib.AutostopCodeGen.set_autostop(
-                idle_minutes_to_autostop, self.NAME, wait_for, down)
-            returncode, _, stderr = self.run_on_head(handle,
-                                                     code,
-                                                     require_outputs=True,
-                                                     stream_logs=stream_logs)
-            subprocess_utils.handle_returncode(returncode,
-                                               code,
-                                               'Failed to set autostop',
-                                               stderr=stderr,
-                                               stream_logs=stream_logs)
+            if env_options.Options.ENABLE_GRPC.get() and handle.is_grpc_enabled:
+                request = autostopv1_pb2.SetAutostopRequest(
+                    idle_minutes=idle_minutes_to_autostop,
+                    backend=self.NAME,
+                    wait_for=wait_for.to_protobuf() if wait_for is not None else
+                    autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
+                    down=down,
+                )
+                backend_utils.invoke_skylet_with_retries(
+                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                    set_autostop(request))
+            else:
+                code = autostop_lib.AutostopCodeGen.set_autostop(
+                    idle_minutes_to_autostop, self.NAME, wait_for, down)
+                returncode, _, stderr = self.run_on_head(
+                    handle, code, require_outputs=True, stream_logs=stream_logs)
+                subprocess_utils.handle_returncode(returncode,
+                                                   code,
+                                                   'Failed to set autostop',
+                                                   stderr=stderr,
+                                                   stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
 
@@ -4805,18 +4958,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # The head node of the cluster is not UP or in an abnormal state.
             # We cannot check if the cluster is autostopping.
             return False
-        code = autostop_lib.AutostopCodeGen.is_autostopping()
-        returncode, stdout, stderr = self.run_on_head(handle,
-                                                      code,
-                                                      require_outputs=True,
-                                                      stream_logs=stream_logs)
-
-        if returncode == 0:
-            return message_utils.decode_payload(stdout)
-        logger.debug('Failed to check if cluster is autostopping with '
-                     f'{returncode}: {stdout+stderr}\n'
-                     f'Command: {code}')
-        return False
+        if env_options.Options.ENABLE_GRPC.get() and handle.is_grpc_enabled:
+            try:
+                request = autostopv1_pb2.IsAutostoppingRequest()
+                response = backend_utils.invoke_skylet_with_retries(
+                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
+                    is_autostopping(request))
+                return response.is_autostopping
+            except Exception as e:  # pylint: disable=broad-except
+                # The cluster may have been terminated, causing the gRPC call
+                # to timeout and fail.
+                logger.debug(f'Failed to check if cluster is autostopping: {e}')
+                return False
+        else:
+            code = autostop_lib.AutostopCodeGen.is_autostopping()
+            returncode, stdout, stderr = self.run_on_head(
+                handle, code, require_outputs=True, stream_logs=stream_logs)
+            if returncode == 0:
+                return message_utils.decode_payload(stdout)
+            logger.debug('Failed to check if cluster is autostopping with '
+                         f'{returncode}: {stdout+stderr}\n'
+                         f'Command: {code}')
+            return False
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
