@@ -2,7 +2,7 @@
 import base64
 import pickle
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import jobs as managed_jobs
 from sky import models
@@ -203,3 +203,13 @@ def decode_job_status(
 def decode_kubernetes_node_info(
         return_value: Dict[str, Any]) -> models.KubernetesNodesInfo:
     return models.KubernetesNodesInfo.from_dict(return_value)
+
+
+@register_decoders('endpoints')
+def decode_endpoints(
+    return_value: Union[Dict[str, str], Optional[str]]
+) -> Union[Dict[int, str], Optional[str]]:
+    if isinstance(return_value, dict):
+        return {int(k): v for k, v in return_value.items()}
+    else:
+        return return_value

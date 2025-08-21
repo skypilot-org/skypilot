@@ -258,8 +258,10 @@ all_clusters, unmanaged_clusters, all_jobs, context
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
-def endpoints(cluster: str,
-              port: Optional[Union[int, str]] = None) -> Dict[str, str]:
+def endpoints(
+    cluster: str,
+    port: Optional[Union[int,
+                         str]] = None) -> Union[Dict[int, str], Optional[str]]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -267,8 +269,10 @@ def endpoints(cluster: str,
         port: The port number to get the endpoint for. If None, endpoints
             for all ports are returned..
 
-    Returns: A dictionary of port numbers to endpoints. If endpoint is None,
-        the dictionary will contain all ports:endpoints exposed on the cluster.
+    Returns:
+        If port is None, a dictionary of port numbers to endpoints.
+        If port is not None, the string endpoint for the given port, or None
+            if the port is not exposed.
 
     Raises:
     ValueError: if the cluster is not UP or the endpoint is not exposed.
@@ -279,9 +283,11 @@ def endpoints(cluster: str,
             ux_utils.spinner_message(
                 f'Fetching endpoints for cluster {cluster}')):
         result = backend_utils.get_endpoints(cluster=cluster, port=port)
-        # Convert int keys to str keys.
-        # In JSON serialization, each key must be a string.
-        return {str(k): v for k, v in result.items()}
+
+        if port is None:
+            return result
+        else:
+            return result.get(int(port), None)
 
 
 @usage_lib.entrypoint

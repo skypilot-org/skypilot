@@ -6,7 +6,7 @@ import base64
 import dataclasses
 import pickle
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky.schemas.api import responses
 from sky.server import constants as server_constants
@@ -209,3 +209,13 @@ def encode_job_status(return_value: Dict[int, Any]) -> Dict[int, str]:
 def encode_kubernetes_node_info(
         return_value: 'models.KubernetesNodesInfo') -> Dict[str, Any]:
     return return_value.to_dict()
+
+
+@register_encoder('endpoints')
+def encode_endpoints(
+    return_value: Union[Dict[int, str], Optional[str]]
+) -> Union[Dict[str, str], Optional[str]]:
+    if isinstance(return_value, dict):
+        return {str(k): v for k, v in return_value.items()}
+    else:
+        return return_value

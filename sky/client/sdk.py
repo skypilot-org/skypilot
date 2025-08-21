@@ -1492,7 +1492,8 @@ def endpoints(
 
     Request Returns:
         If port is None, a dictionary of port numbers to endpoints.
-        If port is not None, the string endpoint for the given port.
+        If port is not None, the string endpoint for the given port, or None
+            if the port is not exposed.
 
     Request Raises:
         ValueError: if the cluster is not UP or the endpoint is not exposed.
@@ -1510,24 +1511,12 @@ def endpoints(
         # get / stream_and_get is called.
         cluster_endpoints_request_id: server_common.RequestId[Dict[
             int, str]] = (server_common.get_request_id(response))
-
-        def response_transform(result: Dict[str, str]) -> Dict[int, str]:
-            return {int(k): v for k, v in result.items()}
-
-        cluster_endpoints_request_id.set_transform_func(response_transform)
         return cluster_endpoints_request_id
     else:
         # Returns a string endpoint for the given port when
         # get / stream_and_get is called.
         cluster_endpoint_request_id: server_common.RequestId[Optional[str]] = (
             server_common.get_request_id(response))
-
-        # Create a transformation function to extract
-        # the specific port from the Dict
-        def port_extractor(result: Dict[str, str]) -> Optional[str]:
-            return result.get(str(port), None)
-
-        cluster_endpoint_request_id.set_transform_func(port_extractor)
         return cluster_endpoint_request_id
 
 
@@ -1956,14 +1945,7 @@ def get(request_id: server_common.RequestId[T]) -> T:
                 f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
                 f'({request_task.request_id}) is cancelled by another process.'
                 f'{colorama.Style.RESET_ALL}')
-    result = request_task.get_return_value()
-
-    # Apply transformation function if it exists in the request_id
-    if hasattr(request_id,
-               'transform_func') and request_id.transform_func is not None:
-        result = request_id.transform_func(result)
-
-    return result
+    return request_task.get_return_value()
 
 
 @typing.overload

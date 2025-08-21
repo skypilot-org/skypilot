@@ -93,9 +93,7 @@ P = ParamSpec('P')
 
 
 class RequestId(str, Generic[T]):
-
-    def set_transform_func(self, transform_func: Callable[[Any], T]):
-        self.transform_func = transform_func
+    pass
 
 
 ApiVersion = Optional[str]

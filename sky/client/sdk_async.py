@@ -617,7 +617,7 @@ async def endpoints(
     if port is None:
         return {int(k): v for k, v in result.items()}
     else:
-        return result.get(str(port), None)
+        return result
 
 
 @usage_lib.entrypoint
