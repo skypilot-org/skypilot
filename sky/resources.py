@@ -1260,10 +1260,14 @@ class Resources:
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
             return None
-        if len(self.image_id) == 1 and self.region in self.image_id:
-            image_id = self.image_id[self.region]
-            if image_id.startswith('docker:'):
-                return image_id[len('docker:'):]
+        # Handle dict image_id
+        if len(self.image_id) == 1:
+            # Check if the single key matches the region or is None (any region)
+            image_key = list(self.image_id.keys())[0]
+            if image_key == self.region or image_key is None:
+                image_id = self.image_id[image_key]
+                if image_id.startswith('docker:'):
+                    return image_id[len('docker:'):]
         return None
 
     def _try_validate_image_id(self) -> None:
@@ -1333,13 +1337,19 @@ class Resources:
                     'Kubernetes, please explicitly specify the cloud.') from e
 
         if self._region is not None:
-            if self._region not in self._image_id:
+            # If the image_id has None as key (region-agnostic),
+            # use it for any region
+            if None in self._image_id:
+                # Replace None key with the actual region
+                self._image_id = {self._region: self._image_id[None]}
+            elif self._region not in self._image_id:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'image_id {self._image_id} should contain the image '
                         f'for the specified region {self._region}.')
-            # Narrow down the image_id to the specified region.
-            self._image_id = {self._region: self._image_id[self._region]}
+            else:
+                # Narrow down the image_id to the specified region.
+                self._image_id = {self._region: self._image_id[self._region]}
 
         # Check the image_id's are valid.
         for region, image_id in self._image_id.items():

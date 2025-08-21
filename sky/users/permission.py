@@ -46,7 +46,8 @@ class PermissionService:
                 engine = global_user_state.initialize_and_get_db()
                 db_utils.add_all_tables_to_db_sqlalchemy(
                     sqlalchemy_adapter.Base.metadata, engine)
-                adapter = sqlalchemy_adapter.Adapter(engine)
+                adapter = sqlalchemy_adapter.Adapter(
+                    engine, db_class=sqlalchemy_adapter.CasbinRule)
                 model_path = os.path.join(os.path.dirname(__file__),
                                           'model.conf')
                 enforcer = casbin.Enforcer(model_path, adapter)
