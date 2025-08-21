@@ -351,7 +351,7 @@ class TestWithNoCloudEnabled:
         assert not result.exit_code
         output = result.stdout.split('\n')
         assert output[
-            0] == f'SkyPilot client version: {client_version} commit: {client_commit}'
+            0] == f'SkyPilot client version: {client_version}, commit: {client_commit}'
         assert output[
             1] == f'Using SkyPilot API server and dashboard: {server_url}'
         assert output[
