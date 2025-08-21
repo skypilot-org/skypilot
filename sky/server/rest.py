@@ -85,6 +85,8 @@ def retry_transient_errors(max_retries: int = 3,
         if isinstance(e, requests.exceptions.HTTPError):
             # Only server error is considered as transient.
             return e.response.status_code >= 500
+        if isinstance(e, exceptions.ClientError):
+            return False
         # It is hard to enumerate all other errors that are transient, e.g.
         # broken pipe, connection refused, etc. Instead, it is safer to assume
         # all other errors might be transient since we only retry for 3 times
