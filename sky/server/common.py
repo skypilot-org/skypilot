@@ -108,6 +108,7 @@ crypt_ctx = CryptContext([
     "ldap_sha1"
 ])
 
+
 class ApiServerStatus(enum.Enum):
     HEALTHY = 'healthy'
     UNHEALTHY = 'unhealthy'
