@@ -63,8 +63,8 @@ def create_catalog(DEFAULT_SIMPLEPOD_KEYS_PATH: str, output_path: str) -> None:
             if instance_key not in seen_instances:
                 seen_instances.add(instance_key)  # Mark as seen
                 writer.writerow([
-                    f"gpu_{gpu_count}x_{gpu_model.lower().replace(' ', '-')}_{vcpus}",  # InstanceType now includes vCPUs
-                    gpu_model.replace(" ", "-"),  # AcceleratorName
+                    f"gpu_{gpu_count}x_{gpu_model.lower().replace(' ', '')}_{vcpus}",  # InstanceType now includes vCPUs
+                    gpu_model.replace(" ", ""),  # AcceleratorName
                     gpu_count,  # AcceleratorCount
                     vcpus,  # vCPUs
                     memory,  # MemoryGiB
