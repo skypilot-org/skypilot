@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Validate llms.txt format."""
 
+from pathlib import Path
 import re
 import sys
-from pathlib import Path
 
 
 def validate_llms_txt(filepath):

@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+
 from sphinx.application import Sphinx
 from sphinx.util import logging
 

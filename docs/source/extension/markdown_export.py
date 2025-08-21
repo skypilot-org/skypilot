@@ -1,7 +1,8 @@
 """Export markdown versions of documentation pages for LLM consumption."""
 
-import re
 from pathlib import Path
+import re
+
 from sphinx.application import Sphinx
 
 
@@ -48,12 +49,13 @@ def process_source_file(source_path, md_path):
     elif source_path.suffix == '.rst':
         try:
             import pypandoc
+
             # Resolve RST includes
             content = resolve_literalincludes(
                 content, source_path,
                 r'\.\. literalinclude:: ([^\n]+)\n(?:   :language: (\w+)\n)?(?:   :[^\n]*\n)*'
             )
-            
+
             # Pre-process emoji substitutions to avoid pandoc reference errors
             # Convert RST emoji syntax |:emoji:| to Unicode characters
             emoji_map = {
@@ -64,7 +66,7 @@ def process_source_file(source_path, md_path):
             }
             for rst_emoji, unicode_emoji in emoji_map.items():
                 content = content.replace(rst_emoji, unicode_emoji)
-            
+
             # Convert via pandoc
             temp_rst = md_path.with_suffix('.temp.rst')
             temp_rst.write_text(content, encoding='utf-8')
