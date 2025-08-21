@@ -2,13 +2,9 @@
 
 import unittest
 from unittest import mock
-from unittest.mock import MagicMock
 from unittest.mock import patch
 
-import pytest
-
 from sky.clouds import kubernetes
-from sky.clouds.utils import gcp_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 
@@ -788,6 +784,178 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
             # Check that drop capabilities from user config are preserved
             drop_capabilities = security_context['capabilities']['drop']
             self.assertIn('NET_RAW', drop_capabilities)
+        finally:
+            import os
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+
+class TestKubernetesVolumeMerging(unittest.TestCase):
+    """Test cases for merging user-specified volume mounts and volumes with pod_config."""
+
+    @patch('yaml.safe_load')
+    @patch('sky.utils.common_utils.dump_yaml')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_user_volume_mounts_merged_correctly(self,
+                                                 mock_get_cloud_config_value,
+                                                 mock_dump_yaml,
+                                                 mock_safe_load):
+        """Test that user-specified volume mounts and volumes are correctly merged."""
+
+        # Based on kubernetes-ray.yml.j2
+        cluster_yaml_with_system_volumes = {
+            'available_node_types': {
+                'ray_head_default': {
+                    'node_config': {
+                        'apiVersion': 'v1',
+                        'kind': 'Pod',
+                        'spec': {
+                            'volumes': [{
+                                'name': 'secret-volume',
+                                'secret': {
+                                    'secretName': kubernetes.Kubernetes.
+                                                  SKY_SSH_KEY_SECRET_NAME
+                                }
+                            }, {
+                                'name': 'dshm',
+                                'emptyDir': {
+                                    'medium': 'Memory'
+                                }
+                            }],
+                            'containers': [{
+                                'name': 'ray-node',
+                                'image': 'test-image',
+                                'volumeMounts': [{
+                                    'name': 'secret-volume',
+                                    'readOnly': True,
+                                    'mountPath': '/etc/secret-volume'
+                                }, {
+                                    'mountPath': '/dev/shm',
+                                    'name': 'dshm'
+                                }]
+                            }]
+                        }
+                    }
+                }
+            }
+        }
+
+        # User config with additional volume mounts and volumes
+        user_pod_config = {
+            'spec': {
+                'containers': [{
+                    'volumeMounts': [{
+                        'name': 'data-volume',
+                        'mountPath': '/data',
+                        'readOnly': False
+                    }, {
+                        'name': 'logs-volume',
+                        'mountPath': '/logs',
+                        'readOnly': False
+                    }]
+                }],
+                'volumes': [{
+                    'name': 'data-volume',
+                    'persistentVolumeClaim': {
+                        'claimName': 'data-pvc',
+                        'readOnly': False
+                    }
+                }, {
+                    'name': 'logs-volume',
+                    'persistentVolumeClaim': {
+                        'claimName': 'logs-pvc',
+                        'readOnly': False
+                    }
+                }]
+            }
+        }
+
+        mock_safe_load.return_value = cluster_yaml_with_system_volumes
+        mock_get_cloud_config_value.return_value = user_pod_config
+
+        # Use a temporary file to avoid file not found error
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', delete=False,
+                                         suffix='.yaml') as tmp_file:
+            tmp_path = tmp_file.name
+
+        try:
+            kubernetes_utils.combine_pod_config_fields(tmp_path, {}, None)
+            mock_safe_load.assert_called_once()
+            mock_dump_yaml.assert_called_once()
+
+            # Get the modified YAML
+            modified_yaml = mock_dump_yaml.call_args[0][1]
+            container = modified_yaml['available_node_types'][
+                'ray_head_default']['node_config']['spec']['containers'][0]
+            pod_spec = modified_yaml['available_node_types'][
+                'ray_head_default']['node_config']['spec']
+
+            # Verify that both system and user volume mounts are present
+            volume_mounts = container['volumeMounts']
+            self.assertEqual(len(volume_mounts), 4)  # 2 system + 2 user
+
+            # Check system volume mounts are preserved
+            secret_mount = next(
+                (vm for vm in volume_mounts if vm['name'] == 'secret-volume'),
+                None)
+            self.assertIsNotNone(secret_mount)
+            self.assertEqual(secret_mount['mountPath'], '/etc/secret-volume')
+            self.assertTrue(secret_mount['readOnly'])
+
+            dshm_mount = next(
+                (vm for vm in volume_mounts if vm['name'] == 'dshm'), None)
+            self.assertIsNotNone(dshm_mount)
+            self.assertEqual(dshm_mount['mountPath'], '/dev/shm')
+
+            # Check user volume mounts are added
+            data_mount = next(
+                (vm for vm in volume_mounts if vm['name'] == 'data-volume'),
+                None)
+            self.assertIsNotNone(data_mount)
+            self.assertEqual(data_mount['mountPath'], '/data')
+            self.assertFalse(data_mount['readOnly'])
+
+            logs_mount = next(
+                (vm for vm in volume_mounts if vm['name'] == 'logs-volume'),
+                None)
+            self.assertIsNotNone(logs_mount)
+            self.assertEqual(logs_mount['mountPath'], '/logs')
+            self.assertFalse(logs_mount['readOnly'])
+
+            # Verify that both system and user volumes are present
+            volumes = pod_spec['volumes']
+            self.assertEqual(len(volumes), 4)  # 2 system + 2 user
+
+            # Check system volumes are preserved
+            secret_volume = next(
+                (v for v in volumes if v['name'] == 'secret-volume'), None)
+            self.assertIsNotNone(secret_volume)
+            self.assertIn('secret', secret_volume)
+            self.assertEqual(secret_volume['secret']['secretName'],
+                             kubernetes.Kubernetes.SKY_SSH_KEY_SECRET_NAME)
+
+            dshm_volume = next((v for v in volumes if v['name'] == 'dshm'),
+                               None)
+            self.assertIsNotNone(dshm_volume)
+            self.assertIn('emptyDir', dshm_volume)
+            self.assertEqual(dshm_volume['emptyDir']['medium'], 'Memory')
+
+            # Check user volumes are added
+            data_volume = next(
+                (v for v in volumes if v['name'] == 'data-volume'), None)
+            self.assertIsNotNone(data_volume)
+            self.assertIn('persistentVolumeClaim', data_volume)
+            self.assertEqual(data_volume['persistentVolumeClaim']['claimName'],
+                             'data-pvc')
+
+            logs_volume = next(
+                (v for v in volumes if v['name'] == 'logs-volume'), None)
+            self.assertIsNotNone(logs_volume)
+            self.assertIn('persistentVolumeClaim', logs_volume)
+            self.assertEqual(logs_volume['persistentVolumeClaim']['claimName'],
+                             'logs-pvc')
+
         finally:
             import os
             if os.path.exists(tmp_path):
