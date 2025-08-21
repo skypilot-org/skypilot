@@ -5,7 +5,6 @@ import enum
 import functools
 from http.cookiejar import CookieJar
 from http.cookiejar import MozillaCookieJar
-import json
 import os
 import pathlib
 import re
@@ -16,13 +15,15 @@ import tempfile
 import threading
 import time
 import typing
-from typing import Any, Dict, Literal, Optional, Tuple, Union
+from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
+                    Tuple, TypeVar, Union)
 from urllib import parse
 import uuid
 
 import cachetools
 import colorama
 import filelock
+from typing_extensions import ParamSpec
 
 from sky import exceptions
 from sky import sky_logging
@@ -87,7 +88,14 @@ _SERVER_INSTALL_VERSION_MISMATCH_WARNING = (
     'restarting the API server.'
     f'{colorama.Style.RESET_ALL}')
 
-RequestId = str
+T = TypeVar('T')
+P = ParamSpec('P')
+
+
+class RequestId(str, Generic[T]):
+    pass
+
+
 ApiVersion = Optional[str]
 
 logger = sky_logging.init_logger(__name__)
@@ -363,7 +371,7 @@ def _handle_non_200_server_status(
                          '') == ApiServerStatus.VERSION_MISMATCH.value):
                 return ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
                                      error=body.get('message', ''))
-        except json.JSONDecodeError:
+        except requests.JSONDecodeError:
             pass
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
@@ -454,7 +462,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             # OAuth.
             set_api_cookie_jar(cookies, create_if_not_exists=True)
             return server_info
-        except (json.JSONDecodeError, AttributeError) as e:
+        except (requests.JSONDecodeError, AttributeError) as e:
             # Try to check if we got redirected to a login page.
             for prev_response in response.history:
                 logger.debug(f'Previous response: {prev_response.url}')
@@ -486,7 +494,7 @@ def handle_request_error(response: 'requests.Response') -> None:
                 f'{response.text}')
 
 
-def get_request_id(response: 'requests.Response') -> RequestId:
+def get_request_id(response: 'requests.Response') -> RequestId[T]:
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')
     if request_id is None:
@@ -497,7 +505,7 @@ def get_request_id(response: 'requests.Response') -> RequestId:
                 'Failed to get request ID from SkyPilot API server at '
                 f'{get_server_url()}. Response: {response.status_code} '
                 f'{response.text}')
-    return request_id
+    return RequestId[T](request_id)
 
 
 def _start_api_server(deploy: bool = False,
@@ -553,15 +561,13 @@ def _start_api_server(deploy: bool = False,
         # For spawn mode, copy the environ to avoid polluting the SDK process.
         server_env = os.environ.copy()
         server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-        _set_metrics_env_var(server_env, metrics, deploy)
         # Start the API server process in the background and don't wait for it.
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
-        server_env = os.environ.copy()
-        server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         if enable_basic_auth:
             server_env[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
+        _set_metrics_env_var(server_env, metrics, deploy)
         with open(log_path, 'w', encoding='utf-8') as log_file:
             # Because the log file is opened using a with statement, it may seem
             # that the file will be closed when the with statement is exited
@@ -635,7 +641,7 @@ def _set_metrics_env_var(env: Union[Dict[str, str], os._Environ], metrics: bool,
         deploy: Whether the server is running in deploy mode, which means
             multiple processes might be running.
     """
-    if metrics:
+    if metrics or os.getenv(constants.ENV_VAR_SERVER_METRICS_ENABLED) == 'true':
         env[constants.ENV_VAR_SERVER_METRICS_ENABLED] = 'true'
         if deploy:
             metrics_dir = os.path.join(tempfile.gettempdir(), 'metrics')
@@ -753,14 +759,14 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                                   metrics_port, enable_basic_auth)
 
 
-def check_server_healthy_or_start(func):
+def check_server_healthy_or_start(func: Callable[P, T]) -> Callable[P, T]:
 
     @functools.wraps(func)
     def wrapper(*args, deploy: bool = False, host: str = '127.0.0.1', **kwargs):
         check_server_healthy_or_start_fn(deploy, host)
         return func(*args, **kwargs)
 
-    return wrapper
+    return cast(Callable[P, T], wrapper)
 
 
 def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
@@ -878,7 +884,8 @@ def request_body_to_params(body: 'pydantic.BaseModel') -> Dict[str, Any]:
 
 def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
-                           using_remote_api_server: bool, user: 'models.User'):
+                           using_remote_api_server: bool, user: 'models.User',
+                           request_id: str) -> None:
     """Reload modules, global variables, and usage message for a new request."""
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
@@ -892,6 +899,7 @@ def reload_for_new_request(client_entrypoint: Optional[str],
         client_command=client_command,
         using_remote_api_server=using_remote_api_server,
         user=user,
+        request_id=request_id,
     )
 
     # Clear cache should be called before reload_logger and usage reset,

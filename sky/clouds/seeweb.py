@@ -1,4 +1,11 @@
-"""Seeweb Cloud."""
+"""Seeweb Cloud
+
+History:
+@ Aug 6, 2025: Initial version of the integration.
+- Francesco Massa 
+- Marco Cristofanilli (marco.cATseeweb.it)
+
+"""
 
 from __future__ import annotations
 
@@ -21,6 +28,8 @@ if typing.TYPE_CHECKING:
 
 # ---------- key file path -----------------
 _SEEWEB_KEY_FILE = "~/.seeweb_cloud/seeweb_keys"
+# (content: ini-like)
+#   api_key = <TOKEN>
 
 
 @registry.CLOUD_REGISTRY.register

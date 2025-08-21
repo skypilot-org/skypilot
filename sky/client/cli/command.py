@@ -35,7 +35,7 @@ import sys
 import traceback
 import typing
 from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
-                    Union)
+                    TypeVar, Union)
 
 import click
 import colorama
@@ -47,12 +47,15 @@ import sky
 from sky import backends
 from sky import catalog
 from sky import clouds
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import jobs as managed_jobs
 from sky import models
+from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
+from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
@@ -60,6 +63,7 @@ from sky.client.cli import git
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import requests
@@ -73,6 +77,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import directory_utils
 from sky.utils import env_options
 from sky.utils import git as git_utils
 from sky.utils import infra_utils
@@ -116,12 +121,14 @@ _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
 
+T = TypeVar('T')
+
 
 def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> List[dict]:
+) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
     Args:
@@ -160,7 +167,7 @@ def _get_cluster_records_and_set_ssh_config(
                     handle.cluster_name, credentials)))
             escaped_executable_path = shlex.quote(sys.executable)
             escaped_websocket_proxy_path = shlex.quote(
-                f'{sky.__root_dir__}/templates/websocket_proxy.py')
+                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
             # Instead of directly use websocket_proxy.py, we add an
             # additional proxy, so that ssh can use the head pod in the
             # cluster to jump to worker pods.
@@ -224,8 +231,8 @@ def _get_glob_matches(candidate_names: List[str],
     return list(set(glob_storages))
 
 
-def _async_call_or_wait(request_id: str, async_call: bool,
-                        request_name: str) -> Any:
+def _async_call_or_wait(request_id: server_common.RequestId[T],
+                        async_call: bool, request_name: str) -> Any:
     short_request_id = request_id[:8]
     if not async_call:
         try:
@@ -271,65 +278,6 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     for (key, value) in env_list:
         env_dict[key] = value
     return list(env_dict.items())
-
-
-def _format_job_ids_str(job_ids: List[int], max_length: int = 30) -> str:
-    """Format job IDs string with ellipsis if too long.
-
-    Args:
-        job_ids: List of job IDs to format.
-        max_length: Maximum length of the output string.
-
-    Returns:
-        Formatted string like "11,12,...,2017,2018" if truncated,
-        or the full string if it fits within max_length.
-    """
-    if not job_ids:
-        return ''
-
-    # Convert all to strings
-    job_strs = [str(job_id) for job_id in job_ids]
-    full_str = ','.join(job_strs)
-
-    # If it fits, return as is
-    if len(full_str) <= max_length:
-        return full_str
-
-    if len(job_strs) <= 2:
-        return full_str  # Can't truncate further
-
-    # Need to truncate with ellipsis
-    ellipsis = '...'
-
-    # Start with minimum: first and last
-    start_count = 1
-    end_count = 1
-
-    while start_count + end_count < len(job_strs):
-        # Try adding one more to start
-        if start_count + 1 + end_count < len(job_strs):
-            start_part = ','.join(job_strs[:start_count + 1])
-            end_part = ','.join(job_strs[-end_count:])
-            candidate = f'{start_part},{ellipsis},{end_part}'
-            if len(candidate) <= max_length:
-                start_count += 1
-                continue
-
-        # Try adding one more to end
-        if start_count + end_count + 1 < len(job_strs):
-            start_part = ','.join(job_strs[:start_count])
-            end_part = ','.join(job_strs[-(end_count + 1):])
-            candidate = f'{start_part},{ellipsis},{end_part}'
-            if len(candidate) <= max_length:
-                end_count += 1
-                continue
-
-        # Can't add more
-        break
-
-    start_part = ','.join(job_strs[:start_count])
-    end_part = ','.join(job_strs[-end_count:])
-    return f'{start_part},{ellipsis},{end_part}'
 
 
 def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
@@ -739,7 +687,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
     git_ref: Optional[str] = None,
-) -> Union[sky.Task, sky.Dag]:
+) -> Union['task_lib.Task', 'dag_lib.Dag']:
     """Creates a task or a dag from an entrypoint with overrides.
 
     Returns:
@@ -802,8 +750,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
             f'If you see this, please file an issue; tasks: {dag.tasks}')
         task = dag.tasks[0]
     else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
-        task.set_resources({sky.Resources()})
+        task = task_lib.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({resources_lib.Resources()})
         # env update has been done for DAG in load_chain_dag_from_yaml for YAML.
         task.update_envs(env)
         task.update_secrets(secret)
@@ -826,7 +774,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     return task
 
 
-def _update_task_workdir(task: sky.Task, workdir: Optional[str],
+def _update_task_workdir(task: task_lib.Task, workdir: Optional[str],
                          git_url: Optional[str], git_ref: Optional[str]):
     """Updates the task workdir.
 
@@ -854,7 +802,7 @@ def _update_task_workdir(task: sky.Task, workdir: Optional[str],
     return
 
 
-def _update_task_workdir_and_secrets_from_workdir(task: sky.Task):
+def _update_task_workdir_and_secrets_from_workdir(task: task_lib.Task):
     """Updates the task secrets from the workdir.
 
     Args:
@@ -1165,7 +1113,7 @@ def launch(
         git_url=git_url,
         git_ref=git_ref,
     )
-    if isinstance(task_or_dag, sky.Dag):
+    if isinstance(task_or_dag, dag_lib.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky launch'))
     task = task_or_dag
@@ -1185,11 +1133,15 @@ def launch(
             raise ValueError(f'{backend_name} backend is not supported.')
 
     if task.service is not None:
+        noun = 'pool' if task.service.pool else 'service'
+        capnoun = noun.capitalize()
+        sysname = 'Jobs Worker Pool' if task.service.pool else 'SkyServe'
+        cmd = 'sky jobs pool apply' if task.service.pool else 'sky serve up'
         logger.info(
-            f'{colorama.Fore.YELLOW}Service section will be ignored when using '
-            f'`sky launch`. {colorama.Style.RESET_ALL}\n{colorama.Fore.YELLOW}'
-            'To spin up a service, use SkyServe CLI: '
-            f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}sky serve up'
+            f'{colorama.Fore.YELLOW}{capnoun} section will be ignored when '
+            f'using `sky launch`. {colorama.Style.RESET_ALL}\n'
+            f'{colorama.Fore.YELLOW}To spin up a {noun}, use {sysname} CLI: '
+            f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}{cmd}'
             f'{colorama.Style.RESET_ALL}')
 
     request_id = sdk.launch(
@@ -1395,7 +1347,7 @@ def exec(
         git_ref=git_ref,
     )
 
-    if isinstance(task_or_dag, sky.Dag):
+    if isinstance(task_or_dag, dag_lib.Dag):
         raise click.UsageError('YAML specifies a DAG, while `sky exec` '
                                'supports a single task only.')
     task = task_or_dag
@@ -1411,7 +1363,7 @@ def exec(
 
 
 def _handle_jobs_queue_request(
-        request_id: str,
+        request_id: server_common.RequestId[List[Dict[str, Any]]],
         show_all: bool,
         show_user: bool,
         max_num_jobs_to_show: Optional[int],
@@ -1492,7 +1444,7 @@ def _handle_jobs_queue_request(
 
 
 def _handle_services_request(
-    request_id: str,
+    request_id: server_common.RequestId[List[Dict[str, Any]]],
     service_names: Optional[List[str]],
     show_all: bool,
     show_endpoint: bool,
@@ -1615,7 +1567,7 @@ def _status_kubernetes(show_all: bool):
 
 
 def _show_endpoint(query_clusters: Optional[List[str]],
-                   cluster_records: List[Dict[str, Any]], ip: bool,
+                   cluster_records: List[responses.StatusResponse], ip: bool,
                    endpoints: bool, endpoint: Optional[int]) -> None:
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
@@ -1879,17 +1831,19 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                                   skip_finished=True,
                                   all_users=all_users)
 
-    def submit_services() -> Optional[str]:
+    def submit_services(
+    ) -> Optional[server_common.RequestId[List[Dict[str, Any]]]]:
         return serve_lib.status(service_names=None)
 
-    def submit_pools() -> Optional[str]:
+    def submit_pools(
+    ) -> Optional[server_common.RequestId[List[Dict[str, Any]]]]:
         try:
             return managed_jobs.pool_status(pool_names=None)
         except exceptions.APINotSupportedError as e:
             logger.debug(f'Pools are not supported in the remote server: {e}')
             return None
 
-    def submit_workspace() -> Optional[str]:
+    def submit_workspace() -> Optional[server_common.RequestId[Dict[str, Any]]]:
         try:
             return sdk.workspaces()
         except RuntimeError:
@@ -1928,11 +1882,14 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         if not (ip or show_endpoints):
             workspace_request_id = workspace_request_future.result()
 
-    managed_jobs_queue_request_id = ('' if not managed_jobs_queue_request_id
-                                     else managed_jobs_queue_request_id)
-    service_status_request_id = ('' if not service_status_request_id else
+    managed_jobs_queue_request_id = (server_common.RequestId()
+                                     if not managed_jobs_queue_request_id else
+                                     managed_jobs_queue_request_id)
+    service_status_request_id = (server_common.RequestId()
+                                 if not service_status_request_id else
                                  service_status_request_id)
-    pool_status_request_id = ('' if not pool_status_request_id else
+    pool_status_request_id = (server_common.RequestId()
+                              if not pool_status_request_id else
                               pool_status_request_id)
 
     # Phase 3: Get cluster records and handle special cases
@@ -1957,7 +1914,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     if workspace_request_id is not None:
         all_workspaces = sdk.get(workspace_request_id)
     else:
-        all_workspaces = [constants.SKYPILOT_DEFAULT_WORKSPACE]
+        all_workspaces = {constants.SKYPILOT_DEFAULT_WORKSPACE: {}}
     active_workspace = skypilot_config.get_active_workspace()
     show_workspace = len(all_workspaces) > 1
     _show_enabled_infra(active_workspace, show_workspace)
@@ -2219,6 +2176,10 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 
 @cli.command()
 @flags.config_option(expose_value=False)
+@click.option('--provision',
+              is_flag=True,
+              default=False,
+              help='Stream the cluster provisioning logs (provision.log).')
 @click.option(
     '--sync-down',
     '-s',
@@ -2255,6 +2216,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
+    provision: bool,
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2284,6 +2246,11 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
     """
+    if provision and (sync_down or status or job_ids):
+        raise click.UsageError(
+            '--provision cannot be combined with job log options '
+            '(--sync-down/--status/job IDs).')
+
     if sync_down and status:
         raise click.UsageError(
             'Both --sync_down and --status are specified '
@@ -2295,6 +2262,10 @@ def logs(
             '\nPass -s/--sync-down to download the logs instead.')
 
     job_ids = None if not job_ids else job_ids
+
+    if provision:
+        # Stream provision logs
+        sys.exit(sdk.tail_provision_logs(cluster, follow=follow, tail=tail))
 
     if sync_down:
         with rich_utils.client_status(
@@ -2975,12 +2946,14 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
     assert controller is not None, controller_name
 
     with rich_utils.client_status(
-            '[bold cyan]Checking for in-progress managed jobs[/]'):
+            '[bold cyan]Checking for in-progress managed jobs and pools[/]'):
         try:
             request_id = managed_jobs.queue(refresh=False,
                                             skip_finished=True,
                                             all_users=True)
             managed_jobs_ = sdk.stream_and_get(request_id)
+            request_id_pools = managed_jobs.pool_status(pool_names=None)
+            pools_ = sdk.stream_and_get(request_id_pools)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -2995,6 +2968,7 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             # the controller being STOPPED or being firstly launched, i.e.,
             # there is no in-prgress managed jobs.
             managed_jobs_ = []
+            pools_ = []
         except exceptions.InconsistentConsolidationModeError:
             # If this error is raised, it means the user switched to the
             # consolidation mode but the previous controller cluster is still
@@ -3012,6 +2986,8 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
                                                 skip_finished=True,
                                                 all_users=True)
                 managed_jobs_ = sdk.stream_and_get(request_id)
+                request_id_pools = managed_jobs.pool_status(pool_names=None)
+                pools_ = sdk.stream_and_get(request_id_pools)
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'jobs controller. Please be aware of the following:'
@@ -3033,9 +3009,23 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
         else:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(msg)
+    elif pools_:
+        pool_names = ', '.join([pool['name'] for pool in pools_])
+        if purge:
+            logger.warning('--purge is set, ignoring the in-progress pools. '
+                           'This could cause leaked clusters!')
+        else:
+            msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
+                   'jobs controller is not supported, as it is currently '
+                   f'hosting the following pools: {pool_names}. Please '
+                   'terminate the pools first with '
+                   f'{colorama.Style.BRIGHT}sky jobs pool down -a'
+                   f'{colorama.Style.RESET_ALL}.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(msg)
     else:
-        click.echo(' * No in-progress managed jobs found. It should be safe to '
-                   'terminate (see caveats above).')
+        click.echo(' * No in-progress managed jobs or running pools found. It '
+                   'should be safe to terminate (see caveats above).')
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
@@ -3070,6 +3060,21 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
             # controller being STOPPED or being firstly launched, i.e., there is
             # no in-prgress services.
             services = []
+        except exceptions.InconsistentConsolidationModeError:
+            # If this error is raised, it means the user switched to the
+            # consolidation mode but the previous controller cluster is still
+            # running. We should allow the user to tear down the controller
+            # cluster in this case.
+            with skypilot_config.override_skypilot_config(
+                {'serve': {
+                    'controller': {
+                        'consolidation_mode': False
+                    }
+                }}):
+                # Check again with the consolidation mode disabled. This is to
+                # make sure there is no in-progress services.
+                request_id = serve_lib.status(service_names=None)
+                services = sdk.stream_and_get(request_id)
 
     if services:
         service_names = [service['name'] for service in services]
@@ -3836,7 +3841,7 @@ def show_gpus(
                 yield k8s_messages
                 yield '\n\n'
 
-            result = sdk.stream_and_get(
+            list_accelerator_counts_result = sdk.stream_and_get(
                 sdk.list_accelerator_counts(
                     gpus_only=True,
                     clouds=clouds_to_list,
@@ -3853,14 +3858,20 @@ def show_gpus(
 
             # "Common" GPUs
             for gpu in catalog.get_common_gpus():
-                if gpu in result:
-                    gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+                if gpu in list_accelerator_counts_result:
+                    gpu_table.add_row([
+                        gpu,
+                        _list_to_str(list_accelerator_counts_result.pop(gpu))
+                    ])
             yield from gpu_table.get_string()
 
             # Google TPUs
             for tpu in catalog.get_tpus():
-                if tpu in result:
-                    tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
+                if tpu in list_accelerator_counts_result:
+                    tpu_table.add_row([
+                        tpu,
+                        _list_to_str(list_accelerator_counts_result.pop(tpu))
+                    ])
             if tpu_table.get_string():
                 yield '\n\n'
             yield from tpu_table.get_string()
@@ -3868,7 +3879,7 @@ def show_gpus(
             # Other GPUs
             if show_all:
                 yield '\n\n'
-                for gpu, qty in sorted(result.items()):
+                for gpu, qty in sorted(list_accelerator_counts_result.items()):
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
@@ -3919,7 +3930,7 @@ def show_gpus(
 
         # For clouds other than Kubernetes, get the accelerator details
         # Case-sensitive
-        result = sdk.stream_and_get(
+        list_accelerators_result = sdk.stream_and_get(
             sdk.list_accelerators(gpus_only=True,
                                   name_filter=name,
                                   quantity_filter=quantity,
@@ -3935,8 +3946,8 @@ def show_gpus(
         #   - Group by cloud
         #   - Sort within each group by prices
         #   - Sort groups by each cloud's (min price, min spot price)
-        new_result = {}
-        for i, (gpu, items) in enumerate(result.items()):
+        new_result: Dict[str, List[catalog_common.InstanceTypeInfo]] = {}
+        for i, (gpu, items) in enumerate(list_accelerators_result.items()):
             df = pd.DataFrame([t._asdict() for t in items])
             # Determine the minimum prices for each cloud.
             min_price_df = df.groupby('cloud').agg(min_price=('price', 'min'),
@@ -3954,14 +3965,14 @@ def show_gpus(
                 for row in df.to_records(index=False)
             ]
             new_result[gpu] = sorted_dataclasses
-        result = new_result
+        list_accelerators_result = new_result
 
         if print_section_titles and not show_all:
             yield '\n\n'
             yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
-        if not result:
+        if not list_accelerators_result:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
             cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
@@ -3969,7 +3980,7 @@ def show_gpus(
             yield 'To show available accelerators, run: sky show-gpus --all'
             return
 
-        for i, (gpu, items) in enumerate(result.items()):
+        for i, (gpu, items) in enumerate(list_accelerators_result.items()):
             accelerator_table_headers = [
                 'GPU',
                 'QTY',
@@ -4448,9 +4459,9 @@ def jobs_launch(
         git_ref=git_ref,
     )
 
-    if not isinstance(task_or_dag, sky.Dag):
-        assert isinstance(task_or_dag, sky.Task), task_or_dag
-        with sky.Dag() as dag:
+    if not isinstance(task_or_dag, dag_lib.Dag):
+        assert isinstance(task_or_dag, task_lib.Task), task_or_dag
+        with dag_lib.Dag() as dag:
             dag.add(task_or_dag)
             dag.name = task_or_dag.name
     else:
@@ -4479,8 +4490,8 @@ def jobs_launch(
         if print_setup_fm_warning:
             click.secho(
                 f'{colorama.Fore.YELLOW}setup/file_mounts/storage_mounts'
-                ' will be ignored in pool. To update a pool, please '
-                f'use `sky pool apply {pool} pool.yaml`. '
+                ' will be ignored when submit jobs to pool. To update a pool, '
+                f'please use `sky jobs pool apply {pool} new-pool.yaml`. '
                 f'{colorama.Style.RESET_ALL}')
 
     # Optimize info is only show if _need_confirmation.
@@ -4507,7 +4518,9 @@ def jobs_launch(
                                                 controller=False)
             sys.exit(returncode)
         else:
-            job_ids_str = _format_job_ids_str(job_ids)
+            # TODO(tian): This can be very long. Considering have a "group id"
+            # and query all job ids with the same group id.
+            job_ids_str = ','.join(map(str, job_ids))
             click.secho(
                 f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                 f'{job_ids_str}{colorama.Style.RESET_ALL}.'
@@ -4792,7 +4805,7 @@ def pool():
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@click.option('--pool-name',
+@click.option('--pool',
               '-p',
               default=None,
               type=str,
@@ -4814,7 +4827,7 @@ def pool():
 @usage_lib.entrypoint
 def jobs_pool_apply(
     pool_yaml: Tuple[str, ...],
-    pool_name: Optional[str],
+    pool: Optional[str],  # pylint: disable=redefined-outer-name
     workdir: Optional[str],
     infra: Optional[str],
     cloud: Optional[str],
@@ -4847,11 +4860,11 @@ def jobs_pool_apply(
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
-    if pool_name is None:
-        pool_name = serve_lib.generate_service_name(pool=True)
+    if pool is None:
+        pool = serve_lib.generate_service_name(pool=True)
 
     task = _generate_task_with_service(
-        service_name=pool_name,
+        service_name=pool,
         service_yaml_args=pool_yaml,
         workdir=workdir,
         cloud=cloud,
@@ -4884,11 +4897,11 @@ def jobs_pool_apply(
     click.secho(
         'Each pool worker will use the following resources (estimated):',
         fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = managed_jobs.pool_apply(task,
-                                         pool_name,
+                                         pool,
                                          mode=serve_lib.UpdateMode(mode),
                                          _need_confirmation=not yes)
     _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
@@ -4972,6 +4985,205 @@ def jobs_pool_down(
     _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_down')
 
 
+def _handle_serve_logs(
+        service_name: str,
+        follow: bool,
+        controller: bool,
+        load_balancer: bool,
+        replica_ids: Tuple[int, ...],
+        sync_down: bool,
+        tail: Optional[int],
+        pool: bool,  # pylint: disable=redefined-outer-name
+):
+    noun = 'pool' if pool else 'service'
+    capnoun = noun.capitalize()
+    repnoun = 'worker' if pool else 'replica'
+    if tail is not None:
+        if tail < 0:
+            raise click.UsageError('--tail must be a non-negative integer.')
+        # TODO(arda): We could add ability to tail and follow logs together.
+        if follow:
+            follow = False
+            logger.warning(
+                f'{colorama.Fore.YELLOW}'
+                '--tail and --follow cannot be used together. '
+                f'Changed the mode to --no-follow.{colorama.Style.RESET_ALL}')
+
+    chosen_components: Set[serve_lib.ServiceComponent] = set()
+    if controller:
+        chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
+    if load_balancer:
+        assert not pool, 'Load balancer is not supported for pools.'
+        chosen_components.add(serve_lib.ServiceComponent.LOAD_BALANCER)
+    # replica_ids contains the specific replica IDs provided by the user.
+    # If it's not empty, it implies the user wants replica logs.
+    if replica_ids:
+        chosen_components.add(serve_lib.ServiceComponent.REPLICA)
+
+    if sync_down:
+        # For sync-down, multiple targets are allowed.
+        # If no specific components/replicas are mentioned, sync all.
+        # Note: Multiple replicas or targets can only be specified when
+        # using --sync-down.
+        targets_to_sync = list(chosen_components)
+        if not targets_to_sync and not replica_ids:
+            # Default to all components if nothing specific is requested
+            targets_to_sync = [
+                serve_lib.ServiceComponent.CONTROLLER,
+                serve_lib.ServiceComponent.REPLICA,
+            ]
+            if not pool:
+                targets_to_sync.append(serve_lib.ServiceComponent.LOAD_BALANCER)
+
+        timestamp = sky_logging.get_run_timestamp()
+        log_dir = (pathlib.Path(constants.SKY_LOGS_DIRECTORY) / noun /
+                   f'{service_name}_{timestamp}').expanduser()
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        with rich_utils.client_status(
+                ux_utils.spinner_message(f'Downloading {noun} logs...')):
+            if pool:
+                managed_jobs.pool_sync_down_logs(service_name,
+                                                 str(log_dir),
+                                                 targets=targets_to_sync,
+                                                 worker_ids=list(replica_ids),
+                                                 tail=tail)
+            else:
+                serve_lib.sync_down_logs(service_name,
+                                         str(log_dir),
+                                         targets=targets_to_sync,
+                                         replica_ids=list(replica_ids),
+                                         tail=tail)
+        style = colorama.Style
+        fore = colorama.Fore
+        logger.info(f'{fore.CYAN}{capnoun} {service_name} logs: '
+                    f'{log_dir}{style.RESET_ALL}')
+        return
+
+    # Tailing requires exactly one target.
+    num_targets = len(chosen_components)
+    # If REPLICA component is chosen, len(replica_ids) must be 1 for tailing.
+    if serve_lib.ServiceComponent.REPLICA in chosen_components:
+        if len(replica_ids) != 1:
+            raise click.UsageError(
+                f'Can only tail logs from a single {repnoun} at a time. '
+                f'Provide exactly one {repnoun.upper()}_ID or use --sync-down '
+                f'to download logs from multiple {repnoun}s.')
+        # If replica is chosen and len is 1, num_targets effectively counts it.
+        # We need to ensure no other component (controller/LB) is selected.
+        if num_targets > 1:
+            raise click.UsageError(
+                'Can only tail logs from one target at a time (controller, '
+                f'load balancer, or a single {repnoun}). Use --sync-down '
+                'to download logs from multiple sources.')
+    elif num_targets == 0:
+        raise click.UsageError(
+            'Specify a target to tail: --controller, --load-balancer, or '
+            f'a {repnoun.upper()}_ID.')
+    elif num_targets > 1:
+        raise click.UsageError(
+            'Can only tail logs from one target at a time. Use --sync-down '
+            'to download logs from multiple sources.')
+
+    # At this point, we have exactly one target for tailing.
+    assert len(chosen_components) == 1
+    assert len(replica_ids) in [0, 1]
+    target_component = chosen_components.pop()
+    target_replica_id: Optional[int] = replica_ids[0] if replica_ids else None
+
+    try:
+        if pool:
+            managed_jobs.pool_tail_logs(service_name,
+                                        target=target_component,
+                                        worker_id=target_replica_id,
+                                        follow=follow,
+                                        tail=tail)
+        else:
+            serve_lib.tail_logs(service_name,
+                                target=target_component,
+                                replica_id=target_replica_id,
+                                follow=follow,
+                                tail=tail)
+    except exceptions.ClusterNotUpError:
+        with ux_utils.print_exception_no_traceback():
+            raise
+
+
+@pool.command('logs', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.option(
+    '--follow/--no-follow',
+    is_flag=True,
+    default=True,
+    help=('Follow the logs of the job. [default: --follow] '
+          'If --no-follow is specified, print the log so far and exit.'))
+@click.option('--controller',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Show the controller logs of this pool.')
+@click.option('--sync-down',
+              '-s',
+              is_flag=True,
+              default=False,
+              help='Sync down logs to the local machine. Can be combined with '
+              '--controller or worker ID to narrow scope.')
+@click.option(
+    '--tail',
+    default=None,
+    type=int,
+    help='The number of lines to display from the end of the log file. '
+    'Default is None, which means print all lines.')
+@click.argument('pool_name', required=True, type=str)
+@click.argument('worker_ids', required=False, type=int, nargs=-1)
+@usage_lib.entrypoint
+# TODO(tian): Add default argument for this CLI if none of the flags are
+# specified.
+def jobs_pool_logs(
+    pool_name: str,
+    follow: bool,
+    controller: bool,
+    worker_ids: Tuple[int, ...],
+    sync_down: bool,
+    tail: Optional[int],
+):
+    """Tail or sync down logs of a pool.
+
+    Logs can be tailed from one target (controller, or a single worker) or
+    synced down from multiple targets simultaneously.
+
+    Example:
+
+    .. code-block:: bash
+
+        # Tail the controller logs of a pool
+        sky pool logs --controller [POOL_NAME]
+        \b
+        # Print the worker logs so far and exit
+        sky pool logs --no-follow [POOL_NAME]
+        \b
+        # Tail the logs of worker 1
+        sky pool logs [POOL_NAME] 1
+        \b
+        # Show the last 100 lines of the controller logs
+        sky pool logs --controller --tail 100 [POOL_NAME]
+        \b
+        # Sync down all logs of the pool (controller, all workers)
+        sky pool logs [POOL_NAME] --sync-down
+        \b
+        # Sync down controller logs and logs for workers 1 and 3
+        sky pool logs [POOL_NAME] 1 3 --controller --sync-down
+    """
+    _handle_serve_logs(pool_name,
+                       follow=follow,
+                       controller=controller,
+                       load_balancer=False,
+                       replica_ids=worker_ids,
+                       sync_down=sync_down,
+                       tail=tail,
+                       pool=True)
+
+
 @cli.command(cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @usage_lib.entrypoint
@@ -5009,7 +5221,7 @@ def _generate_task_with_service(
         network_tier: Optional[str],
         not_supported_cmd: str,
         pool: bool,  # pylint: disable=redefined-outer-name
-) -> sky.Task:
+) -> task_lib.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
     yaml_name = 'SERVICE_YAML' if not pool else 'POOL_YAML'
@@ -5039,7 +5251,7 @@ def _generate_task_with_service(
         network_tier=network_tier,
         ports=ports,
     )
-    if isinstance(task, sky.Dag):
+    if isinstance(task, dag_lib.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command=not_supported_cmd))
 
@@ -5225,7 +5437,7 @@ def serve_up(
 
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = serve_lib.up(task, service_name, _need_confirmation=not yes)
@@ -5328,7 +5540,7 @@ def serve_update(
 
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = serve_lib.update(task,
@@ -5555,6 +5767,7 @@ def serve_down(
                           show_default=True)
 
     if replica_id_is_defined:
+        assert replica_id is not None
         request_id = serve_lib.terminate_replica(service_names[0], replica_id,
                                                  purge)
     else:
@@ -5635,99 +5848,14 @@ def serve_logs(
         # Sync down controller logs and logs for replicas 1 and 3
         sky serve logs [SERVICE_NAME] 1 3 --controller --sync-down
     """
-    if tail is not None:
-        if tail < 0:
-            raise click.UsageError('--tail must be a non-negative integer.')
-        # TODO(arda): We could add ability to tail and follow logs together.
-        if follow:
-            follow = False
-            logger.warning(
-                f'{colorama.Fore.YELLOW}'
-                '--tail and --follow cannot be used together. '
-                f'Changed the mode to --no-follow.{colorama.Style.RESET_ALL}')
-
-    chosen_components: Set[serve_lib.ServiceComponent] = set()
-    if controller:
-        chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
-    if load_balancer:
-        chosen_components.add(serve_lib.ServiceComponent.LOAD_BALANCER)
-    # replica_ids contains the specific replica IDs provided by the user.
-    # If it's not empty, it implies the user wants replica logs.
-    if replica_ids:
-        chosen_components.add(serve_lib.ServiceComponent.REPLICA)
-
-    if sync_down:
-        # For sync-down, multiple targets are allowed.
-        # If no specific components/replicas are mentioned, sync all.
-        # Note: Multiple replicas or targets can only be specified when
-        # using --sync-down.
-        targets_to_sync = list(chosen_components)
-        if not targets_to_sync and not replica_ids:
-            # Default to all components if nothing specific is requested
-            targets_to_sync = [
-                serve_lib.ServiceComponent.CONTROLLER,
-                serve_lib.ServiceComponent.LOAD_BALANCER,
-                serve_lib.ServiceComponent.REPLICA,
-            ]
-
-        timestamp = sky_logging.get_run_timestamp()
-        log_dir = (pathlib.Path(constants.SKY_LOGS_DIRECTORY) / 'service' /
-                   f'{service_name}_{timestamp}').expanduser()
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        with rich_utils.client_status(
-                ux_utils.spinner_message('Downloading service logs...')):
-            serve_lib.sync_down_logs(service_name,
-                                     local_dir=str(log_dir),
-                                     targets=targets_to_sync,
-                                     replica_ids=list(replica_ids),
-                                     tail=tail)
-        style = colorama.Style
-        fore = colorama.Fore
-        logger.info(f'{fore.CYAN}Service {service_name} logs: '
-                    f'{log_dir}{style.RESET_ALL}')
-        return
-
-    # Tailing requires exactly one target.
-    num_targets = len(chosen_components)
-    # If REPLICA component is chosen, len(replica_ids) must be 1 for tailing.
-    if serve_lib.ServiceComponent.REPLICA in chosen_components:
-        if len(replica_ids) != 1:
-            raise click.UsageError(
-                'Can only tail logs from a single replica at a time. '
-                'Provide exactly one REPLICA_ID or use --sync-down '
-                'to download logs from multiple replicas.')
-        # If replica is chosen and len is 1, num_targets effectively counts it.
-        # We need to ensure no other component (controller/LB) is selected.
-        if num_targets > 1:
-            raise click.UsageError(
-                'Can only tail logs from one target at a time (controller, '
-                'load balancer, or a single replica). Use --sync-down '
-                'to download logs from multiple sources.')
-    elif num_targets == 0:
-        raise click.UsageError(
-            'Specify a target to tail: --controller, --load-balancer, or '
-            'a REPLICA_ID.')
-    elif num_targets > 1:
-        raise click.UsageError(
-            'Can only tail logs from one target at a time. Use --sync-down '
-            'to download logs from multiple sources.')
-
-    # At this point, we have exactly one target for tailing.
-    assert len(chosen_components) == 1
-    assert len(replica_ids) in [0, 1]
-    target_component = chosen_components.pop()
-    target_replica_id: Optional[int] = replica_ids[0] if replica_ids else None
-
-    try:
-        serve_lib.tail_logs(service_name,
-                            target=target_component,
-                            replica_id=target_replica_id,
-                            follow=follow,
-                            tail=tail)
-    except exceptions.ClusterNotUpError:
-        with ux_utils.print_exception_no_traceback():
-            raise
+    _handle_serve_logs(service_name,
+                       follow=follow,
+                       controller=controller,
+                       load_balancer=load_balancer,
+                       replica_ids=replica_ids,
+                       sync_down=sync_down,
+                       tail=tail,
+                       pool=False)
 
 
 @cli.group(cls=_NaturalOrderGroup, hidden=True)
@@ -5924,7 +6052,11 @@ def api_logs(request_id: Optional[str], server_logs: bool,
     if request_id is not None and log_path is not None:
         raise click.BadParameter(
             'Only one of request ID and log path can be provided.')
-    sdk.stream_and_get(request_id, log_path, tail)
+    # Only wrap request_id when it is provided; otherwise pass None so the
+    # server accepts log_path-only streaming.
+    req_id = (server_common.RequestId[None](request_id)
+              if request_id is not None else None)
+    sdk.stream_and_get(req_id, log_path, tail, follow)
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
@@ -6063,16 +6195,15 @@ def api_info():
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
     api_server_info = sdk.api_info()
-    api_server_user = api_server_info.get('user')
+    api_server_user = api_server_info.user
     if api_server_user is not None:
-        user = models.User(id=api_server_user['id'],
-                           name=api_server_user['name'])
+        user = api_server_user
     else:
         user = models.User.get_current_user()
     click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
-               f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '
-               f'commit: {api_server_info["commit"]}, '
-               f'version: {api_server_info["version"]}\n'
+               f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
+               f'commit: {api_server_info.commit}, '
+               f'version: {api_server_info.version}\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}User: {user.name} ({user.id})')
 
 

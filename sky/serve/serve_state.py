@@ -3,100 +3,141 @@ import collections
 import enum
 import functools
 import json
-import pathlib
 import pickle
-import sqlite3
 import threading
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
+import uuid
 
 import colorama
+import sqlalchemy
+from sqlalchemy import exc as sqlalchemy_exc
+from sqlalchemy import orm
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects import sqlite
+from sqlalchemy.ext import declarative
 
 from sky.serve import constants
+from sky.utils import common_utils
 from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
 
 if typing.TYPE_CHECKING:
+    from sqlalchemy.engine import row
+
     from sky.serve import replica_managers
     from sky.serve import service_spec
 
+_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
-def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
+Base = declarative.declarative_base()
+
+# === Database schema ===
+services_table = sqlalchemy.Table(
+    'services',
+    Base.metadata,
+    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('controller_job_id',
+                      sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Column('controller_port',
+                      sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Column('load_balancer_port',
+                      sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Column('status', sqlalchemy.Text),
+    sqlalchemy.Column('uptime', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('policy', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('auto_restart', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('requested_resources',
+                      sqlalchemy.LargeBinary,
+                      server_default=None),
+    sqlalchemy.Column('requested_resources_str', sqlalchemy.Text),
+    sqlalchemy.Column('current_version',
+                      sqlalchemy.Integer,
+                      server_default=str(constants.INITIAL_VERSION)),
+    sqlalchemy.Column('active_versions',
+                      sqlalchemy.Text,
+                      server_default=json.dumps([])),
+    sqlalchemy.Column('load_balancing_policy',
+                      sqlalchemy.Text,
+                      server_default=None),
+    sqlalchemy.Column('tls_encrypted', sqlalchemy.Integer, server_default='0'),
+    sqlalchemy.Column('pool', sqlalchemy.Integer, server_default='0'),
+    sqlalchemy.Column('controller_pid', sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Column('hash', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('entrypoint', sqlalchemy.Text, server_default=None),
+)
+
+replicas_table = sqlalchemy.Table(
+    'replicas',
+    Base.metadata,
+    sqlalchemy.Column('service_name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('replica_id', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('replica_info', sqlalchemy.LargeBinary),
+)
+
+version_specs_table = sqlalchemy.Table(
+    'version_specs',
+    Base.metadata,
+    sqlalchemy.Column('service_name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('version', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('spec', sqlalchemy.LargeBinary),
+)
+
+serve_ha_recovery_script_table = sqlalchemy.Table(
+    'serve_ha_recovery_script',
+    Base.metadata,
+    sqlalchemy.Column('service_name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('script', sqlalchemy.Text),
+)
+
+
+def create_table(engine: sqlalchemy.engine.Engine):
     """Creates the service and replica tables if they do not exist."""
 
-    # auto_restart and requested_resources column is deprecated.
-    cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS services (
-        name TEXT PRIMARY KEY,
-        controller_job_id INTEGER DEFAULT NULL,
-        controller_port INTEGER DEFAULT NULL,
-        load_balancer_port INTEGER DEFAULT NULL,
-        status TEXT,
-        uptime INTEGER DEFAULT NULL,
-        policy TEXT DEFAULT NULL,
-        auto_restart INTEGER DEFAULT NULL,
-        requested_resources BLOB DEFAULT NULL)""")
-    cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS replicas (
-        service_name TEXT,
-        replica_id INTEGER,
-        replica_info BLOB,
-        PRIMARY KEY (service_name, replica_id))""")
-    cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS version_specs (
-        version INTEGER,
-        service_name TEXT,
-        spec BLOB,
-        PRIMARY KEY (service_name, version))""")
-    cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS ha_recovery_script (
-        service_name TEXT PRIMARY KEY,
-        script TEXT)""")
-    conn.commit()
+    # Enable WAL mode to avoid locking issues.
+    # See: issue #3863, #1441 and PR #1509
+    # https://github.com/microsoft/WSL/issues/2395
+    # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
+    #  This may cause the database locked problem from WSL issue #1441.
+    if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value and
+            not common_utils.is_wsl()):
+        try:
+            with orm.Session(engine) as session:
+                session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
+                session.commit()
+        except sqlalchemy_exc.OperationalError as e:
+            if 'database is locked' not in str(e):
+                raise
+            # If the database is locked, it is OK to continue, as the WAL mode
+            # is not critical and is likely to be enabled by other processes.
 
-    # Backward compatibility.
-    db_utils.add_column_to_table(cursor, conn, 'services',
-                                 'requested_resources_str', 'TEXT')
-    # Deprecated: switched to `active_versions` below for the version
-    # considered active by the load balancer. The
-    # authscaler/replica_manager version can be found in the
-    # version_specs table.
-    db_utils.add_column_to_table(
-        cursor, conn, 'services', 'current_version',
-        f'INTEGER DEFAULT {constants.INITIAL_VERSION}')
-    # The versions that is activated for the service. This is a list
-    # of integers in json format.
-    db_utils.add_column_to_table(cursor, conn, 'services', 'active_versions',
-                                 f'TEXT DEFAULT {json.dumps([])!r}')
-    db_utils.add_column_to_table(cursor, conn, 'services',
-                                 'load_balancing_policy', 'TEXT DEFAULT NULL')
-    # Whether the service's load balancer is encrypted with TLS.
-    db_utils.add_column_to_table(cursor, conn, 'services', 'tls_encrypted',
-                                 'INTEGER DEFAULT 0')
-    # Whether the service is a cluster pool.
-    db_utils.add_column_to_table(cursor, conn, 'services', 'pool',
-                                 'INTEGER DEFAULT 0')
-    # Add controller_pid for status tracking.
-    db_utils.add_column_to_table(cursor,
-                                 conn,
-                                 'services',
-                                 'controller_pid',
-                                 'INTEGER DEFAULT NULL',
-                                 value_to_replace_existing_entries=-1)
-    conn.commit()
+    migration_utils.safe_alembic_upgrade(engine, migration_utils.SERVE_DB_NAME,
+                                         migration_utils.SERVE_VERSION)
 
 
-def _get_db_path() -> str:
-    """Workaround to collapse multi-step Path ops for type checker.
-    Ensures _DB_PATH is str, avoiding Union[Path, str] inference.
-    """
-    path = pathlib.Path(constants.SKYSERVE_METADATA_DIR) / 'services.db'
-    path = path.expanduser().absolute()
-    path.parents[0].mkdir(parents=True, exist_ok=True)
-    return str(path)
+def initialize_and_get_db() -> sqlalchemy.engine.Engine:
+    global _SQLALCHEMY_ENGINE
 
+    if _SQLALCHEMY_ENGINE is not None:
+        return _SQLALCHEMY_ENGINE
 
-_DB_PATH = None
-_db_init_lock = threading.Lock()
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+        # get an engine to the db
+        engine = migration_utils.get_engine('serve/services')
+
+        # run migrations if needed
+        create_table(engine)
+
+        # return engine
+        _SQLALCHEMY_ENGINE = engine
+        return _SQLALCHEMY_ENGINE
 
 
 def init_db(func):
@@ -104,19 +145,18 @@ def init_db(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        global _DB_PATH
-        if _DB_PATH is not None:
-            return func(*args, **kwargs)
-        with _db_init_lock:
-            if _DB_PATH is None:
-                _DB_PATH = _get_db_path()
-                db_utils.SQLiteConn(_DB_PATH, create_table)
+        initialize_and_get_db()
         return func(*args, **kwargs)
 
     return wrapper
 
 
-_UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
+_UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
+    # sqlite
+    'UNIQUE constraint failed: services.name',
+    # postgres
+    'duplicate key value violates unique constraint "services_pkey"',
+]
 
 
 # === Statuses ===
@@ -284,31 +324,45 @@ _SERVICE_STATUS_TO_COLOR = {
 def add_service(name: str, controller_job_id: int, policy: str,
                 requested_resources_str: str, load_balancing_policy: str,
                 status: ServiceStatus, tls_encrypted: bool, pool: bool,
-                controller_pid: int) -> bool:
+                controller_pid: int, entrypoint: str) -> bool:
     """Add a service in the database.
 
     Returns:
         True if the service is added successfully, False if the service already
         exists.
     """
-    assert _DB_PATH is not None
+    assert _SQLALCHEMY_ENGINE is not None
     try:
-        with db_utils.safe_cursor(_DB_PATH) as cursor:
-            cursor.execute(
-                """\
-                INSERT INTO services
-                (name, controller_job_id, status, policy,
-                requested_resources_str, load_balancing_policy, tls_encrypted,
-                pool, controller_pid)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (name, controller_job_id, status.value, policy,
-                 requested_resources_str, load_balancing_policy,
-                 int(tls_encrypted), int(pool), controller_pid))
+        with orm.Session(_SQLALCHEMY_ENGINE) as session:
+            if (_SQLALCHEMY_ENGINE.dialect.name ==
+                    db_utils.SQLAlchemyDialect.SQLITE.value):
+                insert_func = sqlite.insert
+            elif (_SQLALCHEMY_ENGINE.dialect.name ==
+                  db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+                insert_func = postgresql.insert
+            else:
+                raise ValueError('Unsupported database dialect')
 
-    except sqlite3.IntegrityError as e:
-        if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
-            raise RuntimeError('Unexpected database error') from e
-        return False
+            insert_stmt = insert_func(services_table).values(
+                name=name,
+                controller_job_id=controller_job_id,
+                status=status.value,
+                policy=policy,
+                requested_resources_str=requested_resources_str,
+                load_balancing_policy=load_balancing_policy,
+                tls_encrypted=int(tls_encrypted),
+                pool=int(pool),
+                controller_pid=controller_pid,
+                hash=str(uuid.uuid4()),
+                entrypoint=entrypoint)
+            session.execute(insert_stmt)
+            session.commit()
+
+    except sqlalchemy_exc.IntegrityError as e:
+        for msg in _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS:
+            if msg in str(e):
+                return False
+        raise RuntimeError('Unexpected database error') from e
     return True
 
 
@@ -319,33 +373,34 @@ def update_service_controller_pid(service_name: str,
 
     This is used to update the controller pid of a service on ha recovery.
     """
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            UPDATE services SET
-            controller_pid=(?) WHERE name=(?)""",
-            (controller_pid, service_name))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(services_table).filter(
+            services_table.c.name == service_name).update(
+                {services_table.c.controller_pid: controller_pid})
+        session.commit()
 
 
 @init_db
 def remove_service(service_name: str) -> None:
     """Removes a service from the database."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute("""\
-            DELETE FROM services WHERE name=(?)""", (service_name,))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.delete(services_table).where(
+                services_table.c.name == service_name))
+        session.commit()
 
 
 @init_db
 def set_service_uptime(service_name: str, uptime: int) -> None:
     """Sets the uptime of a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            UPDATE services SET
-            uptime=(?) WHERE name=(?)""", (uptime, service_name))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(services_table).filter(
+            services_table.c.name == service_name).update(
+                {services_table.c.uptime: uptime})
+        session.commit()
 
 
 @init_db
@@ -354,72 +409,71 @@ def set_service_status_and_active_versions(
         status: ServiceStatus,
         active_versions: Optional[List[int]] = None) -> None:
     """Sets the service status."""
-    assert _DB_PATH is not None
-    vars_to_set = 'status=(?)'
-    values: Tuple[str, ...] = (status.value, service_name)
+    assert _SQLALCHEMY_ENGINE is not None
+    update_dict = {services_table.c.status: status.value}
     if active_versions is not None:
-        vars_to_set = 'status=(?), active_versions=(?)'
-        values = (status.value, json.dumps(active_versions), service_name)
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            f"""\
-            UPDATE services SET
-            {vars_to_set} WHERE name=(?)""", values)
+        update_dict[services_table.c.active_versions] = json.dumps(
+            active_versions)
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(services_table).filter(
+            services_table.c.name == service_name).update(update_dict)
+        session.commit()
 
 
 @init_db
 def set_service_controller_port(service_name: str,
                                 controller_port: int) -> None:
     """Sets the controller port of a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            UPDATE services SET
-            controller_port=(?) WHERE name=(?)""",
-            (controller_port, service_name))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(services_table).filter(
+            services_table.c.name == service_name).update(
+                {services_table.c.controller_port: controller_port})
+        session.commit()
 
 
 @init_db
 def set_service_load_balancer_port(service_name: str,
                                    load_balancer_port: int) -> None:
     """Sets the load balancer port of a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            UPDATE services SET
-            load_balancer_port=(?) WHERE name=(?)""",
-            (load_balancer_port, service_name))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(services_table).filter(
+            services_table.c.name == service_name).update(
+                {services_table.c.load_balancer_port: load_balancer_port})
+        session.commit()
 
 
-def _get_service_from_row(row) -> Dict[str, Any]:
-    (current_version, name, controller_job_id, controller_port,
-     load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
-     _, active_versions, load_balancing_policy, tls_encrypted, pool,
-     controller_pid) = row[:17]
+def _get_service_from_row(r: 'row.RowMapping') -> Dict[str, Any]:
+    # Get the max_version from the first column (from the subquery)
+    current_version = r['max_version']
+
     record = {
-        'name': name,
-        'controller_job_id': controller_job_id,
-        'controller_port': controller_port,
-        'load_balancer_port': load_balancer_port,
-        'status': ServiceStatus[status],
-        'uptime': uptime,
-        'policy': policy,
+        'name': r['name'],
+        'controller_job_id': r['controller_job_id'],
+        'controller_port': r['controller_port'],
+        'load_balancer_port': r['load_balancer_port'],
+        'status': ServiceStatus[r['status']],
+        'uptime': r['uptime'],
+        'policy': r['policy'],
         # The version of the autoscaler/replica manager are on. It can be larger
         # than the active versions as the load balancer may not consider the
         # latest version to be active for serving traffic.
         'version': current_version,
         # The versions that is active for the load balancer. This is a list of
         # integers in json format. This is mainly for display purpose.
-        'active_versions': json.loads(active_versions),
-        'requested_resources_str': requested_resources_str,
-        'load_balancing_policy': load_balancing_policy,
-        'tls_encrypted': bool(tls_encrypted),
-        'pool': bool(pool),
-        'controller_pid': controller_pid,
+        'active_versions': json.loads(r['active_versions'])
+                           if r['active_versions'] else [],
+        'requested_resources_str': r['requested_resources_str'],
+        'load_balancing_policy': r['load_balancing_policy'],
+        'tls_encrypted': bool(r['tls_encrypted']),
+        'pool': bool(r['pool']),
+        'controller_pid': r['controller_pid'],
+        'hash': r['hash'],
+        'entrypoint': r['entrypoint'],
     }
-    latest_spec = get_spec(name, current_version)
+    latest_spec = get_spec(r['name'], current_version)
     if latest_spec is not None:
         record['policy'] = latest_spec.autoscaling_policy_str()
         record['load_balancing_policy'] = latest_spec.load_balancing_policy
@@ -429,45 +483,79 @@ def _get_service_from_row(row) -> Dict[str, Any]:
 @init_db
 def get_services() -> List[Dict[str, Any]]:
     """Get all existing service records."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute('SELECT v.max_version, s.* FROM services s '
-                              'JOIN ('
-                              'SELECT service_name, MAX(version) as max_version'
-                              ' FROM version_specs GROUP BY service_name) v '
-                              'ON s.name=v.service_name').fetchall()
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        subquery = sqlalchemy.select(
+            version_specs_table.c.service_name,
+            sqlalchemy.func.max(
+                version_specs_table.c.version).label('max_version')).group_by(
+                    version_specs_table.c.service_name).alias('v')
+
+        query = sqlalchemy.select(
+            subquery.c.max_version, services_table).select_from(
+                services_table.join(
+                    subquery, services_table.c.name == subquery.c.service_name))
+        rows = session.execute(query).fetchall()
     records = []
     for row in rows:
-        records.append(_get_service_from_row(row))
+        records.append(_get_service_from_row(row._mapping))  # pylint: disable=protected-access
     return records
+
+
+@init_db
+def get_num_services() -> int:
+    """Get the number of services."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        return session.execute(
+            sqlalchemy.select(sqlalchemy.func.count()  # pylint: disable=not-callable
+                             ).select_from(services_table)).fetchone()[0]
 
 
 @init_db
 def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     """Get all existing service records."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            'SELECT v.max_version, s.* FROM services s '
-            'JOIN ('
-            'SELECT service_name, MAX(version) as max_version '
-            'FROM version_specs WHERE service_name=(?)) v '
-            'ON s.name=v.service_name WHERE name=(?)',
-            (service_name, service_name)).fetchall()
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        subquery = sqlalchemy.select(
+            version_specs_table.c.service_name,
+            sqlalchemy.func.max(
+                version_specs_table.c.version).label('max_version')
+        ).where(version_specs_table.c.service_name == service_name).group_by(
+            version_specs_table.c.service_name).alias('v')
+
+        query = sqlalchemy.select(
+            subquery.c.max_version, services_table).select_from(
+                services_table.join(
+                    subquery,
+                    services_table.c.name == subquery.c.service_name)).where(
+                        services_table.c.name == service_name)
+
+        rows = session.execute(query).fetchall()
     for row in rows:
-        return _get_service_from_row(row)
+        return _get_service_from_row(row._mapping)  # pylint: disable=protected-access
     return None
+
+
+@init_db
+def get_service_hash(service_name: str) -> Optional[str]:
+    """Get the hash of a service."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.select(services_table.c.hash).where(
+                services_table.c.name == service_name)).fetchone()
+    return result[0] if result else None
 
 
 @init_db
 def get_service_versions(service_name: str) -> List[int]:
     """Gets all versions of a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            SELECT DISTINCT version FROM version_specs
-            WHERE service_name=(?)""", (service_name,)).fetchall()
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(
+            sqlalchemy.select(version_specs_table.c.version.distinct()).where(
+                version_specs_table.c.service_name == service_name)).fetchall()
     return [row[0] for row in rows]
 
 
@@ -483,17 +571,19 @@ def get_glob_service_names(
     Returns:
         A list of non-duplicated service names.
     """
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if service_names is None:
-            rows = cursor.execute('SELECT name FROM services').fetchall()
+            rows = session.execute(sqlalchemy.select(
+                services_table.c.name)).fetchall()
         else:
             rows = []
             for service_name in service_names:
-                rows.extend(
-                    cursor.execute(
-                        'SELECT name FROM services WHERE name GLOB (?)',
-                        (service_name,)).fetchall())
+                pattern_rows = session.execute(
+                    sqlalchemy.select(services_table.c.name).where(
+                        services_table.c.name.like(
+                            service_name.replace('*', '%')))).fetchall()
+                rows.extend(pattern_rows)
     return list({row[0] for row in rows})
 
 
@@ -502,26 +592,40 @@ def get_glob_service_names(
 def add_or_update_replica(service_name: str, replica_id: int,
                           replica_info: 'replica_managers.ReplicaInfo') -> None:
     """Adds a replica to the database."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            INSERT OR REPLACE INTO replicas
-            (service_name, replica_id, replica_info)
-            VALUES (?, ?, ?)""",
-            (service_name, replica_id, pickle.dumps(replica_info)))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        insert_stmt = insert_func(replicas_table).values(
+            service_name=service_name,
+            replica_id=replica_id,
+            replica_info=pickle.dumps(replica_info))
+
+        insert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=['service_name', 'replica_id'],
+            set_={'replica_info': insert_stmt.excluded.replica_info})
+
+        session.execute(insert_stmt)
+        session.commit()
 
 
 @init_db
 def remove_replica(service_name: str, replica_id: int) -> None:
     """Removes a replica from the database."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            DELETE FROM replicas
-            WHERE service_name=(?)
-            AND replica_id=(?)""", (service_name, replica_id))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.delete(replicas_table).where(
+                sqlalchemy.and_(replicas_table.c.service_name == service_name,
+                                replicas_table.c.replica_id == replica_id)))
+        session.commit()
 
 
 @init_db
@@ -529,43 +633,73 @@ def get_replica_info_from_id(
         service_name: str,
         replica_id: int) -> Optional['replica_managers.ReplicaInfo']:
     """Gets a replica info from the database."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            SELECT replica_info FROM replicas
-            WHERE service_name=(?)
-            AND replica_id=(?)""", (service_name, replica_id)).fetchall()
-    for row in rows:
-        return pickle.loads(row[0])
-    return None
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.select(replicas_table.c.replica_info).where(
+                sqlalchemy.and_(
+                    replicas_table.c.service_name == service_name,
+                    replicas_table.c.replica_id == replica_id))).fetchone()
+    return pickle.loads(result[0]) if result else None
 
 
 @init_db
 def get_replica_infos(
         service_name: str) -> List['replica_managers.ReplicaInfo']:
     """Gets all replica infos of a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            SELECT replica_info FROM replicas
-            WHERE service_name=(?)""", (service_name,)).fetchall()
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(
+            sqlalchemy.select(replicas_table.c.replica_info).where(
+                replicas_table.c.service_name == service_name)).fetchall()
     return [pickle.loads(row[0]) for row in rows]
 
 
 @init_db
 def total_number_provisioning_replicas() -> int:
     """Returns the total number of provisioning replicas."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute('SELECT replica_info FROM replicas').fetchall()
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(sqlalchemy.select(
+            replicas_table.c.replica_info)).fetchall()
     provisioning_count = 0
     for row in rows:
         replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
         if replica_info.status == ReplicaStatus.PROVISIONING:
             provisioning_count += 1
     return provisioning_count
+
+
+@init_db
+def total_number_terminating_replicas() -> int:
+    """Returns the total number of terminating replicas."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(sqlalchemy.select(
+            replicas_table.c.replica_info)).fetchall()
+    terminating_count = 0
+    for row in rows:
+        replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
+        if (replica_info.status_property.sky_down_status ==
+                common_utils.ProcessStatus.RUNNING):
+            terminating_count += 1
+    return terminating_count
+
+
+@init_db
+def total_number_scheduled_to_terminate_replicas() -> int:
+    """Returns the total number of terminating replicas."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(sqlalchemy.select(
+            replicas_table.c.replica_info)).fetchall()
+    terminating_count = 0
+    for row in rows:
+        replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
+        if (replica_info.status_property.sky_down_status ==
+                common_utils.ProcessStatus.SCHEDULED):
+            terminating_count += 1
+    return terminating_count
 
 
 def get_replicas_at_status(
@@ -580,154 +714,182 @@ def get_replicas_at_status(
 @init_db
 def add_version(service_name: str) -> int:
     """Adds a version to the database."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            INSERT INTO version_specs
-            (version, service_name, spec)
-            VALUES (
-                (SELECT COALESCE(MAX(version), 0) + 1 FROM
-                version_specs WHERE service_name = ?), ?, ?)
-            RETURNING version""",
-            (service_name, service_name, pickle.dumps(None)))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Insert new version with MAX(version) + 1 in a single atomic operation
+        max_version_subquery = sqlalchemy.select(
+            sqlalchemy.func.coalesce(
+                sqlalchemy.func.max(version_specs_table.c.version), 0) +
+            1).where(version_specs_table.c.service_name ==
+                     service_name).scalar_subquery()
 
-        inserted_version = cursor.fetchone()[0]
+        # Use INSERT with subquery and RETURNING
+        insert_stmt = sqlalchemy.insert(version_specs_table).values(
+            service_name=service_name,
+            version=max_version_subquery,
+            spec=pickle.dumps(None)).returning(version_specs_table.c.version)
 
-    return inserted_version
+        result = session.execute(insert_stmt)
+        new_version = result.scalar()
+        session.commit()
+    return new_version
 
 
 @init_db
 def add_or_update_version(service_name: str, version: int,
                           spec: 'service_spec.SkyServiceSpec') -> None:
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-        INSERT or REPLACE INTO version_specs
-        (service_name, version, spec)
-        VALUES (?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        insert_stmt = insert_func(version_specs_table).values(
+            service_name=service_name, version=version, spec=pickle.dumps(spec))
+
+        insert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=['service_name', 'version'],
+            set_={'spec': insert_stmt.excluded.spec})
+
+        session.execute(insert_stmt)
+        session.commit()
 
 
 @init_db
 def remove_service_versions(service_name: str) -> None:
     """Removes a replica from the database."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            DELETE FROM version_specs
-            WHERE service_name=(?)""", (service_name,))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.delete(version_specs_table).where(
+                version_specs_table.c.service_name == service_name))
+        session.commit()
 
 
 @init_db
 def get_spec(service_name: str,
              version: int) -> Optional['service_spec.SkyServiceSpec']:
     """Gets spec from the database."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            SELECT spec FROM version_specs
-            WHERE service_name=(?)
-            AND version=(?)""", (service_name, version)).fetchall()
-    for row in rows:
-        return pickle.loads(row[0])
-    return None
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.select(version_specs_table.c.spec).where(
+                sqlalchemy.and_(
+                    version_specs_table.c.service_name == service_name,
+                    version_specs_table.c.version == version))).fetchone()
+    return pickle.loads(result[0]) if result else None
 
 
 @init_db
 def delete_version(service_name: str, version: int) -> None:
     """Deletes a version from the database."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            DELETE FROM version_specs
-            WHERE service_name=(?)
-            AND version=(?)""", (service_name, version))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.delete(version_specs_table).where(
+                sqlalchemy.and_(
+                    version_specs_table.c.service_name == service_name,
+                    version_specs_table.c.version == version)))
+        session.commit()
 
 
 @init_db
 def delete_all_versions(service_name: str) -> None:
     """Deletes all versions from the database."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            DELETE FROM version_specs
-            WHERE service_name=(?)""", (service_name,))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.delete(version_specs_table).where(
+                version_specs_table.c.service_name == service_name))
+        session.commit()
 
 
 @init_db
 def get_latest_version(service_name: str) -> Optional[int]:
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            SELECT MAX(version) FROM version_specs
-            WHERE service_name=(?)""", (service_name,)).fetchall()
-    if not rows or rows[0][0] is None:
-        return None
-    return rows[0][0]
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.select(sqlalchemy.func.max(
+                version_specs_table.c.version)).where(
+                    version_specs_table.c.service_name ==
+                    service_name)).fetchone()
+    return result[0] if result else None
 
 
 @init_db
 def get_service_controller_port(service_name: str) -> int:
     """Gets the controller port of a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute('SELECT controller_port FROM services WHERE name = ?',
-                       (service_name,))
-        row = cursor.fetchone()
-        if row is None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.select(services_table.c.controller_port).where(
+                services_table.c.name == service_name)).fetchone()
+        if result is None:
             raise ValueError(f'Service {service_name} does not exist.')
-        return row[0]
+        return result[0]
 
 
 @init_db
 def get_service_load_balancer_port(service_name: str) -> int:
     """Gets the load balancer port of a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute('SELECT load_balancer_port FROM services WHERE name = ?',
-                       (service_name,))
-        row = cursor.fetchone()
-        if row is None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.select(services_table.c.load_balancer_port).where(
+                services_table.c.name == service_name)).fetchone()
+        if result is None:
             raise ValueError(f'Service {service_name} does not exist.')
-        return row[0]
+        return result[0]
 
 
 @init_db
 def get_ha_recovery_script(service_name: str) -> Optional[str]:
     """Gets the HA recovery script for a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            'SELECT script FROM ha_recovery_script WHERE service_name = ?',
-            (service_name,))
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        return row[0]
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.select(serve_ha_recovery_script_table.c.script).where(
+                serve_ha_recovery_script_table.c.service_name ==
+                service_name)).fetchone()
+    return result[0] if result else None
 
 
 @init_db
 def set_ha_recovery_script(service_name: str, script: str) -> None:
     """Sets the HA recovery script for a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            INSERT OR REPLACE INTO ha_recovery_script
-            (service_name, script)
-            VALUES (?, ?)""", (service_name, script))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        insert_stmt = insert_func(serve_ha_recovery_script_table).values(
+            service_name=service_name, script=script)
+
+        insert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=['service_name'],
+            set_={'script': insert_stmt.excluded.script})
+
+        session.execute(insert_stmt)
+        session.commit()
 
 
 @init_db
 def remove_ha_recovery_script(service_name: str) -> None:
     """Removes the HA recovery script for a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute('DELETE FROM ha_recovery_script WHERE service_name = ?',
-                       (service_name,))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.delete(serve_ha_recovery_script_table).where(
+                serve_ha_recovery_script_table.c.service_name == service_name))
+        session.commit()

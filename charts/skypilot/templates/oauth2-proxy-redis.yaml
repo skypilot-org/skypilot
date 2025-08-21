@@ -3,7 +3,7 @@
 {{- if not .Values.auth.oauth.enabled -}}
 {{- $oauth2 = index .Values.ingress "oauth2-proxy" -}}
 {{- end -}}
-{{- if and (eq (index $oauth2 "session-store-type" | default "redis") "redis") (not (index $oauth2 "redis-url")) -}}
+{{- if and (eq (index $oauth2 "session-store-type" | default "redis") "redis") (not (index $oauth2 "redis-url")) (not (index $oauth2 "redis-secret")) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -92,6 +92,23 @@ _TEARDOWN_SERVICE = _SHOW_SERVE_STATUS + (
     r'     echo "$s" | grep -q "scheduled to be terminated\|No service to terminate" && break;'
     '     sleep 10;'
     '     [ $i -eq 20 ] && echo "Failed to terminate service {name}";'
+    'done; '
+    # Wait for service to be fully terminated
+    'start_time=$(date +%s); '
+    'timeout=600; '
+    'while true; do '
+    '    status_output=$(sky serve status {name} 2>&1); '
+    '    echo "Checking service termination status..."; '
+    '    echo "$status_output"; '
+    '    echo "$status_output" | grep -q "Service \'{name}\' not found" && echo "Service terminated successfully" && exit 0; '
+    '    current_time=$(date +%s); '
+    '    elapsed=$((current_time - start_time)); '
+    '    if [ "$elapsed" -ge "$timeout" ]; then '
+    '        echo "Timeout: Service {name} not terminated within 5 minutes"; '
+    '        exit 1; '
+    '    fi; '
+    '    echo "Service still terminating, waiting 10 seconds..."; '
+    '    sleep 10; '
     'done)')
 
 _SERVE_ENDPOINT_WAIT = (
@@ -422,7 +439,7 @@ def test_skyserve_dynamic_ondemand_fallback():
         'test-skyserve-dynamic-ondemand-fallback',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            f'sky serve up -n {name} --infra gcp {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
+            f'sky serve up -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
             f'sleep 40',
             # 2 on-demand (provisioning) + 2 Spot (provisioning).
             f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s";'

@@ -1,6 +1,7 @@
 """Utils shared between all of sky"""
 
 import difflib
+import enum
 import functools
 import getpass
 import hashlib
@@ -27,7 +28,6 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
-from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 
@@ -40,7 +40,7 @@ else:
     psutil = adaptors_common.LazyImport('psutil')
     yaml = adaptors_common.LazyImport('yaml')
 
-_USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
 
 # We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
@@ -53,6 +53,25 @@ _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 _VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 
 logger = sky_logging.init_logger(__name__)
+
+
+class ProcessStatus(enum.Enum):
+    """Process status."""
+
+    # The process is scheduled to run, but not started yet.
+    SCHEDULED = 'SCHEDULED'
+
+    # The process is running
+    RUNNING = 'RUNNING'
+
+    # The process is finished and succeeded
+    SUCCEEDED = 'SUCCEEDED'
+
+    # The process is interrupted
+    INTERRUPTED = 'INTERRUPTED'
+
+    # The process failed
+    FAILED = 'FAILED'
 
 
 @annotations.lru_cache(scope='request')
@@ -111,19 +130,24 @@ def get_user_hash() -> str:
         assert user_hash is not None
         return user_hash
 
-    if os.path.exists(_USER_HASH_FILE):
+    if os.path.exists(USER_HASH_FILE):
         # Read from cached user hash file.
-        with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
+        with open(USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
             user_hash = f.read().strip()
         if is_valid_user_hash(user_hash):
             return user_hash
 
     user_hash = generate_user_hash()
-    os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
-        f.write(user_hash)
+    set_user_hash_locally(user_hash)
     return user_hash
+
+
+def set_user_hash_locally(user_hash: str) -> None:
+    """Sets the user hash to local file."""
+    os.makedirs(os.path.dirname(USER_HASH_FILE), exist_ok=True)
+    with open(USER_HASH_FILE, 'w', encoding='utf-8') as f:
+        f.write(user_hash)
 
 
 def base36_encode(hex_str: str) -> str:
@@ -271,12 +295,13 @@ _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
 _using_remote_api_server: Optional[bool] = None
 _current_user: Optional['models.User'] = None
+_current_request_id: Optional[str] = None
 
 
 def set_request_context(client_entrypoint: Optional[str],
                         client_command: Optional[str],
                         using_remote_api_server: bool,
-                        user: Optional['models.User']):
+                        user: Optional['models.User'], request_id: str) -> None:
     """Override the current client entrypoint and command.
 
     This is useful when we are on the SkyPilot API server side and we have a
@@ -286,10 +311,19 @@ def set_request_context(client_entrypoint: Optional[str],
     global _current_client_entrypoint
     global _using_remote_api_server
     global _current_user
+    global _current_request_id
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
     _using_remote_api_server = using_remote_api_server
     _current_user = user
+    _current_request_id = request_id
+
+
+def get_current_request_id() -> str:
+    """Returns the current request id."""
+    if _current_request_id is not None:
+        return _current_request_id
+    return 'dummy-request-id'
 
 
 def get_current_command() -> str:
@@ -313,7 +347,7 @@ def get_current_user() -> 'models.User':
 
 def get_current_user_name() -> str:
     """Returns the current user name."""
-    name = common_utils.get_current_user().name
+    name = get_current_user().name
     assert name is not None
     return name
 
@@ -856,7 +890,7 @@ def get_cleaned_username(username: str = '') -> str:
     Returns:
       A cleaned username.
     """
-    username = username or common_utils.get_current_user_name()
+    username = username or get_current_user_name()
     username = username.lower()
     username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)

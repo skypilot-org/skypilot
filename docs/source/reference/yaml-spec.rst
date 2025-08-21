@@ -46,7 +46,9 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`ports <yaml-spec-resources-ports>`: 8081
     :ref:`labels <yaml-spec-resources-labels>`:
       my-label: my-value
-    :ref:`autostop <yaml-spec-resources-autostop>`: 10m
+    :ref:`autostop <yaml-spec-resources-autostop>`:
+      idle_minutes: 10
+      wait_for: none
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -277,8 +279,15 @@ Format:
 - ``<num>``: Stop after this many idle minutes
 - ``<num><unit>``: Stop after this much time
 - Object with configuration:
+
   - ``idle_minutes``: Number of idle minutes before stopping
   - ``down``: If true, tear down the cluster instead of stopping it
+  - ``wait_for``: Determines the condition for resetting the idleness timer.
+    Options:
+
+    - ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish
+    - ``jobs``: Only wait for in‑progress jobs
+    - ``none``: Wait for nothing; autostop right after ``idle_minutes``
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -316,6 +325,15 @@ OR
     autostop:
       idle_minutes: 10
       down: true  # Use autodown instead of autostop
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop:
+      idle_minutes: 10
+      wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
 
 
 .. _yaml-spec-resources-accelerators:
@@ -526,7 +544,7 @@ Units supported (case-insensitive):
 
   resources:
     disk_size: 256
-  
+
 OR
 
 .. code-block:: yaml
@@ -655,7 +673,7 @@ If not specified, SkyPilot will use the default debian-based image suitable for 
 
 **Docker support**
 
-You can specify docker image to use by setting the image_id to ``docker:<image name>`` for Azure, AWS and GCP. For example,
+You can specify docker image to use by setting the image_id to ``docker:<image name>`` for Azure, AWS, GCP, and RunPod. For example,
 
 .. code-block:: yaml
 
@@ -761,7 +779,7 @@ https://github.com/IBM/vpc-img-inst
 .. code-block:: yaml
 
   resources:
-    image_id: ami-0868a20f5a3bf9702  # AWS example
+    image_id: ami-0868a20f5a3bf9702  # IBM example
     # image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310  # GCP example
     # image_id: docker:pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime # Docker example
 
@@ -773,6 +791,29 @@ OR
     image_id:
       us-east-1: ami-123
       us-west-2: ami-456
+
+
+**RunPod**
+
+RunPod natively supports Docker images. You can specify any Docker image:
+
+.. code-block:: yaml
+
+  resources:
+    image_id: docker:ubuntu:22.04
+    # Or use a specific registry
+    image_id: docker:nvcr.io/nvidia/pytorch:24.10-py3
+
+For multi-region deployments, you can specify different images per region:
+
+.. code-block:: yaml
+
+  resources:
+    image_id:
+      US: docker:us-registry.io/myapp:latest
+      CA: docker:ca-registry.io/myapp:latest
+      CZ: docker:eu-registry.io/myapp:latest
+
 
 .. _yaml-spec-resources-labels:
 

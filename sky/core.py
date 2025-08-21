@@ -25,6 +25,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -77,13 +78,13 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
-    dag.resolve_and_validate_volumes()
     # TODO: We apply the admin policy only on the first DAG optimization which
     # is shown on `sky launch`. The optimizer is also invoked during failover,
     # but we do not apply the admin policy there. We should apply the admin
     # policy in the optimizer, but that will require some refactoring.
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag, request_options=request_options) as dag:
+        dag.resolve_and_validate_volumes()
         return optimizer.Optimizer.optimize(dag=dag,
                                             minimize=minimize,
                                             blocked_resources=blocked_resources,
@@ -95,7 +96,7 @@ def status(
     cluster_names: Optional[Union[str, List[str]]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> List[Dict[str, Any]]:
+) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
 
@@ -171,7 +172,9 @@ def status(
     clusters = backend_utils.get_clusters(refresh=refresh,
                                           cluster_names=cluster_names,
                                           all_users=all_users)
-    return clusters
+    return [
+        responses.StatusResponse.model_validate(cluster) for cluster in clusters
+    ]
 
 
 def status_kubernetes(
@@ -256,7 +259,7 @@ all_clusters, unmanaged_clusters, all_jobs, context
 
 
 def endpoints(cluster: str,
-              port: Optional[Union[int, str]] = None) -> Dict[int, str]:
+              port: Optional[Union[int, str]] = None) -> Dict[str, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -275,7 +278,10 @@ def endpoints(cluster: str,
     with rich_utils.safe_status(
             ux_utils.spinner_message(
                 f'Fetching endpoints for cluster {cluster}')):
-        return backend_utils.get_endpoints(cluster=cluster, port=port)
+        result = backend_utils.get_endpoints(cluster=cluster, port=port)
+        # Convert int keys to str keys.
+        # In JSON serialization, each key must be a string.
+        return {str(k): v for k, v in result.items()}
 
 
 @usage_lib.entrypoint
@@ -590,7 +596,10 @@ def down(cluster_name: str, purge: bool = False) -> None:
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
-    backend.teardown(handle, terminate=True, purge=purge)
+    backend.teardown(handle,
+                     terminate=True,
+                     purge=purge,
+                     explicitly_requested=True)
 
 
 @usage_lib.entrypoint
@@ -629,6 +638,11 @@ def stop(cluster_name: str, purge: bool = False) -> None:
     if handle is None:
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
+
+    global_user_state.add_cluster_event(
+        cluster_name, status_lib.ClusterStatus.STOPPED,
+        'Cluster was stopped by user.',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
 
     backend = backend_utils.get_backend_from_handle(handle)
 

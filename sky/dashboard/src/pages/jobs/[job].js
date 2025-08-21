@@ -3,7 +3,7 @@ import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
-import { useSingleManagedJob } from '@/data/connectors/jobs';
+import { useSingleManagedJob, getPoolStatus } from '@/data/connectors/jobs';
 import Link from 'next/link';
 import {
   RotateCwIcon,
@@ -11,13 +11,18 @@ import {
   ChevronRightIcon,
   CopyIcon,
   CheckIcon,
+  Download,
 } from 'lucide-react';
 import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
+  renderPoolLink,
 } from '@/components/utils';
 import { LogFilter, formatLogs, stripAnsiCodes } from '@/components/utils';
-import { streamManagedJobLogs } from '@/data/connectors/jobs';
+import {
+  streamManagedJobLogs,
+  downloadManagedJobLogs,
+} from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
@@ -25,12 +30,14 @@ import { NonCapitalizedTooltip } from '@/components/utils';
 import { formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
+import dashboardCache from '@/lib/cache';
 
 function JobDetails() {
   const router = useRouter();
   const { job: jobId, tab } = router.query;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { jobData, loading } = useSingleManagedJob(jobId, refreshTrigger);
+  const [poolsData, setPoolsData] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
@@ -47,6 +54,20 @@ function JobDetails() {
       setIsInitialLoad(false);
     }
   }, [loading, isInitialLoad]);
+
+  // Fetch pools data for hash comparison
+  useEffect(() => {
+    async function fetchPoolsData() {
+      try {
+        const poolsResponse = await dashboardCache.get(getPoolStatus, [{}]);
+        setPoolsData(poolsResponse.pools || []);
+      } catch (error) {
+        console.error('Error fetching pools data:', error);
+        setPoolsData([]);
+      }
+    }
+    fetchPoolsData();
+  }, []);
 
   // Function to scroll to a specific section
   const scrollToSection = (sectionId) => {
@@ -216,6 +237,7 @@ function JobDetails() {
                     isLoadingLogs={isLoadingLogs}
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={0}
+                    poolsData={poolsData}
                   />
                 </div>
               </Card>
@@ -232,20 +254,40 @@ function JobDetails() {
                       logs.)
                     </span>
                   </div>
-                  <Tooltip
-                    content="Refresh logs"
-                    className="text-muted-foreground"
-                  >
-                    <button
-                      onClick={handleLogsRefresh}
-                      disabled={isLoadingLogs}
-                      className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  <div className="flex items-center space-x-3">
+                    <Tooltip
+                      content="Download full logs"
+                      className="text-muted-foreground"
                     >
-                      <RotateCwIcon
-                        className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
-                      />
-                    </button>
-                  </Tooltip>
+                      <button
+                        onClick={() =>
+                          downloadManagedJobLogs({
+                            jobId: parseInt(
+                              Array.isArray(jobId) ? jobId[0] : jobId
+                            ),
+                            controller: false,
+                          })
+                        }
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip
+                      content="Refresh logs"
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={handleLogsRefresh}
+                        disabled={isLoadingLogs}
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <RotateCwIcon
+                          className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                        />
+                      </button>
+                    </Tooltip>
+                  </div>
                 </div>
                 <div className="p-4">
                   <JobDetailsContent
@@ -256,6 +298,7 @@ function JobDetails() {
                     isLoadingLogs={isLoadingLogs}
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={refreshLogsFlag}
+                    poolsData={poolsData}
                   />
                 </div>
               </Card>
@@ -272,20 +315,40 @@ function JobDetails() {
                       logs.)
                     </span>
                   </div>
-                  <Tooltip
-                    content="Refresh controller logs"
-                    className="text-muted-foreground"
-                  >
-                    <button
-                      onClick={handleControllerLogsRefresh}
-                      disabled={isLoadingControllerLogs}
-                      className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  <div className="flex items-center space-x-3">
+                    <Tooltip
+                      content="Download full controller logs"
+                      className="text-muted-foreground"
                     >
-                      <RotateCwIcon
-                        className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
-                      />
-                    </button>
-                  </Tooltip>
+                      <button
+                        onClick={() =>
+                          downloadManagedJobLogs({
+                            jobId: parseInt(
+                              Array.isArray(jobId) ? jobId[0] : jobId
+                            ),
+                            controller: true,
+                          })
+                        }
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip
+                      content="Refresh controller logs"
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={handleControllerLogsRefresh}
+                        disabled={isLoadingControllerLogs}
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <RotateCwIcon
+                          className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
+                        />
+                      </button>
+                    </Tooltip>
+                  </div>
                 </div>
                 <div className="p-4">
                   <JobDetailsContent
@@ -296,6 +359,7 @@ function JobDetails() {
                     isLoadingLogs={isLoadingLogs}
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={refreshControllerLogsFlag}
+                    poolsData={poolsData}
                   />
                 </div>
               </Card>
@@ -319,6 +383,7 @@ function JobDetailsContent({
   isLoadingLogs,
   isLoadingControllerLogs,
   refreshFlag,
+  poolsData,
 }) {
   // Change from array to string for better performance
   const [logs, setLogs] = useState('');
@@ -1088,6 +1153,13 @@ function JobDetailsContent({
           ) : (
             <span className="text-gray-400">-</span>
           )}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-gray-600 font-medium text-base">Worker Pool</div>
+        <div className="text-base mt-1">
+          {renderPoolLink(jobData.pool, jobData.pool_hash, poolsData)}
         </div>
       </div>
 

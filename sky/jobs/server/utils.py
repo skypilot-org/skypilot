@@ -62,7 +62,8 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
     version_matches = controller_version == local_version
 
     # Load and filter jobs locally using existing method
-    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+    jobs, _, _, _, _ = managed_job_utils.load_managed_job_queue(
+        job_table_payload)
     non_terminal_jobs = [job for job in jobs if not job['status'].is_terminal()]
     has_non_terminal_jobs = len(non_terminal_jobs) > 0
 

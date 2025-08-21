@@ -1,13 +1,18 @@
 import fcntl
 import json
 import os
+import pathlib
+import signal
+import socket
 import subprocess
 import tempfile
 import time
-from typing import List
+from typing import Any, Dict, List, Optional
 
+import filelock
 import pytest
 import requests
+from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
@@ -16,6 +21,9 @@ import sqlalchemy_adapter
 
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
+from sky.skylet import constants
+from sky.utils import common_utils
 
 # Initialize logger at the top level
 logger = sky_logging.init_logger(__name__)
@@ -167,6 +175,12 @@ def pytest_addoption(parser):
         help='Skip tests marked as resource_heavy',
     )
     parser.addoption(
+        '--resource-heavy',
+        action='store_true',
+        default=False,
+        help='Only run tests marked as resource_heavy',
+    )
+    parser.addoption(
         '--helm-version',
         type=str,
         default='',
@@ -245,6 +259,8 @@ def pytest_collection_modifyitems(config, items):
         reason='test requires local API server')
     skip_marks['no_resource_heavy'] = pytest.mark.skip(
         reason='skipped, because --no-resource-heavy option is set')
+    skip_marks['resource_heavy'] = pytest.mark.skip(
+        reason='skipped, because --resource-heavy option is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -290,6 +306,10 @@ def pytest_collection_modifyitems(config, items):
         if 'resource_heavy' in marks and config.getoption(
                 '--no-resource-heavy'):
             item.add_marker(skip_marks['no_resource_heavy'])
+        # Skip tests not marked as resource_heavy if --resource-heavy is set
+        if 'resource_heavy' not in marks and config.getoption(
+                '--resource-heavy'):
+            item.add_marker(skip_marks['resource_heavy'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -340,6 +360,96 @@ def _generic_cloud(config) -> str:
 @pytest.fixture
 def generic_cloud(request) -> str:
     return _generic_cloud(request.config)
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_policy_server(request, tmp_path_factory):
+    """Setup policy server for restful policy testing."""
+    # TODO(aylei): this is a common pattern to launch global instance before
+    # test suite and cleanup after the suite, abstract this out if needed.
+    if request.config.getoption('--remote-server'):
+        # For remote server, the policy server should be accessible from the
+        # remote server host. Left as future work.
+        # TODO(aylei): support remote server with restful policy.
+        yield
+        return
+
+    has_smoke_tests = False
+    has_backward_compat_test = False
+    if hasattr(request.session, 'items'):
+        has_smoke_tests = any(
+            'smoke_tests' in item.location[0] for item in request.session.items)
+        has_backward_compat_test = any('backward_compat' in item.location[0]
+                                       for item in request.session.items)
+
+    # Only run the policy server for smoke tests and skip backward compatibility tests.
+    if not has_smoke_tests or has_backward_compat_test:
+        yield
+        return
+
+    # get the temp directory shared by all workers
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent
+
+    fn = root_tmp_dir / 'policy_server.txt'
+    policy_server_url = ''
+    # Reference count and pid for cleanup
+    counter_file = root_tmp_dir / 'policy_server_counter.txt'
+    pid_file = root_tmp_dir / 'policy_server_pid.txt'
+
+    def ref_count(delta: int) -> int:
+        try:
+            with open(counter_file, 'r', encoding='utf-8') as f:
+                count = int(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            count = 0
+        count += delta
+        with open(counter_file, 'w', encoding='utf-8') as f:
+            f.write(str(count))
+        return count
+
+    def wait_server(port: int, timeout: int = 60):
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                socket.create_connection(('127.0.0.1', port), timeout=1).close()
+                return True
+            except (socket.error, OSError):
+                time.sleep(0.5)
+        raise RuntimeError(f"Policy server not available after {timeout}s")
+
+    try:
+        policy_server_url: Optional[str] = None
+        with filelock.FileLock(str(fn) + ".lock"):
+            if fn.is_file():
+                ref_count(1)
+                policy_server_url = fn.read_text().strip()
+            else:
+                # Launch the policy server
+                port = common_utils.find_free_port(start_port=10000)
+                policy_server_url = f'http://127.0.0.1:{port}'
+                server_process = subprocess.Popen([
+                    'python', 'tests/admin_policy/no_op_server.py', '--host',
+                    '0.0.0.0', '--port',
+                    str(port)
+                ])
+                wait_server(port)
+                pid_file.write_text(str(server_process.pid))
+                fn.write_text(policy_server_url)
+                ref_count(1)
+        if policy_server_url is not None:
+            with smoke_tests_utils.override_sky_config(
+                    config_dict={'admin_policy': policy_server_url}):
+                yield
+        else:
+            yield
+    finally:
+        with filelock.FileLock(str(fn) + ".lock"):
+            count = ref_count(-1)
+            if count == 0:
+                # All workers are done, run post cleanup.
+                pid = pid_file.read_text().strip()
+                if pid:
+                    os.kill(int(pid), signal.SIGKILL)
 
 
 @pytest.fixture(scope='session', autouse=True)
