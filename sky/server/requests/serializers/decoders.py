@@ -60,6 +60,8 @@ def decode_status(
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
         cluster['storage_mounts_metadata'] = decode_and_unpickle(
             cluster['storage_mounts_metadata'])
+        if 'is_managed' not in cluster:
+            cluster['is_managed'] = False
         response.append(responses.StatusResponse.model_validate(cluster))
     return response
 
