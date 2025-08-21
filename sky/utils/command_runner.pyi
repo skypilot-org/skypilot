@@ -106,6 +106,13 @@ class CommandRunner:
               max_retry: int = ...) -> None:
         ...
 
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
+        ...
+
     @classmethod
     def make_runner_list(cls: typing.Type[CommandRunner],
                          node_list: Iterable[Tuple[Any, ...]],
@@ -201,6 +208,13 @@ class SSHCommandRunner(CommandRunner):
               max_retry: int = ...) -> None:
         ...
 
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
+        ...
+
 
 class KubernetesCommandRunner(CommandRunner):
 
@@ -271,6 +285,13 @@ class KubernetesCommandRunner(CommandRunner):
               log_path: str = ...,
               stream_logs: bool = ...,
               max_retry: int = ...) -> None:
+        ...
+
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         ...
 
 

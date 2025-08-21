@@ -6,11 +6,13 @@ import hashlib
 import os
 import pathlib
 import pprint
+import queue as queue_lib
 import re
 import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
@@ -208,6 +210,9 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
     # actually in.
     ('provider', 'availability_zone'),
 ]
+
+_ACK_MESSAGE = 'ack'
+_FORWARDING_FROM_MESSAGE = 'Forwarding from'
 
 
 def is_ip(s: str) -> bool:
@@ -3397,6 +3402,80 @@ def cluster_file_mounts_lock_id(cluster_name: str) -> str:
 def workspace_lock_id(workspace_name: str) -> str:
     """Get the lock ID for workspace operations."""
     return f'{workspace_name}_workspace'
+
+
+def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
+                                       command_runner.KubernetesCommandRunner],
+                    port_forward: Tuple[int, int]) -> subprocess.Popen:
+    local_port, remote_port = port_forward
+    if isinstance(head_runner, command_runner.SSHCommandRunner):
+        # Disabling ControlMaster makes things easier to reason about
+        # with respect to resource management/ownership,
+        # as killing the process will close the tunnel too.
+        head_runner.disable_control_master = True
+        head_runner.port_forward_execute_remote_command = True
+
+    # The default connect_timeout of 1s is too short for
+    # connecting to clusters using a jump server.
+    # We use NON_INTERACTIVE mode to avoid allocating a pseudo-tty,
+    # which is counted towards non-idleness.
+    cmd: List[str] = head_runner.port_forward_command(
+        [(local_port, remote_port)],
+        connect_timeout=5,
+        ssh_mode=command_runner.SshMode.NON_INTERACTIVE)
+    if isinstance(head_runner, command_runner.SSHCommandRunner):
+        # cat so the command doesn't exit until we kill it
+        cmd += [f'"echo {_ACK_MESSAGE} && cat"']
+    cmd_str = ' '.join(cmd)
+    logger.debug(f'Running port forward command: {cmd_str}')
+    ssh_tunnel_proc = subprocess.Popen(cmd_str,
+                                       shell=True,
+                                       stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       start_new_session=True,
+                                       text=True)
+    # Wait until we receive an ack from the remote cluster or
+    # the SSH connection times out.
+    queue: queue_lib.Queue = queue_lib.Queue()
+    stdout_thread = threading.Thread(
+        target=lambda queue, stdout: queue.put(stdout.readline()),
+        args=(queue, ssh_tunnel_proc.stdout),
+        daemon=True)
+    stdout_thread.start()
+    while ssh_tunnel_proc.poll() is None:
+        try:
+            ack = queue.get_nowait()
+        except queue_lib.Empty:
+            ack = None
+            time.sleep(0.1)
+            continue
+        assert ack is not None
+        if isinstance(
+                head_runner,
+                command_runner.SSHCommandRunner) and ack == f'{_ACK_MESSAGE}\n':
+            break
+        elif isinstance(head_runner, command_runner.KubernetesCommandRunner
+                       ) and _FORWARDING_FROM_MESSAGE in ack:
+            # For Kind clusters, there seems to be a race condition.
+            # Calling grpc.channel_ready_future immediately after
+            # results in a connection refused error, leading to
+            # the process dying and the health check timing out.
+            # We did not observe this for non-Kind clusters.
+            # TODO(kevin): Find a better way to handle this.
+            time.sleep(0.5)
+            break
+
+    if ssh_tunnel_proc.poll() is not None:
+        stdout, stderr = ssh_tunnel_proc.communicate()
+        error_msg = 'Port forward failed'
+        if stdout:
+            error_msg += f'\n-- stdout --\n{stdout}\n'
+        raise exceptions.CommandError(returncode=ssh_tunnel_proc.returncode,
+                                      command=cmd_str,
+                                      error_msg=error_msg,
+                                      detailed_reason=stderr)
+    return ssh_tunnel_proc
 
 
 T = TypeVar('T')
