@@ -1188,7 +1188,6 @@ async def logs(
     # Only initialize the context in logs handler to limit the scope of this
     # experimental change.
     # TODO(aylei): init in lifespan() to enable SkyPilot context in all APIs.
-    context.initialize()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
@@ -1200,6 +1199,8 @@ async def logs(
 
     async def cancel_task():
         try:
+            logger.info('Client disconnected for request: '
+                        f'{request.state.request_id}')
             task.cancel()
             await task
         except asyncio.CancelledError:
