@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 from typing import Generator, List
+import warnings
 
 import casbin
 import filelock
@@ -21,6 +22,17 @@ logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.model').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.rbac').setLevel(sky_logging.ERROR)
+
+# Suppress SQLAlchemy warnings about duplicate class names in
+# sqlalchemy_adapter
+try:
+    from sqlalchemy.exc import SAWarning
+    warnings.filterwarnings('ignore', category=SAWarning)
+except ImportError:
+    # Fallback: suppress warnings by message pattern
+    warnings.filterwarnings(
+        'ignore', message='.*declarative base already contains a class.*')
+
 logger = sky_logging.init_logger(__name__)
 
 # Filelocks for the policy update.
