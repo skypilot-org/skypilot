@@ -91,7 +91,7 @@ def retry_transient_errors(max_retries: int = 3,
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             backoff = common_utils.Backoff(initial_backoff, max_backoff_factor)
-            failed_retry_cnt = 0
+            consecutive_failed_count = 0
 
             with _retry_in_context() as context:
                 previous_line_processed = context.line_processed  # should be 0
@@ -100,16 +100,18 @@ def retry_transient_errors(max_retries: int = 3,
                     # If the function made progress on a retry,
                     # clears the backoff and resets the failed retry count.
                     # Otherwise, increments the failed retry count.
-                    nonlocal backoff, failed_retry_cnt, previous_line_processed
+                    nonlocal backoff
+                    nonlocal consecutive_failed_count
+                    nonlocal previous_line_processed
                     if context.line_processed > previous_line_processed:
                         backoff = common_utils.Backoff(initial_backoff,
                                                        max_backoff_factor)
                         previous_line_processed = context.line_processed
-                        failed_retry_cnt = 0
+                        consecutive_failed_count = 0
                     else:
-                        failed_retry_cnt += 1
+                        consecutive_failed_count += 1
 
-                while failed_retry_cnt < max_retries:
+                while consecutive_failed_count < max_retries:
                     try:
                         return func(*args, **kwargs)
                     # Occurs when the server proactively interrupts the request
@@ -121,7 +123,7 @@ def retry_transient_errors(max_retries: int = 3,
                         continue
                     except Exception as e:  # pylint: disable=broad-except
                         _handle_exception()
-                        if failed_retry_cnt >= max_retries:
+                        if consecutive_failed_count >= max_retries:
                             # Retries exhausted.
                             raise
                         if not is_transient_error(e):
@@ -129,12 +131,12 @@ def retry_transient_errors(max_retries: int = 3,
                             raise
                         logger.debug(
                             f'Retry {func.__name__} due to {e}, '
-                            f'attempt {failed_retry_cnt}/{max_retries}')
+                            f'attempt {consecutive_failed_count}/{max_retries}')
                         # Only sleep if this is not the first retry.
                         # The idea is that if the function made progress on a
                         # retry, we should try again immediately to reduce the
                         # waiting time.
-                        if failed_retry_cnt > 0:
+                        if consecutive_failed_count > 0:
                             time.sleep(backoff.current_backoff())
 
         return cast(F, wrapper)
