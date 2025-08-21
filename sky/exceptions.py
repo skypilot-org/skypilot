@@ -661,3 +661,11 @@ class RequestInterruptedError(Exception):
 class SkyletInternalError(Exception):
     """Raised when a Skylet internal error occurs."""
     pass
+
+
+class ClientError(Exception):
+    """Raised when a there is a client error occurs.
+
+    If a request encounters a ClientError, it will not be retried to the server.
+    """
+    pass

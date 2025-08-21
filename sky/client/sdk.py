@@ -1945,6 +1945,7 @@ def stream_and_get(request_id: None = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@rest.retry_transient_errors()
 def stream_and_get(
     request_id: Optional[server_common.RequestId[T]] = None,
     log_path: Optional[str] = None,
@@ -1996,7 +1997,7 @@ def stream_and_get(
     if response.status_code in [404, 400]:
         detail = response.json().get('detail')
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Failed to stream logs: {detail}')
+            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
         # TODO(syang): handle the case where the requestID is not provided
         # see https://github.com/skypilot-org/skypilot/issues/6549
