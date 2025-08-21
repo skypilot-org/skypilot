@@ -42,7 +42,7 @@ def test_usable_subnets(monkeypatch):
     mock_ec2.subnets = subnets
     # monkeypatch.setattr(mock_ec2, 'subnets', subnets
     # Case 1: default VPC has no subnets.
-    monkeypatch.setattr(config, '_get_vpc_id_by_name',
+    monkeypatch.setattr(config, 'get_vpc_id_by_name',
                         lambda *args, **kwargs: vpc_id)
     with pytest.raises(RuntimeError) as e:
         config._get_subnet_and_vpc_id(ec2=mock_ec2,
