@@ -40,7 +40,6 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import dateutil.parser as dateutil_parser
     import jinja2
     import yaml
 
@@ -49,7 +48,6 @@ if typing.TYPE_CHECKING:
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     yaml = adaptors_common.LazyImport('yaml')
-    dateutil_parser = adaptors_common.LazyImport('dateutil.parser')
 
 # Please be careful when changing this.
 # When mounting, Kubernetes changes the ownership of the parent directory
@@ -1754,7 +1752,7 @@ class PodValidator:
         :return: date.
         """
         try:
-            return dateutil_parser.parse(string).date()
+            return kubernetes.dateutil_parser.parse(string).date()
         except ValueError as exc:
             raise ValueError(
                 f'Failed to parse `{string}` as date object') from exc
@@ -1769,7 +1767,7 @@ class PodValidator:
         :return: datetime.
         """
         try:
-            return dateutil_parser.parse(string)
+            return kubernetes.dateutil_parser.parse(string)
         except ValueError as exc:
             raise ValueError(
                 f'Failed to parse `{string}` as datetime object') from exc

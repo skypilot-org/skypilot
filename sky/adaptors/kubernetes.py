@@ -18,6 +18,8 @@ models = common.LazyImport('kubernetes.client.models',
                            import_error_message=_IMPORT_ERROR_MESSAGE)
 urllib3 = common.LazyImport('urllib3',
                             import_error_message=_IMPORT_ERROR_MESSAGE)
+dateutil_parser = common.LazyImport('dateutil.parser',
+                                    import_error_message=_IMPORT_ERROR_MESSAGE)
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
