@@ -428,6 +428,8 @@ def override_sky_config(
             f'Overriding controller cloud: '
             f'{override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
         )
+    if is_grpc_enabled_test():
+        env_dict[env_options.Options.ENABLE_GRPC.env_key] = '1'
 
     if not override_sky_config_dict:
         yield None
@@ -752,6 +754,10 @@ def pytest_controller_cloud() -> Optional[str]:
 
 def is_postgres_backend_test() -> bool:
     return os.environ.get('PYTEST_SKYPILOT_POSTGRES_BACKEND', None) is not None
+
+
+def is_grpc_enabled_test() -> bool:
+    return os.environ.get('PYTEST_SKYPILOT_GRPC_ENABLED', None) is not None
 
 
 def override_env_config(config: Dict[str, str]):
