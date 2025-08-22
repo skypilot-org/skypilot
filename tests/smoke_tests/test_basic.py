@@ -175,7 +175,7 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
 @pytest.mark.no_hyperbolic
-@pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet.
+@pytest.mark.no_seeweb
 def test_launch_fast_with_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -836,7 +836,7 @@ def test_kubernetes_context_failover(unreachable_context):
         )
         smoke_tests_utils.run_one_test(test)
 
-
+@pytest.mark.no_seeweb  # Seeweb fails to provision resources
 def test_launch_and_exec_async(generic_cloud: str):
     """Test if the launch and exec commands work correctly with --async."""
     name = smoke_tests_utils.get_cluster_name()

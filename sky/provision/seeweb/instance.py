@@ -8,9 +8,6 @@ Prerequisites:
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from ecsapi import Api
-from ecsapi import ServerCreateRequest
-
 from sky import sky_logging
 from sky.adaptors import seeweb as seeweb_adaptor
 from sky.provision.common import ClusterInfo
@@ -43,7 +40,7 @@ class SeewebNodeProvider:
         """
         self.config = provider_config
         self.cluster_name = cluster_name
-        self.ecs: Api = seeweb_adaptor.client()
+        self.ecs = seeweb_adaptor.client()
 
     # --------------------------------------------------------------------- #
     # 1. bootstrap_instances – no preprocessing needed here
