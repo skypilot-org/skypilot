@@ -1494,7 +1494,7 @@ def format_job_table(
         'JOB DURATION',
         '#RECOVERIES',
         'STATUS',
-        'WORKER_POOL',
+        'POOL',
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
@@ -1597,6 +1597,10 @@ def format_job_table(
 
             user_values = get_user_column_values(job_tasks[0])
 
+            pool = job_tasks[0].get('pool')
+            if pool is None:
+                pool = '-'
+
             job_id = job_hash[1] if tasks_have_k8s_user else job_hash
             job_values = [
                 job_id,
@@ -1610,7 +1614,7 @@ def format_job_table(
                 job_duration,
                 recovery_cnt,
                 status_str,
-                job_tasks[0].get('pool', '-'),
+                pool,
             ]
             if show_all:
                 details = job_tasks[current_task_id].get('details')
@@ -1637,6 +1641,9 @@ def format_job_table(
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             user_values = get_user_column_values(task)
             task_workspace = '-' if len(job_tasks) > 1 else workspace
+            pool = task.get('pool')
+            if pool is None:
+                pool = '-'
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
@@ -1653,7 +1660,7 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
-                task.get('pool', '-'),
+                pool,
             ]
             if show_all:
                 # schedule_state is only set at the job level, so if we have

@@ -156,6 +156,59 @@ class TestRetryTransientErrorsDecorator:
         for call in debug_calls:
             assert 'Retry failing_then_succeeding_function due to' in call[0][0]
 
+    @mock.patch('sky.server.rest.logger')
+    def test_retry_context_is_reset_when_progress_is_made(self, mock_logger):
+        """Test that retry context is reset when progress is made."""
+        call_count = 0
+
+        @rest.retry_transient_errors(max_retries=3, initial_backoff=0.1)
+        def function_making_progress():
+            nonlocal call_count
+            retry_context = rest.get_retry_context()
+            call_count += 1
+            if call_count < 10:
+                retry_context.line_processed += 1
+                raise ValueError("Test error")
+            return "success"
+
+        with mock.patch('time.sleep'):
+            result = function_making_progress()
+            assert result == "success"
+
+        # Check that debug logging was called
+        assert mock_logger.debug.call_count == 9  # 9 retries
+        debug_calls = mock_logger.debug.call_args_list
+        for call in debug_calls:
+            assert 'Retry function_making_progress due to' in call[0][0]
+
+    @mock.patch('sky.server.rest.logger')
+    def test_repeated_failure_after_progress(self, mock_logger):
+        """Test that retry_transient_errors fails if function fails after making progress."""
+        call_count = 0
+
+        @rest.retry_transient_errors(max_retries=3, initial_backoff=0.1)
+        def function_failing_after_making_progress():
+            nonlocal call_count
+            retry_context = rest.get_retry_context()
+            call_count += 1
+            if call_count < 10:
+                retry_context.line_processed += 1
+                raise ValueError("Test error")
+
+            raise ValueError("Test error")
+
+        with mock.patch('time.sleep'):
+            with pytest.raises(ValueError):
+                function_failing_after_making_progress()
+
+        # Check that debug logging was called
+        # 11 retries, 9 retries after progress, 2 retries after failure
+        assert mock_logger.debug.call_count == 11
+        debug_calls = mock_logger.debug.call_args_list
+        for call in debug_calls:
+            assert 'Retry function_failing_after_making_progress due to' in call[
+                0][0]
+
     def test_different_http_error_status_codes(self):
         """Test behavior with different HTTP error status codes."""
 

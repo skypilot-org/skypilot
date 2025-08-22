@@ -1611,7 +1611,7 @@ def _show_endpoint(query_clusters: Optional[List[str]],
         if endpoint:
             request_id = sdk.endpoints(cluster_record['name'], endpoint)
             cluster_endpoints = sdk.stream_and_get(request_id)
-            cluster_endpoint = cluster_endpoints.get(str(endpoint), None)
+            cluster_endpoint = cluster_endpoints.get(endpoint, None)
             if not cluster_endpoint:
                 raise click.Abort(f'Endpoint {endpoint} not found for cluster '
                                   f'{cluster_record["name"]!r}.')
@@ -6200,6 +6200,9 @@ def api_info():
         user = api_server_user
     else:
         user = models.User.get_current_user()
+    # Print client version and commit.
+    click.echo(f'SkyPilot client version: {sky.__version__}, '
+               f'commit: {sky.__commit__}')
     click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '

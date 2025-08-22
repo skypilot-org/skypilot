@@ -1201,9 +1201,6 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
-    # Only initialize the context in logs handler to limit the scope of this
-    # experimental change.
-    # TODO(aylei): init in lifespan() to enable SkyPilot context in all APIs.
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
