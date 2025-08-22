@@ -34,6 +34,11 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 .. image:: ../images/skypilot-abstractions-long-2.png
     :width: 90%
     :align: center
+    :class: only-light
+.. image:: ../images/skypilot-abstractions-long-2-dark.png
+    :width: 90%
+    :align: center
+    :class: only-dark
 
 .. grid:: 1 1 1 1
     :gutter: 3
