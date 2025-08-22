@@ -206,10 +206,5 @@ def decode_kubernetes_node_info(
 
 
 @register_decoders('endpoints')
-def decode_endpoints(
-    return_value: Union[Dict[str, str], Optional[str]]
-) -> Union[Dict[int, str], Optional[str]]:
-    if isinstance(return_value, dict):
-        return {int(k): v for k, v in return_value.items()}
-    else:
-        return return_value
+def decode_endpoints(return_value: Dict[int, str]) -> Dict[int, str]:
+    return {int(k): v for k, v in return_value.items()}

@@ -1460,26 +1460,13 @@ def status(
     return server_common.get_request_id(response)
 
 
-@typing.overload
-def endpoints(cluster: str,
-              port: None = None) -> server_common.RequestId[Dict[int, str]]:
-    ...
-
-
-@typing.overload
-def endpoints(cluster: str,
-              port: Union[int, str]) -> server_common.RequestId[Optional[str]]:
-    ...
-
-
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def endpoints(
     cluster: str,
     port: Optional[Union[int, str]] = None
-) -> Union[server_common.RequestId[Dict[int, str]],
-           server_common.RequestId[Optional[str]]]:
+) -> server_common.RequestId[Dict[int, str]]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -1491,9 +1478,8 @@ def endpoints(
         The request ID of the endpoints request.
 
     Request Returns:
-        If port is None, a dictionary of port numbers to endpoints.
-        If port is not None, the string endpoint for the given port, or None
-            if the port is not exposed.
+        A dictionary of port numbers to endpoints. If port is None,
+        the dictionary will contain all ports:endpoints exposed on the cluster.
 
     Request Raises:
         ValueError: if the cluster is not UP or the endpoint is not exposed.
@@ -1506,18 +1492,7 @@ def endpoints(
     )
     response = server_common.make_authenticated_request(
         'POST', '/endpoints', json=json.loads(body.model_dump_json()))
-    if port is None:
-        # Returns a dictionary of port numbers to endpoints when
-        # get / stream_and_get is called.
-        cluster_endpoints_request_id: server_common.RequestId[Dict[
-            int, str]] = (server_common.get_request_id(response))
-        return cluster_endpoints_request_id
-    else:
-        # Returns a string endpoint for the given port when
-        # get / stream_and_get is called.
-        cluster_endpoint_request_id: server_common.RequestId[Optional[str]] = (
-            server_common.get_request_id(response))
-        return cluster_endpoint_request_id
+    return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint

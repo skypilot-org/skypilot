@@ -582,31 +582,13 @@ async def status(
         return await get(request_id)
 
 
-@typing.overload
-async def endpoints(
-    cluster: str,
-    port: None = None,
-    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Dict[int, str]:
-    ...
-
-
-@typing.overload
-async def endpoints(
-    cluster: str,
-    port: Union[int, str],
-    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Optional[str]:
-    ...
-
-
 @usage_lib.entrypoint
 @annotations.client_api
 async def endpoints(
     cluster: str,
     port: Optional[Union[int, str]] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Union[Dict[int, str], Optional[str]]:
+) -> Dict[int, str]:
     """Async version of endpoints() that gets the endpoint for a given cluster
       and port number."""
     request_id = await context_utils.to_thread(sdk.endpoints, cluster, port)
@@ -614,10 +596,7 @@ async def endpoints(
         result = await _stream_and_get(request_id, stream_logs)
     else:
         result = await get(request_id)
-    if port is None:
-        return {int(k): v for k, v in result.items()}
-    else:
-        return result
+    return result
 
 
 @usage_lib.entrypoint
