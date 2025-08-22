@@ -15,8 +15,6 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
-from dateutil.parser import parse
-
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -42,6 +40,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import dateutil.parser as dateutil_parser
     import jinja2
     import yaml
 
@@ -50,6 +49,7 @@ if typing.TYPE_CHECKING:
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     yaml = adaptors_common.LazyImport('yaml')
+    dateutil_parser = adaptors_common.LazyImport('dateutil.parser')
 
 # Please be careful when changing this.
 # When mounting, Kubernetes changes the ownership of the parent directory
@@ -1754,7 +1754,7 @@ class PodValidator:
         :return: date.
         """
         try:
-            return parse(string).date()
+            return dateutil_parser.parse(string).date()
         except ValueError as exc:
             raise ValueError(
                 f'Failed to parse `{string}` as date object') from exc
@@ -1769,7 +1769,7 @@ class PodValidator:
         :return: datetime.
         """
         try:
-            return parse(string)
+            return dateutil_parser.parse(string)
         except ValueError as exc:
             raise ValueError(
                 f'Failed to parse `{string}` as datetime object') from exc
