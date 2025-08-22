@@ -1,17 +1,12 @@
 # pylint: skip-file
 """SkyPilot.
 
-SkyPilot is a framework for easily running machine learning* workloads on any
-cloud through a unified interface. No knowledge of cloud offerings is required
-or expected – you simply define the workload and its resource requirements, and
-SkyPilot will automatically execute it on AWS, Google Cloud Platform or
-Microsoft Azure.
+SkyPilot is a system to run, manage, and scale AI workloads on any AI
+infrastructure.
 
-*: SkyPilot is primarily targeted at machine learning workloads, but it can
-also support many general workloads. We're excited to hear about your use case
-and would love to hear more about how we can better support your requirements -
-please join us in [this
-discussion](https://github.com/skypilot-org/skypilot/discussions/1016)
+SkyPilot gives AI teams a simple interface to run jobs on any infra. Infra teams
+get a unified control plane to manage any AI compute — with advanced scheduling,
+scaling, and orchestration.
 """
 import atexit
 import io
@@ -161,7 +156,9 @@ setuptools.setup(
     author='SkyPilot Team',
     license='Apache 2.0',
     readme='README.md',
-    description='SkyPilot: Run AI on Any Infra — Unified, Faster, Cheaper.',
+    description=(
+        'SkyPilot: Run, manage, and scale AI workloads on any AI infrastructure'
+    ),
     long_description=long_description,
     long_description_content_type='text/markdown',
     setup_requires=['wheel'],

@@ -57,7 +57,9 @@ SkyPilot is a system to run, manage, and scale AI workloads on any AI infrastruc
 SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 **Infra teams** get a unified control plane to manage any AI compute — with advanced scheduling, scaling, and orchestration.
 
-![](./docs/source/images/skypilot-abstractions-long-2.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-abstractions-long-2.png" alt="SkyPilot">
+</p>
 
 ## Overview
 
@@ -96,12 +98,11 @@ pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidst
 ```
 
 <p align="center">
-  <img src="docs/source/_static/intro.gif" alt="SkyPilot">
+  <img src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/_static/intro.gif" alt="SkyPilot Gif Demo">
 </p>
 
-Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
-RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
-VMware vSphere, Nebius.
+Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Nebius, Lambda Cloud, RunPod, Fluidstack,
+Vast.ai, Cudo, Paperspace, Digital Ocean, Cloudflare, Samsung, IBM, VMware vSphere.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png">
