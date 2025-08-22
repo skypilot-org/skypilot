@@ -191,14 +191,12 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                 break
         if event_message is not None:
             if pod_status == 'Pending':
-                logger.info(event_message)
+                out_of = {}  # key: resource name, value: extra message
                 if 'Insufficient cpu' in event_message:
-                    raise config_lib.KubernetesError(
-                        _lack_resource_msg('CPU', pod, details=event_message))
+                    out_of['CPU'] = None
                 if 'Insufficient memory' in event_message:
-                    raise config_lib.KubernetesError(
-                        _lack_resource_msg('memory', pod,
-                                           details=event_message))
+                    out_of['memory'] = None
+
                 # TODO(aylei): after switching from smarter-device-manager to
                 # fusermount-server, we need a new way to check whether the
                 # fusermount-server daemonset is ready.
@@ -206,41 +204,59 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     key for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                     for key in lf.get_label_keys()
                 ]
-                if pod.spec.node_selector:
-                    for label_key in pod.spec.node_selector.keys():
-                        if label_key in gpu_lf_keys:
-                            # TODO(romilb): We may have additional node
-                            #  affinity selectors in the future - in that
-                            #  case we will need to update this logic.
-                            # TODO(Doyoung): Update the error message raised
-                            # with the multi-host TPU support.
-                            gpu_resource_key = kubernetes_utils.get_gpu_resource_key(context)  # pylint: disable=line-too-long
-                            if 'Insufficient google.com/tpu' in event_message:
-                                extra_msg = (
-                                    f'Verify if '
-                                    f'{pod.spec.node_selector[label_key]}'
-                                    ' is available in the cluster. Note '
-                                    'that multi-host TPU podslices are '
-                                    'currently not unsupported.')
-                                raise config_lib.KubernetesError(
-                                    _lack_resource_msg('TPU',
-                                                       pod,
-                                                       extra_msg,
-                                                       details=event_message))
-                            elif ((f'Insufficient {gpu_resource_key}'
-                                   in event_message) or
-                                  ('didn\'t match Pod\'s node affinity/selector'
-                                   in event_message)):
-                                extra_msg = (
-                                    f'Verify if any node matching label  '
-                                    f'{pod.spec.node_selector[label_key]} and '
-                                    f'sufficient resource {gpu_resource_key} '
-                                    f'is available in the cluster.')
-                                raise config_lib.KubernetesError(
-                                    _lack_resource_msg('GPU',
-                                                       pod,
-                                                       extra_msg,
-                                                       details=event_message))
+                for label_key in gpu_lf_keys:
+                    # TODO(romilb): We may have additional node
+                    #  affinity selectors in the future - in that
+                    #  case we will need to update this logic.
+                    # TODO(Doyoung): Update the error message raised
+                    # with the multi-host TPU support.
+                    gpu_resource_key = kubernetes_utils.get_gpu_resource_key(
+                        context)  # pylint: disable=line-too-long
+                    if ((f'Insufficient {gpu_resource_key}' in event_message) or
+                        ('didn\'t match Pod\'s node affinity/selector'
+                         in event_message) and pod.spec.node_selector):
+                        if (pod.spec.node_selector and
+                                label_key in pod.spec.node_selector):
+                            extra_msg = (
+                                f'Verify if any node matching label '
+                                f'{pod.spec.node_selector[label_key]} and '
+                                f'sufficient resource {gpu_resource_key} '
+                                f'is available in the cluster.')
+                        else:
+                            extra_msg = ''
+                        if gpu_resource_key not in out_of or out_of[
+                                gpu_resource_key] == '':
+                            out_of[f'{gpu_resource_key}'] = extra_msg
+
+            if len(out_of) > 0:
+                # We are out of some resources. We should raise an error.
+                rsrc_err_msg = 'Insufficient resource capacity on the '
+                rsrc_err_msg += 'cluster. Check resource usage by running '
+                rsrc_err_msg += 'kubectl describe nodes.\n'
+                out_of_keys = list(out_of.keys())
+                for i in range(len(out_of_keys)):
+                    rsrc = out_of_keys[i]
+                    extra_msg = out_of[rsrc]
+                    extra_msg = extra_msg if extra_msg else ''
+                    if i == len(out_of_keys) - 1:
+                        indent = '└──'
+                    else:
+                        indent = '├──'
+                    extra_msg = ' ' + extra_msg if extra_msg else ''
+                    info_msg = (
+                        ': Run sky show-gpus --cloud kubernetes to see '
+                        'the available GPUs.') if 'gpu' in rsrc.lower() else ''
+                    rsrc_err_msg += (f'{indent} Cluster out of {rsrc}'
+                                     f'{info_msg}{extra_msg}')
+                    if i != len(out_of_keys) - 1:
+                        rsrc_err_msg += '\n'
+
+                logger.warning(f'{rsrc_err_msg}')
+                raise config_lib.KubernetesError(
+                    f'{timeout_err_msg} '
+                    f'Pod status: {pod_status} '
+                    f'Details: \'{event_message}\' ')
+
             raise config_lib.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status} '
                                              f'Details: \'{event_message}\' ')
