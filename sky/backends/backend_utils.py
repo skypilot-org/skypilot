@@ -2052,8 +2052,9 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         if rc:
             raise exceptions.CommandError(
                 rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                f'Failed to check ray cluster\'s healthiness. \n'
-                f'-- stdout --\n{output}\n', stderr)
+                f'Failed to check ray cluster\'s healthiness.\n'
+                '-- stdout --\n'
+                f'{output}\n', stderr)
         return (*_count_healthy_nodes_from_ray(output), output, stderr)
 
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
@@ -2094,10 +2095,13 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                         #
                         # So we should surface a message to the user to
                         # help them recover from this inconsistent state.
-                        if (_RAY_CLUSTER_NOT_FOUND_MESSAGE in e.error_msg or
-                            (e.detailed_reason is not None and
-                             _SSH_CONNECTION_TIMED_OUT_PATTERN.search(
-                                 e.detailed_reason.strip()) is not None)):
+                        has_new_ip_addr = (
+                            e.detailed_reason is not None and
+                            _SSH_CONNECTION_TIMED_OUT_PATTERN.search(
+                                e.detailed_reason.strip()) is not None)
+                        runtime_not_setup = (_RAY_CLUSTER_NOT_FOUND_MESSAGE
+                                             in e.error_msg)
+                        if has_new_ip_addr or runtime_not_setup:
                             yellow = colorama.Fore.YELLOW
                             bright = colorama.Style.BRIGHT
                             reset = colorama.Style.RESET_ALL
