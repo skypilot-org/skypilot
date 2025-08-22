@@ -32,11 +32,9 @@ def test_ssm_public():
     """Test that ssm works with public IP addresses."""
     name = smoke_tests_utils.get_cluster_name()
     vpc = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
-    vpc_config = (
-        f'--config aws.vpc_name={vpc} '
-        f'--config aws.use_ssm=true '
-        f'--config aws.security_group_name=lloyd-airgap-gw-sg'
-    )
+    vpc_config = (f'--config aws.vpc_name={vpc} '
+                  f'--config aws.use_ssm=true '
+                  f'--config aws.security_group_name=lloyd-airgap-gw-sg')
 
     test = smoke_tests_utils.Test(
         'ssm_public',
@@ -58,12 +56,10 @@ def test_ssm_private():
     """
     name = smoke_tests_utils.get_cluster_name()
     vpc = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
-    vpc_config = (
-        f'--config aws.vpc_name={vpc} '
-        f'--config aws.use_ssm=true '
-        f'--config aws.security_group_name=lloyd-airgap-gw-sg '
-        f'--config aws.use_internal_ips=true'
-    )
+    vpc_config = (f'--config aws.vpc_name={vpc} '
+                  f'--config aws.use_ssm=true '
+                  f'--config aws.security_group_name=lloyd-airgap-gw-sg '
+                  f'--config aws.use_internal_ips=true')
 
     test = smoke_tests_utils.Test(
         'ssm_private',
