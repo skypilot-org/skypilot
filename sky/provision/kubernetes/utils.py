@@ -1682,10 +1682,10 @@ class PodValidator:
 
     @classmethod
     def validate(cls, data):
-        return cls.__validate(data, kubernetes.kubernetes.client.models.V1Pod)
+        return cls.__validate(data, kubernetes.models.V1Pod)
 
     @classmethod
-    def __validate(cls, data, klass=kubernetes.kubernetes.client.models.V1Pod):
+    def __validate(cls, data, klass):
         """Deserializes dict, list, str into an object.
 
         :param data: dict, list or str.
@@ -1709,7 +1709,7 @@ class PodValidator:
             if klass in cls.NATIVE_TYPES_MAPPING:
                 klass = cls.NATIVE_TYPES_MAPPING[klass]
             else:
-                klass = getattr(kubernetes.kubernetes.client.models, klass)
+                klass = getattr(kubernetes.models, klass)
 
         if klass in cls.PRIMITIVE_TYPES:
             return cls.__validate_primitive(data, klass)
