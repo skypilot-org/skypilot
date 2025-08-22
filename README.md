@@ -57,7 +57,10 @@ SkyPilot is a system to run, manage, and scale AI workloads on any AI infrastruc
 SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 **Infra teams** get a unified control plane to manage any AI compute — with advanced scheduling, scaling, and orchestration.
 
-![](./docs/source/images/skypilot-abstractions-long-2.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/source/images/skypilot-abstractions-long-2-dark.png">
+  <img src="./docs/source/images/skypilot-abstractions-long-2.png" alt="SkyPilot Abstractions">
+</picture>
 
 ## Overview
 
