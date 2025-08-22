@@ -108,8 +108,7 @@ _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
 _SSH_CONNECTION_TIMED_OUT_PATTERN = re.compile(r'^ssh:.*timed out$',
                                                re.IGNORECASE)
-_RAY_CLUSTER_NOT_FOUND_PATTERN = re.compile(r'.*Ray cluster is not found.*',
-                                            re.IGNORECASE)
+_RAY_CLUSTER_NOT_FOUND_MESSAGE = 'Ray cluster is not found'
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We check network connection by going through _TEST_IP_LIST. We may need to
@@ -2095,8 +2094,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                         #
                         # So we should surface a message to the user to
                         # help them recover from this inconsistent state.
-                        if (_RAY_CLUSTER_NOT_FOUND_PATTERN.search(
-                                e.error_msg) is not None or
+                        if (_RAY_CLUSTER_NOT_FOUND_MESSAGE in e.error_msg or
                             (e.detailed_reason is not None and
                              _SSH_CONNECTION_TIMED_OUT_PATTERN.search(
                                  e.detailed_reason.strip()) is not None)):
