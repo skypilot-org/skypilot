@@ -7,6 +7,7 @@ import pydantic
 
 from sky import models
 from sky.server import common
+from sky.skylet import job_lib
 from sky.utils import status_lib
 
 
@@ -130,7 +131,7 @@ class ClusterJobRecord(ResponseBaseModel):
     start_at: float
     end_at: float
     resources: str
-    status: str
+    status: job_lib.JobStatus
     log_path: str
 
 
