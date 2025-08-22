@@ -126,9 +126,9 @@ class ClusterJobRecord(ResponseBaseModel):
     job_name: str
     username: str
     user_hash: str
-    submitted_at: int
-    start_at: int
-    end_at: int
+    submitted_at: float
+    start_at: float
+    end_at: float
     resources: str
     status: str
     log_path: str

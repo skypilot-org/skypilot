@@ -1284,8 +1284,8 @@ def queue(
         The request ID of the queue request.
 
     Request Returns:
-        job_records (List[responses.ClusterJobRecord]): A list of dicts for each job in the
-            queue.
+        job_records (List[responses.ClusterJobRecord]): A list of job records
+            for each job in the queue.
 
             .. code-block:: python
 
