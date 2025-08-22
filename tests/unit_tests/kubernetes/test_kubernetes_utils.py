@@ -475,7 +475,6 @@ spec:
         if expected_is_valid:
             assert error_msg is None
         else:
-            print(f'Error message: {error_msg}')
             assert error_msg is not None
             if expected_error_msg:
                 assert expected_error_msg in error_msg
