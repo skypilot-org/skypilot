@@ -379,29 +379,25 @@ def test_insufficient_resources_msg(monkeypatch):
     kubernetes_cloud.is_same_cloud = mock.MagicMock()
     kubernetes_cloud.is_same_cloud.return_value = True
 
-    monkeypatch.setattr(
-        clouds, 'Kubernetes', lambda *args, **kwargs: kubernetes_cloud
-    )
+    monkeypatch.setattr(clouds, 'Kubernetes',
+                        lambda *args, **kwargs: kubernetes_cloud)
 
     requested_resources_str = f'{requested_resources}'
     assert (
         retrying_vm_prosioner._insufficient_resources_msg(
-            to_provision, requested_resources, insufficient_resources
-        )
-        == f'Failed to acquire resources (CPUs, Memory) in {zone} for {requested_resources_str}. '
+            to_provision, requested_resources, insufficient_resources) ==
+        f'Failed to acquire resources (CPUs, Memory) in {zone} for {requested_resources_str}. '
     )
 
     assert (
         retrying_vm_prosioner._insufficient_resources_msg(
-            to_provision, requested_resources, None
-        )
-        == f'Failed to acquire resources in {zone} for {requested_resources_str}. '
+            to_provision, requested_resources, None) ==
+        f'Failed to acquire resources in {zone} for {requested_resources_str}. '
     )
 
     to_provision.zone = None
     assert (
         retrying_vm_prosioner._insufficient_resources_msg(
-            to_provision, requested_resources, insufficient_resources
-        )
-        == f'Failed to acquire resources (CPUs, Memory) in context {region} for {requested_resources_str}. '
+            to_provision, requested_resources, insufficient_resources) ==
+        f'Failed to acquire resources (CPUs, Memory) in context {region} for {requested_resources_str}. '
     )

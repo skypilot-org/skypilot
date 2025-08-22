@@ -1353,16 +1353,13 @@ class RetryingVmProvisioner(object):
         requested_resources: Set[resources_lib.Resources],
         insufficient_resources: Optional[List[str]],
     ) -> str:
-        insufficent_resource_msg = (
-            ''
-            if insufficient_resources is None
-            else ' (' + ', '.join(insufficient_resources) + ')'
-        )
+        insufficent_resource_msg = ('' if insufficient_resources is None else
+                                    ' (' + ', '.join(insufficient_resources) +
+                                    ')')
         if to_provision.zone is not None:
             message = (
                 f'Failed to acquire resources{insufficent_resource_msg} in '
-                f'{to_provision.zone} for {requested_resources}. '
-            )
+                f'{to_provision.zone} for {requested_resources}. ')
         elif to_provision.region is not None and to_provision.cloud is not None:
             # For public clouds, provision.region is always set.
             if clouds.SSH().is_same_cloud(to_provision.cloud):
@@ -1370,25 +1367,21 @@ class RetryingVmProvisioner(object):
                     f'Failed to acquire resources{insufficent_resource_msg} '
                     f'in SSH Node Pool ({to_provision.region.lstrip("ssh-")}) '
                     f'for {requested_resources}. The SSH Node Pool may not '
-                    'have enough resources.'
-                )
+                    'have enough resources.')
             elif clouds.Kubernetes().is_same_cloud(to_provision.cloud):
                 message = (
                     f'Failed to acquire resources{insufficent_resource_msg} '
                     f'in context {to_provision.region} for '
-                    f'{requested_resources}. '
-                )
+                    f'{requested_resources}. ')
             else:
                 message = (
                     f'Failed to acquire resources{insufficent_resource_msg} '
                     f'in all zones in {to_provision.region} for '
-                    f'{requested_resources}. '
-                )
+                    f'{requested_resources}. ')
         else:
             message = (
                 f'Failed to acquire resources{insufficent_resource_msg} in '
-                f'{to_provision.cloud} for {requested_resources}. '
-            )
+                f'{to_provision.cloud} for {requested_resources}. ')
         return message
 
     def _retry_zones(
@@ -1698,8 +1691,7 @@ class RetryingVmProvisioner(object):
                     #  blocking strategy. See '_update_blocklist_on_error'
                     #  for details.
                     FailoverCloudErrorHandlerV2.update_blocklist_on_error(
-                        self._blocked_resources, to_provision, region, zones, e
-                    )
+                        self._blocked_resources, to_provision, region, zones, e)
                     continue
                 except Exception as e:  # pylint: disable=broad-except
                     # NOTE: We try to cleanup the cluster even if the previous
@@ -1831,9 +1823,9 @@ class RetryingVmProvisioner(object):
                                                  terminate=terminate_or_stop,
                                                  remove_from_db=False)
 
-        message = self._insufficient_resources_msg(
-            to_provision, requested_resources, insufficient_resources
-        )
+        message = self._insufficient_resources_msg(to_provision,
+                                                   requested_resources,
+                                                   insufficient_resources)
         # Do not failover to other locations if the cluster was ever up, since
         # the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
