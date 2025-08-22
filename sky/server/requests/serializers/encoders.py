@@ -92,10 +92,13 @@ def encode_start(resource_handle: 'backends.CloudVmRayResourceHandle') -> str:
 
 
 @register_encoder('queue')
-def encode_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
+def encode_queue(jobs: List[responses.ClusterJobRecord],) -> List[Dict[str, Any]]:
+    response = []
     for job in jobs:
-        job['status'] = job['status'].value
-    return jobs
+        response_job = job.model_dump()
+        response_job['status'] = job['status'].value
+        response.append(response_job)
+    return response
 
 
 @register_encoder('status_kubernetes')
