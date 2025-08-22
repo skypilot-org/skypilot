@@ -1513,6 +1513,14 @@ def endpoints(
 ) -> server_common.RequestId[Dict[int, str]]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
+    Example:
+        .. code-block:: python
+
+            import sky
+            request_id = sky.endpoints('test-cluster')
+            sky.get(request_id)
+
+
     Args:
         cluster: The name of the cluster.
         port: The port number to get the endpoint for. If None, endpoints
@@ -1522,8 +1530,9 @@ def endpoints(
         The request ID of the endpoints request.
 
     Request Returns:
-        A dictionary of port numbers to endpoints. If port is None,
-        the dictionary will contain all ports:endpoints exposed on the cluster.
+        A dictionary of port numbers to endpoints.
+        If port is None, the dictionary contains all
+            ports:endpoints exposed on the cluster.
 
     Request Raises:
         ValueError: if the cluster is not UP or the endpoint is not exposed.
