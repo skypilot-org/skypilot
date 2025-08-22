@@ -593,10 +593,9 @@ async def endpoints(
       and port number."""
     request_id = await context_utils.to_thread(sdk.endpoints, cluster, port)
     if stream_logs is not None:
-        result = await _stream_and_get(request_id, stream_logs)
+        return await _stream_and_get(request_id, stream_logs)
     else:
-        result = await get(request_id)
-    return result
+        return await get(request_id)
 
 
 @usage_lib.entrypoint

@@ -2,7 +2,7 @@
 import base64
 import pickle
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import jobs as managed_jobs
 from sky import models

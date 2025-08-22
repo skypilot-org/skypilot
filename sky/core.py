@@ -258,9 +258,8 @@ all_clusters, unmanaged_clusters, all_jobs, context
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
-def endpoints(
-    cluster: str,
-    port: Optional[Union[int, str]] = None) -> Dict[int, str]:
+def endpoints(cluster: str,
+              port: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -280,7 +279,6 @@ def endpoints(
             ux_utils.spinner_message(
                 f'Fetching endpoints for cluster {cluster}')):
         result = backend_utils.get_endpoints(cluster=cluster, port=port)
-
         return result
 
 
