@@ -14,7 +14,7 @@ import filelock
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky.server.common import crypt_ctx
+from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import permission
@@ -86,7 +86,7 @@ async def user_create(user_create_body: payloads.UserCreateBody) -> None:
         role = rbac.get_default_role()
 
     # Create user
-    password_hash = crypt_ctx.hash(password)
+    password_hash = server_common.crypt_ctx.hash(password)
     user_hash = hashlib.md5(
         username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     with _user_lock(user_hash):
@@ -146,7 +146,7 @@ async def user_update(request: fastapi.Request,
 
     with _user_lock(user_info.id):
         if password:
-            password_hash = crypt_ctx.hash(password)
+            password_hash = server_common.crypt_ctx.hash(password)
             global_user_state.add_or_update_user(
                 models.User(id=user_info.id,
                             name=user_info.name,
@@ -272,12 +272,12 @@ async def user_import(
                 continue
 
             # Check if password is already hashed
-            if crypt_ctx.identify(password) is not None:
+            if server_common.crypt_ctx.identify(password) is not None:
                 # Password is already hashed, use it directly
                 password_hash = password
             else:
                 # Password is plain text, hash it
-                password_hash = crypt_ctx.hash(password)
+                password_hash = server_common.crypt_ctx.hash(password)
 
             user_hash = hashlib.md5(
                 username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]

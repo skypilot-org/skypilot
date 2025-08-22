@@ -7,7 +7,7 @@ import fastapi
 import pytest
 
 from sky import models
-from sky.server.common import crypt_ctx
+from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import rbac
@@ -210,7 +210,7 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert crypt_ctx.identify(user_obj.password) is not None
+        assert server_common.crypt_ctx.identify(user_obj.password) is not None
         assert user_obj.password != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
@@ -381,7 +381,7 @@ class TestUsersEndpoints:
         args, kwargs = mock_add_or_update_user.call_args
         user_obj = args[0]
         assert user_obj.name == 'alice'
-        assert crypt_ctx.identify(user_obj.password) is not None
+        assert server_common.crypt_ctx.identify(user_obj.password) is not None
         assert user_obj.password != password
 
     @mock.patch('sky.global_user_state.get_user_by_name')
@@ -516,7 +516,7 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert crypt_ctx.identify(user_obj.password) is not None
+        assert server_common.crypt_ctx.identify(user_obj.password) is not None
         assert user_obj.password != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
@@ -554,7 +554,7 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert crypt_ctx.identify(user_obj.password) is not None
+        assert server_common.crypt_ctx.identify(user_obj.password) is not None
         assert user_obj.password != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
@@ -679,7 +679,7 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert crypt_ctx.identify(user_obj.password) is not None
+        assert server_common.crypt_ctx.identify(user_obj.password) is not None
         assert user_obj.password != new_password
 
     @mock.patch('sky.global_user_state.get_user')
