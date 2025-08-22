@@ -3,6 +3,7 @@ import copy
 import datetime
 import json
 import re
+import sys
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -191,11 +192,15 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                 break
         if event_message is not None:
             if pod_status == 'Pending':
-                out_of = {}  # key: resource name, value: extra message
+                out_of = {}
+                # key: resource name, value: (extra message, nice name)
                 if 'Insufficient cpu' in event_message:
-                    out_of['CPU'] = None
+                    out_of['CPU'] = (': Run `kubectl get nodes -o '
+                                     'custom-columns=NAME:.metadata.name,'
+                                     'CPU:.status.allocatable.cpu` to check '
+                                     'the available CPUs on the node.', 'CPUs')
                 if 'Insufficient memory' in event_message:
-                    out_of['memory'] = None
+                    out_of['memory'] = (None, 'Memory')
 
                 # TODO(aylei): after switching from smarter-device-manager to
                 # fusermount-server, we need a new way to check whether the
@@ -215,6 +220,12 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     if ((f'Insufficient {gpu_resource_key}' in event_message) or
                         ('didn\'t match Pod\'s node affinity/selector'
                          in event_message) and pod.spec.node_selector):
+                        if 'gpu' in gpu_resource_key.lower():
+                            info_msg = (
+                                ': Run sky show-gpus --infra kubernetes to see '
+                                'the available GPUs.')
+                        else:
+                            info_msg = ': '
                         if (pod.spec.node_selector and
                                 label_key in pod.spec.node_selector):
                             extra_msg = (
@@ -222,36 +233,45 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                                 f'{pod.spec.node_selector[label_key]} and '
                                 f'sufficient resource {gpu_resource_key} '
                                 f'is available in the cluster.')
+                            extra_msg = info_msg + ' ' + extra_msg
                         else:
-                            extra_msg = ''
-                        if gpu_resource_key not in out_of or out_of[
-                                gpu_resource_key] == '':
-                            out_of[f'{gpu_resource_key}'] = extra_msg
+                            extra_msg = info_msg
+                        if gpu_resource_key not in out_of or len(
+                                out_of[gpu_resource_key][0]) < len(extra_msg):
+                            out_of[f'{gpu_resource_key}'] = (extra_msg, 'GPUs')
 
             if len(out_of) > 0:
                 # We are out of some resources. We should raise an error.
                 rsrc_err_msg = 'Insufficient resource capacity on the '
-                rsrc_err_msg += 'cluster. Check resource usage by running '
-                rsrc_err_msg += 'kubectl describe nodes.\n'
+                rsrc_err_msg += 'cluster:\n'
                 out_of_keys = list(out_of.keys())
                 for i in range(len(out_of_keys)):
                     rsrc = out_of_keys[i]
-                    extra_msg = out_of[rsrc]
+                    (extra_msg, nice_name) = out_of[rsrc]
                     extra_msg = extra_msg if extra_msg else ''
                     if i == len(out_of_keys) - 1:
                         indent = '└──'
                     else:
                         indent = '├──'
-                    extra_msg = ' ' + extra_msg if extra_msg else ''
-                    info_msg = (
-                        ': Run sky show-gpus --cloud kubernetes to see '
-                        'the available GPUs.') if 'gpu' in rsrc.lower() else ''
-                    rsrc_err_msg += (f'{indent} Cluster out of {rsrc}'
-                                     f'{info_msg}{extra_msg}')
+                    rsrc_err_msg += (f'{indent} Cluster does not have '
+                                     f'sufficient {nice_name} for your request'
+                                     f'{extra_msg}')
                     if i != len(out_of_keys) - 1:
                         rsrc_err_msg += '\n'
 
-                logger.warning(f'{rsrc_err_msg}')
+                # Emit the error message without logging prefixes for better UX.
+                tmp_handler = sky_logging.EnvAwareHandler(sys.stdout)
+                tmp_handler.flush = sys.stdout.flush
+                tmp_handler.setFormatter(sky_logging.NO_PREFIX_FORMATTER)
+                tmp_handler.setLevel(sky_logging.ERROR)
+                prev_propagate = logger.propagate
+                try:
+                    logger.addHandler(tmp_handler)
+                    logger.propagate = False
+                    logger.error(ux_utils.error_message(f'{rsrc_err_msg}'))
+                finally:
+                    logger.removeHandler(tmp_handler)
+                    logger.propagate = prev_propagate
                 raise config_lib.KubernetesError(
                     f'{timeout_err_msg} '
                     f'Pod status: {pod_status} '
