@@ -32,19 +32,22 @@ def test_ssm_public():
     """Test that ssm works with public IP addresses."""
     name = smoke_tests_utils.get_cluster_name()
     vpc = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
-    vpc_config = f'--config aws.vpc_name={vpc} ' \
-        f'--config aws.use_ssm=true ' \
+    vpc_config = (
+        f'--config aws.vpc_name={vpc} '
+        f'--config aws.use_ssm=true '
         f'--config aws.security_group_name=lloyd-airgap-gw-sg'
+    )
 
     test = smoke_tests_utils.Test(
         'ssm_public',
         [
-            f'export s=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml)',
-        ] + list(smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT_EXPORTED),
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+        ],
         teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('aws'),
     )
     smoke_tests_utils.run_one_test(test)
+
 
 @pytest.mark.aws
 def test_ssm_private():
@@ -55,20 +58,19 @@ def test_ssm_private():
     """
     name = smoke_tests_utils.get_cluster_name()
     vpc = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
-    vpc_config = f'--config aws.vpc_name={vpc} ' \
-        f'--config aws.use_ssm=true ' \
-        f'--config aws.security_group_name=lloyd-airgap-gw-sg ' \
+    vpc_config = (
+        f'--config aws.vpc_name={vpc} '
+        f'--config aws.use_ssm=true '
+        f'--config aws.security_group_name=lloyd-airgap-gw-sg '
         f'--config aws.use_internal_ips=true'
+    )
 
     test = smoke_tests_utils.Test(
         'ssm_private',
         [
-            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
         ],
         teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('aws'),
     )
-    outputs = smoke_tests_utils.run_one_test(test)
-    for output in outputs:
-        print(output)
     smoke_tests_utils.run_one_test(test)
