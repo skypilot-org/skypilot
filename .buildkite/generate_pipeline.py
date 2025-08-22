@@ -116,6 +116,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--helm-version')
     parser.add_argument('--helm-package')
     parser.add_argument('--jobs-consolidation', action="store_true")
+    parser.add_argument('--grpc', action="store_true")
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
