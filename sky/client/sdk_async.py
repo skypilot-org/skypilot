@@ -523,11 +523,11 @@ async def autostop(
 @usage_lib.entrypoint
 @annotations.client_api
 async def queue(
-        cluster_name: str,
-        skip_finished: bool = False,
-        all_users: bool = False,
-        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> List[dict]:
+    cluster_name: str,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> List[responses.ClusterJobRecord]:
     """Async version of queue() that gets the job queue of a cluster."""
     request_id = await context_utils.to_thread(sdk.queue, cluster_name,
                                                skip_finished, all_users)
