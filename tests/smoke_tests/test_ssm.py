@@ -7,24 +7,8 @@
 # Terminate failed clusters after test finishes
 # > pytest tests/smoke_tests/test_ssm.py --terminate-on-failure
 
-from ast import Name
-import json
-import os
-import pathlib
-import subprocess
-import sys
-import tempfile
-import textwrap
-import time
-
 import pytest
 from smoke_tests import smoke_tests_utils
-
-import sky
-from sky import skypilot_config
-from sky.skylet import constants
-from sky.skylet import events
-from sky.utils import common_utils
 
 
 @pytest.mark.aws
