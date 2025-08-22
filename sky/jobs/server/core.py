@@ -1,11 +1,9 @@
 """SDK functions for managed jobs."""
-import ipaddress
 import os
 import pathlib
 import tempfile
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
-from urllib import parse as urlparse
 import uuid
 
 import colorama
@@ -190,7 +188,6 @@ def launch(
 
     dag_uuid = str(uuid.uuid4().hex[:4])
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
@@ -204,21 +201,6 @@ def launch(
     # TODO(aylei): use consolidated job controller instead of performing
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
-
-    # If there is a local postgres db, when the api server tries launching on
-    # the remote jobs controller it will fail. therefore, we should remove this
-    # before sending the config to the jobs controller.
-    # TODO(luca) there are a lot of potential problems with postgres being sent
-    # to the jobs controller. for example if the postgres is whitelisted to
-    # only the API server, this will then break. the simple solution to that is
-    # telling the user to add the jobs controller to the postgres whitelist.
-    if not managed_job_utils.is_consolidation_mode():
-        db_path = mutated_user_config.get('db', None)
-        if db_path is not None:
-            parsed = urlparse.urlparse(db_path)
-            if ((parsed.hostname == 'localhost' or
-                 ipaddress.ip_address(parsed.hostname).is_loopback)):
-                mutated_user_config.pop('db', None)
 
     user_dag_str_user_specified = dag_utils.dump_chain_dag_to_yaml_str(
         dag, use_user_specified_yaml=True)
@@ -442,8 +424,10 @@ def launch(
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
                     # Dump script for high availability recovery.
-                    managed_job_state.set_ha_recovery_script(
-                        consolidation_mode_job_id, run_script)
+                    if controller_utils.high_availability_specified(
+                            controller_name):
+                        managed_job_state.set_ha_recovery_script(
+                            consolidation_mode_job_id, run_script)
                     backend.run_on_head(local_handle, run_script)
                     return consolidation_mode_job_id, local_handle
 
