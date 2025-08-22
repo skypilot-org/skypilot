@@ -64,6 +64,12 @@ Clusters SDK
 .. autofunction:: sky.autostop
   :noindex:
 
+``sky.endpoints``
+~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.endpoints
+  :noindex:
+
 
 Jobs SDK
 --------
