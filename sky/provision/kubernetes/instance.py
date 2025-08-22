@@ -272,10 +272,13 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                 finally:
                     logger.removeHandler(tmp_handler)
                     logger.propagate = prev_propagate
+                nice_names = [out_of[rsrc][1] for rsrc in out_of_keys]
                 raise config_lib.KubernetesError(
                     f'{timeout_err_msg} '
                     f'Pod status: {pod_status} '
-                    f'Details: \'{event_message}\' ')
+                    f'Details: \'{event_message}\' ',
+                    insufficent_resources=nice_names,
+                )
 
             raise config_lib.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status} '

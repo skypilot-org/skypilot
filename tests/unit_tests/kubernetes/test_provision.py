@@ -5,6 +5,9 @@ from unittest import mock
 
 import pytest
 
+from sky import clouds
+from sky import resources
+from sky.backends import cloud_vm_ray_backend
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import instance
 from sky.provision.kubernetes.instance import logger
@@ -330,3 +333,75 @@ def test_out_of_memory(monkeypatch):
         1] == '└── Cluster does not have sufficient Memory for your request'
 
     assert len(error_output) == 2
+
+
+def test_insufficient_resources_msg(monkeypatch):
+    """Test to check if the error message is correct when there is only CPU resource shortage."""
+
+    monkeypatch.setattr(
+        cloud_vm_ray_backend.RetryingVmProvisioner,
+        '__init__',
+        lambda *args, **kwargs: None,
+    )
+
+    retrying_vm_prosioner = cloud_vm_ray_backend.RetryingVmProvisioner(
+        log_dir=None,
+        dag=None,
+        optimize_target=None,
+        requested_features=None,
+        local_wheel_path=None,
+        wheel_hash=None,
+    )
+
+    zone = "Test Zone"
+    region = "Test Region"
+    cloud = "Test Cloud"
+    requested_resources = mock.MagicMock()
+    insufficient_resources = mock.MagicMock()
+
+    to_provision = mock.MagicMock()
+    to_provision.zone = zone
+    to_provision.region = region
+    to_provision.cloud = cloud
+
+    num_cpus = 10
+    num_memory = 10
+    requested_resources = resources.Resources(cpus=num_cpus, memory=num_memory)
+    insufficient_resources = ["CPUs", "Memory"]
+
+    ssh_cloud = mock.MagicMock()
+    ssh_cloud.is_same_cloud = mock.MagicMock()
+    ssh_cloud.is_same_cloud.return_value = False
+
+    monkeypatch.setattr(clouds, 'SSH', lambda *args, **kwargs: ssh_cloud)
+
+    kubernetes_cloud = mock.MagicMock()
+    kubernetes_cloud.is_same_cloud = mock.MagicMock()
+    kubernetes_cloud.is_same_cloud.return_value = True
+
+    monkeypatch.setattr(
+        clouds, 'Kubernetes', lambda *args, **kwargs: kubernetes_cloud
+    )
+
+    requested_resources_str = f'{requested_resources}'
+    assert (
+        retrying_vm_prosioner._insufficient_resources_msg(
+            to_provision, requested_resources, insufficient_resources
+        )
+        == f'Failed to acquire resources (CPUs, Memory) in {zone} for {requested_resources_str}. '
+    )
+
+    assert (
+        retrying_vm_prosioner._insufficient_resources_msg(
+            to_provision, requested_resources, None
+        )
+        == f'Failed to acquire resources in {zone} for {requested_resources_str}. '
+    )
+
+    to_provision.zone = None
+    assert (
+        retrying_vm_prosioner._insufficient_resources_msg(
+            to_provision, requested_resources, insufficient_resources
+        )
+        == f'Failed to acquire resources (CPUs, Memory) in context {region} for {requested_resources_str}. '
+    )
