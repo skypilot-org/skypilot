@@ -195,9 +195,9 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                 out_of = {}
                 # key: resource name, value: (extra message, nice name)
                 if 'Insufficient cpu' in event_message:
-                    out_of['CPU'] = (': Run `kubectl get nodes -o '
+                    out_of['CPU'] = (': Run \'kubectl get nodes -o '
                                      'custom-columns=NAME:.metadata.name,'
-                                     'CPU:.status.allocatable.cpu` to check '
+                                     'CPU:.status.allocatable.cpu\' to check '
                                      'the available CPUs on the node.', 'CPUs')
                 if 'Insufficient memory' in event_message:
                     out_of['memory'] = (None, 'Memory')
