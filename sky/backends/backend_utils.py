@@ -106,6 +106,9 @@ _LAUNCHED_RESERVED_WORKER_PATTERN = re.compile(
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
+_SSH_CONNECTION_TIMED_OUT_PATTERN = re.compile(r'^ssh:.*timed out$',
+                                               re.IGNORECASE)
+_RAY_CLUSTER_NOT_FOUND_MESSAGE = 'Ray cluster is not found'
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We check network connection by going through _TEST_IP_LIST. We may need to
@@ -2047,11 +2050,11 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             require_outputs=True,
             separate_stderr=True)
         if rc:
-            raise RuntimeError(
-                f'Refreshing status ({cluster_name!r}): Failed to check '
-                f'ray cluster\'s healthiness with '
-                f'{instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
-                f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
+            raise exceptions.CommandError(
+                rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                f'Failed to check ray cluster\'s healthiness.\n'
+                '-- stdout --\n'
+                f'{output}\n', stderr)
         return (*_count_healthy_nodes_from_ray(output), output, stderr)
 
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
@@ -2082,10 +2085,34 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                 try:
                     ready_head, ready_workers, output, stderr = (
                         get_node_counts_from_ray_status(head_runner))
-                except RuntimeError as e:
+                except exceptions.CommandError as e:
                     logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
                                  f' {i}: {common_utils.format_exception(e)}')
                     if cloud_name != 'kubernetes':
+                        # Non-k8s clusters can be manually restarted and:
+                        # 1. Get new IP addresses, or
+                        # 2. Not have the SkyPilot runtime setup
+                        #
+                        # So we should surface a message to the user to
+                        # help them recover from this inconsistent state.
+                        has_new_ip_addr = (
+                            e.detailed_reason is not None and
+                            _SSH_CONNECTION_TIMED_OUT_PATTERN.search(
+                                e.detailed_reason.strip()) is not None)
+                        runtime_not_setup = (_RAY_CLUSTER_NOT_FOUND_MESSAGE
+                                             in e.error_msg)
+                        if has_new_ip_addr or runtime_not_setup:
+                            yellow = colorama.Fore.YELLOW
+                            bright = colorama.Style.BRIGHT
+                            reset = colorama.Style.RESET_ALL
+                            ux_utils.console_newline()
+                            logger.warning(
+                                f'{yellow}Failed getting cluster status despite all nodes '
+                                f'being up ({cluster_name!r}). '
+                                f'If the cluster was restarted manually, try running: '
+                                f'{reset}{bright}sky start {cluster_name}{reset} '
+                                f'{yellow}to recover from INIT status.{reset}')
+                            return False
                         raise e
                     # We retry for kubernetes because coreweave can have a
                     # transient network issue.
