@@ -1788,15 +1788,24 @@ class PodValidator:
             return data
 
         kwargs = {}
-        if (data is not None and klass.openapi_types is not None and
-                isinstance(data, (list, dict))):
-            rev = {v: k for k, v in klass.attribute_map.items()}
-            for k, v in data.items():
-                if k in rev:
-                    kwargs[rev[k]] = cls.__validate(v,
-                                                    klass.openapi_types[rev[k]])
-                else:
-                    raise ValueError(f'Unknown field: {k}')
+        try:
+            if (data is not None and klass.openapi_types is not None and
+                    isinstance(data, (list, dict))):
+                # attribute_map is a dict that maps field names in snake_case
+                # to camelCase.
+                reverse_attribute_map = {
+                    v: k for k, v in klass.attribute_map.items()
+                }
+                for k, v in data.items():
+                    field_name = reverse_attribute_map.get(k, None)
+                    if field_name is None:
+                        raise ValueError('Unknown field')
+                    kwargs[field_name] = cls.__validate(
+                        v, klass.openapi_types[field_name])
+        except exceptions.KubeValidationError as e:
+            raise exceptions.KubeValidationError([k] + e.path, str(e)) from e
+        except Exception as e:
+            raise exceptions.KubeValidationError([k], str(e)) from e
 
         instance = klass(**kwargs)
 
@@ -1808,9 +1817,15 @@ class PodValidator:
 
 def check_pod_config(pod_config: dict) \
     -> Tuple[bool, Optional[str]]:
-    """Check if the pod_config is a valid pod config
+    """Check if the pod_config is a valid pod config.
 
-    Using deserialize api to check the pod_config is valid or not.
+    Uses the deserialize API from the kubernetes client library.
+
+    This is a client-side validation, meant to catch common errors like
+    unknown/misspelled fields, and missing required fields.
+
+    The full validation however is done later on by the Kubernetes API server
+    when the pod creation request is sent.
 
     Returns:
         bool: True if pod_config is valid.
@@ -1818,8 +1833,10 @@ def check_pod_config(pod_config: dict) \
     """
     try:
         PodValidator.validate(pod_config)
+    except exceptions.KubeValidationError as e:
+        return False, f'Validation error in {".".join(e.path)}: {str(e)}'
     except Exception as e:  # pylint: disable=broad-except
-        return False, f'Validation error: {str(e)}'
+        return False, f'Unexpected error: {str(e)}'
     return True, None
 
 

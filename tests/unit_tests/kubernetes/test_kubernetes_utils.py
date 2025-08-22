@@ -4,11 +4,14 @@
 
 import os
 import tempfile
+from typing import Optional
+import unittest
 from unittest import mock
 from unittest.mock import patch
 
 import kubernetes
 import pytest
+import yaml
 
 from sky import exceptions
 from sky import models
@@ -439,3 +442,485 @@ def test_should_exclude_pod_from_gpu_allocation():
     assert utils.should_exclude_pod_from_gpu_allocation(
         mock_regular_pod) == False
     assert utils.should_exclude_pod_from_gpu_allocation(mock_other_pod) == False
+
+
+class TestCheckPodConfig(unittest.TestCase):
+    """Unit tests for check_pod_config."""
+
+    # apiVersion: v1 and kind: Pod are not required, since
+    # we are just validating the metadata and spec fields.
+    MINIMAL_POD_BASE = '''
+metadata:
+  name: test-pod
+spec:
+  containers:
+  - name: default-container
+    image: alpine:latest'''
+
+    def _check_pod_config(self,
+                          yaml_string: str,
+                          expected_is_valid: bool,
+                          expected_error_msg: Optional[str] = None):
+        """Helper method to test pod config validation.
+
+        Args:
+            yaml_string: YAML string to validate
+            expected_is_valid: Expected validation result
+            expected_error_msg: Expected error message (if any). If provided, checks that this string is contained in the error message.
+        """
+        pod_dict = yaml.safe_load(yaml_string)
+        is_valid, error_msg = utils.check_pod_config(pod_dict)
+        assert is_valid == expected_is_valid
+
+        if expected_is_valid:
+            assert error_msg is None
+        else:
+            print(f'Error message: {error_msg}')
+            assert error_msg is not None
+            if expected_error_msg:
+                assert expected_error_msg in error_msg
+
+    def test_minimal_valid_pod(self):
+        """Test with minimal valid pod configuration."""
+        self._check_pod_config(self.MINIMAL_POD_BASE, True)
+
+    def test_invalid_pod_spec_field_name(self):
+        """Test with invalid pod spec field names."""
+        # Potential user typo: volume instead of volumes
+        invalid_pod_spec_field = f'''
+{self.MINIMAL_POD_BASE}
+  volume: some-value'''
+
+        self._check_pod_config(
+            invalid_pod_spec_field,
+            False,
+            expected_error_msg='Validation error in spec.volume: Unknown field')
+
+    def test_invalid_container_spec_field_name(self):
+        """Test with invalid container field names."""
+        # Potential user typo: arg instead of args
+        invalid_container_field = f'''
+{self.MINIMAL_POD_BASE}
+    arg: ['hello']'''
+
+        self._check_pod_config(
+            invalid_container_field,
+            False,
+            expected_error_msg=
+            'Validation error in spec.containers.arg: Unknown field')
+
+    def test_invalid_metadata_field_name(self):
+        """Test with invalid metadata field names."""
+        invalid_metadata_field = '''
+metadata:
+  name: invalid-metadata-pod
+  invalidMetadataField: invalid-value
+spec:
+  containers:
+  - name: container
+    image: alpine:latest'''
+
+        self._check_pod_config(
+            invalid_metadata_field,
+            False,
+            expected_error_msg=
+            'Validation error in metadata.invalidMetadataField: Unknown field')
+
+    def test_missing_required_container_name(self):
+        """Test with missing required container name."""
+        # `name` is required by V1Container
+        container_without_name = '''
+spec:
+  containers:
+  - image: alpine:latest
+'''
+
+        self._check_pod_config(
+            container_without_name,
+            False,
+            expected_error_msg=
+            'Validation error in spec.containers: Invalid value for `name`')
+
+    def test_missing_required_volume_name(self):
+        """Test with missing required volume name."""
+        # `name` is required by V1Volume
+        volume_without_name = f'''
+{self.MINIMAL_POD_BASE}
+  volumes:
+  - persistentVolumeClaim:
+      claimName: my-pvc
+'''
+
+        self._check_pod_config(
+            volume_without_name,
+            False,
+            expected_error_msg=
+            'Validation error in spec.volumes: Invalid value for `name`')
+
+    def test_missing_required_container_env_name(self):
+        """Test with missing required container env name."""
+        # `name` is required by V1EnvVar
+        container_without_env_name = f'''
+{self.MINIMAL_POD_BASE}
+spec:
+  containers:
+  - name: default-container
+    image: alpine:latest
+    env:
+    - value: some-value
+'''
+
+        self._check_pod_config(
+            container_without_env_name,
+            False,
+            expected_error_msg=
+            'Validation error in spec.containers.env: Invalid value for `name`')
+
+    def test_missing_optional_container_image(self):
+        """Test with missing optional container image."""
+        # `image` is optional in V1Container
+        container_without_image = '''
+spec:
+  containers:
+  - name: test-container'''
+        self._check_pod_config(container_without_image, True)
+
+    def test_spec_without_containers(self):
+        """Test with spec without containers."""
+        spec_without_containers = '''
+spec: {}'''
+
+        self._check_pod_config(
+            spec_without_containers,
+            False,
+            expected_error_msg=
+            'Validation error in spec: Invalid value for `containers`')
+
+    def test_valid_field_invalid_type(self):
+        """Test with valid field but invalid type.
+
+        This won't be caught by the client-side validation, but will be
+        caught later on by the Kubernetes API server in run_instances.
+        """
+        valid_field_invalid_type = f'''
+{self.MINIMAL_POD_BASE}
+    readinessProbe: hello
+'''
+        self._check_pod_config(valid_field_invalid_type, True)
+
+    def test_comprehensive_pod_features(self):
+        """Test pod with comprehensive Kubernetes features."""
+        comprehensive_pod_config = '''
+metadata:
+  name: comprehensive-test-pod
+  namespace: test-namespace
+  labels:
+    app: comprehensive-app
+    version: v2.0
+    tier: backend
+  annotations:
+    description: "Comprehensive pod testing all Kubernetes features"
+    scheduler.alpha.kubernetes.io/critical-pod: ""
+    container.apparmor.security.beta.kubernetes.io/gpu-container: runtime/default
+    k8s.v1.cni.cncf.io/networks: macvlan-conf
+spec:
+  restartPolicy: OnFailure
+  terminationGracePeriodSeconds: 60
+  activeDeadlineSeconds: 3600
+  priorityClassName: high-priority
+  priority: 1000
+  serviceAccountName: comprehensive-service-account
+  automountServiceAccountToken: true
+  hostNetwork: false
+  hostPID: false
+  hostIPC: false
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: false
+  shareProcessNamespace: false
+  dnsConfig:
+    nameservers:
+    - 8.8.8.8
+    - 8.8.4.4
+    searches:
+    - example.com
+    - cluster.local
+    options:
+    - name: ndots
+      value: "2"
+  hostAliases:
+  - ip: "192.168.1.100"
+    hostnames:
+    - "example.com"
+  imagePullSecrets:
+  - name: registry-secret-1
+  - name: registry-secret-2
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 3000
+    runAsNonRoot: true
+    fsGroup: 2000
+    supplementalGroups: [4000, 5000]
+    seLinuxOptions:
+      level: "s0:c123,c456"
+    sysctls:
+    - name: net.core.somaxconn
+      value: "1024"
+  nodeSelector:
+    kubernetes.io/arch: amd64
+    node-type: gpu-enabled
+  tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+  - key: dedicated
+    operator: Equal
+    value: "true"
+    effect: NoExecute
+    tolerationSeconds: 300
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/arch
+            operator: In
+            values: ["amd64", "arm64"]
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: node-type
+            operator: In
+            values: ["gpu-enabled"]
+    podAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app: database
+        topologyKey: kubernetes.io/hostname
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 50
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: web-server
+          topologyKey: kubernetes.io/hostname
+  topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app: comprehensive-app
+  initContainers:
+  - name: init-setup
+    image: busybox:latest
+    command: ['sh', '-c', 'echo "Initializing..." && sleep 5']
+    securityContext:
+      runAsUser: 1001
+      allowPrivilegeEscalation: false
+  - name: init-download
+    image: curlimages/curl:latest
+    command: ['curl', '-o', '/shared/config.json', 'https://example.com/config']
+    volumeMounts:
+    - name: shared-data
+      mountPath: /shared
+  containers:
+  - name: gpu-app-container
+    image: nvidia/cuda:11.8-devel-ubuntu20.04
+    imagePullPolicy: Always
+    workingDir: /app
+    command: ["python", "/app/main.py"]
+    args: ["-c", "/config/app.conf"]
+    ports:
+    - name: http
+      containerPort: 8080
+      protocol: TCP
+    - name: metrics
+      containerPort: 9090
+      protocol: TCP
+    resources:
+      requests:
+        nvidia.com/gpu: "2"
+        cpu: "2"
+        memory: "4Gi"
+        ephemeral-storage: "10Gi"
+        hugepages-2Mi: "1Gi"
+      limits:
+        nvidia.com/gpu: "2"
+        cpu: "4"
+        memory: "8Gi"
+        ephemeral-storage: "20Gi"
+        hugepages-2Mi: "1Gi"
+    env:
+    - name: CUDA_VISIBLE_DEVICES
+      value: "0,1"
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+    - name: NODE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+    - name: CONFIG_VALUE
+      valueFrom:
+        configMapKeyRef:
+          name: app-config
+          key: config-key
+          optional: true
+    - name: SECRET_VALUE
+      valueFrom:
+        secretKeyRef:
+          name: app-secrets
+          key: secret-key
+    - name: RESOURCE_LIMIT_CPU
+      valueFrom:
+        resourceFieldRef:
+          resource: limits.cpu
+    envFrom:
+    - configMapRef:
+        name: env-config
+        optional: true
+    - secretRef:
+        name: env-secrets
+    - prefix: DB_
+      configMapRef:
+        name: database-config
+    securityContext:
+      runAsUser: 1001
+      runAsGroup: 3001
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        add: ["NET_ADMIN", "SYS_TIME"]
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
+      procMount: Default
+    lifecycle:
+      postStart:
+        exec:
+          command: ["/bin/sh", "-c", "echo 'Container started' > /var/log/startup.log"]
+      preStop:
+        httpGet:
+          path: /shutdown
+          port: 8080
+          scheme: HTTP
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 8080
+        httpHeaders:
+        - name: Custom-Header
+          value: health-check
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      successThreshold: 1
+      failureThreshold: 3
+    readinessProbe:
+      tcpSocket:
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      successThreshold: 1
+      failureThreshold: 3
+    startupProbe:
+      exec:
+        command: ["cat", "/tmp/healthy"]
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 1
+      successThreshold: 1
+      failureThreshold: 30
+    volumeMounts:
+    - name: pvc-volume
+      mountPath: /data
+    - name: config-volume
+      mountPath: /config
+      readOnly: true
+    - name: secret-volume
+      mountPath: /secrets
+      readOnly: true
+    - name: shared-data
+      mountPath: /shared
+    - name: empty-volume
+      mountPath: /tmp-data
+    - name: projected-volume
+      mountPath: /projected
+      subPath: configs
+    - name: writable-volume
+      mountPath: /writable
+    volumeDevices:
+    - name: block-volume
+      devicePath: /dev/block-device
+  - name: tpu-sidecar
+    image: tensorflow/tensorflow:latest
+    resources:
+      requests:
+        google.com/tpu: "1"
+        cpu: "1"
+        memory: "2Gi"
+      limits:
+        google.com/tpu: "1"
+        cpu: "2"
+        memory: "4Gi"
+    volumeMounts:
+    - name: log-volume
+      mountPath: /var/log
+  volumes:
+  - name: pvc-volume
+    persistentVolumeClaim:
+      claimName: my-pvc
+      readOnly: false
+  - name: config-volume
+    configMap:
+      name: app-config
+      defaultMode: 0644
+      items:
+      - key: config.yaml
+        path: app-config.yaml
+        mode: 0600
+  - name: secret-volume
+    secret:
+      secretName: app-secrets
+      defaultMode: 0400
+  - name: host-volume
+    hostPath:
+      path: /host/data
+      type: DirectoryOrCreate
+  - name: empty-volume
+    emptyDir:
+      sizeLimit: "2Gi"
+      medium: Memory
+  - name: shared-data
+    emptyDir: {}
+  - name: log-volume
+    emptyDir: {}
+  - name: writable-volume
+    emptyDir: {}
+  - name: projected-volume
+    projected:
+      defaultMode: 0644
+      sources:
+      - configMap:
+          name: config1
+      - secret:
+          name: secret1
+      - serviceAccountToken:
+          path: token
+          expirationSeconds: 3600
+  - name: block-volume
+    persistentVolumeClaim:
+      claimName: block-pvc
+'''
+
+        self._check_pod_config(comprehensive_pod_config, True)
