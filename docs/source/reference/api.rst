@@ -65,7 +65,7 @@ Clusters SDK
   :noindex:
 
 ``sky.endpoints``
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.endpoints
   :noindex:
