@@ -12,7 +12,6 @@ from sky import skypilot_config
 
 
 @pytest.mark.no_vast
-@pytest.mark.no_remote_server
 def test_provision_logs_streaming(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
