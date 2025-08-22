@@ -526,7 +526,6 @@ def _post_provision_setup(
             status.update(
                 ux_utils.spinner_message(
                     'Checking controller version compatibility'))
-
             try:
                 server_jobs_utils.check_version_mismatch_and_non_terminal_jobs()
             except exceptions.ClusterNotUpError:

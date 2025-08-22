@@ -22,6 +22,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.jobs import scheduler as jobs_scheduler
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -1050,6 +1051,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._service_name, replica_id)
                 assert info is not None, replica_id
                 error_in_sky_launch = False
+                schedule_next_jobs = False
                 if info.status == serve_state.ReplicaStatus.PENDING:
                     # sky.launch not started yet
                     if controller_utils.can_provision():
@@ -1077,6 +1079,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     else:
                         info.status_property.sky_launch_status = (
                             common_utils.ProcessStatus.SUCCEEDED)
+                        schedule_next_jobs = True
                     if self._spot_placer is not None and info.is_spot:
                         # TODO(tian): Currently, we set the location to
                         # preemptive if the launch process failed. This is
@@ -1096,12 +1099,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                             self._spot_placer.set_active(location)
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
+                if schedule_next_jobs and self._is_pool:
+                    jobs_scheduler.maybe_schedule_next_jobs()
                 if error_in_sky_launch:
                     # Teardown after update replica info since
                     # _terminate_replica will update the replica info too.
                     self._terminate_replica(replica_id,
                                             sync_down_logs=True,
                                             replica_drain_delay_seconds=0)
+            # Try schedule next job after acquiring the lock.
+            jobs_scheduler.maybe_schedule_next_jobs()
         down_process_pool_snapshot = list(self._down_process_pool.items())
         for replica_id, p in down_process_pool_snapshot:
             if p.is_alive():
