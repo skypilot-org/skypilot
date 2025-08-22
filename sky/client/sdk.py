@@ -134,7 +134,7 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
         retry_context = rest.get_retry_context()
     try:
         line_count = 0
-        for line in rich_utils.decode_rich_status(response):
+        for line in rich_utils.decode_rich_status(response, logger):
             if line is not None:
                 line_count += 1
                 if retry_context is None:

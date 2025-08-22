@@ -1,9 +1,11 @@
 """Rich status spinner utils."""
 import contextlib
 import contextvars
+import datetime
 import enum
 import logging
 import threading
+import time
 import typing
 from typing import Callable, Iterator, Optional, Tuple, Union
 
@@ -290,9 +292,11 @@ def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
 
 
 def decode_rich_status(
-        response: 'requests.Response') -> Iterator[Optional[str]]:
+        response: 'requests.Response',
+        logger: Optional[logging.Logger] = None) -> Iterator[Optional[str]]:
     """Decode the rich status message from the response."""
     decoding_status = None
+    last_heartbeat_time: Optional[float] = None
     try:
         last_line = ''
         # Buffer to store incomplete UTF-8 bytes between chunks
@@ -376,6 +380,16 @@ def decode_rich_status(
                 if threading.current_thread() is not threading.main_thread():
                     yield None
                     continue
+                if control == Control.HEARTBEAT:
+                    if logger is not None:
+                        formatted_time = ''
+                        if last_heartbeat_time is not None:
+                            formatted_time = datetime.datetime.fromtimestamp(
+                                last_heartbeat_time).strftime(
+                                    '%Y-%m-%d %H:%M:%S')
+                        logger.info('Received HEARTBEAT, last_heartbeat_time: '
+                                    f'{formatted_time}')
+                        last_heartbeat_time = time.time()
                 if control == Control.INIT:
                     decoding_status = client_status(encoded_status)
                 else:
@@ -396,6 +410,7 @@ def decode_rich_status(
                     elif control == Control.HEARTBEAT:
                         # Heartbeat is not displayed to the user, so we do not
                         # need to update the status.
+
                         pass
     finally:
         if decoding_status is not None:

@@ -5,6 +5,7 @@ import contextlib
 import contextvars
 import functools
 import time
+import traceback
 import typing
 from typing import Any, Callable, cast, Optional, TypeVar
 
@@ -105,8 +106,9 @@ def retry_transient_errors(max_retries: int = 3,
                         if not is_transient_error(e):
                             # Permanent error, no need to retry.
                             raise
-                        logger.debug(f'Retry {func.__name__} due to {e}, '
-                                     f'attempt {retry_cnt + 1}/{max_retries}')
+                        logger.info(f'Retry {func.__name__} due to {e}, '
+                                    f'attempt {retry_cnt + 1}/{max_retries}\n'
+                                    f'Traceback: {traceback.format_exc()}')
                         time.sleep(backoff.current_backoff())
 
         return cast(F, wrapper)
