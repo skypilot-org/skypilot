@@ -1467,7 +1467,7 @@ def status(
 def endpoints(
     cluster: str,
     port: Optional[Union[int, str]] = None
-) -> server_common.RequestId[Dict[str, str]]:
+) -> server_common.RequestId[Dict[int, str]]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
