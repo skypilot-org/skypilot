@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 import traceback
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 import pandas as pd
 import runpod
@@ -38,8 +38,8 @@ USEFUL_COLUMNS = [
     'MemoryGiB',
     'GpuInfo',
     'Region',
-    'Price',
     'SpotPrice',
+    'Price',
     'AvailabilityZone',
 ]
 
@@ -117,40 +117,26 @@ def get_gpu_details(gpu_id: str, gpu_count: int = 1) -> Dict:
     """
 
     result = graphql.run_graphql_query(query)
+    
     if 'errors' in result:
-        raise ValueError(f'GraphQL errors: {result["errors"]}')
-
-    return result['data']['gpuTypes'][0]
-
+        raise RuntimeError(f'GraphQL errors: {result["errors"]}')
+    
+    try:
+        gpu_type = result['data']['gpuTypes'][0]
+    except Exception as e:
+        error_msg = (
+            "No GPU Types found in RunPod query with"
+            f"gpu_id={gpu_id}, gpu_count={gpu_count}"
+        )
+        raise ValueError(error_msg) from e
+    
+    return gpu_type
 
 def format_price(price: float) -> float:
     """Format price to two decimal places."""
     return round(price, 2)
 
-
-def get_gpu_counts(max_count: int) -> List[int]:
-    """Generate list of GPU counts based on powers of 2 and max count.
-
-    RunPod supports any number up to max_count. We only generate a list of
-    powers of two & the max count.
-
-    For example, if the max count is 8, create a row for each of [1, 2, 4, 8].
-    For max count 7, create a row for each of [1, 2, 4, 7].
-    """
-    counts = []
-    power = 1
-    while power <= max_count:
-        counts.append(power)
-        power *= 2
-
-    # Add max count if it's not already included (not a power of 2)
-    if max_count not in counts:
-        counts.append(max_count)
-
-    return sorted(counts)
-
-
-def format_gpu_name(gpu_type: Dict) -> str:
+def format_gpu_name(gpu_type: Dict[str,Any]) -> str:
     """Format GPU name to match the required format.
 
     Programmatically generates the name from RunPod's GPU display name.
@@ -175,36 +161,44 @@ def format_gpu_name(gpu_type: Dict) -> str:
 
 def get_gpu_info(gpu_type: Dict, gpu_count: int) -> Dict:
     """Extract relevant GPU information from RunPod GPU type data."""
-    # Use minVcpu and minMemory from lowestPrice if available,
-    # otherwise use defaults
+    # Use minVcpu lowestPrice if available, otherwise use defaults
     vcpus = gpu_type.get('lowestPrice', {}).get('minVcpu')
-    memory = gpu_type.get('lowestPrice', {}).get('minMemory')
+    # This is the GPU memory not the CPU memory.
+    memory = gpu_type.get('memoryInGb') * gpu_count
 
     # Fall back to defaults if values are None
     # scale default value by gpu_count
     vcpus = DEFAULT_VCPUS * gpu_count if vcpus is None else vcpus
-    memory = MEMORY_PER_GPU * gpu_count if memory is None else memory
+    memory = MEMORY_PER_GPU * gpu_count if memory is None else memory 
+
+    assert isinstance(vcpus, (float, int)) and vcpus > 0, f'vCPUs must be a positive number, not {vcpus}'
+    assert isinstance(memory, (float, int)) and memory > 0, f'MemoryGiB must be a positive number, not {memory}'
 
     gpu_name = format_gpu_name(gpu_type)
 
+    # Convert the counts, vCPUs, and memory to float for consistency with skypilot's catalog format
     return {
         'AcceleratorName': gpu_name,
         'AcceleratorCount': float(gpu_count),
-        'vCPUs': vcpus,
-        'MemoryGiB': memory,
+        'vCPUs': float(vcpus),
+        'MemoryGiB': float(memory),
         'GpuInfo': gpu_name,
     }
 
 
-def get_instance_configurations(gpu_type: Dict) -> List[Dict]:
+def get_instance_configurations(gpu_id: str) -> List[Dict]:
     """Generate instance configurations for a GPU type."""
     instances = []
-    base_gpu_name = format_gpu_name(gpu_type)
-    gpu_counts = gpu_type.get('lowestPrice', {}).get('availableGpuCounts', [])
+    detailed_gpu_1 = get_gpu_details(gpu_id, gpu_count=1)
+    base_gpu_name = format_gpu_name(detailed_gpu_1)
+    gpu_counts = detailed_gpu_1.get('lowestPrice', {}).get('availableGpuCounts', [])
 
     for gpu_count in gpu_counts:
         # Get detailed GPU info for this count
-        detailed_gpu = get_gpu_details(gpu_type['id'], gpu_count)
+        if gpu_count == 1:
+            detailed_gpu = detailed_gpu_1
+        else:
+            detailed_gpu = get_gpu_details(gpu_id, gpu_count)
 
         # only add secure clouds. skipping community cloud instances.
         if not detailed_gpu['secureCloud']:
@@ -251,12 +245,12 @@ def fetch_runpod_catalog(gpu_ids: Optional[str] = None) -> pd.DataFrame:
             if not gpus:
                 raise ValueError('No GPU types returned from RunPod API')
 
-        # Generate instances from GPU types
-        instances = []
-        for gpu in gpus:
-            # initial gpu details. later, request specific quantity details
-            gpu_type = get_gpu_details(gpu['id'])
-            instances.extend(get_instance_configurations(gpu_type))
+        # Generate instances from GPU ids
+        instances = [
+            instance
+            for gpu in gpus
+            for instance in get_instance_configurations(gpu['id'])
+        ]
 
         # Create DataFrame
         df = pd.DataFrame(instances)
