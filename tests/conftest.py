@@ -199,6 +199,12 @@ def pytest_addoption(parser):
               '(The config change is made in buildkite so this is a flag to '
               'ensure the tests will not be skipped but no actual effect)'),
     )
+    parser.addoption(
+        '--grpc',
+        action='store_true',
+        default=False,
+        help='Run tests with GRPC enabled',
+    )
 
 
 def pytest_configure(config):
@@ -646,4 +652,14 @@ def setup_postgres_backend_env(request):
         yield
         return
     os.environ['PYTEST_SKYPILOT_POSTGRES_BACKEND'] = '1'
+    yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_grpc_backend_env(request):
+    """Setup gRPC enabled environment variable if --grpc is specified."""
+    if not request.config.getoption('--grpc'):
+        yield
+        return
+    os.environ['PYTEST_SKYPILOT_GRPC_ENABLED'] = '1'
     yield
