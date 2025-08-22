@@ -131,9 +131,9 @@ def test_status_return_type():
     _check_return_type(sdk.status, core.status)
 
 
-# endpoints SDK call has postprocessing which makes the return type
-# different from the internal function. This is intentional and
-# the function is not tested here.
+def test_endpoints_return_type():
+    """Test that sdk.endpoints and core.endpoints return types match."""
+    _check_return_type(sdk.endpoints, core.endpoints)
 
 
 def test_cost_report_return_type():

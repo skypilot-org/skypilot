@@ -198,30 +198,17 @@ async def test_endpoints(mock_stream_and_get, mock_to_thread,
     """Test endpoints() function."""
     mock_sdk_functions['endpoints'].return_value = 'test-request-id'
 
-    # if no port is specified, the response is a dictionary of port numbers to endpoints
-    api_return_response = {8080: 'http://1.2.3.4:8080'}
-    mock_stream_and_get.return_value = api_return_response
-
-    result = await sdk_async.endpoints('test-cluster')
-    assert result == api_return_response
-    mock_sdk_functions['endpoints'].assert_called_once_with(
-        'test-cluster', None)
-
-    # if a port is specified, the response is a string endpoint
-    api_return_response = 'http://1.2.3.4:8080'
-    mock_stream_and_get.return_value = api_return_response
+    expected_result = {8080: 'http://1.2.3.4:8080'}
+    mock_stream_and_get.return_value = expected_result
 
     result = await sdk_async.endpoints('test-cluster', 8080)
-    assert result == api_return_response
-    mock_sdk_functions['endpoints'].assert_has_calls(
-        [mock.call('test-cluster', None),
-         mock.call('test-cluster', 8080)])
+    assert result == expected_result
+    mock_sdk_functions['endpoints'].assert_called_once_with(
+        'test-cluster', 8080)
     # The function should be called with request_id and the default StreamConfig parameters
     # Based on the error: stream_and_get('test-request-id', None, None, True, None)
-    mock_stream_and_get.assert_has_calls([
-        mock.call('test-request-id', None, None, True, None),
-        mock.call('test-request-id', None, None, True, None)
-    ])
+    mock_stream_and_get.assert_called_once_with('test-request-id', None, None,
+                                                True, None)
 
 
 @pytest.mark.asyncio
