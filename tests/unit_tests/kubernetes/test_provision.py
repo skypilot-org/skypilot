@@ -60,7 +60,6 @@ def test_out_of_cpus(monkeypatch):
     with pytest.raises(config_lib.KubernetesError) as e:
         instance._raise_pod_scheduling_errors(namespace, context, [new_node])
 
-    print(f'Lloyd: error_output: {error_output}')
     error_output = error_output[0].split('\n')
     
     assert error_output[0] == 'Insufficient resource capacity on the cluster. Check resource usage by running kubectl describe nodes.'
@@ -118,7 +117,6 @@ def test_out_of_gpus(monkeypatch):
     with pytest.raises(config_lib.KubernetesError) as e:
         instance._raise_pod_scheduling_errors(namespace, context, [new_node])
 
-    print(f'Lloyd: error_output: {error_output}')
     error_output = error_output[0].split('\n')
     
     assert error_output[0] == 'Insufficient resource capacity on the cluster. Check resource usage by running kubectl describe nodes.'
@@ -174,7 +172,6 @@ def test_out_of_both_cpus_and_gpus(monkeypatch):
     with pytest.raises(config_lib.KubernetesError) as e:
         instance._raise_pod_scheduling_errors(namespace, context, [new_node])
 
-    print(f'Lloyd: error_output: {error_output}')
     error_output = error_output[0].split('\n')
     
     assert error_output[0] == 'Insufficient resource capacity on the cluster. Check resource usage by running kubectl describe nodes.'
@@ -237,7 +234,6 @@ def test_out_of_gpus_and_node_selector_failed(monkeypatch):
     with pytest.raises(config_lib.KubernetesError) as e:
         instance._raise_pod_scheduling_errors(namespace, context, [new_node])
 
-    print(f'Lloyd: error_output: {error_output}')
     error_output = error_output[0].split('\n')
     
     assert error_output[0] == 'Insufficient resource capacity on the cluster. Check resource usage by running kubectl describe nodes.'
