@@ -134,7 +134,7 @@ def test_out_of_gpus(monkeypatch):
 
     assert error_output[0] == '⨯ Insufficient resource capacity on the cluster:'
     assert error_output[
-        1] == '└── Cluster does not have sufficient GPUs for your request: Run sky show-gpus --infra kubernetes to see the available GPUs.'
+        1] == '└── Cluster does not have sufficient GPUs for your request: Run \'sky show-gpus --infra kubernetes\' to see the available GPUs.'
 
     assert len(error_output) == 2
 
@@ -197,7 +197,7 @@ def test_out_of_both_cpus_and_gpus(monkeypatch):
     assert error_output[
         1] == '├── Cluster does not have sufficient CPUs for your request: Run `kubectl get nodes -o custom-columns=NAME:.metadata.name,CPU:.status.allocatable.cpu` to check the available CPUs on the node.'
     assert error_output[
-        2] == '└── Cluster does not have sufficient GPUs for your request: Run sky show-gpus --infra kubernetes to see the available GPUs.'
+        2] == '└── Cluster does not have sufficient GPUs for your request: Run \'sky show-gpus --infra kubernetes\' to see the available GPUs.'
 
     assert len(error_output) == 3
 
@@ -265,7 +265,7 @@ def test_out_of_gpus_and_node_selector_failed(monkeypatch):
 
     assert error_output[0] == '⨯ Insufficient resource capacity on the cluster:'
     assert error_output[
-        1] == '└── Cluster does not have sufficient GPUs for your request: Run sky show-gpus --infra kubernetes to see the available GPUs. Verify if any node matching label nvidia-tesla-a100 and sufficient resource nvidia.com/gpu is available in the cluster.'
+        1] == '└── Cluster does not have sufficient GPUs for your request: Run \'sky show-gpus --infra kubernetes\' to see the available GPUs. Verify if any node matching label nvidia-tesla-a100 and sufficient resource nvidia.com/gpu is available in the cluster.'
 
     assert len(error_output) == 2
 

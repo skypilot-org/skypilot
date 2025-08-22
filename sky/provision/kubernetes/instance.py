@@ -222,8 +222,8 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                          in event_message) and pod.spec.node_selector):
                         if 'gpu' in gpu_resource_key.lower():
                             info_msg = (
-                                ': Run sky show-gpus --infra kubernetes to see '
-                                'the available GPUs.')
+                                ': Run \'sky show-gpus --infra kubernetes\' to '
+                                'see the available GPUs.')
                         else:
                             info_msg = ': '
                         if (pod.spec.node_selector and
