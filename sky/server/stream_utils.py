@@ -9,6 +9,7 @@ import aiofiles
 import fastapi
 
 from sky import sky_logging
+from sky.server import metrics as metrics_lib
 from sky.server.requests import requests as requests_lib
 from sky.utils import message_utils
 from sky.utils import rich_utils
@@ -151,7 +152,11 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
         line: Optional[bytes] = await f.readline()
         if not line:
             if request_id is not None:
+                start = asyncio.get_event_loop().time()
                 request_task = requests_lib.get_request(request_id)
+                metrics_lib.sky_apiserver_log_stream_operation_seconds.labels(
+                    operation='get_request').observe(
+                        asyncio.get_event_loop().time() - start)
                 if request_task.status > requests_lib.RequestStatus.RUNNING:
                     if (request_task.status ==
                             requests_lib.RequestStatus.CANCELLED):

@@ -248,18 +248,22 @@ def test_launch_and_logs_api(num_requests):
         name = f'echo{idx}'
         with sky.Dag() as dag:
             dag.name = name
-            sky.Task(name=name, run='for i in {1..10000}; do echo $i; sleep 1; done')
+            sky.Task(name=name,
+                     run='for i in {1..10000}; do echo $i; sleep 1; done')
         sdk.stream_and_get(sdk.launch(dag, cluster_name=name))
         sdk.tail_logs(name, 1, follow=True)
 
-    run_concurrent_api_requests(num_requests, launch_and_logs,
+    run_concurrent_api_requests(num_requests,
+                                launch_and_logs,
                                 'API /launch_and_logs',
                                 include_idx=True)
 
 
-
 all_requests = ['launch', 'status', 'logs', 'jobs', 'serve']
-all_apis = ['status', 'cli_status', 'tail_logs', 'validate', 'api_status', 'launch_and_logs']
+all_apis = [
+    'status', 'cli_status', 'tail_logs', 'validate', 'api_status',
+    'launch_and_logs'
+]
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

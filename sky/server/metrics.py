@@ -1,5 +1,6 @@
 """Instrumentation for the API server."""
 
+import functools
 import os
 import time
 
@@ -9,7 +10,6 @@ from prometheus_client import multiprocess
 import prometheus_client as prom
 import starlette.middleware.base
 import uvicorn
-import functools
 
 from sky import sky_logging
 
@@ -53,10 +53,17 @@ sky_apiserver_function_duration_seconds = prom.Histogram(
 sky_apiserver_event_loop_lag_seconds = prom.Histogram(
     "sky_apiserver_event_loop_lag_seconds",
     "Scheduling delay of the event loop (positive drift)",
-    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, float('inf')),
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5,
+             float('inf')),
 )
 
-
+sky_apiserver_log_stream_operation_seconds = prom.Histogram(
+    "sky_apiserver_log_stream_operation_seconds",
+    "Time spent in log stream operations",
+    ['operation'],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5,
+             float('inf')),
+)
 
 metrics_app = fastapi.FastAPI()
 
@@ -103,7 +110,7 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         path = request.url.path
-        logger.info(f'PROM Middleware Request: {request}, {request.url.path}')
+        logger.debug(f'PROM Middleware Request: {request}, {request.url.path}')
         streaming = _is_streaming_api(path)
         if not streaming:
             # Exclude streaming APIs, the duration is not meaningful.
@@ -137,6 +144,7 @@ def measure_duration(func):
     Records the duration in the sky_apiserver_function_duration_seconds
     histogram with the function name as a label.
     """
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         start_time = time.time()
@@ -146,7 +154,6 @@ def measure_duration(func):
         finally:
             duration = time.time() - start_time
             sky_apiserver_function_duration_seconds.labels(
-                function=func.__name__
-            ).observe(duration)
-    
+                function=func.__name__).observe(duration)
+
     return wrapper

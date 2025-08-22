@@ -447,9 +447,9 @@ async def cleanup_upload_ids():
                  upload_id).with_suffix('.zip').unlink(missing_ok=True)
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
 
-async def start_loop_lag_monitor(
-        loop: asyncio.AbstractEventLoop,
-        interval: float = 0.1) -> None:
+
+async def start_loop_lag_monitor(loop: asyncio.AbstractEventLoop,
+                                 interval: float = 0.1) -> None:
     target = loop.time() + interval
 
     def tick():
@@ -461,6 +461,7 @@ async def start_loop_lag_monitor(
         loop.call_at(target, tick)
 
     loop.call_at(target, tick)
+
 
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name

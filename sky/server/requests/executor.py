@@ -41,6 +41,7 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -56,8 +57,6 @@ from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
 from sky.workspaces import core as workspaces_core
-
-from sky.server import metrics as metrics_lib
 
 if typing.TYPE_CHECKING:
     import types
@@ -427,8 +426,7 @@ def _request_execution_wrapper(request_id: str,
             logger.info(f'Request {request_id} finished')
         finally:
             metrics_lib.sky_apiserver_request_execution_duration_seconds.labels(
-                request_type, worker_type).observe(
-                    time.time() - start_time)
+                request_type, worker_type).observe(time.time() - start_time)
 
 
 async def execute_request_coroutine(request: api_requests.Request):
