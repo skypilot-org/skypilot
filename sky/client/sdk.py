@@ -30,6 +30,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
+from sky.jobs import scheduler
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
@@ -1944,6 +1945,7 @@ def stream_and_get(request_id: None = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@rest.retry_transient_errors()
 def stream_and_get(
     request_id: Optional[server_common.RequestId[T]] = None,
     log_path: Optional[str] = None,
@@ -1995,7 +1997,7 @@ def stream_and_get(
     if response.status_code in [404, 400]:
         detail = response.json().get('detail')
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Failed to stream logs: {detail}')
+            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
         # TODO(syang): handle the case where the requestID is not provided
         # see https://github.com/skypilot-org/skypilot/issues/6549
@@ -2212,6 +2214,25 @@ def api_stop() -> None:
             raise RuntimeError(
                 f'Cannot kill the API server at {server_url} because it is not '
                 f'the default SkyPilot API server started locally.')
+
+    try:
+        with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
+                  'r',
+                  encoding='utf-8') as f:
+            pids = f.read().split('\n')[:-1]
+            for pid in pids:
+                if subprocess_utils.is_process_alive(int(pid.strip())):
+                    subprocess_utils.kill_children_processes(
+                        parent_pids=[int(pid.strip())], force=True)
+        os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
+    except FileNotFoundError:
+        # its fine we will create it
+        pass
+    except Exception as e:  # pylint: disable=broad-except
+        # in case we get perm issues or something is messed up, just ignore it
+        # and assume the process is dead
+        logger.error(f'Error looking at job controller pid file: {e}')
+        pass
 
     found = _local_api_server_running(kill=True)
 

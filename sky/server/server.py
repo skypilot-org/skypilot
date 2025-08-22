@@ -624,6 +624,9 @@ app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
 app.include_router(ssh_node_pools_rest.router,
                    prefix='/ssh_node_pools',
                    tags=['ssh_node_pools'])
+# increase the resource limit for the server
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 
 # Increase the limit of files we can open to our hard limit. This fixes bugs
 # where we can not aquire file locks or open enough logs and the API server
@@ -1185,10 +1188,6 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
-    # Only initialize the context in logs handler to limit the scope of this
-    # experimental change.
-    # TODO(aylei): init in lifespan() to enable SkyPilot context in all APIs.
-    context.initialize()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
@@ -1198,8 +1197,14 @@ async def logs(
     )
     task = asyncio.create_task(executor.execute_request_coroutine(request_task))
 
-    def cancel_task():
-        task.cancel()
+    async def cancel_task():
+        try:
+            logger.info('Client disconnected for request: '
+                        f'{request.state.request_id}')
+            task.cancel()
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # Cancel the task after the request is done or client disconnects
     background_tasks.add_task(cancel_task)

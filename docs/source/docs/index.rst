@@ -26,7 +26,7 @@ Welcome to SkyPilot!
    <script async defer src="https://buttons.github.io/buttons.js"></script>
    </p>
 
-SkyPilot is a system for running, managing, and scaling AI workloads on any AI infrastructure.
+SkyPilot is a system to run, manage, and scale AI workloads on any AI infrastructure.
 
 SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 **Infra teams** get a unified control plane to manage any AI compute — with advanced scheduling, scaling, and orchestration.
