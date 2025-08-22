@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 import traceback
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import runpod
@@ -117,26 +117,26 @@ def get_gpu_details(gpu_id: str, gpu_count: int = 1) -> Dict:
     """
 
     result = graphql.run_graphql_query(query)
-    
+
     if 'errors' in result:
         raise RuntimeError(f'GraphQL errors: {result["errors"]}')
-    
+
     try:
         gpu_type = result['data']['gpuTypes'][0]
     except Exception as e:
-        error_msg = (
-            "No GPU Types found in RunPod query with"
-            f"gpu_id={gpu_id}, gpu_count={gpu_count}"
-        )
+        error_msg = ('No GPU Types found in RunPod query with'
+                     f'gpu_id={gpu_id}, gpu_count={gpu_count}')
         raise ValueError(error_msg) from e
-    
+
     return gpu_type
+
 
 def format_price(price: float) -> float:
     """Format price to two decimal places."""
     return round(price, 2)
 
-def format_gpu_name(gpu_type: Dict[str,Any]) -> str:
+
+def format_gpu_name(gpu_type: Dict[str, Any]) -> str:
     """Format GPU name to match the required format.
 
     Programmatically generates the name from RunPod's GPU display name.
@@ -164,19 +164,26 @@ def get_gpu_info(gpu_type: Dict, gpu_count: int) -> Dict:
     # Use minVcpu lowestPrice if available, otherwise use defaults
     vcpus = gpu_type.get('lowestPrice', {}).get('minVcpu')
     # This is the GPU memory not the CPU memory.
-    memory = gpu_type.get('memoryInGb') * gpu_count
+    memory = gpu_type.get('memoryInGb')
 
     # Fall back to defaults if values are None
     # scale default value by gpu_count
     vcpus = DEFAULT_VCPUS * gpu_count if vcpus is None else vcpus
-    memory = MEMORY_PER_GPU * gpu_count if memory is None else memory 
+    memory = (MEMORY_PER_GPU if memory is None else memory) * gpu_count
 
-    assert isinstance(vcpus, (float, int)) and vcpus > 0, f'vCPUs must be a positive number, not {vcpus}'
-    assert isinstance(memory, (float, int)) and memory > 0, f'MemoryGiB must be a positive number, not {memory}'
+    assert isinstance(
+        vcpus,
+        (float,
+         int)) and vcpus > 0, f'vCPUs must be a positive number, not {vcpus}'
+    assert isinstance(
+        memory,
+        (float, int
+        )) and memory > 0, f'MemoryGiB must be a positive number, not {memory}'
 
     gpu_name = format_gpu_name(gpu_type)
 
-    # Convert the counts, vCPUs, and memory to float for consistency with skypilot's catalog format
+    # Convert the counts, vCPUs, and memory to float
+    # for consistency with skypilot's catalog format
     return {
         'AcceleratorName': gpu_name,
         'AcceleratorCount': float(gpu_count),
@@ -191,7 +198,8 @@ def get_instance_configurations(gpu_id: str) -> List[Dict]:
     instances = []
     detailed_gpu_1 = get_gpu_details(gpu_id, gpu_count=1)
     base_gpu_name = format_gpu_name(detailed_gpu_1)
-    gpu_counts = detailed_gpu_1.get('lowestPrice', {}).get('availableGpuCounts', [])
+    gpu_counts = detailed_gpu_1.get('lowestPrice',
+                                    {}).get('availableGpuCounts', [])
 
     for gpu_count in gpu_counts:
         # Get detailed GPU info for this count
@@ -247,8 +255,7 @@ def fetch_runpod_catalog(gpu_ids: Optional[str] = None) -> pd.DataFrame:
 
         # Generate instances from GPU ids
         instances = [
-            instance
-            for gpu in gpus
+            instance for gpu in gpus
             for instance in get_instance_configurations(gpu['id'])
         ]
 
