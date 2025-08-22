@@ -6,6 +6,7 @@ import time
 from unittest import mock
 
 import pytest
+import sqlalchemy_adapter
 
 from sky import models
 from sky.skylet import constants
@@ -68,7 +69,8 @@ class TestPermissionService:
             service._lazy_initialize()
 
             # Verify SQLAlchemy adapter was created with the correct engine
-            mock_adapter_class.assert_called_once_with(mock_engine)
+            mock_adapter_class.assert_called_once_with(
+                mock_engine, db_class=sqlalchemy_adapter.CasbinRule)
 
             # Verify Casbin enforcer was created with correct model path
             args, kwargs = mock_enforcer_class.call_args

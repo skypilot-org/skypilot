@@ -421,6 +421,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.resource_heavy
+@pytest.mark.no_remote_server
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     use_spot = True
@@ -700,6 +701,7 @@ def test_azure_http_server_with_custom_ports():
 
 # ---------- Web apps with custom ports on Kubernetes. ----------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_server
 def test_kubernetes_http_server_with_custom_ports():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(

@@ -1196,3 +1196,42 @@ def test_cli_output(generic_cloud: str):
                 'echo "$s" | grep -- "$border" | wc -l | grep 3'),
         ])
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_sky_down_with_multiple_sgs():
+    """Test that sky down works with multiple security groups.
+    
+    The goal is to ensure that when we run sky down we get the typical 
+    terminating output with no extra output. If the output changes please
+    update the test.
+    """
+    name_one = smoke_tests_utils.get_cluster_name()
+    vpc_one = "DO_NOT_DELETE"
+    name_two = smoke_tests_utils.get_cluster_name() + '-2'
+    vpc_two = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
+
+    validate_terminating_output = (
+        f'printf "%s" "$s" && echo "\n===Validating terminating output===" && '
+        # Ensure each terminating line is present.
+        f'printf "%s" "$s" | grep "Terminating cluster {name_one}...done" && '
+        f'printf "%s" "$s" | grep "Terminating cluster {name_two}...done" && '
+        # Ensure the last line is present.
+        f'printf "%s" "$s" | grep "Terminating 2 clusters" && '
+        # # Ensure there are only 3 lines.
+        f'echo "$s" | sed "/^$/d" | wc -l | grep 3')
+
+    test = smoke_tests_utils.Test(
+        'sky_down_with_multiple_sgs',
+        [
+            # Launch cluster one.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name_one} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} --config aws.vpc_name={vpc_one} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Launch cluster two.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name_two} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} --config aws.vpc_name={vpc_two} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Run sky down and validate the output.
+            f's=$(SKYPILOT_DEBUG=0 sky down -y {name_one} {name_two} 2>&1) && {validate_terminating_output}',
+        ],
+        teardown=f'sky down -y {name_one} {name_two}',
+        timeout=smoke_tests_utils.get_timeout('aws'),
+    )
+    smoke_tests_utils.run_one_test(test)
