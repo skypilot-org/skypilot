@@ -155,6 +155,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--helm-package {parsed_args.helm_package}')
     if parsed_args.jobs_consolidation:
         extra_args.append('--jobs-consolidation')
+    if parsed_args.grpc:
+        extra_args.append('--grpc')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
