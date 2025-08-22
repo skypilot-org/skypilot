@@ -13,6 +13,7 @@ from sky.provision.kubernetes.instance import logger
 def _remove_colorama_escape_codes(error_output):
     return [re.sub(r'\x1b\[[0-9;]*m', '', line) for line in error_output]
 
+
 def test_out_of_cpus(monkeypatch):
     """Test to check if the error message is correct when there is only CPU resource shortage."""
 
