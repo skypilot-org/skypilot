@@ -123,6 +123,7 @@ def _create_invalid_config_yaml_file(task_file_path: pathlib.Path) -> None:
                             annotations:
                                 abc: def
                         spec:
+                            somedata: echohi
                             containers:
                                 - name:
                             imagePullSecrets:
