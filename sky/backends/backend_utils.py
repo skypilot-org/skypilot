@@ -2511,7 +2511,7 @@ def refresh_cluster_record(
             ) - start_time:
                 logger.debug(
                     'Refreshing status: Failed get the lock for cluster '
-                    f'{cluster_name!r}. Using the cached status.')
+                    f'{cluster_name!r}. Using the cached status.', stack_info=True)
                 return record
             time.sleep(0.05)
 
