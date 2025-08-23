@@ -180,7 +180,7 @@ class KubeAPIUnreachableError(ResourcesUnavailableError):
     pass
 
 
-class KubeValidationError(Exception):
+class KubernetesValidationError(Exception):
     """Raised when the Kubernetes validation fails.
 
     It stores a list of strings that represent the path to the field which
