@@ -1,3 +1,4 @@
+"""Utilities for formatting tables for CLI output."""
 from typing import List
 
 from sky.schemas.api import responses
