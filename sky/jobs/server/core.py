@@ -28,6 +28,7 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
+from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
@@ -478,7 +479,7 @@ def launch(
 def queue_from_kubernetes_pod(
         pod_name: str,
         context: Optional[str] = None,
-        skip_finished: bool = False) -> List[Dict[str, Any]]:
+        skip_finished: bool = False) -> List[responses.ManagedJobRecord]:
     """Gets the jobs queue from a specific controller pod.
 
     Args:
@@ -544,7 +545,7 @@ def queue_from_kubernetes_pod(
         job_table_payload)
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
-        return jobs
+        return [responses.ManagedJobRecord(**job) for job in jobs]
 
     # Backward compatibility for old jobs controller without filtering
     # TODO(hailong): remove this after 0.12.0
@@ -556,7 +557,7 @@ def queue_from_kubernetes_pod(
         non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
         jobs = list(
             filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
-    return jobs
+    return [responses.ManagedJobRecord(**job) for job in jobs]
 
 
 def _maybe_restart_controller(
@@ -656,14 +657,14 @@ def queue_v2(
     page: Optional[int] = None,
     limit: Optional[int] = None,
     statuses: Optional[List[str]] = None,
-) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
+) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
 
     Please refer to sky.cli.job_queue for documentation.
 
     Returns:
-        jobs: List[Dict[str, Any]]
+        jobs: List[responses.ManagedJobRecord]
             [
                 {
                     'job_id': int,
@@ -775,7 +776,10 @@ def queue_v2(
     ) = managed_job_utils.load_managed_job_queue(job_table_payload)
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
-        return jobs, total, status_counts, total_no_filter
+        maanged_jobs_records = [
+            responses.ManagedJobRecord(**job) for job in jobs
+        ]
+        return maanged_jobs_records, total, status_counts, total_no_filter
 
     # Backward compatibility for old jobs controller without filtering
     # TODO(hailong): remove this after 0.12.0
@@ -820,6 +824,7 @@ def queue_v2(
         enable_user_match=True,
         statuses=statuses,
     )
+    filtered_jobs = [responses.ManagedJobRecord(**job) for job in filtered_jobs]
     return filtered_jobs, total, status_counts, total_no_filter
 
 

@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import pydantic
 
 from sky import models
+from sky.jobs import state as job_state
 from sky.server import common
 from sky.skylet import job_lib
 from sky.utils import status_lib
@@ -143,3 +144,38 @@ class UploadStatus(enum.Enum):
     """Status of the upload."""
     UPLOADING = 'uploading'
     COMPLETED = 'completed'
+
+
+class ManagedJobRecord(ResponseBaseModel):
+    """Response for the managed job queue endpoint.
+    {
+        'job_id': int,
+        'job_name': str,
+        'resources': str,
+        'submitted_at': (float) timestamp of submission,
+        'end_at': (float) timestamp of end,
+        'job_duration': (float) duration in seconds,
+        'recovery_count': (int) Number of retries,
+        'status': (sky.jobs.ManagedJobStatus) of the job,
+        'cluster_resources': (str) resources of the cluster,
+        'region': (str) region of the cluster,
+        'user_name': (Optional[str]) job creator's user name,
+        'user_hash': (str) job creator's user hash,
+        'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+        'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+    }
+    """
+    job_id: int
+    job_name: str
+    resources: str
+    submitted_at: float
+    end_at: float
+    job_duration: float
+    recovery_count: int
+    status: job_state.ManagedJobStatus
+    cluster_resources: str
+    region: str
+    user_name: Optional[str]
+    user_hash: str
+    task_id: int
+    task_name: str
