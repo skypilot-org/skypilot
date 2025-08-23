@@ -17,17 +17,17 @@ def format_job_queue(jobs: List[responses.ClusterJobRecord]):
     ])
     for job in jobs:
         job_table.add_row([
-            job['job_id'],
-            job['job_name'],
-            job['username'],
-            log_utils.readable_time_duration(job['submitted_at']),
-            log_utils.readable_time_duration(job['start_at']),
-            log_utils.readable_time_duration(job['start_at'],
-                                             job['end_at'],
+            job.job_id,
+            job.job_name,
+            job.username,
+            log_utils.readable_time_duration(job.submitted_at),
+            log_utils.readable_time_duration(job.start_at),
+            log_utils.readable_time_duration(job.start_at,
+                                             job.end_at,
                                              absolute=True),
-            job['resources'],
-            job['status'].colored_str(),
-            job['log_path'],
-            job.get('metadata', {}).get('git_commit', '-'),
+            job.resources,
+            job.status.colored_str(),
+            job.log_path,
+            job.metadata.get('git_commit', '-'),
         ])
     return job_table
