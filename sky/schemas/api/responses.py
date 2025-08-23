@@ -133,6 +133,7 @@ class ClusterJobRecord(ResponseBaseModel):
     resources: str
     status: job_lib.JobStatus
     log_path: str
+    metadata: Dict[str, Any] = {}
 
 
 class UploadStatus(enum.Enum):
