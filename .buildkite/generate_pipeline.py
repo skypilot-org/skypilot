@@ -51,12 +51,13 @@ QUEUE_GENERIC_CLOUD_REMOTE_SERVER = 'generic_cloud_remote_server'
 # resource_heavy. It can be either EKS or GKE.
 QUEUE_KUBE_BACKEND = os.getenv('KUBE_BACKEND', QUEUE_EKS).lower()
 assert QUEUE_KUBE_BACKEND in [QUEUE_EKS, QUEUE_GKE]
-# Only aws, gcp, azure, and kubernetes are supported for now.
+# Only aws, gcp, azure, nebius, and kubernetes are supported for now.
 # Other clouds do not have credentials.
 CLOUD_QUEUE_MAP = {
     'aws': QUEUE_GENERIC_CLOUD,
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
+    'nebius': QUEUE_GENERIC_CLOUD,
     'kubernetes': QUEUE_KUBERNETES
 }
 
