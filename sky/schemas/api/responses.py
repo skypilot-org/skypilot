@@ -168,7 +168,8 @@ class ManagedJobRecord(ResponseBaseModel):
     job_id: int
     job_name: str
     resources: str
-    submitted_at: float
+    # None if the job has not been submitted yet.
+    submitted_at: Optional[float] = None
     # None if the job has not ended yet.
     end_at: Optional[float] = None
     job_duration: float
