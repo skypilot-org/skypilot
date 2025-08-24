@@ -5,6 +5,7 @@ from smoke_tests import smoke_tests_utils
 
 import sky
 from sky.skylet import constants
+from sky.utils import common
 
 
 def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
@@ -197,5 +198,28 @@ def test_requests_scheduling(generic_cloud: str):
         ],
         f'sky down -y {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.docker_resources(cpu_limit="4", memory_limit="8g")
+def test_stress(generic_cloud: str):
+    """Test stress with limited Docker container resources (4 CPU, 8GB memory)."""
+    # launch a container with 4CPU and 8GB memory
+    # Issue 100 long request, 100 short requests
+    # refresh == True is long request
+    # refresh == False is short request
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip('Skipping test_stress on local server')
+
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'test_stress',
+        [
+            # Launch a cluster so that we have cluster name to query in sky status
+            f'sky launch -y -c {name} -d --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'python tests/smoke_tests/scripts/test_stress.py --cluster-name {name}',
+        ],
+        f'sky down -y {name}',
     )
     smoke_tests_utils.run_one_test(test)
