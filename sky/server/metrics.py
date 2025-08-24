@@ -2,6 +2,7 @@
 
 import os
 import time
+from typing import Tuple
 
 import fastapi
 from prometheus_client import generate_latest
@@ -13,6 +14,51 @@ import uvicorn
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
+
+HISTOGRAM_BUCKETS_ENV_VAR = 'SKY_APISERVER_HISTOGRAM_BUCKETS'
+
+
+def _parse_histogram_buckets() -> Tuple[float, ...]:
+    """Parse histogram buckets from environment variable."""
+    env_buckets = os.environ.get(HISTOGRAM_BUCKETS_ENV_VAR)
+    default_buckets = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+                       15.0, 30.0, 60.0, 120.0, float('inf'))
+
+    if not env_buckets:
+        return default_buckets
+
+    try:
+        bucket_strs = [s.strip() for s in env_buckets.split(',')]
+        buckets = []
+
+        for bucket_str in bucket_strs:
+            if bucket_str.lower() in ('inf', '+inf', 'infinity'):
+                buckets.append(float('inf'))
+            else:
+                value = float(bucket_str)
+                if value < 0:
+                    raise ValueError('Histogram buckets must be non-negative')
+                buckets.append(value)
+
+        for i in range(1, len(buckets)):
+            if buckets[i] <= buckets[i -
+                                     1] and not (buckets[i - 1] == float('inf')
+                                                 or buckets[i] == float('inf')):
+                raise ValueError('Histogram buckets must be monotonically '
+                                 'increasing')
+
+        # Ensure the last bucket is +inf
+        if buckets[-1] != float('inf'):
+            buckets.append(float('inf'))
+
+        return tuple(buckets)
+
+    except (ValueError, TypeError) as e:
+        logger.warning(f'Invalid histogram buckets in '
+                       f'{HISTOGRAM_BUCKETS_ENV_VAR}: {env_buckets}. '
+                       f'Error: {e}. Using default buckets.')
+        return default_buckets
+
 
 # Total number of API server requests, grouped by path, method, and status.
 sky_apiserver_requests_total = prom.Counter(
@@ -27,8 +73,7 @@ sky_apiserver_request_duration_seconds = prom.Histogram(
     'sky_apiserver_request_duration_seconds',
     'Time spent processing API server requests',
     ['path', 'method', 'status'],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
-             float('inf')),
+    buckets=_parse_histogram_buckets(),
 )
 
 metrics_app = fastapi.FastAPI()
