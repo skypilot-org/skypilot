@@ -102,10 +102,18 @@ Using Ray with SkyPilot
 
 When running Ray workloads on SkyPilot:
 
-- **Always start your own Ray cluster on a port different from 6380** - SkyPilot uses port 6380 internally
+- **Running** ``ray start`` **is fine** - Ray defaults to port 6379, while SkyPilot uses port 6380 internally
 - **Never use** ``ray.init(address="auto")`` - It connects to SkyPilot's internal Ray cluster
 - **Start Ray head on rank 0, workers on other ranks** - See :ref:`distributed Ray example <dist-jobs>`
 - **Never call** ``ray stop`` - It may interfere with SkyPilot operations
+- **To kill your Ray cluster**, use ``ray.shutdown()`` in Python or kill the Ray processes directly:
+  
+  .. code-block:: bash
+  
+     # Kill all Ray processes started by your application (not SkyPilot's internal Ray)
+     pkill -f "ray start --address" 
+     # Or kill specific Ray head/worker processes
+     pkill -f "ray start --head --port=<your_port>"
 
 Use ``disk_tier: best``
 ~~~~~~~~~~~~~~~~~~~~~~~

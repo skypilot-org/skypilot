@@ -223,11 +223,12 @@ SkyPilot uses Ray internally on port 6380 for cluster management. When you use `
 .. code-block:: yaml
 
   run: |
+    head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
     if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-      ray start --head --port 6379
+      ray start --head
       python your_script.py
     else
-      ray start --address $HEAD_IP:6379
+      ray start --address $head_ip:6379
     fi
 
 How can I launch a VS Code tunnel using a SkyPilot task definition?
