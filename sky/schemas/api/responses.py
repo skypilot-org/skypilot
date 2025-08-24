@@ -169,7 +169,8 @@ class ManagedJobRecord(ResponseBaseModel):
     job_name: str
     resources: str
     submitted_at: float
-    end_at: float
+    # None if the job has not ended yet.
+    end_at: Optional[float] = None
     job_duration: float
     recovery_count: int
     status: job_state.ManagedJobStatus
