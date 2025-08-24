@@ -1,5 +1,5 @@
-# We use the cuda runtime image instead of devel image to reduce size (1.3GB vs 3.6GB)
-FROM nvidia/cuda:12.1.1-runtime-ubuntu20.04
+# CUDA devel image includes nvcc (required by some frameworks)
+FROM nvidia/cuda:12.1.1-devel-ubuntu20.04
 
 # Detect architecture using ARG with default value
 ARG TARGETARCH
