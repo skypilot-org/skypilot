@@ -128,8 +128,10 @@ class ClusterJobRecord(ResponseBaseModel):
     username: str
     user_hash: str
     submitted_at: float
-    start_at: float
-    end_at: float
+    # None if the job has not started yet.
+    start_at: Optional[float] = None
+    # None if the job has not ended yet.
+    end_at: Optional[float] = None
     resources: str
     status: job_lib.JobStatus
     log_path: str
