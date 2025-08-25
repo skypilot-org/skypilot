@@ -18,278 +18,36 @@ import pandas as pd
 
 DEFAULT_SEEWEB_KEYS_PATH = os.path.expanduser('~/.seeweb_cloud/seeweb_keys')
 
-# Known GPU types to memory mapping (in MiB)
-# Updated with actual Seeweb offerings from catalog
-GPU_TO_MEMORY = {
-    'RTX-6000-24GB': 24576,  # 24GB
-    'RTX-A6000-48GB': 49152,  # 48GB
-    'A30': 24576,  # 24GB
-    'A100-80GB': 81920,  # 80GB
-    'L4-24GB': 24576,  # 24GB
-    'L40s-48GB': 49152,  # 48GB
-    'MI300X': 131072,  # 128GB (8x16GB)
-    'H200': 141312,  # 141GB
-    'H200-141GB': 141312,  # 141GB
-    'GENERAL': None  # No GPU
+# Seeweb GPU name to SkyPilot canonical name mapping.
+# This maps the names returned by Seeweb API to the canonical names used by SkyPilot.
+SEEWEB_GPU_NAME_TO_SKYPILOT_GPU_NAME = {
+    'H200 141GB': 'H200',
+    'A100 80GB': 'A100',
+    'H100 80GB': 'H100',
+    'RTX 6000 24GB': 'RTX6000',
+    'RTX A6000 48GB': 'RTXA6000',
+    'L4 24GB': 'L4',
+    'L40s 48GB': 'L40S',
+    'A30': 'A30',
+    'MI300X': 'MI300X',
+    'Tenstorrent Grayskull e75': 'Grayskull-e75',
+    'Tenstorrent Grayskull e150': 'Grayskull-e150',
 }
 
-# Fallback catalog data if API fails
-# Updated with actual Seeweb offerings from catalog
-FALLBACK_PLANS = [
-    # CPU-only instances
-    {
-        'plan_name': 'eCS1',
-        'vcpus': 1,
-        'memory_gb': 1,
-        'price': 0.019,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-    {
-        'plan_name': 'eCS2',
-        'vcpus': 2,
-        'memory_gb': 2,
-        'price': 0.032,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-    {
-        'plan_name': 'eCS3',
-        'vcpus': 4,
-        'memory_gb': 4,
-        'price': 0.048,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-    {
-        'plan_name': 'eCS4',
-        'vcpus': 4,
-        'memory_gb': 8,
-        'price': 0.063,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-    {
-        'plan_name': 'eCS5',
-        'vcpus': 8,
-        'memory_gb': 16,
-        'price': 0.127,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-    {
-        'plan_name': 'eCS6',
-        'vcpus': 12,
-        'memory_gb': 24,
-        'price': 0.152,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-    {
-        'plan_name': 'ECS7',
-        'vcpus': 16,
-        'memory_gb': 32,
-        'price': 0.31,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-    {
-        'plan_name': 'ECS8',
-        'vcpus': 16,
-        'memory_gb': 64,
-        'price': 0.63,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-
-    # High Memory instances
-    {
-        'plan_name': 'eCS1HM',
-        'vcpus': 4,
-        'memory_gb': 64,
-        'price': 0.217,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-    {
-        'plan_name': 'eCS2HM',
-        'vcpus': 8,
-        'memory_gb': 128,
-        'price': 0.434,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-    {
-        'plan_name': 'eCS3HM',
-        'vcpus': 16,
-        'memory_gb': 256,
-        'price': 0.719,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-    {
-        'plan_name': 'eCS4HM',
-        'vcpus': 32,
-        'memory_gb': 512,
-        'price': 1.338,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-    {
-        'plan_name': 'eCS5HM',
-        'vcpus': 32,
-        'memory_gb': 960,
-        'price': 2.537,
-        'gpu_name': None,
-        'gpu_count': 0
-    },
-
-    # GPU instances - RTX-6000-24GB
-    {
-        'plan_name': 'ECS1GPU',
-        'vcpus': 8,
-        'memory_gb': 32,
-        'price': 0.29,
-        'gpu_name': 'RTX-6000-24GB',
-        'gpu_count': 1
-    },
-
-    # GPU instances - A30
-    {
-        'plan_name': 'ECS1GPU11',
-        'vcpus': 8,
-        'memory_gb': 32,
-        'price': 0.29,
-        'gpu_name': 'A30',
-        'gpu_count': 1
-    },
-
-    # GPU instances - H200
-    {
-        'plan_name': 'ECS1GPU10',
-        'vcpus': 8,
-        'memory_gb': 32,
-        'price': 0.85,
-        'gpu_name': 'H200',
-        'gpu_count': 1
-    },
-    {
-        'plan_name': 'ECS2GPU10',
-        'vcpus': 16,
-        'memory_gb': 64,
-        'price': 1.7,
-        'gpu_name': 'H200',
-        'gpu_count': 2
-    },
-
-    # GPU instances - RTX-A6000-48GB
-    {
-        'plan_name': 'ECS1GPU2',
-        'vcpus': 8,
-        'memory_gb': 32,
-        'price': 0.74,
-        'gpu_name': 'RTX-A6000-48GB',
-        'gpu_count': 1
-    },
-    {
-        'plan_name': 'ECS2GPU2',
-        'vcpus': 16,
-        'memory_gb': 64,
-        'price': 1.48,
-        'gpu_name': 'RTX-A6000-48GB',
-        'gpu_count': 2
-    },
-    {
-        'plan_name': 'ECS3GPU2',
-        'vcpus': 32,
-        'memory_gb': 128,
-        'price': 2.96,
-        'gpu_name': 'RTX-A6000-48GB',
-        'gpu_count': 4
-    },
-
-    # GPU instances - A100-80GB
-    {
-        'plan_name': 'ECS1GPU3',
-        'vcpus': 16,
-        'memory_gb': 120,
-        'price': 1.89,
-        'gpu_name': 'A100-80GB',
-        'gpu_count': 1
-    },
-    {
-        'plan_name': 'ECS2GPU3',
-        'vcpus': 32,
-        'memory_gb': 240,
-        'price': 3.78,
-        'gpu_name': 'A100-80GB',
-        'gpu_count': 2
-    },
-    {
-        'plan_name': 'ECS3GPU3',
-        'vcpus': 64,
-        'memory_gb': 480,
-        'price': 7.56,
-        'gpu_name': 'A100-80GB',
-        'gpu_count': 4
-    },
-
-    # GPU instances - L4-24GB
-    {
-        'plan_name': 'ECS1GPU6',
-        'vcpus': 4,
-        'memory_gb': 32,
-        'price': 0.38,
-        'gpu_name': 'L4-24GB',
-        'gpu_count': 1
-    },
-    {
-        'plan_name': 'ECS2GPU6',
-        'vcpus': 8,
-        'memory_gb': 64,
-        'price': 0.76,
-        'gpu_name': 'L4-24GB',
-        'gpu_count': 2
-    },
-    {
-        'plan_name': 'ECS3GPU6',
-        'vcpus': 16,
-        'memory_gb': 128,
-        'price': 1.52,
-        'gpu_name': 'L4-24GB',
-        'gpu_count': 4
-    },
-
-    # GPU instances - L40s-48GB
-    {
-        'plan_name': 'ECS1GPU7',
-        'vcpus': 8,
-        'memory_gb': 32,
-        'price': 0.85,
-        'gpu_name': 'L40s-48GB',
-        'gpu_count': 1
-    },
-    {
-        'plan_name': 'ECS2GPU7',
-        'vcpus': 16,
-        'memory_gb': 64,
-        'price': 1.7,
-        'gpu_name': 'L40s-48GB',
-        'gpu_count': 2
-    },
-
-    # GPU instances - MI300X (AMD)
-    {
-        'plan_name': 'ECS8GPU9',
-        'vcpus': 255,
-        'memory_gb': 2048,
-        'price': 12.8,
-        'gpu_name': 'MI300X',
-        'gpu_count': 8
-    },
-]
-
-FALLBACK_REGIONS = ['it-fr2', 'it-mi2', 'ch-lug1', 'bg-sof1']
+# GPU VRAM mapping (like Nebius approach) - using canonical names
+VRAM = {
+    'RTX6000': 24576,  # 24GB
+    'RTXA6000': 49152,  # 48GB
+    'A30': 24576,  # 24GB
+    'A100': 81920,  # 80GB
+    'H100': 81920,  # 80GB
+    'H200': 144384,  # 141GB
+    'L4': 24576,  # 24GB
+    'L40S': 49152,  # 48GB
+    'MI300X': 196608,  # 192GB
+    'Grayskull-e75': 8192,  # 8GB
+    'Grayskull-e150': 16384,  # 16GB
+}
 
 
 def get_api_key(api_key_path: Optional[str] = None) -> str:
@@ -309,6 +67,23 @@ def get_api_key(api_key_path: Optional[str] = None) -> str:
         return parser['DEFAULT']['api_key'].strip()
     except KeyError:
         raise ValueError(f'Missing api_key in {path}')
+
+
+def normalize_gpu_name(gpu_name: str) -> str:
+    """Normalize GPU name from Seeweb API to SkyPilot canonical name."""
+    if not gpu_name:
+        return ''
+
+    # Map to canonical name if available
+    canonical_name = SEEWEB_GPU_NAME_TO_SKYPILOT_GPU_NAME.get(gpu_name)
+    if canonical_name:
+        return canonical_name
+
+    # If not found in mapping, return original name
+    print(
+        f'Warning: GPU name "{gpu_name}" not found in mapping, using original name'
+    )
+    return gpu_name
 
 
 def parse_plan_info(plan: Any) -> Dict[str, Any]:
@@ -341,25 +116,26 @@ def parse_plan_info(plan: Any) -> Dict[str, Any]:
 
         gpu_label = getattr(plan, 'gpu_label', None)
 
-        # Determine GPU name
-        gpu_name = None
-        if gpu_count > 0 and gpu_label:
-            gpu_name = str(gpu_label)
-        elif gpu_count > 0:
-            # Try to extract from plan name
-            plan_name_upper = plan_name.upper()
-            for gpu_type in GPU_TO_MEMORY.keys():
-                if gpu_type in plan_name_upper:
-                    gpu_name = gpu_type
-                    break
+        # Determine GPU name - use gpu_label if available, otherwise try to infer from plan name
+        if gpu_label:
+            gpu_name = normalize_gpu_name(gpu_label)  # Normalize the GPU name
+        else:
+            # Try to extract GPU name from plan name
+            plan_name = getattr(plan, 'name', '')
+            if 'GPU' in plan_name:
+                # Extract GPU type from plan name (e.g., ECS1GPU11 -> GPU11)
+                parts = plan_name.split('GPU')
+                if len(parts) > 1:
+                    gpu_name = 'GPU' + parts[1]
+                else:
+                    gpu_name = 'GPU'
+            else:
+                gpu_name = None
+
+        # Get GPU VRAM from mapping using the normalized name
+        gpu_vram_mb = VRAM.get(gpu_name, 0) if gpu_name else 0
     else:
-        # Dictionary format (fallback data)
-        plan_name = plan.get('name', plan.get('plan_name', 'unknown'))
-        vcpus = plan.get('vcpu', plan.get('vcpus', 0))
-        memory_gb = plan.get('ram', plan.get('memory_gb', 0))
-        price = plan.get('price_hour', plan.get('price', 0.0))
-        gpu_name = plan.get('gpu', plan.get('gpu_name'))
-        gpu_count = plan.get('gpu_count', 0)
+        raise ValueError(f"Unsupported plan format: {type(plan)}")
 
     return {
         'plan_name': plan_name,
@@ -367,96 +143,75 @@ def parse_plan_info(plan: Any) -> Dict[str, Any]:
         'memory_gb': memory_gb,
         'gpu_name': gpu_name,
         'gpu_count': gpu_count,
+        'gpu_vram_mb': gpu_vram_mb,
         'price': price,
     }
 
 
-def clean_gpu_name(gpu_name: str) -> str:
-    """Clean GPU name by replacing spaces with hyphens for SkyPilot compatibility."""
-    if not gpu_name or pd.isna(gpu_name):
-        return ''
-    return str(gpu_name).replace(' ', '-')
-
-
-def get_gpu_info(gpu_count: int, gpu_name: str) -> str:
+def get_gpu_info(gpu_count: int, gpu_name: str, gpu_vram_mb: int = 0) -> str:
     """Generate GPU info JSON string compatible with SkyPilot."""
     if not gpu_name or gpu_count == 0:
         return ''
 
-    # Clean GPU name by replacing spaces with hyphens
-    clean_name = clean_gpu_name(gpu_name)
-
-    gpu_memory = GPU_TO_MEMORY.get(gpu_name,
-                                   16384)  # Default to 16GB if unknown
+    # Determine manufacturer based on GPU name
+    gpu_name_upper = str(gpu_name).upper()
+    if 'MI300' in gpu_name_upper or gpu_name_upper == 'MI300X':
+        manufacturer = 'AMD'
+    elif 'GRAYSKULL' in gpu_name_upper:
+        manufacturer = 'TENSTORRENT'
+    else:
+        manufacturer = 'NVIDIA'
 
     gpu_info = {
         'Gpus': [{
-            'Name': clean_name,  # Use cleaned name
-            'Manufacturer': 'NVIDIA',  # Assuming NVIDIA for now
+            'Name': gpu_name,
+            'Manufacturer': manufacturer,
             'Count': float(gpu_count),
             'MemoryInfo': {
-                'SizeInMiB': gpu_memory
+                'SizeInMiB': gpu_vram_mb
             },
         }],
-        'TotalGpuMemoryInMiB': gpu_memory * gpu_count if gpu_memory else 0
+        'TotalGpuMemoryInMiB': gpu_vram_mb * gpu_count if gpu_vram_mb else 0
     }
 
     return json.dumps(gpu_info).replace('"', "'")
 
 
 def fetch_seeweb_data(api_key: str) -> List[Dict]:
-    """Fetch plans and regions from Seeweb API, with fallback to default data."""
-    plans = FALLBACK_PLANS.copy()
-    regions = FALLBACK_REGIONS.copy()
 
     try:
         import ecsapi
         client = ecsapi.Api(token=api_key)
 
-        # Try to fetch plans - this is more complex and may fail
-        try:
-            print("Fetching plans from Seeweb API...")
-            # Try simple plans first
-            api_plans = client.fetch_plans()
-            print(f"API plans: {[p.name for p in api_plans if int(p.gpu) > 0]}")
-            if api_plans and len(api_plans) > 0:
-                print(f"Successfully fetched {len(api_plans)} plans from API")
-                plans = []
-                for plan in api_plans:
-                    # Skip plans that end with 'W' (Windows plans)
-                    if plan.name.endswith('W'):
-                        print(f"Skipping Windows plan: {plan.name}")
-                        continue
+        print("Fetching plans from Seeweb API...")
+        api_plans = client.fetch_plans()
 
-                    print(f"Fetching regions available for {plan.name}")
-                    regions_available = client.fetch_regions_available(
-                        plan.name)
-                    print(f"Regions available: {len(regions_available)}")
-                    try:
-                        parsed = parse_plan_info(plan)
-                        parsed.update({'regions_available': regions_available})
-                        print(f"Parsed plan: {parsed}")
-                        plans.append(parsed)
-                    except Exception as e:
-                        print(f"Error parsing plan {plan}: {e}")
-                        raise e
-                        continue
-                print(
-                    f"Successfully parsed {len(plans)} plans (excluding Windows plans)"
-                )
-        except Exception as e:
-            raise e
-            print(f"Error fetching plans from API: {e}")
-            print(f"Using fallback plans: {[p['plan_name'] for p in plans]}")
+        if not api_plans:
+            raise ValueError("No plans returned from API")
+
+        print(f"Successfully fetched {len(api_plans)} plans from API")
+        plans = []
+
+        for plan in api_plans:
+
+            print(f"Fetching regions available for {plan.name}")
+            regions_available = client.fetch_regions_available(plan.name)
+
+            try:
+                parsed = parse_plan_info(plan)
+                parsed.update({'regions_available': regions_available})
+                plans.append(parsed)
+            except Exception as e:
+                print(f"Error parsing plan {plan.name}: {e}")
+                continue
+
+        print(f"Successfully parsed {len(plans)} plans")
+        return plans
 
     except ImportError:
-        print("ecsapi not available, using fallback data")
+        raise ImportError("ecsapi not available")
     except Exception as e:
-        raise e
-        print(f"Error initializing Seeweb client: {e}")
-        print("Using fallback data")
-
-    return plans
+        raise Exception(f"Error fetching data from Seeweb API: {e}")
 
 
 def create_catalog(api_key: str, output_path: str) -> None:
@@ -477,61 +232,74 @@ def create_catalog(api_key: str, output_path: str) -> None:
                 gpu_info_str = ''
                 if plan['gpu_name'] and plan['gpu_count'] > 0:
                     gpu_info_str = get_gpu_info(plan['gpu_count'],
-                                                plan['gpu_name'])
+                                                plan['gpu_name'],
+                                                plan.get('gpu_vram_mb', 0))
 
-                # Create entry for each region
-                for region in plan.get('regions_available', []):
-                    print(f"Writing plan {plan['plan_name']} to {region}")
-                    # Clean GPU name for AcceleratorName field
-                    clean_gpu_name_value = clean_gpu_name(
-                        plan['gpu_name']) if plan['gpu_name'] else ''
+                # Handle regions - create a row for each available region
+                regions_available = plan['regions_available']
+                if isinstance(regions_available,
+                              list) and len(regions_available) > 0:
+                    # Create a row for each region
+                    for region in regions_available:
+                        writer.writerow([
+                            plan['plan_name'],  # InstanceType
+                            plan['gpu_name'],  # AcceleratorName (cleaned)
+                            plan['gpu_count'] if plan['gpu_count'] > 0 else
+                            '',  # AcceleratorCount
+                            plan['vcpus'],  # vCPUs
+                            plan['memory_gb'],  # MemoryGiB  
+                            plan['price'],  # Price
+                            region,  # Region (single region per row)
+                            gpu_info_str,  # GpuInfo
+                            ''  # SpotPrice (Seeweb doesn't support spot)
+                        ])
+                else:
+                    # No regions available, create a row with empty region
                     writer.writerow([
                         plan['plan_name'],  # InstanceType
-                        clean_gpu_name_value,  # AcceleratorName (cleaned)
+                        plan['gpu_name'],  # AcceleratorName (cleaned)
                         plan['gpu_count']
                         if plan['gpu_count'] > 0 else '',  # AcceleratorCount
                         plan['vcpus'],  # vCPUs
                         plan['memory_gb'],  # MemoryGiB  
                         plan['price'],  # Price
-                        region,  # Region
+                        '',  # Region (empty)
                         gpu_info_str,  # GpuInfo
                         ''  # SpotPrice (Seeweb doesn't support spot)
                     ])
             except Exception as e:
-                print(f"Error processing plan {plan}: {e}")
+                print(f"Error processing plan {plan['plan_name']}: {e}")
                 continue
 
     print(f"Seeweb catalog saved to {output_path}")
     print(f"Created {len(plans)} instance types")
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Generate Seeweb catalog')
+def main() -> None:
+    """Main function to fetch and write Seeweb platform prices to a CSV file."""
+    parser = argparse.ArgumentParser()
     parser.add_argument('--api-key', help='Seeweb API key')
     parser.add_argument('--api-key-path',
                         help='Path to file containing Seeweb API key')
-    parser.add_argument('--fallback-only',
-                        action='store_true',
-                        help='Skip API calls and use only fallback data')
-
     args = parser.parse_args()
 
     # Get API key
-    api_key = None
-    if not args.fallback_only:
-        try:
-            if args.api_key:
-                api_key = args.api_key
-            else:
-                api_key = get_api_key(args.api_key_path)
-        except Exception as e:
-            print(f"Error getting API key: {e}")
-            print("Using fallback data only")
+    if args.api_key:
+        api_key = args.api_key
+    else:
+        api_key = get_api_key(args.api_key_path)
 
-    # Create catalog using standard pattern
-    os.makedirs('seeweb', exist_ok=True)
-    create_catalog(api_key, 'seeweb/vms.csv')
-    print('Seeweb Service Catalog saved to seeweb/vms.csv')
+    # TODOPR: Before PR, change back to 'seeweb' directory
+    # os.makedirs('seeweb', exist_ok=True)
+    # create_catalog(api_key, 'seeweb/vms.csv')
+    # print('Seeweb Service Catalog saved to seeweb/vms.csv')
+
+    # Temporary: Save to SkyPilot local catalog directory for testing
+    import os
+    catalog_dir = os.path.expanduser('~/.sky/catalogs/v7/seeweb')
+    os.makedirs(catalog_dir, exist_ok=True)
+    create_catalog(api_key, os.path.join(catalog_dir, 'vms.csv'))
+    print(f'Seeweb Service Catalog saved to {catalog_dir}/vms.csv')
 
 
 if __name__ == '__main__':

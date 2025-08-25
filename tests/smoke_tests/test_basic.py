@@ -836,6 +836,7 @@ def test_kubernetes_context_failover(unreachable_context):
         )
         smoke_tests_utils.run_one_test(test)
 
+
 @pytest.mark.no_seeweb  # Seeweb fails to provision resources
 def test_launch_and_exec_async(generic_cloud: str):
     """Test if the launch and exec commands work correctly with --async."""

@@ -1,4 +1,5 @@
 """Seeweb cloud adaptor - versione ultra-semplificata."""
+import os
 
 from sky.adaptors import common
 
@@ -8,12 +9,13 @@ _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Seeweb.'
 ecsapi = common.LazyImport(
     'ecsapi',
     import_error_message=_IMPORT_ERROR_MESSAGE,
-    set_loggers=lambda: os.environ.update({'GRPC_VERBOSITY': 'NONE'}))
+)
 boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
 botocore = common.LazyImport('botocore',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
 
 _LAZY_MODULES = (ecsapi, boto3, botocore)
+
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def check_compute_credentials():
@@ -40,10 +42,12 @@ def check_compute_credentials():
     except Exception as e:
         return False, f'Unable to authenticate with Seeweb API: {e}'
 
+
 @common.load_lazy_modules(_LAZY_MODULES)
 def check_storage_credentials():
     """Checks if the user has access credentials to Seeweb's storage service."""
     return check_compute_credentials()
+
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def client():
