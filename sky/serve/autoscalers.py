@@ -479,8 +479,7 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
 
         # RequestRateAutoscaler should only handle float values
         if isinstance(self.target_qps_per_replica, dict):
-            raise ValueError('RequestRateAutoscaler '
-                             'does not support dict '
+            raise ValueError('RequestRateAutoscaler does not support dict '
                              'target_qps_per_replica. Should use '
                              'InstanceAwareRequestRateAutoscaler instead.')
 
