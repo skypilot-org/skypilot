@@ -487,12 +487,11 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
             self.request_timestamps) / self.qps_window_size
 
         target_qps = self.target_qps_per_replica
-        raw_target_num = math.ceil(num_requests_per_second / target_qps)
-        target_num_replicas = self._clip_target_num_replicas(raw_target_num)
+        target_num_replicas = math.ceil(num_requests_per_second / target_qps)
         logger.info(f'Requests per second: {num_requests_per_second}. '
                     f'Target number of replicas: {target_num_replicas}.')
 
-        return target_num_replicas
+        return self._clip_target_num_replicas(target_num_replicas)
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:

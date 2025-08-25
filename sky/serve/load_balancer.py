@@ -60,8 +60,8 @@ class SkyServeLoadBalancer:
         # Set accelerator QPS for instance-aware policies
         if (target_qps_per_replica and
                 isinstance(target_qps_per_replica, dict) and
-                hasattr(self._load_balancing_policy,
-                        'set_target_qps_per_accelerator')):
+                isinstance(self._load_balancing_policy,
+                           lb_policies.InstanceAwareLeastLoadPolicy)):
             self._load_balancing_policy.set_target_qps_per_accelerator(
                 target_qps_per_replica)
 
