@@ -199,7 +199,8 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
                 data = response.json()
                 status = data.get('status')
                 msg = ('Uploaded chunk: '
-                       f'{params.chunk_index + 1} / {params.total_chunks}')
+                       f'{params.chunk_index + 1} / {params.total_chunks} '
+                       f'(Status: {status})')
                 if status == 'uploading':
                     missing_chunks = data.get('missing_chunks')
                     if missing_chunks:
@@ -213,7 +214,12 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
                     f'{response.content.decode("utf-8")}')
                 upload_logger.info(
                     f'Retrying... ({attempt + 1} / {max_attempts})')
-                time.sleep(1)
+                if response.status_code == 503:
+                    # If the server is temporarily unavailable,
+                    # wait a little longer before retrying.
+                    time.sleep(10)
+                else:
+                    time.sleep(1)
             else:
                 try:
                     response_details = response.json().get('detail')
