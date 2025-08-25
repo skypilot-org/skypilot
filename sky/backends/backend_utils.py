@@ -776,6 +776,13 @@ def write_cluster_config(
             region=region.name,
             keys=('use_ssm',),
             default_value=False)
+        if not use_ssm and use_internal_ips and ssh_proxy_command is None:
+            logger.warning('use_internal_ips is set to true, ' +
+            'but ssh_proxy_command is not set. Defaulting to using SSM. ' +
+            'Specify ssh_proxy_command to use a different proxy command: ' +
+            'https://docs.skypilot.co/en/latest/reference/config.html#' +
+            'aws.ssh_proxy_command.')
+            use_ssm = True
         if use_ssm:
             if ssh_proxy_command is None:
                 aws_profile = os.environ.get('AWS_PROFILE', 'default')
@@ -794,8 +801,9 @@ def write_cluster_config(
                 region_name = 'ssm-session'  # TODO: change this to a random string
             else:
                 logger.warning('use_ssm is set to true, but ssh_proxy_command '
-                               f'is already set to {ssh_proxy_command!r}')
-    logger.warning(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
+                               f'is already set to {ssh_proxy_command!r}.'
+                               'Ignoring use_ssm.')
+    logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
     labels = skypilot_config.get_effective_region_config(

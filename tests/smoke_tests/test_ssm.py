@@ -79,7 +79,30 @@ def test_ssm_private():
     test = smoke_tests_utils.Test(
         'ssm_private',
         [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml) && echo "$s"',
+            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml) && echo "$s"',
+        ],
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('aws'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+@pytest.mark.aws
+def test_ssm_private_no_ssh_proxy_command():
+    """Test that ssm works with private IP addresses.
+
+    Because we turn on use_internal_ips SkyPilot will automatically
+    use the private subnet to create the cluster.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    vpc = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
+    vpc_config = (f'--config aws.vpc_name={vpc} '
+                  f'--config aws.security_group_name=lloyd-airgap-gw-sg '
+                  f'--config aws.use_internal_ips=true')
+
+    test = smoke_tests_utils.Test(
+        'ssm_private',
+        [
+            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml) && echo "$s"',
         ],
         teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('aws'),
