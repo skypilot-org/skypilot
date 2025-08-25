@@ -79,10 +79,10 @@ def test_ssm_private():
     test = smoke_tests_utils.Test(
         'ssm_private',
         [
-            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml) && echo "$s"',
+            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml | tee /dev/stderr) && echo "$s"',
         ],
         # teardown=f'sky down -y {name}',
-        timeout=120,
+        timeout=smoke_tests_utils.get_timeout('aws'),
     )
     smoke_tests_utils.run_one_test(test)
 
