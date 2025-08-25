@@ -1511,7 +1511,7 @@ async def stream(
             if not resolved_log_path.exists():
                 raise fastapi.HTTPException(
                     status_code=404,
-                    detail=f'Server log file does not exist. The API server '
+                    detail='Server log file does not exist. The API server may '
                     'have been started using foreground logging mode - check '
                     'the external log location such as `kubectl logs`.')
         else:
