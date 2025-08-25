@@ -1144,7 +1144,7 @@ def storage_ls() -> List[responses.StorageRecord]:
             responses.StorageRecord(
                 name=storage['name'],
                 launched_at=storage['launched_at'],
-                store=storage['handle'],
+                store=list(storage.pop('handle').sky_stores.keys()),
                 last_use=storage['last_use'],
                 status=storage['status'],
             ))
