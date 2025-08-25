@@ -3,7 +3,7 @@ import json
 import os
 import textwrap
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from sky import serve
 from sky.adaptors import common as adaptors_common
@@ -33,7 +33,7 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         num_overprovision: Optional[int] = None,
         ports: Optional[str] = None,
-        target_qps_per_replica: Optional[float] = None,
+        target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None,
         post_data: Optional[Dict[str, Any]] = None,
         tls_credential: Optional[serve_utils.TLSCredential] = None,
         readiness_headers: Optional[Dict[str, str]] = None,
@@ -109,7 +109,8 @@ class SkyServiceSpec:
         self._max_replicas: Optional[int] = max_replicas
         self._num_overprovision: Optional[int] = num_overprovision
         self._ports: Optional[str] = ports
-        self._target_qps_per_replica: Optional[float] = target_qps_per_replica
+        self._target_qps_per_replica: Optional[Union[float, Dict[
+            str, float]]] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
             tls_credential)
@@ -240,6 +241,26 @@ class SkyServiceSpec:
 
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
+
+        # Validate instance-aware settings
+        target_qps_per_replica = service_config['target_qps_per_replica']
+        load_balancing_policy = service_config['load_balancing_policy']
+
+        if isinstance(target_qps_per_replica, dict):
+            if load_balancing_policy != 'instance_aware_least_load':
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'When using dict type target_qps_per_replica, '
+                        'load_balancing_policy must be '
+                        '"instance_aware_least_load".')
+
+        if load_balancing_policy == 'instance_aware_least_load':
+            if not isinstance(target_qps_per_replica, dict):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'When using "instance_aware_least_load" policy, '
+                        'target_qps_per_replica must be a '
+                        'dict mapping GPU types to QPS values.')
 
         tls_section = config.get('tls', None)
         if tls_section is not None:
@@ -435,7 +456,8 @@ class SkyServiceSpec:
         return self._ports
 
     @property
-    def target_qps_per_replica(self) -> Optional[float]:
+    def target_qps_per_replica(
+            self) -> Optional[Union[float, Dict[str, float]]]:
         return self._target_qps_per_replica
 
     @property

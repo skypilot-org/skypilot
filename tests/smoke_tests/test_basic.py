@@ -282,7 +282,7 @@ def test_aws_stale_job_manual_restart():
         'aws_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            f'sky launch -y -c {name} --infra aws/us-east-2 {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -309,6 +309,60 @@ def test_aws_stale_job_manual_restart():
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_vast
+@pytest.mark.aws
+def test_aws_manual_restart_recovery():
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.AWS.max_cluster_name_length())
+    region = 'us-east-2'
+    test = smoke_tests_utils.Test(
+        'test_aws_manual_restart_recovery',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                'aws', name, skip_remote_server_check=True),
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky autostop {name} -y -i 1',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=180),
+            # Restart the cluster manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=(
+                    f'id=`aws ec2 describe-instances --region {region} --filters '
+                    f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+                    f'--query Reservations[].Instances[].InstanceId '
+                    f'--output text` && '
+                    # Wait for the instance to be stopped before restarting.
+                    f'aws ec2 wait instance-stopped --region {region} '
+                    f'--instance-ids $id && '
+                    # Start the instance.
+                    f'aws ec2 start-instances --region {region} '
+                    f'--instance-ids $id && '
+                    # Wait for the instance to be running.
+                    f'aws ec2 wait instance-running --region {region} '
+                    f'--instance-ids $id'),
+                skip_remote_server_check=True),
+            # Status refresh should time out, as the restarted
+            # instance would get a new IP address.
+            # We should see a warning message on how to recover
+            # from this state.
+            f'sky status -r {name} | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            # Recover the cluster.
+            f'sky start -y {name}',
+            # Wait for the cluster to be up.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=300),
+        ],
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1195,4 +1249,43 @@ def test_cli_output(generic_cloud: str):
                 # Strawman idea: validate the table has 3 borders to ensure it is completed.
                 'echo "$s" | grep -- "$border" | wc -l | grep 3'),
         ])
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_sky_down_with_multiple_sgs():
+    """Test that sky down works with multiple security groups.
+    
+    The goal is to ensure that when we run sky down we get the typical 
+    terminating output with no extra output. If the output changes please
+    update the test.
+    """
+    name_one = smoke_tests_utils.get_cluster_name()
+    vpc_one = "DO_NOT_DELETE"
+    name_two = smoke_tests_utils.get_cluster_name() + '-2'
+    vpc_two = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
+
+    validate_terminating_output = (
+        f'printf "%s" "$s" && echo "\n===Validating terminating output===" && '
+        # Ensure each terminating line is present.
+        f'printf "%s" "$s" | grep "Terminating cluster {name_one}...done" && '
+        f'printf "%s" "$s" | grep "Terminating cluster {name_two}...done" && '
+        # Ensure the last line is present.
+        f'printf "%s" "$s" | grep "Terminating 2 clusters" && '
+        # # Ensure there are only 3 lines.
+        f'echo "$s" | sed "/^$/d" | wc -l | grep 3')
+
+    test = smoke_tests_utils.Test(
+        'sky_down_with_multiple_sgs',
+        [
+            # Launch cluster one.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name_one} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} --config aws.vpc_name={vpc_one} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Launch cluster two.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name_two} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} --config aws.vpc_name={vpc_two} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Run sky down and validate the output.
+            f's=$(SKYPILOT_DEBUG=0 sky down -y {name_one} {name_two} 2>&1) && {validate_terminating_output}',
+        ],
+        teardown=f'sky down -y {name_one} {name_two}',
+        timeout=smoke_tests_utils.get_timeout('aws'),
+    )
     smoke_tests_utils.run_one_test(test)

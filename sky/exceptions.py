@@ -180,6 +180,18 @@ class KubeAPIUnreachableError(ResourcesUnavailableError):
     pass
 
 
+class KubernetesValidationError(Exception):
+    """Raised when the Kubernetes validation fails.
+
+    It stores a list of strings that represent the path to the field which
+    caused the validation error.
+    """
+
+    def __init__(self, path: List[str], message: str):
+        super().__init__(message)
+        self.path = path
+
+
 class InvalidCloudConfigs(Exception):
     """Raised when invalid configurations are provided for a given cloud."""
     pass
@@ -660,4 +672,12 @@ class RequestInterruptedError(Exception):
 
 class SkyletInternalError(Exception):
     """Raised when a Skylet internal error occurs."""
+    pass
+
+
+class ClientError(Exception):
+    """Raised when a there is a client error occurs.
+
+    If a request encounters a ClientError, it will not be retried to the server.
+    """
     pass
