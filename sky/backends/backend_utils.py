@@ -795,7 +795,7 @@ def write_cluster_config(
             else:
                 logger.warning('use_ssm is set to true, but ssh_proxy_command '
                                f'is already set to {ssh_proxy_command!r}')
-    logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
+    logger.warning(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
     labels = skypilot_config.get_effective_region_config(
