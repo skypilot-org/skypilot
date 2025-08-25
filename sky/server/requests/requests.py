@@ -25,6 +25,7 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
@@ -439,6 +440,7 @@ def request_lock_path(request_id: str) -> str:
 
 @contextlib.contextmanager
 @init_db
+@metrics_lib.measure_duration
 def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get a SkyPilot API request."""
     request = _get_request_no_lock(request_id)
@@ -463,6 +465,7 @@ def _get_request_no_lock(request_id: str) -> Optional[Request]:
 
 
 @init_db
+@metrics_lib.measure_duration
 def get_latest_request_id() -> Optional[str]:
     """Get the latest request ID."""
     assert _DB is not None
@@ -475,6 +478,7 @@ def get_latest_request_id() -> Optional[str]:
 
 
 @init_db
+@metrics_lib.measure_duration
 def get_request(request_id: str) -> Optional[Request]:
     """Get a SkyPilot API request."""
     with filelock.FileLock(request_lock_path(request_id)):
@@ -482,6 +486,7 @@ def get_request(request_id: str) -> Optional[Request]:
 
 
 @init_db
+@metrics_lib.measure_duration
 def create_if_not_exists(request: Request) -> bool:
     """Create a SkyPilot API request if it does not exist."""
     with filelock.FileLock(request_lock_path(request.request_id)):
@@ -492,6 +497,7 @@ def create_if_not_exists(request: Request) -> bool:
 
 
 @init_db
+@metrics_lib.measure_duration
 def get_request_tasks(
     status: Optional[List[RequestStatus]] = None,
     cluster_names: Optional[List[str]] = None,
@@ -609,6 +615,7 @@ def set_request_cancelled(request_id: str) -> None:
 
 
 @init_db
+@metrics_lib.measure_duration
 def _delete_requests(requests: List[Request]):
     """Clean up requests by their IDs."""
     id_list_str = ','.join(repr(req.request_id) for req in requests)

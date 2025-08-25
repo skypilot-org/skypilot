@@ -88,8 +88,7 @@ RUN cd /skypilot && \
     # Cleanup all caches to reduce the image size
     ~/.local/bin/uv cache clean && \
     rm -rf ~/.cache/pip ~/.cache/uv && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
+    apt-get update && \
     # Remove source code if installed from wheel (not needed for wheel installs)
     if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
         echo "Removing source code (wheel installation)" && \

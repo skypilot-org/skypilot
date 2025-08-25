@@ -99,21 +99,24 @@ def run_concurrent_requests(num_requests, cmd):
         thread.join()
 
 
-def run_concurrent_api_requests(num_requests, fn, kind):
+def run_concurrent_api_requests(num_requests, fn, kind, include_idx=False):
     threads = []
     for i in range(num_requests):
         thread = threading.Thread(target=run_single_api_request,
-                                  args=(i + 1, fn, kind))
+                                  args=(i + 1, fn, kind, include_idx))
         threads.append(thread)
         thread.start()
     for thread in threads:
         thread.join()
 
 
-def run_single_api_request(idx, fn, kind):
+def run_single_api_request(idx, fn, kind, include_idx=False):
     print(f"API Request {idx} submitted")
     begin = time.time()
-    fn()
+    if include_idx:
+        fn(idx)
+    else:
+        fn()
     duration = time.time() - begin
     with results_lock:
         request_latencies[kind].append(duration)
@@ -227,8 +230,8 @@ def test_validate_api(num_requests):
 
     def validate():
         with sky.Dag() as dag:
-            dag.add(sky.Task(name='echo', run='echo hello'))
-            sdk.validate(dag)
+            sky.Task(name='echo', run='echo hello')
+        sdk.validate(dag)
 
     run_concurrent_api_requests(num_requests, validate, 'API /validate')
 
@@ -238,8 +241,29 @@ def test_api_status(num_requests):
     run_concurrent_api_requests(num_requests, sdk.api_status, 'API /status')
 
 
+def test_launch_and_logs_api(num_requests):
+    print(f"Testing {num_requests} launch and logs API requests")
+
+    def launch_and_logs(idx):
+        name = f'echo{idx}'
+        with sky.Dag() as dag:
+            dag.name = name
+            sky.Task(name=name,
+                     run='for i in {1..10000}; do echo $i; sleep 1; done')
+        sdk.stream_and_get(sdk.launch(dag, cluster_name=name))
+        sdk.tail_logs(name, 1, follow=True)
+
+    run_concurrent_api_requests(num_requests,
+                                launch_and_logs,
+                                'API /launch_and_logs',
+                                include_idx=True)
+
+
 all_requests = ['launch', 'status', 'logs', 'jobs', 'serve']
-all_apis = ['status', 'cli_status', 'tail_logs', 'validate', 'api_status']
+all_apis = [
+    'status', 'cli_status', 'tail_logs', 'validate', 'api_status',
+    'launch_and_logs'
+]
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -326,6 +350,9 @@ if __name__ == '__main__':
                                           args=(args.n,))
             elif api == 'api_status':
                 thread = threading.Thread(target=test_api_status,
+                                          args=(args.n,))
+            elif api == 'launch_and_logs':
+                thread = threading.Thread(target=test_launch_and_logs_api,
                                           args=(args.n,))
             if thread:
                 test_threads.append(thread)
