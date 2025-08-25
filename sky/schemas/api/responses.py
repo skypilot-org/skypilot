@@ -226,15 +226,15 @@ class VolumeRecord(ResponseBaseModel):
     launched_at: int
     cloud: str
     region: str
-    zone: str
+    zone: Optional[str] = None
     size: str
     config: Dict[str, Any]
     name_on_cloud: str
     user_hash: str
     user_name: str
     workspace: str
-    last_attached_at: int
-    last_use: str
-    status: status_lib.VolumeStatus
+    last_attached_at: Optional[int] = None
+    last_use: Optional[str] = None
+    status: Optional[status_lib.VolumeStatus] = None
     usedby_pods: List[str]
     usedby_clusters: List[str]
