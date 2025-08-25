@@ -44,7 +44,9 @@ def _get_infra_str(cloud: Optional[str], region: Optional[str],
 class VolumeTable(abc.ABC):
     """The volume table."""
 
-    def __init__(self, volumes: List[responses.VolumeRecord], show_all: bool = False):
+    def __init__(self,
+                 volumes: List[responses.VolumeRecord],
+                 show_all: bool = False):
         super().__init__()
         self.table = self._create_table(show_all)
         self._add_rows(volumes, show_all)
