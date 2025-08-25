@@ -14,7 +14,7 @@ import sys
 import tempfile
 import textwrap
 import time
-from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
+from typing import (Callable, Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
                     Tuple, Union)
 
 import colorama

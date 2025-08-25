@@ -2936,6 +2936,25 @@ class SkyletClient:
     ) -> 'servev1_pb2.UpdateServiceResponse':
         return self._serve_stub.UpdateService(request, timeout=timeout)
 
+    def _get_serve_stream_color(self, color):
+        # refer to proto file to for why we do mappings.
+        color_mappings = {
+            servev1_pb2.ColorSchema.RED: colorama.Fore.RED,
+            servev1_pb2.ColorSchema.YELLOW: colorama.Fore.YELLOW,
+            servev1_pb2.ColorSchema.GREEN: colorama.Fore.GREEN
+        }
+        return color_mappings.get(color, '')
+
+    def stream_replica_logs(
+        self,
+        request: 'servev1_pb2.StreamReplicaLogRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> None:
+        stream = self._serve_stub.StreamReplicaLogs(request, timeout=timeout)
+        for log in stream:
+            print(f'{self._get_serve_stream_color(log.color)}'
+                  f'{log.message}{colorama.Style.RESET_ALL}')
+
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):

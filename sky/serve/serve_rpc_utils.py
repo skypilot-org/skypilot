@@ -173,3 +173,20 @@ class RpcRunner:
             handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
             update_service(request))
         return response.encoded_message
+
+    @classmethod
+    def stream_replica_logs(cls, handle: backends.CloudVmRayResourceHandle,
+                            service_name: str, replica_id: int, follow: bool,
+                            tail: Optional[int], pool: bool) -> None:
+        assert handle.is_grpc_enabled
+        request = servev1_pb2.StreamReplicaLogRequest(service_name=service_name,
+                                                      replica_id=replica_id,
+                                                      follow=follow,
+                                                      pool=pool)
+        if tail is not None:
+            request.tail = tail
+
+        # will automatically stream the logs.
+        backend_utils.invoke_skylet_with_retries(
+            handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
+            stream_replica_logs(request))

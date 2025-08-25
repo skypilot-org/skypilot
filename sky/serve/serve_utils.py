@@ -1372,6 +1372,15 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
     return ''
 
 
+def _service_is_terminal(service_name: str, pool: bool) -> bool:
+    record = _get_service_status(service_name,
+                                 pool,
+                                 with_replica_info=False)
+    if record is None:
+        return True
+    return record['status'] in serve_state.ServiceStatus.failed_statuses()
+
+
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
                               follow: bool, tail: Optional[int],
                               pool: bool) -> str:
@@ -1382,14 +1391,6 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
         log_file = generate_remote_controller_log_file_name(service_name)
     else:
         log_file = generate_remote_load_balancer_log_file_name(service_name)
-
-    def _service_is_terminal() -> bool:
-        record = _get_service_status(service_name,
-                                     pool,
-                                     with_replica_info=False)
-        if record is None:
-            return True
-        return record['status'] in serve_state.ServiceStatus.failed_statuses()
 
     if tail is not None:
         lines = common_utils.read_last_n_lines(os.path.expanduser(log_file),
@@ -1403,13 +1404,47 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
                   'r',
                   newline='',
                   encoding='utf-8') as f:
+            should_stop = lambda: _service_is_terminal(service_name, pool)
             for line in log_utils.follow_logs(
                     f,
-                    should_stop=_service_is_terminal,
+                    should_stop=should_stop,
                     stop_on_eof=not follow,
             ):
                 print(line, end='', flush=True)
     return ''
+
+
+def stream_serve_process_logs_iter(service_name: str, stream_controller: bool,
+                                   follow: bool, tail: Optional[int],
+                                   pool: bool) -> Iterator[str]:
+    msg = _check_service_status_healthy(service_name, pool)
+    if msg is not None:
+        return msg
+    if stream_controller:
+        log_file = generate_remote_controller_log_file_name(service_name)
+    else:
+        log_file = generate_remote_load_balancer_log_file_name(service_name)
+
+    if tail is not None:
+        lines = common_utils.read_last_n_lines(os.path.expanduser(log_file),
+                                               tail)
+        for line in lines:
+            if not line.endswith('\n'):
+                line += '\n'
+            yield line
+    else:
+        with open(os.path.expanduser(log_file),
+                  'r',
+                  newline='',
+                  encoding='utf-8') as f:
+            should_stop = lambda: _service_is_terminal(service_name, pool)
+            for line in log_utils.follow_logs(
+                    f,
+                    should_stop=should_stop,
+                    stop_on_eof=not follow,
+            ):
+                yield line
+    yield ''
 
 
 # ================== Table Formatter for `sky serve status` ==================

@@ -1,4 +1,5 @@
 """gRPC service implementations for skylet."""
+from typing import Iterator
 
 import grpc
 
@@ -145,4 +146,26 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
             return servev1_pb2.UpdateServiceResponse(
                 encoded_message=encoded_message)
         except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def StreamReplicaLogs(  # type: ignore[return]
+            self, request: servev1_pb2.StreamReplicaLogRequest,
+            context: grpc.ServicerContext) -> Iterator[servev1_pb2.ReplicaLog]:
+        """Stream replica logs"""
+        seq = 0
+        try:
+            service_name = request.service_name
+            replica_id = request.replica_id
+            follow = request.follow
+            tail = None if not request.HasField('tail') else request.tail
+            pool = request.pool
+
+            # TODO (kyuds): yield from
+        except Exception as e:  # pylint: disable=broad-except
+            response = servev1_pb2.ReplicaLog(
+                seq=seq,
+                message=str(e),
+                color=servev1_pb2.ColorSchema.RED,
+                status=servev1_pb2.ResponseStatus.ERROR)
+            yield response
             context.abort(grpc.StatusCode.INTERNAL, str(e))

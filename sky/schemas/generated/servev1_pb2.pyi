@@ -1,9 +1,28 @@
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
+
+class ResponseStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    OK: _ClassVar[ResponseStatus]
+    ERROR: _ClassVar[ResponseStatus]
+    DONE: _ClassVar[ResponseStatus]
+
+class ColorSchema(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    RED: _ClassVar[ColorSchema]
+    YELLOW: _ClassVar[ColorSchema]
+    GREEN: _ClassVar[ColorSchema]
+OK: ResponseStatus
+ERROR: ResponseStatus
+DONE: ResponseStatus
+RED: ColorSchema
+YELLOW: ColorSchema
+GREEN: ColorSchema
 
 class ServiceNames(_message.Message):
     __slots__ = ("names",)
@@ -115,3 +134,29 @@ class UpdateServiceResponse(_message.Message):
     ENCODED_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     encoded_message: str
     def __init__(self, encoded_message: _Optional[str] = ...) -> None: ...
+
+class StreamReplicaLogRequest(_message.Message):
+    __slots__ = ("service_name", "replica_id", "follow", "tail", "pool")
+    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    REPLICA_ID_FIELD_NUMBER: _ClassVar[int]
+    FOLLOW_FIELD_NUMBER: _ClassVar[int]
+    TAIL_FIELD_NUMBER: _ClassVar[int]
+    POOL_FIELD_NUMBER: _ClassVar[int]
+    service_name: str
+    replica_id: int
+    follow: bool
+    tail: int
+    pool: bool
+    def __init__(self, service_name: _Optional[str] = ..., replica_id: _Optional[int] = ..., follow: bool = ..., tail: _Optional[int] = ..., pool: bool = ...) -> None: ...
+
+class ReplicaLog(_message.Message):
+    __slots__ = ("seq", "message", "color", "status")
+    SEQ_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    COLOR_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    seq: int
+    message: str
+    color: ColorSchema
+    status: ResponseStatus
+    def __init__(self, seq: _Optional[int] = ..., message: _Optional[str] = ..., color: _Optional[_Union[ColorSchema, str]] = ..., status: _Optional[_Union[ResponseStatus, str]] = ...) -> None: ...
