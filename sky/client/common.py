@@ -165,8 +165,12 @@ class UploadChunkParams:
     log_file: str
 
 
-def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
-    """Uploads a chunk of a zip file to the API server."""
+def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
+    """Uploads a chunk of a zip file to the API server.
+
+    Returns:
+        Status of the upload.
+    """
     upload_logger = params.upload_logger
     upload_logger.info(
         f'Uploading chunk: {params.chunk_index + 1} / {params.total_chunks}')
@@ -201,7 +205,7 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
                     if missing_chunks:
                         msg += f' - Waiting for chunks: {missing_chunks}'
                 upload_logger.info(msg)
-                return
+                return status
             elif attempt < max_attempts - 1:
                 upload_logger.error(
                     f'Failed to upload chunk: '
@@ -225,6 +229,8 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
                         ux_utils.error_message(error_msg + '\n',
                                                params.log_file,
                                                is_local=True))
+    # If we reach here, the upload failed.
+    return 'failed'
 
 
 @contextlib.contextmanager
@@ -348,14 +354,23 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                     is_local=True))
 
             with httpx.Client(timeout=timeout) as client:
-                chunk_params = [
-                    UploadChunkParams(client, upload_id, chunk_index,
-                                      total_chunks, temp_zip_file.name,
-                                      upload_logger, log_file)
-                    for chunk_index in range(total_chunks)
-                ]
-                subprocess_utils.run_in_parallel(_upload_chunk_with_retry,
-                                                 chunk_params)
+                total_retries = 3
+                for retry in range(total_retries):
+                    chunk_params = [
+                        UploadChunkParams(client, upload_id, chunk_index,
+                                          total_chunks, temp_zip_file.name,
+                                          upload_logger, log_file)
+                        for chunk_index in range(total_chunks)
+                    ]
+                    statuses = subprocess_utils.run_in_parallel(
+                        _upload_chunk_with_retry, chunk_params)
+                    if any(status == 'completed' for status in statuses):
+                        break
+                    else:
+                        upload_logger.info(
+                            f'No chunk upload returned completed status. '
+                            'Retrying entire upload... '
+                            f'({retry + 1} / {total_retries})')
         os.unlink(temp_zip_file.name)
         upload_logger.info(f'Uploaded files: {upload_list}')
         logger.info(
