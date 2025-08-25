@@ -1130,25 +1130,25 @@ def job_status(cluster_name: str,
 # = Storage Management =
 # ======================
 @usage_lib.entrypoint
-def storage_ls() -> List[Dict[str, Any]]:
+def storage_ls() -> List[responses.StorageRecord]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets the storages.
 
     Returns:
-        [
-            {
-                'name': str,
-                'launched_at': int timestamp of creation,
-                'store': List[sky.StoreType],
-                'last_use': int timestamp of last use,
-                'status': sky.StorageStatus,
-            }
-        ]
+        List[responses.StorageRecord]: A list of storage records.
     """
     storages = global_user_state.get_storage()
+    storage_records = []
     for storage in storages:
-        storage['store'] = list(storage.pop('handle').sky_stores.keys())
-    return storages
+        storage_records.append(
+            responses.StorageRecord(
+                name=storage['name'],
+                launched_at=storage['launched_at'],
+                store=storage['handle'],
+                last_use=storage['last_use'],
+                status=storage['status'],
+            ))
+    return storage_records
 
 
 @usage_lib.entrypoint

@@ -59,6 +59,7 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
+from sky.client.cli import git
 from sky.client.cli import table_utils
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
@@ -4027,8 +4028,7 @@ def storage_ls(verbose: bool):
     """List storage objects managed by SkyPilot."""
     request_id = sdk.storage_ls()
     storages = sdk.stream_and_get(request_id)
-    storage_table = storage_utils.format_storage_table(storages,
-                                                       show_all=verbose)
+    storage_table = table_utils.format_storage_table(storages, show_all=verbose)
     click.echo(storage_table)
 
 
