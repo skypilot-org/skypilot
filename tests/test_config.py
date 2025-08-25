@@ -62,10 +62,10 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
             kubernetes:
                 networking: {NODEPORT_MODE_NAME}
                 pod_config:
+                    metadata:
+                        annotations:
+                            my_annotation: my_value
                     spec:
-                        metadata:
-                            annotations:
-                                my_annotation: my_value
                         runtimeClassName: nvidia    # Custom runtimeClassName for GPU pods.
                         imagePullSecrets:
                             - name: my-secret     # Pull images from a private registry using a secret

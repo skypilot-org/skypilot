@@ -10,6 +10,11 @@ clusters, clouds and regions for VMs, and existing machines --- into a unified c
 .. image:: images/skypilot-abstractions-long-2.png
     :width: 90%
     :align: center
+    :class: only-light
+.. image:: images/skypilot-abstractions-long-2-dark.png
+    :width: 90%
+    :align: center
+    :class: only-dark
 
 
 You can run AI workloads on this pool in a unified interface, using these core abstractions:

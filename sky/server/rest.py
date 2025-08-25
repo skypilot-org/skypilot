@@ -43,6 +43,7 @@ adapter = requests.adapters.HTTPAdapter(
 )
 _session.mount('http://', adapter)
 _session.mount('https://', adapter)
+
 _session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
 _session.headers[constants.VERSION_HEADER] = (
     versions.get_local_readable_version())

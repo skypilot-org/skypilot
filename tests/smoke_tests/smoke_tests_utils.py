@@ -648,6 +648,12 @@ _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 # without cloud credentials or cloud dependencies locally. To do this, we run
 # the cloud commands required in tests on a separate remote cluster with the
 # cloud credentials and dependencies setup.
+#
+# Set `skip_remote_server_check=True` to opt-in to using the remote helper
+# cluster regardless of whether the API server is local or remote. This is
+# useful for running cloud commands while the cluster being tested is
+# stopped and you need to run cloud commands.
+#
 # Example usage:
 # Test(
 #     'mytest',
@@ -660,10 +666,13 @@ _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 #     ],
 #     f'sky down -y mytest-cluster && {down_cluster_for_cloud_cmd('mytest-cluster')}',
 # )
-def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
+def launch_cluster_for_cloud_cmd(cloud: str,
+                                 test_cluster_name: str,
+                                 skip_remote_server_check: bool = False) -> str:
     """Launch the cluster for cloud commands asynchronously."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local() and not is_remote_server_test():
+    if not skip_remote_server_check and sky.server.common.is_api_server_local(
+    ) and not is_remote_server_test():
         # We need is_remote_server_test() because we override the SKY_API_SERVER_URL_ENV_VAR
         # in the middle of the test, which is after the test is launched, so the
         # is_api_server_local() already cached and returned True but we're actually
@@ -678,10 +687,12 @@ def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
 def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              cmd: str,
                              envs: Set[str] = None,
-                             timeout: int = 180) -> str:
+                             timeout: int = 180,
+                             skip_remote_server_check: bool = False) -> str:
     """Run the cloud command on the remote cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local() and not is_remote_server_test():
+    if not skip_remote_server_check and sky.server.common.is_api_server_local(
+    ) and not is_remote_server_test():
         return cmd
     else:
         cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cmd}'
@@ -698,10 +709,12 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
                 f'sky logs {cluster_name} --status')
 
 
-def down_cluster_for_cloud_cmd(test_cluster_name: str) -> str:
+def down_cluster_for_cloud_cmd(test_cluster_name: str,
+                               skip_remote_server_check: bool = False) -> str:
     """Down the cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local() and not is_remote_server_test():
+    if not skip_remote_server_check and sky.server.common.is_api_server_local(
+    ) and not is_remote_server_test():
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
