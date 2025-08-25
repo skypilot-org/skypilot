@@ -216,7 +216,7 @@ class VolumeRecord(ResponseBaseModel):
         'workspace': str,
         'last_attached_at': int timestamp of last attachment,
         'last_use': last command,
-        'status': sky.VolumeStatus,
+        'status': str,
         'usedby_pods': List[str],
         'usedby_clusters': List[str],
     }
@@ -235,6 +235,6 @@ class VolumeRecord(ResponseBaseModel):
     workspace: str
     last_attached_at: Optional[int] = None
     last_use: Optional[str] = None
-    status: Optional[status_lib.VolumeStatus] = None
+    status: Optional[str] = None
     usedby_pods: List[str]
     usedby_clusters: List[str]
