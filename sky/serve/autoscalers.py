@@ -485,8 +485,8 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
 
         num_requests_per_second = len(
             self.request_timestamps) / self.qps_window_size
-        target_num_replicas = math.ceil(num_requests_per_second /
-                                        self.target_qps_per_replica）
+        target_num_replicas = \
+            math.ceil(num_requests_per_second / self.target_qps_per_replica)
         logger.info(f'Requests per second: {num_requests_per_second}. '
                     f'Target number of replicas: {target_num_replicas}.')
 
