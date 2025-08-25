@@ -777,11 +777,12 @@ def write_cluster_config(
             keys=('use_ssm',),
             default_value=False)
         if not use_ssm and use_internal_ips and ssh_proxy_command is None:
-            logger.warning('use_internal_ips is set to true, ' +
-            'but ssh_proxy_command is not set. Defaulting to using SSM. ' +
-            'Specify ssh_proxy_command to use a different proxy command: ' +
-            'https://docs.skypilot.co/en/latest/reference/config.html#' +
-            'aws.ssh_proxy_command.')
+            logger.warning(
+                'use_internal_ips is set to true, '
+                'but ssh_proxy_command is not set. Defaulting to '
+                'using SSM. Specify ssh_proxy_command to use a different '
+                'https://docs.skypilot.co/en/latest/reference/config.html#'
+                'aws.ssh_proxy_command.')
             use_ssm = True
         if use_ssm:
             if ssh_proxy_command is None:
@@ -790,11 +791,12 @@ def write_cluster_config(
                 ip_address_filter = ('Name=private-ip-address,Values=%h'
                                      if use_internal_ips else
                                      'Name=ip-address,Values=%h')
-                ssm_proxy_command = 'aws ssm start-session --target \"' + \
-                    '$(aws ec2 describe-instances --filter ' + \
-                    f'{ip_address_filter} --region {region_name} ' + \
-                    f'{profile_str} ' + \
-                    '| jq -r \'.Reservations[].Instances[]|.InstanceId\')\" ' + \
+                get_instance_id_command = 'aws ec2 describe-instances ' + \
+                    f'--region {region_name} --filters {ip_address_filter} ' + \
+                    '--query \"Reservations[].Instances[].InstanceId\" ' + \
+                    f'{profile_str} --output text'
+                ssm_proxy_command = 'aws ssm start-session --target ' + \
+                    f'\"$({get_instance_id_command})\" ' + \
                     f'--region {region_name} {profile_str} ' + \
                     '--document-name AWS-StartSSHSession ' + \
                     '--parameters portNumber=%p'
