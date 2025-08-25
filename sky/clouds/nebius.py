@@ -336,6 +336,7 @@ class Nebius(clouds.Cloud):
              acc_count,
              use_spot=resources.use_spot,
              cpus=resources.cpus,
+             memory=resources.memory,
              region=resources.region,
              zone=resources.zone,
              clouds='nebius')

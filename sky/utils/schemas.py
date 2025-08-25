@@ -481,6 +481,7 @@ def get_volume_schema():
                     },
                 },
             },
+            **_LABELS_SCHEMA,
         }
     }
 

@@ -176,6 +176,12 @@ def pytest_addoption(parser):
         help='Skip tests marked as resource_heavy',
     )
     parser.addoption(
+        '--resource-heavy',
+        action='store_true',
+        default=False,
+        help='Only run tests marked as resource_heavy',
+    )
+    parser.addoption(
         '--helm-version',
         type=str,
         default='',
@@ -194,6 +200,12 @@ def pytest_addoption(parser):
         help=('If set, the tests will be run in jobs consolidation mode '
               '(The config change is made in buildkite so this is a flag to '
               'ensure the tests will not be skipped but no actual effect)'),
+    )
+    parser.addoption(
+        '--grpc',
+        action='store_true',
+        default=False,
+        help='Run tests with GRPC enabled',
     )
 
 
@@ -252,8 +264,15 @@ def pytest_collection_modifyitems(config, items):
         reason='skipped, because --tpu option is set')
     skip_marks['local'] = pytest.mark.skip(
         reason='test requires local API server')
+    skip_marks['no_remote_server'] = pytest.mark.skip(
+        reason='skip tests marked as no_remote_server if --remote-server is set'
+    )
     skip_marks['no_resource_heavy'] = pytest.mark.skip(
-        reason='skipped, because --no-resource-heavy option is set')
+        reason=
+        'skip tests marked as resource_heavy if --no-resource-heavy is set')
+    skip_marks['resource_heavy'] = pytest.mark.skip(
+        reason=
+        'skip tests not marked as resource_heavy if --resource-heavy is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -299,6 +318,13 @@ def pytest_collection_modifyitems(config, items):
         if 'resource_heavy' in marks and config.getoption(
                 '--no-resource-heavy'):
             item.add_marker(skip_marks['no_resource_heavy'])
+        # Skip tests not marked as resource_heavy if --resource-heavy is set
+        if 'resource_heavy' not in marks and config.getoption(
+                '--resource-heavy'):
+            item.add_marker(skip_marks['resource_heavy'])
+        # Skip tests marked as no_remote_server if --remote-server is set
+        if 'no_remote_server' in marks and config.getoption('--remote-server'):
+            item.add_marker(skip_marks['no_remote_server'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -628,4 +654,14 @@ def setup_postgres_backend_env(request):
         yield
         return
     os.environ['PYTEST_SKYPILOT_POSTGRES_BACKEND'] = '1'
+    yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_grpc_backend_env(request):
+    """Setup gRPC enabled environment variable if --grpc is specified."""
+    if not request.config.getoption('--grpc'):
+        yield
+        return
+    os.environ['PYTEST_SKYPILOT_GRPC_ENABLED'] = '1'
     yield

@@ -4437,11 +4437,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         run_timestamp = list(run_timestamps.values())[0]
         job_id = list(run_timestamps.keys())[0]
+
+        # If run_timestamp contains the full path with SKY_LOGS_DIRECTORY,
+        # strip the prefix to get just the relative part to avoid duplication
+        # when constructing local paths.
+        if run_timestamp.startswith(constants.SKY_LOGS_DIRECTORY):
+            run_timestamp = run_timestamp[len(constants.SKY_LOGS_DIRECTORY
+                                             ):].lstrip('/')
         local_log_dir = ''
         if controller:  # download controller logs
             remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
                                       f'{job_id}.log')
-            local_log_dir = os.path.join(local_dir, run_timestamp)
+            local_log_dir = os.path.join(local_dir, 'managed_jobs',
+                                         run_timestamp)
             os.makedirs(os.path.dirname(os.path.expanduser(local_log_dir)),
                         exist_ok=True)
 
@@ -4988,7 +4996,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
-            if handle.is_grpc_enabled:
+            if env_options.Options.ENABLE_GRPC.get() and handle.is_grpc_enabled:
                 request = autostopv1_pb2.SetAutostopRequest(
                     idle_minutes=idle_minutes_to_autostop,
                     backend=self.NAME,
@@ -5000,9 +5008,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     handle, lambda: SkyletClient(handle.get_grpc_channel()).
                     set_autostop(request))
             else:
-                logger.info(
-                    'Using legacy remote execution for set_autostop on '
-                    'cluster %s.', handle.cluster_name)
                 code = autostop_lib.AutostopCodeGen.set_autostop(
                     idle_minutes_to_autostop, self.NAME, wait_for, down)
                 returncode, _, stderr = self.run_on_head(
@@ -5036,7 +5041,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # The head node of the cluster is not UP or in an abnormal state.
             # We cannot check if the cluster is autostopping.
             return False
-        if handle.is_grpc_enabled:
+        if env_options.Options.ENABLE_GRPC.get() and handle.is_grpc_enabled:
             try:
                 request = autostopv1_pb2.IsAutostoppingRequest()
                 response = backend_utils.invoke_skylet_with_retries(
@@ -5049,9 +5054,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 logger.debug(f'Failed to check if cluster is autostopping: {e}')
                 return False
         else:
-            logger.info(
-                'Using legacy remote execution for is_autostopping on '
-                'cluster %s.', handle.cluster_name)
             code = autostop_lib.AutostopCodeGen.is_autostopping()
             returncode, stdout, stderr = self.run_on_head(
                 handle, code, require_outputs=True, stream_logs=stream_logs)

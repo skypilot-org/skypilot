@@ -51,12 +51,13 @@ QUEUE_GENERIC_CLOUD_REMOTE_SERVER = 'generic_cloud_remote_server'
 # resource_heavy. It can be either EKS or GKE.
 QUEUE_KUBE_BACKEND = os.getenv('KUBE_BACKEND', QUEUE_EKS).lower()
 assert QUEUE_KUBE_BACKEND in [QUEUE_EKS, QUEUE_GKE]
-# Only aws, gcp, azure, and kubernetes are supported for now.
+# Only aws, gcp, azure, nebius, and kubernetes are supported for now.
 # Other clouds do not have credentials.
 CLOUD_QUEUE_MAP = {
     'aws': QUEUE_GENERIC_CLOUD,
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
+    'nebius': QUEUE_GENERIC_CLOUD,
     'kubernetes': QUEUE_KUBERNETES
 }
 
@@ -116,6 +117,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--helm-version')
     parser.add_argument('--helm-package')
     parser.add_argument('--jobs-consolidation', action="store_true")
+    parser.add_argument('--grpc', action="store_true")
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
@@ -155,6 +157,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--helm-package {parsed_args.helm_package}')
     if parsed_args.jobs_consolidation:
         extra_args.append('--jobs-consolidation')
+    if parsed_args.grpc:
+        extra_args.append('--grpc')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 

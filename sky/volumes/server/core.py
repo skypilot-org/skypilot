@@ -162,9 +162,16 @@ def volume_delete(names: List[str]) -> None:
                 global_user_state.delete_volume(name)
 
 
-def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
-                 zone: Optional[str], size: Optional[str],
-                 config: Dict[str, Any]) -> None:
+def volume_apply(
+    name: str,
+    volume_type: str,
+    cloud: str,
+    region: Optional[str],
+    zone: Optional[str],
+    size: Optional[str],
+    config: Dict[str, Any],
+    labels: Optional[Dict[str, str]] = None,
+) -> None:
     """Creates or registers a volume.
 
     Args:
@@ -175,6 +182,7 @@ def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
         zone: The zone of the volume.
         size: The size of the volume.
         config: The configuration of the volume.
+        labels: The labels of the volume.
 
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Creating volume')):
@@ -195,6 +203,7 @@ def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
             size=size,
             config=config,
             name_on_cloud=name_on_cloud,
+            labels=labels,
         )
         logger.debug(
             f'Creating volume {name} on cloud {cloud} with config {config}')

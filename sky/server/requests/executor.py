@@ -427,9 +427,9 @@ async def execute_request_coroutine(request: api_requests.Request):
     event loop. This is designed for executing tasks that are not CPU
     intensive, e.g. sky logs.
     """
+    context.initialize()
     ctx = context.get()
-    if ctx is None:
-        raise ValueError('Context is not initialized')
+    assert ctx is not None, 'Context is not initialized'
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
