@@ -134,8 +134,7 @@ class SkyServeController:
                     # Get GPU type from handle.launched_resources.accelerators
                     gpu_type = 'unknown'
                     handle = info.handle()
-                    if handle is not None and hasattr(handle,
-                                                      'launched_resources'):
+                    if handle is not None:
                         accelerators = handle.launched_resources.accelerators
                         if accelerators and len(accelerators) > 0:
                             # Get the first accelerator type

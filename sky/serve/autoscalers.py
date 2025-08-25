@@ -594,7 +594,7 @@ class InstanceAwareRequestRateAutoscaler(RequestRateAutoscaler):
         assert isinstance(spec.target_qps_per_replica, dict), \
             'InstanceAware Autoscaler requires dict type target_qps_per_replica'
         # Re-assign with correct type using setattr to avoid typing issues
-        setattr(self, 'target_qps_per_replica', spec.target_qps_per_replica)
+        self.target_qps_per_replica = spec.target_qps_per_replica
 
     def _generate_scaling_decisions(
         self,
@@ -806,7 +806,7 @@ class InstanceAwareRequestRateAutoscaler(RequestRateAutoscaler):
         """Extract GPU type from ReplicaInfo object."""
         gpu_type = 'unknown'
         handle = replica_info.handle()
-        if handle is not None and hasattr(handle, 'launched_resources'):
+        if handle is not None:
             accelerators = handle.launched_resources.accelerators
             if accelerators and len(accelerators) > 0:
                 # Get the first accelerator type
@@ -903,7 +903,7 @@ class InstanceAwareRequestRateAutoscaler(RequestRateAutoscaler):
         # Ensure it's a dict and re-assign using setattr to avoid typing
         assert isinstance(spec.target_qps_per_replica, dict), \
             'InstanceAware Autoscaler requires dict type target_qps_per_replica'
-        setattr(self, 'target_qps_per_replica', spec.target_qps_per_replica)
+        self.target_qps_per_replica = spec.target_qps_per_replica
 
 
 class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
