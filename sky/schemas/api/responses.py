@@ -165,19 +165,19 @@ class ManagedJobRecord(ResponseBaseModel):
         'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
     }
     """
-    job_id: int
-    job_name: str
-    resources: str
+    job_id: Optional[int] = None
+    job_name: Optional[str] = None
+    resources: Optional[str] = None
     # None if the job has not been submitted yet.
     submitted_at: Optional[float] = None
     # None if the job has not ended yet.
     end_at: Optional[float] = None
-    job_duration: float
-    recovery_count: int
-    status: job_state.ManagedJobStatus
-    cluster_resources: str
-    region: str
-    user_name: Optional[str]
-    user_hash: str
-    task_id: int
-    task_name: str
+    job_duration: Optional[float] = None
+    recovery_count: Optional[int] = None
+    status: Optional[job_state.ManagedJobStatus] = None
+    cluster_resources: Optional[str] = None
+    region: Optional[str] = None
+    user_name: Optional[str] = None
+    user_hash: Optional[str] = None
+    task_id: Optional[int] = None
+    task_name: Optional[str] = None
