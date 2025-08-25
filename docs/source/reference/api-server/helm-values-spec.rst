@@ -81,6 +81,7 @@ Below is the available helm value keys and the default value of each key:
       :ref:`client-id <helm-values-auth-oauth-client-id>`: ""
       :ref:`client-secret <helm-values-auth-oauth-client-secret>`: ""
       :ref:`client-details-from-secret <helm-values-auth-oauth-client-details-from-secret>`: ""
+      :ref:`use-https <helm-values-auth-oauth-use-https>`: false
       :ref:`email-domain <helm-values-auth-oauth-email-domain>`: "*"
       :ref:`session-store-type <helm-values-auth-oauth-session-store-type>`: "redis"
       :ref:`redis-url <helm-values-auth-oauth-redis-url>`: null
@@ -718,6 +719,7 @@ Default: see the yaml below.
       client-id: ""
       client-secret: ""
       client-details-from-secret: ""
+      use-https: false
       email-domain: "*"
       session-store-type: "redis"
       redis-url: null
@@ -798,6 +800,21 @@ Default: ``""``
   auth:
     oauth:
       client-details-from-secret: "oauth-client-credentials"
+
+.. _helm-values-auth-oauth-use-https:
+
+``auth.oauth.use-https``
+''''''''''''''''''''''''''''''''''
+
+Set to ``true`` when using HTTPS for the API server endpoint. When set to ``false``, secure cookies are disabled, which is required for HTTP endpoints.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      use-https: true
 
 .. _helm-values-auth-oauth-email-domain:
 
