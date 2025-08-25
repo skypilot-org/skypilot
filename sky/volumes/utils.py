@@ -1,11 +1,12 @@
 """Volume utils."""
 import abc
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import prettytable
 
 from sky import sky_logging
+from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -39,7 +40,9 @@ class VolumeTable(abc.ABC):
 class PVCVolumeTable(VolumeTable):
     """The PVC volume table."""
 
-    def __init__(self, volumes: List[Dict[str, Any]], show_all: bool = False):
+    def __init__(self,
+                 volumes: List[responses.VolumeRecord],
+                 show_all: bool = False):
         super().__init__()
         self.table = self._create_table(show_all)
         self._add_rows(volumes, show_all)
@@ -88,7 +91,7 @@ class PVCVolumeTable(VolumeTable):
         return table
 
     def _add_rows(self,
-                  volumes: List[Dict[str, Any]],
+                  volumes: List[responses.VolumeRecord],
                   show_all: bool = False) -> None:
         """Add rows to the PVC volume table."""
         for row in volumes:
@@ -141,7 +144,7 @@ class PVCVolumeTable(VolumeTable):
         return str(self.table)
 
 
-def format_volume_table(volumes: List[Dict[str, Any]],
+def format_volume_table(volumes: List[responses.VolumeRecord],
                         show_all: bool = False) -> str:
     """Format the volume table for display.
 
@@ -151,7 +154,7 @@ def format_volume_table(volumes: List[Dict[str, Any]],
     Returns:
         str: The formatted volume table.
     """
-    volumes_per_type: Dict[str, List[Dict[str, Any]]] = {}
+    volumes_per_type: Dict[str, List[responses.VolumeRecord]] = {}
     supported_volume_types = [
         volume_type.value for volume_type in volume.VolumeType
     ]

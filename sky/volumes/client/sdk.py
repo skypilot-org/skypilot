@@ -1,10 +1,11 @@
 """SDK functions for managed jobs."""
 import json
 import typing
-from typing import Any, Dict, List
+from typing import List
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.usage import usage_lib
@@ -53,7 +54,7 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ls() -> server_common.RequestId[List[Dict[str, Any]]]:
+def ls() -> server_common.RequestId[List[responses.VolumeRecord]]:
     """Lists all volumes.
 
     Returns:

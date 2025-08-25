@@ -117,3 +117,43 @@ class StatusResponse(ResponseBaseModel):
     cpus: Optional[str] = None
     memory: Optional[str] = None
     accelerators: Optional[str] = None
+
+
+class VolumeRecord(ResponseBaseModel):
+    """Response for the volume list endpoint.
+    {
+        'name': str,
+        'type': str,
+        'launched_at': int timestamp of creation,
+        'cloud': str,
+        'region': str,
+        'zone': str,
+        'size': str,
+        'config': Dict[str, Any],
+        'name_on_cloud': str,
+        'user_hash': str,
+        'workspace': str,
+        'last_attached_at': int timestamp of last attachment,
+        'last_use': last command,
+        'status': str,
+        'usedby_pods': List[str],
+        'usedby_clusters': List[str],
+    }
+    """
+    name: str
+    type: str
+    launched_at: int
+    cloud: str
+    region: str
+    zone: Optional[str] = None
+    size: str
+    config: Dict[str, Any]
+    name_on_cloud: str
+    user_hash: str
+    user_name: str
+    workspace: str
+    last_attached_at: Optional[int] = None
+    last_use: Optional[str] = None
+    status: Optional[str] = None
+    usedby_pods: List[str]
+    usedby_clusters: List[str]
