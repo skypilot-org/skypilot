@@ -16,7 +16,6 @@ from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
-from sky.serve import service_spec
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -30,12 +29,14 @@ class SkyServeLoadBalancer:
     policy.
     """
 
-    def __init__(self,
-                 controller_url: str,
-                 load_balancer_port: int,
-                 load_balancing_policy_name: Optional[str] = None,
-                 tls_credential: Optional[serve_utils.TLSCredential] = None,
-                 spec: Optional[service_spec.SkyServiceSpec] = None) -> None:
+    def __init__(
+        self,
+        controller_url: str,
+        load_balancer_port: int,
+        load_balancing_policy_name: Optional[str] = None,
+        tls_credential: Optional[serve_utils.TLSCredential] = None,
+        target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None
+    ) -> None:
         """Initialize the load balancer.
 
         Args:
@@ -45,8 +46,9 @@ class SkyServeLoadBalancer:
                 to use. Defaults to None.
             tls_credentials: The TLS credentials for HTTPS endpoint. Defaults
                 to None.
-            spec: The service specification containing accelerator QPS
-                information. Defaults to None.
+            target_qps_per_replica: Target QPS per replica for instance-aware
+                load balancing. Can be a float or dict mapping GPU types to QPS.
+                Defaults to None.
         """
         self._app = fastapi.FastAPI()
         self._controller_url: str = controller_url
@@ -56,12 +58,12 @@ class SkyServeLoadBalancer:
             load_balancing_policy_name)
 
         # Set accelerator QPS for instance-aware policies
-        if (spec and spec.target_qps_per_replica and
-                isinstance(spec.target_qps_per_replica, dict) and
+        if (target_qps_per_replica and
+                isinstance(target_qps_per_replica, dict) and
                 hasattr(self._load_balancing_policy,
                         'set_target_qps_per_accelerator')):
             self._load_balancing_policy.set_target_qps_per_accelerator(
-                spec.target_qps_per_replica)
+                target_qps_per_replica)
 
         logger.info('Starting load balancer with policy '
                     f'{load_balancing_policy_name}.')
@@ -115,7 +117,8 @@ class SkyServeLoadBalancer:
                     self._load_balancing_policy.set_ready_replicas(
                         ready_replica_urls)
                     # Set replica info for instance-aware policies
-                    if hasattr(self._load_balancing_policy, 'set_replica_info'):
+                    if isinstance(self._load_balancing_policy,
+                                  lb_policies.InstanceAwareLeastLoadPolicy):
                         self._load_balancing_policy.set_replica_info(
                             replica_info)
                     for replica_url in ready_replica_urls:
@@ -284,11 +287,12 @@ class SkyServeLoadBalancer:
 
 
 def run_load_balancer(
-        controller_addr: str,
-        load_balancer_port: int,
-        load_balancing_policy_name: Optional[str] = None,
-        tls_credential: Optional[serve_utils.TLSCredential] = None,
-        spec: Optional[service_spec.SkyServiceSpec] = None) -> None:
+    controller_addr: str,
+    load_balancer_port: int,
+    load_balancing_policy_name: Optional[str] = None,
+    tls_credential: Optional[serve_utils.TLSCredential] = None,
+    target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None
+) -> None:
     """ Run the load balancer.
 
     Args:
@@ -298,15 +302,16 @@ def run_load_balancer(
         Defaults to None.
         tls_credential:
             The TLS credentials for HTTPS endpoint. Defaults to None.
-        spec: The service specification containing accelerator QPS
-            information. Defaults to None.
+        target_qps_per_replica: Target QPS per replica for instance-aware
+            load balancing. Can be a float or dict mapping GPU types to QPS.
+            Defaults to None.
     """
     load_balancer = SkyServeLoadBalancer(
         controller_url=controller_addr,
         load_balancer_port=load_balancer_port,
         load_balancing_policy_name=load_balancing_policy_name,
         tls_credential=tls_credential,
-        spec=spec)
+        target_qps_per_replica=target_qps_per_replica)
     load_balancer.run()
 
 
@@ -330,5 +335,8 @@ if __name__ == '__main__':
         help=f'The load balancing policy to use. Available policies: '
         f'{", ".join(available_policies)}.')
     args = parser.parse_args()
-    run_load_balancer(args.controller_addr, args.load_balancer_port,
-                      args.load_balancing_policy)
+    run_load_balancer(args.controller_addr,
+                      args.load_balancer_port,
+                      args.load_balancing_policy,
+                      tls_credential=None,
+                      target_qps_per_replica=None)
