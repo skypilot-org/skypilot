@@ -143,6 +143,15 @@ class SkyServeController:
 
                     replica_info[info.url] = {'gpu_type': gpu_type}
 
+            # Check that all ready replica URLs are included in replica_info
+            missing_urls = set(ready_replica_urls) - set(replica_info.keys())
+            if missing_urls:
+                logger.warning(f'Ready replica URLs missing from replica_info: '
+                               f'{missing_urls}')
+                # fallback: add missing URLs with unknown GPU type
+                for url in missing_urls:
+                    replica_info[url] = {'gpu_type': 'unknown'}
+
             return responses.JSONResponse(
                 content={'replica_info': replica_info}, status_code=200)
 
