@@ -359,6 +359,7 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                     log_file,
                     is_local=True))
 
+            upload_completed = False
             with httpx.Client(timeout=timeout) as client:
                 total_retries = 3
                 for retry in range(total_retries):
@@ -371,12 +372,15 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                     statuses = subprocess_utils.run_in_parallel(
                         _upload_chunk_with_retry, chunk_params)
                     if any(status == 'completed' for status in statuses):
+                        upload_completed = True
                         break
                     else:
                         upload_logger.info(
                             f'No chunk upload returned completed status. '
                             'Retrying entire upload... '
                             f'({retry + 1} / {total_retries})')
+            if not upload_completed:
+                raise RuntimeError('Failed to upload files to API server.')
         os.unlink(temp_zip_file.name)
         upload_logger.info(f'Uploaded files: {upload_list}')
         logger.info(
