@@ -490,7 +490,7 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
         raw_target_num = math.ceil(num_requests_per_second / target_qps)
         target_num_replicas = self._clip_target_num_replicas(raw_target_num)
         logger.info(f'Requests per second: {num_requests_per_second}. '
-                    f'Target number of replicas: {raw_target_num}.')
+                    f'Target number of replicas: {target_num_replicas}.')
 
         return target_num_replicas
 
@@ -565,9 +565,6 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
             _generate_scale_down_decisions(replicas_to_scale_down))
 
         return scaling_decisions
-
-
-# Instance-aware logic moved to InstanceAwareRequestRateAutoscaler
 
     def _dump_dynamic_states(self) -> Dict[str, Any]:
         return {
