@@ -139,6 +139,7 @@ Cudo = clouds.Cudo
 GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
+Slurm = clouds.Slurm
 Kubernetes = clouds.Kubernetes
 K8s = Kubernetes
 OCI = clouds.OCI
@@ -165,6 +166,7 @@ __all__ = [
     'RunPod',
     'Vast',
     'SCP',
+    'Slurm',
     'Vsphere',
     'Fluidstack',
     'Nebius',
