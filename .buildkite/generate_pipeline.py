@@ -118,6 +118,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--helm-package')
     parser.add_argument('--jobs-consolidation', action="store_true")
     parser.add_argument('--grpc', action="store_true")
+    parser.add_argument('--env-file')
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
@@ -159,6 +160,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append('--jobs-consolidation')
     if parsed_args.grpc:
         extra_args.append('--grpc')
+    if parsed_args.env_file:
+        extra_args.append(f'--env-file {parsed_args.env_file}')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
