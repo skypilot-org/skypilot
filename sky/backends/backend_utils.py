@@ -766,6 +766,47 @@ def write_cluster_config(
             assert region_name in ssh_proxy_command_config, (
                 region_name, ssh_proxy_command_config)
             ssh_proxy_command = ssh_proxy_command_config[region_name]
+
+    use_internal_ips = skypilot_config.get_effective_region_config(
+        cloud=str(cloud).lower(),
+        region=region.name,
+        keys=('use_internal_ips',),
+        default_value=False)
+    if isinstance(cloud, clouds.AWS):
+        # If the use_ssm flag is set to true, we use the ssm proxy command.
+        use_ssm = skypilot_config.get_effective_region_config(
+            cloud=str(cloud).lower(),
+            region=region.name,
+            keys=('use_ssm',),
+            default_value=False)
+        if not use_ssm and use_internal_ips and ssh_proxy_command is None:
+            logger.warning('use_internal_ips is set to true, ' +
+            'but ssh_proxy_command is not set. Defaulting to using SSM. ' +
+            'Specify ssh_proxy_command to use a different proxy command: ' +
+            'https://docs.skypilot.co/en/latest/reference/config.html#' +
+            'aws.ssh_proxy_command.')
+            use_ssm = True
+        if use_ssm:
+            if ssh_proxy_command is None:
+                aws_profile = os.environ.get('AWS_PROFILE', None)
+                profile_str = f'--profile {aws_profile}' if aws_profile else ''
+                ip_address_filter = ('Name=private-ip-address,Values=%h'
+                                     if use_internal_ips else
+                                     'Name=ip-address,Values=%h')
+                ssm_proxy_command = 'aws ssm start-session --target \"' + \
+                    '$(aws ec2 describe-instances --filter ' + \
+                    f'{ip_address_filter} --region {region_name} ' + \
+                    f'{profile_str} ' + \
+                    '| jq -r \'.Reservations[].Instances[]|.InstanceId\')\" ' + \
+                    f'--region {region_name} {profile_str} ' + \
+                    '--document-name AWS-StartSSHSession ' + \
+                    '--parameters portNumber=%p'
+                ssh_proxy_command = ssm_proxy_command
+                region_name = 'ssm-session'  # TODO: change this to a random string
+            else:
+                logger.warning('use_ssm is set to true, but ssh_proxy_command '
+                               f'is already set to {ssh_proxy_command!r}.'
+                               'Ignoring use_ssm.')
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
