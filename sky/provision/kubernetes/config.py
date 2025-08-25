@@ -4,7 +4,7 @@ import logging
 import math
 import os
 import typing
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
@@ -672,4 +672,9 @@ def _configure_services(namespace: str, context: Optional[str],
 
 
 class KubernetesError(Exception):
-    pass
+
+    def __init__(self,
+                 *args,
+                 insufficent_resources: Optional[List[str]] = None):
+        self.insufficent_resources = insufficent_resources
+        super().__init__(*args)
