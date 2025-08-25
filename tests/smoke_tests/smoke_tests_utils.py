@@ -393,7 +393,13 @@ def override_sky_config(
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
     echo = Test.echo_without_prefix if test is None else test.echo
     env_before_override: Optional[Dict[str, Any]] = None
-    override_sky_config_dict = skypilot_config.config_utils.Config()
+    config_file_override = pytest_config_file_override()
+    if config_file_override:
+        override_sky_config_dict = (
+            skypilot_config.parse_and_validate_config_file(config_file_override)
+        )
+    else:
+        override_sky_config_dict = (skypilot_config.config_utils.Config())
 
     if env_dict is None:
         env_dict = os.environ
@@ -758,7 +764,8 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
 
 
 def is_remote_server_test() -> bool:
-    return 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ
+    return os.environ.get('PYTEST_SKYPILOT_REMOTE_SERVER_TEST',
+                          None) is not None
 
 
 def pytest_controller_cloud() -> Optional[str]:
@@ -773,7 +780,11 @@ def is_grpc_enabled_test() -> bool:
     return os.environ.get('PYTEST_SKYPILOT_GRPC_ENABLED', None) is not None
 
 
-def override_env_config(config: Dict[str, str]):
+def pytest_config_file_override() -> Optional[str]:
+    return os.environ.get('PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE', None)
+
+
+def pytest_override_env_config_file(config: Dict[str, str]):
     """Override the environment variable for the test."""
     for key, value in config.items():
         os.environ[key] = value

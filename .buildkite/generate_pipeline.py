@@ -67,7 +67,7 @@ GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
 
 
 def _get_buildkite_queue(cloud: str, remote_server: bool,
-                         run_on_cloud_kube_backend: bool) -> str:
+                         run_on_cloud_kube_backend: bool, args: str) -> str:
     """Get the Buildkite queue for a given cloud.
 
     We use a separate queue for generic cloud tests on remote servers because:
@@ -78,6 +78,12 @@ def _get_buildkite_queue(cloud: str, remote_server: bool,
     Kubernetes has low concurrency on a single VM originally,
     so remote-server won't drain VM resources, we can reuse the same queue.
     """
+    if '--env-file' in args:
+        # TODO(zeping): Remove this when test requirements become more varied.
+        # Currently, tests specifying --env-file and a custom API server endpoint are assigned to
+        # the generic_cloud queue to optimize resource usage. If tests require customization
+        # beyond the API server, update this logic to ensure they run on the correct resources.
+        return QUEUE_GENERIC_CLOUD
     if run_on_cloud_kube_backend:
         return QUEUE_KUBE_BACKEND
 
@@ -118,6 +124,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--helm-package')
     parser.add_argument('--jobs-consolidation', action="store_true")
     parser.add_argument('--grpc', action="store_true")
+    parser.add_argument('--env-file')
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
@@ -159,6 +166,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append('--jobs-consolidation')
     if parsed_args.grpc:
         extra_args.append('--grpc')
+    if parsed_args.env_file:
+        extra_args.append(f'--env-file {parsed_args.env_file}')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
@@ -261,7 +270,7 @@ def _extract_marked_tests(
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
             _get_buildkite_queue(cloud, remote_server,
-                                 run_on_cloud_kube_backend)
+                                 run_on_cloud_kube_backend, args)
             for cloud in final_clouds_to_include
         ], param_list, [
             extra_args for _ in range(len(final_clouds_to_include))
