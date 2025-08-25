@@ -1508,6 +1508,12 @@ async def stream(
         if log_path == constants.API_SERVER_LOGS:
             resolved_log_path = pathlib.Path(
                 constants.API_SERVER_LOGS).expanduser()
+            if not resolved_log_path.exists():
+                raise fastapi.HTTPException(
+                    status_code=404,
+                    detail=f'Server log file does not exist. The API server '
+                    'have been started using foreground logging mode - check '
+                    'the external log location such as `kubectl logs`.')
         else:
             # This should be a log path under ~/sky_logs.
             resolved_logs_directory = pathlib.Path(
