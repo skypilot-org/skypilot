@@ -26,6 +26,9 @@ from fastapi.responses import JSONResponse
 import pytest
 import uvicorn
 
+# Run serially to avoid port races.
+pytestmark = pytest.mark.xdist_group(name="serial_rest_policy")
+
 import sky
 from sky import admin_policy
 from sky import skypilot_config

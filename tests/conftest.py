@@ -1,3 +1,14 @@
+# Prepend repo root so tests import local ./sky instead of site-packages.
+import os as _os
+from pathlib import Path as _Path
+import sys as _sys
+
+_REPO_ROOT = str(_Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in _sys.path:
+    _sys.path.insert(0, _REPO_ROOT)
+_os.environ["PYTHONPATH"] = (f"{_REPO_ROOT}:{_os.environ.get('PYTHONPATH','')}"
+                             if _os.environ.get('PYTHONPATH') else _REPO_ROOT)
+
 import fcntl
 import json
 import os
