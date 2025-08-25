@@ -11,6 +11,7 @@ from sky import global_user_state
 from sky import models
 from sky import provision
 from sky import sky_logging
+from sky.schemas.api import responses
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
@@ -56,7 +57,7 @@ def volume_refresh():
                         volume_name, status=status_lib.VolumeStatus.IN_USE)
 
 
-def volume_list() -> List[Dict[str, Any]]:
+def volume_list() -> List[responses.VolumeRecord]:
     """Gets the volumes.
 
     Returns:
@@ -143,7 +144,7 @@ def volume_list() -> List[Dict[str, Any]]:
             record['name_on_cloud'] = config.name_on_cloud
             record['usedby_pods'] = usedby_pods
             record['usedby_clusters'] = usedby_clusters
-            records.append(record)
+            records.append(responses.VolumeRecord(**record))
         return records
 
 

@@ -143,3 +143,43 @@ class UploadStatus(enum.Enum):
     """Status of the upload."""
     UPLOADING = 'uploading'
     COMPLETED = 'completed'
+
+
+class VolumeRecord(ResponseBaseModel):
+    """Response for the volume list endpoint.
+    {
+        'name': str,
+        'type': str,
+        'launched_at': int timestamp of creation,
+        'cloud': str,
+        'region': str,
+        'zone': str,
+        'size': str,
+        'config': Dict[str, Any],
+        'name_on_cloud': str,
+        'user_hash': str,
+        'workspace': str,
+        'last_attached_at': int timestamp of last attachment,
+        'last_use': last command,
+        'status': sky.VolumeStatus,
+        'usedby_pods': List[str],
+        'usedby_clusters': List[str],
+    }
+    """
+    name: str
+    type: str
+    launched_at: int
+    cloud: str
+    region: str
+    zone: str
+    size: str
+    config: Dict[str, Any]
+    name_on_cloud: str
+    user_hash: str
+    user_name: str
+    workspace: str
+    last_attached_at: int
+    last_use: str
+    status: status_lib.VolumeStatus
+    usedby_pods: List[str]
+    usedby_clusters: List[str]
