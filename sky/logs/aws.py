@@ -130,7 +130,10 @@ class CloudwatchLoggingAgent(FluentbitAgent):
 
         # If region is specified, set it in the environment
         if self.config.region:
-            pre_cmd += f' export AWS_REGION={self.config.region};'
+            pre_cmd += (f' export AWS_REGION={self.config.region}'
+                        f' AWS_DEFAULT_REGION={self.config.region};'
+                        ' command -v aws &>/dev/null && '
+                        f'aws configure set region {self.config.region};')
         else:
             # If region is not specified, check if it's available in
             # the environment or credentials file
