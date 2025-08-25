@@ -9,6 +9,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
+from sky.schemas.api import responses
 from sky.serve.client import impl
 from sky.server import common as server_common
 from sky.server import rest
@@ -130,7 +131,7 @@ def queue(
     skip_finished: bool = False,
     all_users: bool = False,
     job_ids: Optional[List[int]] = None
-) -> server_common.RequestId[List[Dict[str, Any]]]:
+) -> server_common.RequestId[List[responses.ManagedJobRecord]]:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.

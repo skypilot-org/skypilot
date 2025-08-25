@@ -30,6 +30,7 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -1282,7 +1283,7 @@ def dump_managed_job_queue(
 
 
 def filter_jobs(
-    jobs: List[Dict[str, Any]],
+    jobs: List[responses.ManagedJobRecord],
     workspace_match: Optional[str],
     name_match: Optional[str],
     pool_match: Optional[str],
@@ -1291,7 +1292,7 @@ def filter_jobs(
     user_match: Optional[str] = None,
     enable_user_match: bool = False,
     statuses: Optional[List[str]] = None,
-) -> Tuple[List[Dict[str, Any]], int, Dict[str, int]]:
+) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int]]:
     """Filter jobs based on the given criteria.
 
     Args:
@@ -1326,10 +1327,10 @@ def filter_jobs(
         return pattern in str(value)
 
     def _handle_page_and_limit(
-        result: List[Dict[str, Any]],
+        result: List[responses.ManagedJobRecord],
         page: Optional[int],
         limit: Optional[int],
-    ) -> List[Dict[str, Any]]:
+    ) -> List[responses.ManagedJobRecord]:
         if page is None and limit is None:
             return result
         assert page is not None and limit is not None, (page, limit)
@@ -1365,8 +1366,8 @@ def filter_jobs(
 
 def load_managed_job_queue(
     payload: str
-) -> Tuple[List[Dict[str, Any]], int, ManagedJobQueueResultType, int, Dict[
-        str, int]]:
+) -> Tuple[List[responses.ManagedJobRecord], int, ManagedJobQueueResultType,
+           int, Dict[str, int]]:
     """Load job queue from json string."""
     result = message_utils.decode_payload(payload)
     result_type = ManagedJobQueueResultType.DICT
@@ -1393,7 +1394,7 @@ def load_managed_job_queue(
 
 
 def _get_job_status_from_tasks(
-    job_tasks: List[Dict[str, Any]]
+    job_tasks: List[responses.ManagedJobRecord]
 ) -> Tuple[managed_job_state.ManagedJobStatus, int]:
     """Get the current task status and the current task id for a job."""
     managed_task_status = managed_job_state.ManagedJobStatus.SUCCEEDED
@@ -1413,7 +1414,7 @@ def _get_job_status_from_tasks(
 
 
 @typing.overload
-def format_job_table(tasks: List[Dict[str, Any]],
+def format_job_table(tasks: List[responses.ManagedJobRecord],
                      show_all: bool,
                      show_user: bool,
                      return_rows: Literal[False] = False,
@@ -1422,7 +1423,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
 
 
 @typing.overload
-def format_job_table(tasks: List[Dict[str, Any]],
+def format_job_table(tasks: List[responses.ManagedJobRecord],
                      show_all: bool,
                      show_user: bool,
                      return_rows: Literal[True],
@@ -1431,7 +1432,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
 
 
 def format_job_table(
-        tasks: List[Dict[str, Any]],
+        tasks: List[responses.ManagedJobRecord],
         show_all: bool,
         show_user: bool,
         return_rows: bool = False,
