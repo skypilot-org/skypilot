@@ -1,3 +1,7 @@
+# This example starts its own Ray cluster on port 6379, separate from SkyPilot's 
+# internal Ray cluster (port 6380). Do not use ray.init(address="auto") as it 
+# connects to SkyPilot's internal cluster, causing resource conflicts.
+
 resources:
   accelerators: L4:2
   memory: 64+
