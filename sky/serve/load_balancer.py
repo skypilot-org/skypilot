@@ -16,7 +16,7 @@ from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
-from sky.serve.service_spec import SkyServiceSpec
+from sky.serve import service_spec
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -35,7 +35,7 @@ class SkyServeLoadBalancer:
                  load_balancer_port: int,
                  load_balancing_policy_name: Optional[str] = None,
                  tls_credential: Optional[serve_utils.TLSCredential] = None,
-                 service_spec: Optional[SkyServiceSpec] = None) -> None:
+                 spec: Optional[service_spec.SkyServiceSpec] = None) -> None:
         """Initialize the load balancer.
 
         Args:
@@ -45,7 +45,7 @@ class SkyServeLoadBalancer:
                 to use. Defaults to None.
             tls_credentials: The TLS credentials for HTTPS endpoint. Defaults
                 to None.
-            service_spec: The service specification containing accelerator QPS
+            spec: The service specification containing accelerator QPS
                 information. Defaults to None.
         """
         self._app = fastapi.FastAPI()
@@ -56,12 +56,12 @@ class SkyServeLoadBalancer:
             load_balancing_policy_name)
 
         # Set accelerator QPS for instance-aware policies
-        if (service_spec and service_spec.target_qps_per_replica and
-                isinstance(service_spec.target_qps_per_replica, dict) and
+        if (spec and spec.target_qps_per_replica and
+                isinstance(spec.target_qps_per_replica, dict) and
                 hasattr(self._load_balancing_policy,
                         'set_target_qps_per_accelerator')):
             self._load_balancing_policy.set_target_qps_per_accelerator(
-                service_spec.target_qps_per_replica)
+                spec.target_qps_per_replica)
 
         logger.info('Starting load balancer with policy '
                     f'{load_balancing_policy_name}.')
@@ -283,12 +283,12 @@ class SkyServeLoadBalancer:
                     **uvicorn_tls_kwargs)
 
 
-def run_load_balancer(controller_addr: str,
-                      load_balancer_port: int,
-                      load_balancing_policy_name: Optional[str] = None,
-                      tls_credential: Optional[
-                          serve_utils.TLSCredential] = None,
-                      service_spec: Optional[SkyServiceSpec] = None) -> None:
+def run_load_balancer(
+        controller_addr: str,
+        load_balancer_port: int,
+        load_balancing_policy_name: Optional[str] = None,
+        tls_credential: Optional[serve_utils.TLSCredential] = None,
+        spec: Optional[service_spec.SkyServiceSpec] = None) -> None:
     """ Run the load balancer.
 
     Args:
@@ -298,7 +298,7 @@ def run_load_balancer(controller_addr: str,
         Defaults to None.
         tls_credential:
             The TLS credentials for HTTPS endpoint. Defaults to None.
-        service_spec: The service specification containing accelerator QPS
+        spec: The service specification containing accelerator QPS
             information. Defaults to None.
     """
     load_balancer = SkyServeLoadBalancer(
@@ -306,7 +306,7 @@ def run_load_balancer(controller_addr: str,
         load_balancer_port=load_balancer_port,
         load_balancing_policy_name=load_balancing_policy_name,
         tls_credential=tls_credential,
-        service_spec=service_spec)
+        spec=spec)
     load_balancer.run()
 
 
