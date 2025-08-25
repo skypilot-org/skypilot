@@ -254,6 +254,14 @@ class SkyServiceSpec:
                         'load_balancing_policy must be '
                         '"instance_aware_least_load".')
 
+        if load_balancing_policy == 'instance_aware_least_load':
+            if not isinstance(target_qps_per_replica, dict):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'When using "instance_aware_least_load" policy, '
+                        'target_qps_per_replica must be a '
+                        'dict mapping GPU types to QPS values.')
+
         tls_section = config.get('tls', None)
         if tls_section is not None:
             service_config['tls_credential'] = serve_utils.TLSCredential(
