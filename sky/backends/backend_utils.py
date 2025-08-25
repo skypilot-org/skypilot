@@ -785,16 +785,17 @@ def write_cluster_config(
             use_ssm = True
         if use_ssm:
             if ssh_proxy_command is None:
-                aws_profile = os.environ.get('AWS_PROFILE', 'default')
+                aws_profile = os.environ.get('AWS_PROFILE', None)
+                profile_str = f'--profile {aws_profile}' if aws_profile else ''
                 ip_address_filter = ('Name=private-ip-address,Values=%h'
                                      if use_internal_ips else
                                      'Name=ip-address,Values=%h')
                 ssm_proxy_command = 'aws ssm start-session --target \"' + \
                     '$(aws ec2 describe-instances --filter ' + \
                     f'{ip_address_filter} --region {region_name} ' + \
-                    f'--profile {aws_profile} ' + \
+                    f'{profile_str} ' + \
                     '| jq -r \'.Reservations[].Instances[]|.InstanceId\')\" ' + \
-                    f'--region {region_name} --profile {aws_profile} ' + \
+                    f'--region {region_name} {profile_str} ' + \
                     '--document-name AWS-StartSSHSession ' + \
                     '--parameters portNumber=%p'
                 ssh_proxy_command = ssm_proxy_command
