@@ -789,20 +789,20 @@ def _get_last_cluster_event_multiple(
         # Use a subquery to get the latest event for each cluster_hash
         latest_events = session.query(
             cluster_event_table.c.cluster_hash,
-            sqlalchemy.func.max(cluster_event_table.c.transitioned_at).label('max_time')
-        ).filter(
-            cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-            cluster_event_table.c.type == event_type.value
-        ).group_by(cluster_event_table.c.cluster_hash).subquery()
+            sqlalchemy.func.max(cluster_event_table.c.transitioned_at).label(
+                'max_time')).filter(
+                    cluster_event_table.c.cluster_hash.in_(cluster_hashes),
+                    cluster_event_table.c.type == event_type.value).group_by(
+                        cluster_event_table.c.cluster_hash).subquery()
 
         # Join with original table to get the full event details
         rows = session.query(cluster_event_table).join(
             latest_events,
             sqlalchemy.and_(
-                cluster_event_table.c.cluster_hash == latest_events.c.cluster_hash,
-                cluster_event_table.c.transitioned_at == latest_events.c.max_time
-            )
-        ).all()
+                cluster_event_table.c.cluster_hash ==
+                latest_events.c.cluster_hash,
+                cluster_event_table.c.transitioned_at ==
+                latest_events.c.max_time)).all()
 
     return {row.cluster_hash: row.reason for row in rows}
 
