@@ -67,17 +67,17 @@ def credentials_path() -> str:
         'credentials_file_path', None)
     if workspace_path is not None:
         return workspace_path
-    return _get_default_credentials_path()
+    return get_default_credentials_path()
 
 
-def _get_workspace_credentials_path() -> Optional[str]:
+def get_workspace_credentials_path() -> Optional[str]:
     """Get credentials path if explicitly set in workspace config."""
     workspace_cred_path = skypilot_config.get_workspace_cloud('nebius').get(
         'credentials_file_path', None)
     return workspace_cred_path
 
 
-def _get_default_credentials_path() -> str:
+def get_default_credentials_path() -> str:
     """Get the default credentials path."""
     return '~/.nebius/credentials.json'
 
@@ -189,7 +189,7 @@ def sdk():
     3. Default credentials path
     """
     # 1. Check if credentials path is set in workspace config (highest priority)
-    workspace_cred_path = _get_workspace_credentials_path()
+    workspace_cred_path = get_workspace_credentials_path()
     if workspace_cred_path is not None:
         # Check if token is also available and warn
         token = get_iam_token()
@@ -206,7 +206,7 @@ def sdk():
         return _sdk(token, None)
 
     # 3. Fall back to default credentials path (lowest priority)
-    default_cred_path = _get_default_credentials_path()
+    default_cred_path = get_default_credentials_path()
     return _sdk(None, default_cred_path)
 
 
@@ -308,10 +308,10 @@ def get_credential_file_paths() -> List[str]:
     }
 
     # Add workspace-specific credentials path if set
-    workspace_cred_path = _get_workspace_credentials_path()
+    workspace_cred_path = get_workspace_credentials_path()
     if workspace_cred_path is not None:
         paths.add(workspace_cred_path)
     # Always add default path in case it's needed for fallback
-    paths.add(_get_default_credentials_path())
+    paths.add(get_default_credentials_path())
 
     return list(paths)
