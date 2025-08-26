@@ -7,6 +7,8 @@ and can be used to query instance types and pricing information for Shadeform.
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
+import pandas as pd
+
 from sky.catalog import common
 
 if typing.TYPE_CHECKING:
@@ -28,7 +30,6 @@ def _get_df():
         except FileNotFoundError:
             # If no static catalog exists, create an empty one
             # This would be replaced with dynamic API fetching
-            import pandas as pd
             _df = pd.DataFrame(columns=[
                 'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
                 'MemoryGiB', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
@@ -56,7 +57,7 @@ def get_hourly_cost(instance_type: str,
     """Returns the cost, or the cheapest cost among all zones for spot."""
     # Shadeform doesn't support spot instances currently
     if use_spot:
-        raise ValueError("Spot instances are not supported on Shadeform")
+        raise ValueError('Spot instances are not supported on Shadeform')
 
     return common.get_hourly_cost_impl(_get_df(), instance_type, use_spot,
                                        region, zone)
@@ -98,7 +99,7 @@ def get_instance_type_for_accelerator(
     """Returns a list of instance types that have the given accelerator."""
     if use_spot:
         # Return empty lists since spot is not supported
-        return None, ["Spot instances are not supported on Shadeform"]
+        return None, ['Spot instances are not supported on Shadeform']
 
     return common.get_instance_type_for_accelerator_impl(df=_get_df(),
                                                          acc_name=acc_name,
