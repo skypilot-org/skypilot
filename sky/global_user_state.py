@@ -1312,8 +1312,14 @@ def get_clusters(
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(cluster_table)
         if is_managed_filter is not None:
-            query = query.filter(
-                cluster_table.c.is_managed == int(is_managed_filter))
+            if is_managed_filter:
+                query = query.filter(cluster_table.c.is_managed == 1)
+            else:
+                # backwards compatibility for old clusters.
+                # If is_managed is None, it means the cluster is not managed.
+                query = query.filter((cluster_table.c.is_managed == 0) |
+                                     (cluster_table.c.is_managed == None))
+
         query = query.order_by(sqlalchemy.desc(cluster_table.c.launched_at))
         rows = query.all()
     records = []
