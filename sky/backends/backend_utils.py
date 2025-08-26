@@ -2881,14 +2881,11 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    records = global_user_state.get_clusters()
-
-    # Filter out clusters created by the controller.
+    is_managed_filter = None
     if (not env_options.Options.SHOW_DEBUG_INFO.get() and
             not _include_is_managed):
-        records = [
-            record for record in records if not record.get('is_managed', False)
-        ]
+        is_managed_filter = False
+    records = global_user_state.get_clusters(is_managed_filter=is_managed_filter)
 
     # Filter by user if requested
     if not all_users:
