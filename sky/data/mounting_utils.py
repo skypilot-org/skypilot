@@ -249,18 +249,20 @@ def get_az_mount_cmd(container_name: str,
     # TODO(zpoint): clear old cache that has been created in the previous boot.
     # Do not set umask to avoid permission problems for non-root users.
     custom_mount_options = (custom_mount_options or '').replace(
-        '--tmp-path default', f'--tmp-path {cache_path}_$({remote_boot_time_cmd})'
-    )
+        '--tmp-path default',
+        f'--tmp-path {cache_path}_$({remote_boot_time_cmd})')
     if custom_mount_options:
-        blobfuse2_cmd = ('blobfuse2 --no-symlinks '
-                        f'{bucket_sub_path_arg}'
-                        f'--container-name {container_name} {custom_mount_options}').strip()
+        blobfuse2_cmd = (
+            'blobfuse2 --no-symlinks '
+            f'{bucket_sub_path_arg}'
+            f'--container-name {container_name} {custom_mount_options}'
+        ).strip()
     else:
-            blobfuse2_cmd = ('blobfuse2 --no-symlinks '
-                     f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
-                     f'{bucket_sub_path_arg}'
-                     f'--container-name {container_name}').strip()
-        
+        blobfuse2_cmd = ('blobfuse2 --no-symlinks '
+                         f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
+                         f'{bucket_sub_path_arg}'
+                         f'--container-name {container_name}').strip()
+
     # 1. Set -o nonempty to bypass empty directory check of blobfuse2 when using
     # fusermount-wrapper, since the mount is delegated to fusermount and
     # blobfuse2 only get the mounted fd.
