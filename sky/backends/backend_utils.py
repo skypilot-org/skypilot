@@ -2883,8 +2883,7 @@ def get_clusters(
     """
 
     is_managed_filter = None
-    if (not env_options.Options.SHOW_DEBUG_INFO.get() and
-            not _include_is_managed):
+    if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
         is_managed_filter = False
     user_hashes_filter = None
     if not all_users:
