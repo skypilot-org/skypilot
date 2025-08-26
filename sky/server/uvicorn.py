@@ -84,6 +84,8 @@ class Server(uvicorn.Server):
     def _graceful_shutdown(self, sig: int, frame: Union[FrameType,
                                                         None]) -> None:
         """Perform graceful shutdown."""
+        import uvicorn.protocols.http.httptools_impl as http_impl
+        http_impl.HttpToolsProtocol
         # Block new requests so that we can wait until all on-going requests
         # are finished. Note that /api/$verb operations are still allowed in
         # this stage to ensure the client can still operate the on-going
