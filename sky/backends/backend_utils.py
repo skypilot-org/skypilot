@@ -1408,6 +1408,35 @@ def ssh_credential_from_yaml(
     return credentials
 
 
+def ssh_credentials_from_handles(
+    handles: List['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+) -> List[Dict[str, Any]]:
+    """Returns ssh_user, ssh_private_key and ssh_control name.
+    """
+    credentials = []
+
+    non_empty_cluster_yaml_paths = [
+        handle.cluster_yaml for handle in handles if handle.cluster_yaml is not None]
+    cluster_yaml_dicts = global_user_state.get_cluster_yaml_dict_multiple(non_empty_cluster_yaml_paths)
+    
+    # If the cluster yaml is not in the database, check if it exists
+    # on the local file system and migrate it to the database.
+    # TODO(syang): remove this check once we have a way to migrate the
+    # cluster from file to database. Remove on v0.12.0.
+    for cluster_yaml_path in non_empty_cluster_yaml_paths:
+        if not os.path.exists(cluster_yaml_path):
+            global_user_state.set_cluster_yaml(cluster_yaml_path)
+    for handle, cluster_yaml_dict in zip(handles, cluster_yaml_dicts):
+        if handle.cluster_yaml is not None:
+            credentials.append(
+                ssh_credential_from_yaml(cluster_yaml_dict, handle.docker_user,
+                                         handle.ssh_user))
+        else:
+            credentials.append(None)
+    
+    return credentials
+
+
 def parallel_data_transfer_to_nodes(
         runners: List[command_runner.CommandRunner],
         source: Optional[str],
@@ -2944,26 +2973,27 @@ def get_clusters(
             record[
                 'resources_str_full'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=False)
-            credentials = ssh_credential_from_yaml(handle.cluster_yaml,
-                                                   handle.docker_user,
-                                                   handle.ssh_user)
-            if not credentials:
+
+        handles = [record['handle'] for record in filtered_records]
+        credentials = ssh_credentials_from_handles(handles)
+        for record, credential in zip(filtered_records, credentials):
+            if not credential:
                 continue
-            ssh_private_key_path = credentials.get('ssh_private_key', None)
+            ssh_private_key_path = credential.get('ssh_private_key', None)
             if ssh_private_key_path is not None:
                 if not os.path.exists(os.path.expanduser(ssh_private_key_path)):
                     auth.create_ssh_key_files_from_db(ssh_private_key_path)
                 with open(os.path.expanduser(ssh_private_key_path),
                           'r',
                           encoding='utf-8') as f:
-                    credentials['ssh_private_key_content'] = f.read()
+                    credential['ssh_private_key_content'] = f.read()
             else:
                 private_key_path, _ = auth.get_or_generate_keys()
                 with open(os.path.expanduser(private_key_path),
                           'r',
                           encoding='utf-8') as f:
-                    credentials['ssh_private_key_content'] = f.read()
-            record['credentials'] = credentials
+                    credential['ssh_private_key_content'] = f.read()
+            record['credentials'] = credential
 
     def _update_records_with_resources(
             records: List[Optional[Dict[str, Any]]]) -> None:
