@@ -137,6 +137,7 @@ def chunk_iter(file_obj, chunk_size: int, chunk_index: int):
         # Read a smaller buffer size to keep memory usage low
         buffer_size = min(64 * 1024,
                             chunk_size - bytes_read)  # 64KB buffer
+        logger.info(f'Reading chunk {chunk_index} of size {buffer_size}')
         data = file_obj.read(buffer_size)
         if not data:
             break
