@@ -648,6 +648,22 @@ def test_multi_node_failure(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- EFA. ----------
+@pytest.mark.aws
+def test_efa():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'efa',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/efa_vm.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 1 | grep "Selected provider is efa, fabric is efa"',  # Ensure efa is enabled.
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Web apps with custom ports on GCP. ----------
 @pytest.mark.gcp
 def test_gcp_http_server_with_custom_ports():
