@@ -30,7 +30,6 @@ from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
-from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -332,7 +331,8 @@ class JobsController:
                     clusters = backend_utils.get_clusters(
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
-                        all_users=True)
+                        all_users=True,
+                        _include_is_managed=True)
                     if clusters:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')

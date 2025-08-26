@@ -1,6 +1,6 @@
 """Hyperbolic instance provisioning."""
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
@@ -304,12 +304,13 @@ def get_cluster_info(
 
 
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[dict] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional['status_lib.ClusterStatus']]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Returns the status of the specified instances for Hyperbolic."""
-    del provider_config  # unused
+    del cluster_name, provider_config  # unused
     # Fetch all instances for this cluster
     instances = utils.list_instances(
         metadata={'skypilot': {
@@ -319,7 +320,8 @@ def query_instances(
         # No instances found: return empty dict to indicate fully deleted
         return {}
 
-    statuses: Dict[str, Optional['status_lib.ClusterStatus']] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for instance_id, instance in instances.items():
         try:
             raw_status = instance.get('status', 'unknown').lower()
@@ -328,7 +330,7 @@ def query_instances(
             status = hyperbolic_status.to_cluster_status()
             if non_terminated_only and status is None:
                 continue
-            statuses[instance_id] = status
+            statuses[instance_id] = (status, None)
         except utils.HyperbolicError as e:
             logger.warning(
                 f'Failed to parse status for instance {instance_id}: {e}')

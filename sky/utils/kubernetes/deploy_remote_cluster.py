@@ -1276,7 +1276,9 @@ def deploy_cluster(head_node,
     print(
         '  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes'
     )
-    print('  • Connect to pod with VSCode: code --remote ssh-remote+devbox ')
+    print(
+        '  • Connect to pod with VSCode: code --remote ssh-remote+devbox "/home"'
+    )
     # Print completion marker for current cluster
     print(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
 

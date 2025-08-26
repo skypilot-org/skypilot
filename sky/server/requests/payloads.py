@@ -453,6 +453,7 @@ class VolumeApplyBody(RequestBody):
     zone: Optional[str] = None
     size: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
+    labels: Optional[Dict[str, str]] = None
 
 
 class VolumeDeleteBody(RequestBody):
@@ -497,6 +498,13 @@ class JobsQueueBody(RequestBody):
     skip_finished: bool = False
     all_users: bool = False
     job_ids: Optional[List[int]] = None
+    user_match: Optional[str] = None
+    workspace_match: Optional[str] = None
+    name_match: Optional[str] = None
+    pool_match: Optional[str] = None
+    page: Optional[int] = None
+    limit: Optional[int] = None
+    statuses: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):
@@ -705,6 +713,25 @@ class JobsPoolDownBody(RequestBody):
 class JobsPoolStatusBody(RequestBody):
     """The request body for the jobs pool status endpoint."""
     pool_names: Optional[Union[str, List[str]]]
+
+
+class JobsPoolLogsBody(RequestBody):
+    """The request body for the jobs pool logs endpoint."""
+    pool_name: str
+    target: Union[str, serve.ServiceComponent]
+    worker_id: Optional[int] = None
+    follow: bool = True
+    tail: Optional[int] = None
+
+
+class JobsPoolDownloadLogsBody(RequestBody):
+    """The request body for the jobs pool download logs endpoint."""
+    pool_name: str
+    local_dir: str
+    targets: Optional[Union[str, serve.ServiceComponent,
+                            List[Union[str, serve.ServiceComponent]]]]
+    worker_ids: Optional[List[int]] = None
+    tail: Optional[int] = None
 
 
 class UploadZipFileResponse(pydantic.BaseModel):

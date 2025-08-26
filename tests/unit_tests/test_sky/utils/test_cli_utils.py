@@ -6,7 +6,6 @@ import time
 
 import pytest
 
-import sky
 from sky import backends
 from sky.resources import Resources
 from sky.utils import status_lib
@@ -141,6 +140,7 @@ def test_show_status_table():
             'resources_str_full': ('1x(cpus=8, mem=32, m6i.2xlarge, '
                                    'disk=50)'),
             'workspace': 'test-workspace',
+            'last_event': 'Test event.',
         }
 
         # Test basic table

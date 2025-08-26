@@ -4,7 +4,7 @@ import copy
 from multiprocessing import pool
 import re
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Type
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
 
 from sky import sky_logging
 from sky.adaptors import gcp
@@ -58,11 +58,13 @@ def _filter_instances(
 # for terminated instances, if they have already been fully deleted.
 @common_utils.retry
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
@@ -84,7 +86,8 @@ def query_instances(
     )
 
     raw_statuses = {}
-    statuses = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst_id, instance in instances.items():
         raw_status = instance[handler.STATUS_FIELD]
         raw_statuses[inst_id] = raw_status
@@ -98,7 +101,7 @@ def query_instances(
             status = None
         if non_terminated_only and status is None:
             continue
-        statuses[inst_id] = status
+        statuses[inst_id] = (status, None)
 
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     if handler == instance_utils.GCPTPUVMInstance:

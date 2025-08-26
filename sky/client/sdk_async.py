@@ -20,13 +20,14 @@ import colorama
 
 from sky import admin_policy
 from sky import backends
+from sky import catalog
 from sky import exceptions
 from sky import models
 from sky import sky_logging
-import sky.catalog
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
@@ -244,6 +245,10 @@ async def stream_and_get(
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(f'Failed to stream logs: {detail}')
             elif response.status != 200:
+                # TODO(syang): handle the case where the requestID is not
+                # provided. https://github.com/skypilot-org/skypilot/issues/6549
+                if request_id is None:
+                    return None
                 return await get(request_id)
 
             return await stream_response_async(request_id, response,
@@ -297,7 +302,7 @@ async def list_accelerators(
     require_price: bool = True,
     case_sensitive: bool = True,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Dict[str, List[sky.catalog.common.InstanceTypeInfo]]:
+) -> Dict[str, List[catalog.common.InstanceTypeInfo]]:
     """Async version of list_accelerators() that lists the names of all
     accelerators offered by Sky."""
     request_id = await context_utils.to_thread(sdk.list_accelerators, gpus_only,
@@ -341,7 +346,7 @@ async def optimize(
         admin_policy_request_options: Optional[
             admin_policy.RequestOptions] = None,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> sky.dag.Dag:
+) -> 'sky.Dag':
     """Async version of optimize() that finds the best execution plan for the
       given DAG."""
     request_id = await context_utils.to_thread(sdk.optimize, dag, minimize,
@@ -782,7 +787,7 @@ async def dashboard(starting_page: Optional[str] = None) -> None:
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_info() -> Dict[str, Any]:
+async def api_info() -> responses.APIHealthResponse:
     """Async version of api_info() that gets the server's status, commit and
       version."""
     return await context_utils.to_thread(sdk.api_info)

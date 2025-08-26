@@ -22,7 +22,7 @@ depends_on = None
 def upgrade():
     with op.get_context().autocommit_block():
         # Create any missing tables with current schema first
-        db_utils.add_tables_to_db_sqlalchemy(Base.metadata, op.get_bind())
+        db_utils.add_all_tables_to_db_sqlalchemy(Base.metadata, op.get_bind())
 
         # Add all missing columns to clusters table
         # This allows each column addition to fail independently without rolling

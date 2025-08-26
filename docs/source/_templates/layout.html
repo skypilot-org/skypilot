@@ -3,4 +3,12 @@
 {% block docs_navbar %}
 {% include "header.html" ignore missing %}
 {{ super() }}
+{% endblock %}
+
+{% block docs_body %}
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WDLMDR6J"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
+{{ super() }}
 {% endblock %} 

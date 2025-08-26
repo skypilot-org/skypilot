@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional
 
 from sky.utils import common_utils
 from sky.utils import infra_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
 
@@ -16,6 +17,7 @@ class Volume:
             type: Optional[str] = None,  # pylint: disable=redefined-builtin
             infra: Optional[str] = None,
             size: Optional[str] = None,
+            labels: Optional[Dict[str, str]] = None,
             resource_name: Optional[str] = None,
             config: Optional[Dict[str, Any]] = None):
         """Initialize a Volume instance.
@@ -25,12 +27,14 @@ class Volume:
             type: Volume type (e.g., 'k8s-pvc')
             infra: Infrastructure specification
             size: Volume size
+            labels: Volume labels
             config: Additional configuration
         """
         self.name = name
         self.type = type
         self.infra = infra
         self.size = size
+        self.labels = labels or {}
         self.resource_name = resource_name
         self.config = config or {}
 
@@ -45,6 +49,7 @@ class Volume:
                    type=config_dict.get('type'),
                    infra=config_dict.get('infra'),
                    size=config_dict.get('size'),
+                   labels=config_dict.get('labels'),
                    resource_name=config_dict.get('resource_name'),
                    config=config_dict.get('config', {}))
 
@@ -55,6 +60,7 @@ class Volume:
             'type': self.type,
             'infra': self.infra,
             'size': self.size,
+            'labels': self.labels,
             'resource_name': self.resource_name,
             'config': self.config,
             'cloud': self.cloud,
@@ -94,14 +100,14 @@ class Volume:
         # Adjust the volume config (e.g., parse size)
         self._adjust_config()
 
-        # Validate the volume config
-        self._validate_config()
-
         # Resolve the infrastructure options to cloud, region, zone
         infra_info = infra_utils.InfraInfo.from_str(self.infra)
         self.cloud = infra_info.cloud
         self.region = infra_info.region
         self.zone = infra_info.zone
+
+        # Validate the volume config
+        self._validate_config()
 
     def _adjust_config(self) -> None:
         """Adjust the volume config (e.g., parse size)."""
@@ -123,3 +129,11 @@ class Volume:
             raise ValueError('Size is required for new volumes. '
                              'Please specify the size in the YAML file or '
                              'use the --size flag.')
+        if self.labels:
+            assert self.cloud is not None, 'Cloud must be specified'
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
+            assert cloud_obj is not None
+            for key, value in self.labels.items():
+                valid, err_msg = cloud_obj.is_label_valid(key, value)
+                if not valid:
+                    raise ValueError(f'{err_msg}')

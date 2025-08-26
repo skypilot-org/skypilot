@@ -14,8 +14,12 @@ _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Kubernetes. '
                          'Try running: pip install "skypilot[kubernetes]"')
 kubernetes = common.LazyImport('kubernetes',
                                import_error_message=_IMPORT_ERROR_MESSAGE)
+models = common.LazyImport('kubernetes.client.models',
+                           import_error_message=_IMPORT_ERROR_MESSAGE)
 urllib3 = common.LazyImport('urllib3',
                             import_error_message=_IMPORT_ERROR_MESSAGE)
+dateutil_parser = common.LazyImport('dateutil.parser',
+                                    import_error_message=_IMPORT_ERROR_MESSAGE)
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
@@ -142,8 +146,11 @@ def _load_config(context: Optional[str] = None):
             # show up in SkyPilot tasks. For now, we work around by using
             # DNS name instead of environment variables.
             # See issue: https://github.com/skypilot-org/skypilot/issues/2287
-            os.environ['KUBERNETES_SERVICE_HOST'] = 'kubernetes.default.svc'
-            os.environ['KUBERNETES_SERVICE_PORT'] = '443'
+            # Only set if not already present (preserving existing values)
+            if 'KUBERNETES_SERVICE_HOST' not in os.environ:
+                os.environ['KUBERNETES_SERVICE_HOST'] = 'kubernetes.default.svc'
+            if 'KUBERNETES_SERVICE_PORT' not in os.environ:
+                os.environ['KUBERNETES_SERVICE_PORT'] = '443'
             kubernetes.config.load_incluster_config()
         except kubernetes.config.config_exception.ConfigException:
             _load_config_from_kubeconfig()

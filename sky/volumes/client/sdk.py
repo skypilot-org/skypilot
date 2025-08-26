@@ -1,7 +1,7 @@
 """SDK functions for managed jobs."""
 import json
 import typing
-from typing import List
+from typing import Any, Dict, List
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -24,7 +24,7 @@ logger = sky_logging.init_logger(__name__)
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def apply(volume: volume_lib.Volume) -> server_common.RequestId:
+def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
     """Creates or registers a volume.
 
     Args:
@@ -33,13 +33,16 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId:
     Returns:
         The request ID of the apply request.
     """
-    body = payloads.VolumeApplyBody(name=volume.name,
-                                    volume_type=volume.type,
-                                    cloud=volume.cloud,
-                                    region=volume.region,
-                                    zone=volume.zone,
-                                    size=volume.size,
-                                    config=volume.config)
+    body = payloads.VolumeApplyBody(
+        name=volume.name,
+        volume_type=volume.type,
+        cloud=volume.cloud,
+        region=volume.region,
+        zone=volume.zone,
+        size=volume.size,
+        config=volume.config,
+        labels=volume.labels,
+    )
     response = requests.post(f'{server_common.get_server_url()}/volumes/apply',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())
@@ -50,7 +53,7 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ls() -> server_common.RequestId:
+def ls() -> server_common.RequestId[List[Dict[str, Any]]]:
     """Lists all volumes.
 
     Returns:
@@ -65,7 +68,7 @@ def ls() -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def delete(names: List[str]) -> server_common.RequestId:
+def delete(names: List[str]) -> server_common.RequestId[None]:
     """Deletes volumes.
 
     Args:

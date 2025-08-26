@@ -8,6 +8,26 @@ logger = sky_logging.init_logger(__name__)
 
 _REGION_CONFIG_CLOUDS = ['nebius', 'oci']
 
+# Kubernetes API use list to represent dictionary fields with patch strategy
+# merge and each item is indexed by the patch merge key. The following map
+# maps the field name to the patch merge key.
+# pylint: disable=line-too-long
+# Ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#podspec-v1-core
+# NOTE: field containers and imagePullSecrets are not included deliberately for
+# backward compatibility (we only support one container per pod now).
+_PATCH_MERGE_KEYS = {
+    'initContainers': 'name',
+    'ephemeralContainers': 'name',
+    'volumes': 'name',
+    'volumeMounts': 'name',
+    'resourceClaims': 'name',
+    'env': 'name',
+    'hostAliases': 'ip',
+    'topologySpreadConstraints': 'topologyKey',
+    'ports': 'containerPort',
+    'volumeDevices': 'devicePath',
+}
+
 
 class Config(Dict[str, Any]):
     """SkyPilot config that supports setting/getting values with nested keys."""
@@ -211,19 +231,23 @@ def merge_k8s_configs(
                 merge_k8s_configs(base_config[key][0], value[0],
                                   next_allowed_override_keys,
                                   next_disallowed_override_keys)
-            elif key in ['volumes', 'volumeMounts', 'initContainers']:
-                # If the key is 'volumes', 'volumeMounts', or 'initContainers',
-                # we search for item with the same name and merge it.
+            # For list fields with patch strategy "merge", we merge the list
+            # by the patch merge key.
+            elif key in _PATCH_MERGE_KEYS:
+                patch_merge_key = _PATCH_MERGE_KEYS[key]
                 for override_item in value:
-                    override_item_name = override_item.get('name')
+                    override_item_name = override_item.get(patch_merge_key)
                     if override_item_name is not None:
                         existing_base_item = next(
                             (v for v in base_config[key]
-                             if v.get('name') == override_item_name), None)
+                             if v.get(patch_merge_key) == override_item_name),
+                            None)
                         if existing_base_item is not None:
                             merge_k8s_configs(existing_base_item, override_item)
                         else:
                             base_config[key].append(override_item)
+                    else:
+                        base_config[key].append(override_item)
             else:
                 base_config[key].extend(value)
         else:
