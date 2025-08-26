@@ -327,10 +327,16 @@ class StrategyExecutor:
                                 cluster_name=self.cluster_name,
                                 # We expect to tear down the cluster as soon as
                                 # the job is finished. However, in case the
-                                # controller dies, set autodown to try and avoid
+                                # controller dies, set autostop to try and avoid
                                 # a resource leak.
                                 idle_minutes_to_autostop=_AUTODOWN_MINUTES,
-                                down=True,
+                                # Ideally, we should autodown to be safe, but
+                                # it's fine to just autostop for now, as
+                                # Nebius doesn't support autodown yet
+                                # and this is just a safety net.
+                                # TODO(kevin): set down=True once Nebius
+                                # supports autodown.
+                                down=False,
                                 _is_launched_by_jobs_controller=True)
                         else:
                             self.cluster_name = (
