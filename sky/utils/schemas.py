@@ -1410,6 +1410,9 @@ def get_config_schema():
                 **_NETWORK_CONFIG_SCHEMA, 'tenant_id': {
                     'type': 'string',
                 },
+                'domain': {
+                    'type': 'string',
+                },
                 'region_configs': {
                     'type': 'object',
                     'required': [],
@@ -1663,6 +1666,9 @@ def get_config_schema():
                             'type': 'string',
                         },
                         'tenant_id': {
+                            'type': 'string',
+                        },
+                        'domain': {
                             'type': 'string',
                         },
                         'disabled': {

@@ -62,6 +62,10 @@ def iam_token_path() -> str:
     return '~/.nebius/NEBIUS_IAM_TOKEN.txt'
 
 
+def domain_path() -> str:
+    return '~/.nebius/NEBIUS_DOMAIN.txt'
+
+
 def credentials_path() -> str:
     workspace_path = skypilot_config.get_workspace_cloud('nebius').get(
         'credentials_file_path', None)
@@ -80,6 +84,28 @@ def _get_workspace_credentials_path() -> Optional[str]:
 def _get_default_credentials_path() -> str:
     """Get the default credentials path."""
     return '~/.nebius/credentials.json'
+
+
+def api_domain() -> str:
+    domain_in_ws_config = skypilot_config.get_workspace_cloud('nebius').get(
+        'domain', None)
+    if domain_in_ws_config is not None:
+        return domain_in_ws_config
+    domain_in_config = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=None, keys=('domain',), default_value=None)
+    if domain_in_config is not None:
+        return domain_in_config
+    try:
+        with open(os.path.expanduser(domain_path()), encoding='utf-8') as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        return _get_default_api_domain()
+
+
+def _get_default_api_domain() -> str:
+    # pylint: disable=import-outside-toplevel
+    from nebius.base import constants
+    return constants.DOMAIN
 
 
 DEFAULT_REGION = 'eu-north1'
@@ -215,10 +241,12 @@ def _sdk(token: Optional[str], cred_path: Optional[str]):
     # Exactly one of token or cred_path must be provided
     assert (token is None) != (cred_path is None), (token, cred_path)
     if token is not None:
-        return nebius.sdk.SDK(credentials=token)
+        return nebius.sdk.SDK(credentials=token, domain=api_domain())
     if cred_path is not None:
         return nebius.sdk.SDK(
-            credentials_file_name=os.path.expanduser(cred_path))
+            credentials_file_name=os.path.expanduser(cred_path),
+            domain=api_domain(),
+        )
     raise ValueError('Either token or credentials file path must be provided')
 
 
