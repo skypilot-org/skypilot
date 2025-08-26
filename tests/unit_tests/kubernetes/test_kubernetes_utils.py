@@ -325,7 +325,7 @@ def test_detect_gpu_label_formatter_ignores_empty_labels():
         'beta.kubernetes.io/arch': 'amd64',
         'beta.kubernetes.io/os': 'linux',
         'cloud.google.com/gke-accelerator': '',  # Empty GKE label
-        'gpu.nvidia.com/class': '',              # Empty CoreWeave label
+        'gpu.nvidia.com/class': '',  # Empty CoreWeave label
         'gpu.nvidia.com/count': '',
         'gpu.nvidia.com/model': '',
         'gpu.nvidia.com/vram': ''
@@ -336,7 +336,7 @@ def test_detect_gpu_label_formatter_ignores_empty_labels():
     mock_gpu_node.metadata.name = 'gpu-node'
     mock_gpu_node.metadata.labels = {
         'cloud.google.com/gke-accelerator': 'H200',  # Invalid for GKE formatter
-        'gpu.nvidia.com/class': 'H200',             # Valid for CoreWeave formatter
+        'gpu.nvidia.com/class': 'H200',  # Valid for CoreWeave formatter
         'gpu.nvidia.com/count': '8',
         'gpu.nvidia.com/model': 'H200',
         'gpu.nvidia.com/vram': '143'
@@ -356,7 +356,7 @@ def test_detect_gpu_label_formatter_ignores_empty_labels():
     mock_cpu_node_whitespace.metadata.name = 'cpu-node-ws'
     mock_cpu_node_whitespace.metadata.labels = {
         'cloud.google.com/gke-accelerator': '   ',  # Whitespace only
-        'gpu.nvidia.com/class': '\t\n',             # Whitespace only
+        'gpu.nvidia.com/class': '\t\n',  # Whitespace only
     }
 
     nodes_with_whitespace = [mock_cpu_node_whitespace, mock_gpu_node]
