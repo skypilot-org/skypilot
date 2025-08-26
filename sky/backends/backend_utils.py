@@ -2886,19 +2886,15 @@ def get_clusters(
     if (not env_options.Options.SHOW_DEBUG_INFO.get() and
             not _include_is_managed):
         is_managed_filter = False
+    user_hashes_filter = None
+    if not all_users:
+        user_hashes_filter = {common_utils.get_current_user().id}
     accessible_workspaces = workspaces_core.get_workspaces()
 
     records = global_user_state.get_clusters(
         is_managed_filter=is_managed_filter,
+        user_hashes_filter=user_hashes_filter,
         workspaces_filter=accessible_workspaces)
-
-    # Filter by user if requested
-    if not all_users:
-        current_user = common_utils.get_current_user()
-        records = [
-            record for record in records
-            if record['user_hash'] == current_user.id
-        ]
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT

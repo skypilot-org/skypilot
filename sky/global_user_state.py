@@ -1309,6 +1309,7 @@ def get_cluster_from_name(
 def get_clusters(
     is_managed_filter: Optional[bool] = None,
     workspaces_filter: Optional[Set[str]] = None,
+    user_hashes_filter: Optional[Set[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Get clusters from the database.
 
@@ -1317,7 +1318,11 @@ def get_clusters(
             that has is_managed field set to the value.
         workspaces_filter: If specified, only include clusters
             that has workspace field set to one of the values.
+        user_hashes_filter: If specified, only include clusters
+            that has user_hash field set to one of the values.
     """
+    # is a cluster has a null user_hash, we treat it as belonging to the current user.
+    current_user_hash = common_utils.get_user_hash()
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(cluster_table)
@@ -1326,10 +1331,20 @@ def get_clusters(
         if workspaces_filter is not None:
             query = query.filter(
                 cluster_table.c.workspace.in_(workspaces_filter))
+        if user_hashes_filter is not None:
+            if current_user_hash in user_hashes_filter:
+                # backwards compatibility for old clusters.
+                # If current_user_hash is in user_hashes_filter, we include
+                # clusters that have a null user_hash.
+                query = query.filter(
+                    cluster_table.c.user_hash.in_(user_hashes_filter) |
+                    (cluster_table.c.user_hash == None))
+            else:
+                query = query.filter(
+                    cluster_table.c.user_hash.in_(user_hashes_filter))
         query = query.order_by(sqlalchemy.desc(cluster_table.c.launched_at))
         rows = query.all()
     records = []
-    current_user_hash = common_utils.get_user_hash()
 
     # get user hash for each row
     row_to_user_hash = {}
