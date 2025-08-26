@@ -7,7 +7,6 @@ import contextlib
 import datetime
 import hashlib
 import json
-import logging
 import multiprocessing
 import os
 import pathlib
@@ -69,7 +68,6 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
-from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest
@@ -85,31 +83,6 @@ P = ParamSpec('P')
 
 _SERVER_USER_HASH_KEY = 'server_user_hash'
 
-
-def _add_timestamp_prefix_for_server_logs() -> None:
-    server_logger = sky_logging.init_logger('sky.server')
-    # Clear existing handlers first to prevent duplicates
-    server_logger.handlers.clear()
-    # Disable propagation to avoid the root logger of SkyPilot being affected
-    server_logger.propagate = False
-    # Add date prefix to the log message printed by loggers under
-    # server.
-    stream_handler = logging.StreamHandler(sys.stdout)
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        stream_handler.setLevel(logging.DEBUG)
-    else:
-        stream_handler.setLevel(logging.INFO)
-    stream_handler.flush = sys.stdout.flush  # type: ignore
-    stream_handler.setFormatter(sky_logging.FORMATTER)
-    server_logger.addHandler(stream_handler)
-    # Add date prefix to the log message printed by uvicorn.
-    for name in ['uvicorn', 'uvicorn.access']:
-        uvicorn_logger = logging.getLogger(name)
-        uvicorn_logger.handlers.clear()
-        uvicorn_logger.addHandler(stream_handler)
-
-
-_add_timestamp_prefix_for_server_logs()
 logger = sky_logging.init_logger(__name__)
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
@@ -1869,6 +1842,8 @@ if __name__ == '__main__':
     import uvicorn
 
     from sky.server import uvicorn as skyuvicorn
+
+    skyuvicorn.add_timestamp_prefix_for_server_logs()
 
     # Initialize global user state db
     global_user_state.initialize_and_get_db()
