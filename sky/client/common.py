@@ -137,11 +137,11 @@ def chunk_iter(file_obj, chunk_size: int, chunk_index: int):
         # Read a smaller buffer size to keep memory usage low
         buffer_size = min(64 * 1024,
                             chunk_size - bytes_read)  # 64KB buffer
-        logger.info(f'Reading chunk {chunk_index} of size {buffer_size}')
         data = file_obj.read(buffer_size)
         if not data:
             break
         bytes_read += len(data)
+        logger.info(f'Reading chunk {chunk_index} of size {buffer_size}')
         yield data
 
 
@@ -368,8 +368,10 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                                       upload_logger, log_file)
                     for chunk_index in range(total_chunks)
                 ]
-                subprocess_utils.run_in_parallel(_upload_chunk_with_retry,
-                                                 chunk_params)
+                for chunk_param in chunk_params:
+                    _upload_chunk_with_retry(chunk_param)
+                # subprocess_utils.run_in_parallel(_upload_chunk_with_retry,
+                #                                  chunk_params)
         os.unlink(temp_zip_file.name)
         upload_logger.info(f'Uploaded files: {upload_list}')
         logger.info(
