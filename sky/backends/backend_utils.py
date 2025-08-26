@@ -1068,11 +1068,14 @@ def _query_status_seeweb(
       an instance belongs to (*notes == cluster_name_on_cloud*).
     • Translates Seeweb statuses → SkyPilot ClusterStatus enum.
     """
-    try:
-        import configparser
-        from pathlib import Path
+    # ray_config is unused for Seeweb
+    del ray_config
 
-        import ecsapi
+    try:
+        import configparser  # pylint: disable=import-outside-toplevel
+        from pathlib import Path  # pylint: disable=import-outside-toplevel
+
+        import ecsapi  # pylint: disable=import-outside-toplevel
 
         # Leggi API key
         parser = configparser.ConfigParser()
@@ -1080,7 +1083,7 @@ def _query_status_seeweb(
         api_key = parser['DEFAULT']['api_key'].strip()
 
         client = ecsapi.Api(token=api_key)
-    except Exception as e:  # pragma: no cover
+    except Exception as e:  # pragma: no cover  # pylint: disable=broad-except
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Impossibile interrogare Seeweb: {e}. '
                                'Verifica che SEEWEB_TOKEN sia valido.') from e
@@ -2991,6 +2994,7 @@ def get_clusters(
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
         cluster_names = _get_glob_clusters(cluster_names, silent=True)
+
         new_records = []
         not_exist_cluster_names = []
         for cluster_name in cluster_names:
@@ -3037,7 +3041,6 @@ def get_clusters(
         # Add resources to the records
         _update_records_with_resources(records)
         return records
-
     plural = 's' if len(records) > 1 else ''
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,

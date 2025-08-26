@@ -1,7 +1,8 @@
 """A script that generates the Seeweb catalog.
 
 Usage:
-    python fetch_seeweb.py [-h] [--api-key API_KEY] [--api-key-path API_KEY_PATH]
+    python fetch_seeweb.py [-h] [--api-key API_KEY]
+    [--api-key-path API_KEY_PATH]
 
 If neither --api-key nor --api-key-path are provided, this script will parse
 `~/.seeweb_cloud/seeweb_keys` to look for Seeweb API key.
@@ -11,62 +12,47 @@ import configparser
 import csv
 import json
 import os
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-import pandas as pd
+import ecsapi
 
-DEFAULT_SEEWEB_KEYS_PATH = os.path.expanduser('~/.seeweb_cloud/seeweb_keys')
-
-# Seeweb GPU name to SkyPilot canonical name mapping.
-# This maps the names returned by Seeweb API to the canonical names used by SkyPilot.
+# GPU name mapping from Seeweb to SkyPilot canonical names
 SEEWEB_GPU_NAME_TO_SKYPILOT_GPU_NAME = {
-    'H200 141GB': 'H200',
-    'A100 80GB': 'A100',
-    'H100 80GB': 'H100',
-    'RTX 6000 24GB': 'RTX6000',
-    'RTX A6000 48GB': 'RTXA6000',
-    'L4 24GB': 'L4',
-    'L40s 48GB': 'L40S',
-    'A30': 'A30',
+    'GPU11': 'RTX4090',
+    'GPU10': 'H200',
+    'GPU9': 'RTX4090',
+    'GPU8': 'RTX4090',
+    'GPU7': 'RTX4090',
+    'GPU6': 'RTX4090',
+    'GPU5': 'RTX4090',
+    'GPU4': 'RTX4090',
+    'GPU3': 'RTX4090',
+    'GPU2': 'RTX4090',
+    'GPU1': 'RTX4090',
     'MI300X': 'MI300X',
-    'Tenstorrent Grayskull e75': 'Grayskull-e75',
-    'Tenstorrent Grayskull e150': 'Grayskull-e150',
+    'MI300': 'MI300',
+    'GRAYSKULL': 'GRAYSKULL',
 }
 
-# GPU VRAM mapping (like Nebius approach) - using canonical names
+# GPU VRAM mapping in MB
 VRAM = {
-    'RTX6000': 24576,  # 24GB
-    'RTXA6000': 49152,  # 48GB
-    'A30': 24576,  # 24GB
-    'A100': 81920,  # 80GB
-    'H100': 81920,  # 80GB
-    'H200': 144384,  # 141GB
-    'L4': 24576,  # 24GB
-    'L40S': 49152,  # 48GB
-    'MI300X': 196608,  # 192GB
-    'Grayskull-e75': 8192,  # 8GB
-    'Grayskull-e150': 16384,  # 16GB
+    'RTX4090': 24576,  # 24GB
+    'H200': 81920,  # 80GB
+    'MI300X': 192000,  # 192GB
+    'MI300': 128000,  # 128GB
+    'GRAYSKULL': 8192,  # 8GB
 }
 
 
-def get_api_key(api_key_path: Optional[str] = None) -> str:
-    """Get Seeweb API key from file or environment."""
-    if api_key_path:
-        path = os.path.expanduser(api_key_path)
-    else:
-        path = DEFAULT_SEEWEB_KEYS_PATH
-
-    if not os.path.exists(path):
-        raise FileNotFoundError(f'Seeweb API key file not found: {path}')
-
+def get_api_key(path: str) -> str:
+    """Get API key from config file."""
     parser = configparser.ConfigParser()
     parser.read(path)
 
     try:
         return parser['DEFAULT']['api_key'].strip()
-    except KeyError:
-        raise ValueError(f'Missing api_key in {path}')
+    except KeyError as exc:
+        raise ValueError(f'Missing api_key in {path}') from exc
 
 
 def normalize_gpu_name(gpu_name: str) -> str:
@@ -80,9 +66,8 @@ def normalize_gpu_name(gpu_name: str) -> str:
         return canonical_name
 
     # If not found in mapping, return original name
-    print(
-        f'Warning: GPU name "{gpu_name}" not found in mapping, using original name'
-    )
+    print(f'Warning: GPU name "{gpu_name}" not found in mapping,'
+          f'using original name')
     return gpu_name
 
 
@@ -116,7 +101,8 @@ def parse_plan_info(plan: Any) -> Dict[str, Any]:
 
         gpu_label = getattr(plan, 'gpu_label', None)
 
-        # Determine GPU name - use gpu_label if available, otherwise try to infer from plan name
+        # Determine GPU name - use gpu_label if available,
+        # otherwise try to infer from plan name
         if gpu_label:
             gpu_name = normalize_gpu_name(gpu_label)  # Normalize the GPU name
         else:
@@ -135,7 +121,7 @@ def parse_plan_info(plan: Any) -> Dict[str, Any]:
         # Get GPU VRAM from mapping using the normalized name
         gpu_vram_mb = VRAM.get(gpu_name, 0) if gpu_name else 0
     else:
-        raise ValueError(f"Unsupported plan format: {type(plan)}")
+        raise ValueError(f'Unsupported plan format: {type(plan)}')
 
     return {
         'plan_name': plan_name,
@@ -178,40 +164,40 @@ def get_gpu_info(gpu_count: int, gpu_name: str, gpu_vram_mb: int = 0) -> str:
 
 
 def fetch_seeweb_data(api_key: str) -> List[Dict]:
+    """Fetch data from Seeweb API."""
+    if ecsapi is None:
+        raise ImportError('ecsapi not available')
 
     try:
-        import ecsapi
         client = ecsapi.Api(token=api_key)
 
-        print("Fetching plans from Seeweb API...")
+        print('Fetching plans from Seeweb API...')
         api_plans = client.fetch_plans()
 
         if not api_plans:
-            raise ValueError("No plans returned from API")
+            raise ValueError('No plans returned from API')
 
-        print(f"Successfully fetched {len(api_plans)} plans from API")
+        print(f'Successfully fetched {len(api_plans)} plans from API')
         plans = []
 
         for plan in api_plans:
 
-            print(f"Fetching regions available for {plan.name}")
+            print(f'Fetching regions available for {plan.name}')
             regions_available = client.fetch_regions_available(plan.name)
 
             try:
                 parsed = parse_plan_info(plan)
                 parsed.update({'regions_available': regions_available})
                 plans.append(parsed)
-            except Exception as e:
-                print(f"Error parsing plan {plan.name}: {e}")
+            except Exception as e:  # pylint: disable=broad-except
+                print(f'Error parsing plan {plan.name}: {e}')
                 continue
 
-        print(f"Successfully parsed {len(plans)} plans")
+        print(f'Successfully parsed {len(plans)} plans')
         return plans
 
-    except ImportError:
-        raise ImportError("ecsapi not available")
-    except Exception as e:
-        raise Exception(f"Error fetching data from Seeweb API: {e}")
+    except Exception as e:  # pylint: disable=broad-except
+        raise Exception(f'Error fetching data from Seeweb API: {e}') from e
 
 
 def create_catalog(api_key: str, output_path: str) -> None:
@@ -219,7 +205,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
     plans = fetch_seeweb_data(api_key)
 
     # Create CSV catalog
-    print(f"Writing catalog to {output_path}")
+    print(f'Writing catalog to {output_path}')
     with open(output_path, mode='w', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
         writer.writerow([
@@ -247,7 +233,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
                             plan['gpu_count'] if plan['gpu_count'] > 0 else
                             '',  # AcceleratorCount
                             plan['vcpus'],  # vCPUs
-                            plan['memory_gb'],  # MemoryGiB  
+                            plan['memory_gb'],  # MemoryGiB
                             plan['price'],  # Price
                             region,  # Region (single region per row)
                             gpu_info_str,  # GpuInfo
@@ -261,18 +247,18 @@ def create_catalog(api_key: str, output_path: str) -> None:
                         plan['gpu_count']
                         if plan['gpu_count'] > 0 else '',  # AcceleratorCount
                         plan['vcpus'],  # vCPUs
-                        plan['memory_gb'],  # MemoryGiB  
+                        plan['memory_gb'],  # MemoryGiB
                         plan['price'],  # Price
                         '',  # Region (empty)
                         gpu_info_str,  # GpuInfo
                         ''  # SpotPrice (Seeweb doesn't support spot)
                     ])
-            except Exception as e:
-                print(f"Error processing plan {plan['plan_name']}: {e}")
+            except Exception as e:  # pylint: disable=broad-except
+                print(f'Error processing plan {plan["plan_name"]}: {e}')
                 continue
 
-    print(f"Seeweb catalog saved to {output_path}")
-    print(f"Created {len(plans)} instance types")
+    print(f'Seeweb catalog saved to {output_path}')
+    print(f'Created {len(plans)} instance types')
 
 
 def main() -> None:
@@ -295,7 +281,6 @@ def main() -> None:
     # print('Seeweb Service Catalog saved to seeweb/vms.csv')
 
     # Temporary: Save to SkyPilot local catalog directory for testing
-    import os
     catalog_dir = os.path.expanduser('~/.sky/catalogs/v7/seeweb')
     os.makedirs(catalog_dir, exist_ok=True)
     create_catalog(api_key, os.path.join(catalog_dir, 'vms.csv'))

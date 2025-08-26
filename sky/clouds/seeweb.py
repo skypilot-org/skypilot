@@ -2,21 +2,20 @@
 
 History:
 @ Aug 6, 2025: Initial version of the integration.
-- Francesco Massa 
+- Francesco Massa
 - Marco Cristofanilli (marco.cATseeweb.it)
 
 """
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
 from sky.adaptors import seeweb as seeweb_adaptor
+from sky.provision import seeweb as seeweb_provision
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -27,7 +26,7 @@ if typing.TYPE_CHECKING:
     from sky.utils import volume as volume_lib
 
 # ---------- key file path -----------------
-_SEEWEB_KEY_FILE = "~/.seeweb_cloud/seeweb_keys"
+_SEEWEB_KEY_FILE = '~/.seeweb_cloud/seeweb_keys'    
 # (content: ini-like)
 #   api_key = <TOKEN>
 
@@ -36,21 +35,43 @@ _SEEWEB_KEY_FILE = "~/.seeweb_cloud/seeweb_keys"
 class Seeweb(clouds.Cloud):
     """Seeweb GPU Cloud."""
 
-    _REPR = "Seeweb"
+    _REPR = 'Seeweb'
     # Define unsupported features to provide clear error messages
     # This helps users understand what Seeweb can and cannot do
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.MULTI_NODE: "Multi-node not supported.",
-        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: "Custom disk tiers not supported.",
-        clouds.CloudImplementationFeatures.STORAGE_MOUNTING: "Storage mounting not supported.",
-        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS: "High availability controllers not supported.",
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE: "Spot instances not supported.",
-        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: "Disk cloning not supported.",
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE: "Docker images not supported.",
-        clouds.CloudImplementationFeatures.IMAGE_ID: "Custom image IDs not supported.",
-        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER: "Custom network tiers not supported.",
-        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: "Host controllers not supported.",
-        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK: "Custom multi-network not supported.",
+        clouds.CloudImplementationFeatures.MULTI_NODE:
+            ("Multi-node not supported. "
+             "Seeweb does not support multi-node clusters."),
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            ("Custom disk tiers not supported. "
+             "Seeweb does not support custom disk tiers."),
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
+            ("Storage mounting not supported. "
+             "Seeweb does not support storage mounting."),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ("High availability controllers not supported. "
+             "Seeweb does not support high availability controllers."),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
+            ("Spot instances not supported. "
+             "Seeweb does not support spot instances."),
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            ("Disk cloning not supported. "
+             "Seeweb does not support disk cloning."),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            ("Docker images not supported. "
+             "Seeweb does not support Docker images."),
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            ("Custom image IDs not supported. "
+             "Seeweb does not support custom image IDs."),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ("Custom network tiers not supported. "
+             "Seeweb does not support custom network tiers."),
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
+            ("Host controllers not supported. "
+             "Seeweb does not support host controllers."),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ("Custom multi-network not supported. "
+             "Seeweb does not support custom multi-network."),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -94,7 +115,8 @@ class Seeweb(clouds.Cloud):
             return []
 
         # Get regions from catalog based on instance type
-        # This will read the CSV and return only regions where the instance type exists
+        # This will read the CSV and return only regions
+        # where the instance type exists
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, "seeweb")
 
@@ -207,8 +229,9 @@ class Seeweb(clouds.Cloud):
 
         # Handle custom image_id if specified (though not supported)
         if resources.image_id is not None:
-            # Even though custom images aren't supported, we should handle
-            # the case where someone tries to specify one and provide a clear error
+            # Even though custom images aren't supported, we
+            # should handle the case where someone tries to
+            # specify one and provide a clear error
             if None in resources.image_id:
                 image_id = resources.image_id[None]
             else:
@@ -270,9 +293,11 @@ class Seeweb(clouds.Cloud):
 
         # If no instance_type is specified, try to get a default one
         if not resources.instance_type:
-            # If accelerators are specified, try to find instance type for that accelerator
+            # If accelerators are specified, try to find instance
+            # type forthat accelerator
             if resources.accelerators:
-                # Get the first accelerator (we already checked there's only one)
+                # Get the first accelerator
+                # (we already checked there's only one)
                 acc_name, acc_count = list(resources.accelerators.items())[0]
 
                 # Use catalog to find instance type for this accelerator
@@ -300,7 +325,8 @@ class Seeweb(clouds.Cloud):
                     return resources_utils.FeasibleResources(
                         [],
                         fuzzy_candidates,
-                        f"No instance type found for accelerator {acc_name}:{acc_count} on Seeweb",
+                        f"No instance type found for accelerator"
+                        f"{acc_name}:{acc_count} on Seeweb",
                     )
             else:
                 # No accelerators specified, use default instance type
@@ -319,7 +345,8 @@ class Seeweb(clouds.Cloud):
                     return resources_utils.FeasibleResources(
                         [],
                         [],
-                        f"No suitable instance type found for cpus={resources.cpus}, memory={resources.memory}",
+                        f"No suitable instance type found for"
+                        f"cpus={resources.cpus}, memory={resources.memory}",
                     )
 
         # Check if instance type exists
@@ -330,7 +357,8 @@ class Seeweb(clouds.Cloud):
                 return resources_utils.FeasibleResources(
                     [],
                     [],
-                    f"Instance type {resources.instance_type} not available on Seeweb",
+                    f"Instance type {resources.instance_type}"
+                    f" not available on Seeweb",
                 )
 
         # Set the cloud if not already set
@@ -346,7 +374,7 @@ class Seeweb(clouds.Cloud):
         try:
             result = seeweb_adaptor.check_compute_credentials()
             return result, None
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             return False, str(e)
 
     @classmethod
@@ -355,7 +383,7 @@ class Seeweb(clouds.Cloud):
         try:
             result = seeweb_adaptor.check_storage_credentials()
             return result, None
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             return False, str(e)
 
     @classmethod
@@ -373,19 +401,17 @@ class Seeweb(clouds.Cloud):
         **kwargs,
     ) -> List["status_lib.ClusterStatus"]:
         """Query the status of Seeweb cluster instances."""
-        from sky.provision.seeweb import instance as seeweb_instance
-
         # For Seeweb, 'name' is already the cluster_name_on_cloud
         # (e.g., 'sky-bfbb-root-8f6f0399'), so we use it directly
         cluster_name_on_cloud = name
 
-        result = seeweb_instance.query_instances(
-            provider_name=repr(cls),
+        result = seeweb_provision.instance.query_instances(
             cluster_name=name,
             cluster_name_on_cloud=cluster_name_on_cloud,
             provider_config={},
             non_terminated_only=True)
-        # Convert Dict[str, Tuple[Optional[ClusterStatus], Optional[str]]] to List[ClusterStatus]
+        # Convert Dict[str, Tuple[Optional[ClusterStatus],
+        # Optional[str]]] to List[ClusterStatus]
         return [status for status, _ in result.values() if status is not None]
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -421,8 +447,9 @@ class Seeweb(clouds.Cloud):
         del cluster_name, region, zone  # unused
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                f"Creating images from clusters is not supported on {cls._REPR}. "
-                "Seeweb does not support custom image creation.")
+                f"Creating images from clusters is not supported on"
+                f" {cls._REPR}. Seeweb does not support custom"
+                f" image creation.")
 
     @classmethod
     def maybe_move_image(
@@ -436,7 +463,8 @@ class Seeweb(clouds.Cloud):
         del image_id, source_region, target_region, source_zone, target_zone
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                f"Moving images between regions is not supported on {cls._REPR}. "
+                f"Moving images between regions is not supported on"
+                f" {cls._REPR}. "
                 "Seeweb does not support custom images.")
 
     @classmethod

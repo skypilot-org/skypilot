@@ -1,5 +1,6 @@
 """Seeweb cloud adaptor - versione ultra-semplificata."""
-import os
+import configparser
+from pathlib import Path
 
 from sky.adaptors import common
 
@@ -21,9 +22,6 @@ _LAZY_MODULES = (ecsapi, boto3, botocore)
 def check_compute_credentials():
     """Checks if the user has access credentials to Seeweb's compute service."""
     try:
-        import configparser
-        from pathlib import Path
-
         # Read API key from standard Seeweb configuration file
         parser = configparser.ConfigParser()
         parser.read(Path('~/.seeweb_cloud/seeweb_keys').expanduser())
@@ -31,15 +29,15 @@ def check_compute_credentials():
 
         # Test connection by fetching servers list
         # This validates that the API key is working
-        client = ecsapi.Api(token=api_key)
-        client.fetch_servers()
+        seeweb_client = ecsapi.Api(token=api_key)
+        seeweb_client.fetch_servers()
         return True, None
 
     except FileNotFoundError:
         return False, 'Missing Seeweb API key file ~/.seeweb_cloud/seeweb_keys'
     except KeyError:
         return False, 'Missing api_key in ~/.seeweb_cloud/seeweb_keys'
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         return False, f'Unable to authenticate with Seeweb API: {e}'
 
 
@@ -52,9 +50,6 @@ def check_storage_credentials():
 @common.load_lazy_modules(_LAZY_MODULES)
 def client():
     """Returns an authenticated ecsapi.Api object."""
-    import configparser
-    from pathlib import Path
-
     # Create authenticated client using the same credential pattern
     parser = configparser.ConfigParser()
     parser.read(Path('~/.seeweb_cloud/seeweb_keys').expanduser())
