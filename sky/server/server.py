@@ -868,6 +868,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         chunk_index: The chunk index, starting from 0.
         total_chunks: The total number of chunks.
     """
+    logger.info(request.headers)
     # Add the upload id to the cleanup list.
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
