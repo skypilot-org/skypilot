@@ -30,9 +30,7 @@ def test_ssm_public():
     test = smoke_tests_utils.Test(
         'ssm_public',
         [
-            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml | tee /dev/stderr)',
-            f'aws ec2 describe-instances --debug --region us-west-1 --filters "Name=instance-state-name,Values=running,pending" --query "Reservations[].Instances[].InstanceId" --output text',
-            f'aws ssm start-session --debug --region us-west-1 --target "$(aws ec2 describe-instances --region us-west-1 --filters "Name=instance-state-name,Values=running,pending" --query "Reservations[].Instances[].InstanceId" --output text)" --document-name AWS-StartInteractiveCommand --parameters "command=[\"echo hi\"]"',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml | tee /dev/stderr) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
         ],
         teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('aws'),
