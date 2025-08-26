@@ -1307,7 +1307,7 @@ def get_cluster_from_name(
 
 @_init_db
 def get_clusters(
-    *, # keyword only separator
+    *,  # keyword only separator
     exclude_managed_clusters: bool = False,
     workspaces_filter: Optional[Set[str]] = None,
     user_hashes_filter: Optional[Set[str]] = None,
@@ -1329,8 +1329,7 @@ def get_clusters(
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(cluster_table)
         if exclude_managed_clusters:
-            query = query.filter(
-                cluster_table.c.is_managed == 0)
+            query = query.filter(cluster_table.c.is_managed == 0)
         if workspaces_filter is not None:
             query = query.filter(
                 cluster_table.c.workspace.in_(workspaces_filter))
