@@ -663,8 +663,8 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
 # it will be used to determine the priority of the label formats when
 # auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
-    SkyPilotLabelFormatter, GFDLabelFormatter, CoreWeaveLabelFormatter,
-    GKELabelFormatter, KarpenterLabelFormatter,
+    SkyPilotLabelFormatter, GKELabelFormatter, KarpenterLabelFormatter,
+    GFDLabelFormatter, CoreWeaveLabelFormatter
 ]
 
 
@@ -693,6 +693,9 @@ def detect_gpu_label_formatter(
         for _, label_list in node_labels.items():
             for label, value in label_list:
                 if lf.match_label_key(label):
+                    # Skip empty label values
+                    if not value or value.strip() == '':
+                        continue
                     valid, reason = lf.validate_label_value(value)
                     if valid:
                         return lf(), node_labels

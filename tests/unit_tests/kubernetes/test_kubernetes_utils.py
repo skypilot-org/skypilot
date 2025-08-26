@@ -313,6 +313,61 @@ def test_detect_gpu_label_formatter_invalid_label_skip():
         assert isinstance(lf, utils.CoreWeaveLabelFormatter)
 
 
+def test_detect_gpu_label_formatter_ignores_empty_labels():
+    """Tests that the detect_gpu_label_formatter method correctly ignores
+    empty labels from CPU nodes and selects the appropriate formatter
+    based on non-empty labels from GPU nodes."""
+
+    # Mock CPU node with empty labels (typical CPU node configuration)
+    mock_cpu_node = mock.MagicMock()
+    mock_cpu_node.metadata.name = 'cpu-node'
+    mock_cpu_node.metadata.labels = {
+        'beta.kubernetes.io/arch': 'amd64',
+        'beta.kubernetes.io/os': 'linux',
+        'cloud.google.com/gke-accelerator': '',  # Empty GKE label
+        'gpu.nvidia.com/class': '',              # Empty CoreWeave label
+        'gpu.nvidia.com/count': '',
+        'gpu.nvidia.com/model': '',
+        'gpu.nvidia.com/vram': ''
+    }
+
+    # Mock GPU node with mixed labels (invalid GKE, valid CoreWeave)
+    mock_gpu_node = mock.MagicMock()
+    mock_gpu_node.metadata.name = 'gpu-node'
+    mock_gpu_node.metadata.labels = {
+        'cloud.google.com/gke-accelerator': 'H200',  # Invalid for GKE formatter
+        'gpu.nvidia.com/class': 'H200',             # Valid for CoreWeave formatter
+        'gpu.nvidia.com/count': '8',
+        'gpu.nvidia.com/model': 'H200',
+        'gpu.nvidia.com/vram': '143'
+    }
+
+    # Test when CPU node is returned first (Kube API is non-deterministic)
+    nodes = [mock_cpu_node, mock_gpu_node]
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                    return_value=nodes):
+        lf, _ = utils.detect_gpu_label_formatter('test-context')
+        assert lf is not None
+        assert isinstance(lf, utils.CoreWeaveLabelFormatter)
+
+    # Test empty string variations
+    mock_cpu_node_whitespace = mock.MagicMock()
+    mock_cpu_node_whitespace.metadata.name = 'cpu-node-ws'
+    mock_cpu_node_whitespace.metadata.labels = {
+        'cloud.google.com/gke-accelerator': '   ',  # Whitespace only
+        'gpu.nvidia.com/class': '\t\n',             # Whitespace only
+    }
+
+    nodes_with_whitespace = [mock_cpu_node_whitespace, mock_gpu_node]
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                    return_value=nodes_with_whitespace):
+        lf, _ = utils.detect_gpu_label_formatter('test-context')
+        assert lf is not None
+        assert isinstance(lf, utils.CoreWeaveLabelFormatter)
+
+
 # pylint: disable=line-too-long
 def test_heterogenous_gpu_detection_key_counts():
     """Tests that a heterogenous gpu cluster with empty
