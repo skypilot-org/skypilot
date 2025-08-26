@@ -239,8 +239,8 @@ class Nebius(clouds.Cloud):
                 'filesystem_id': fs['filesystem_id'],
                 'filesystem_attach_mode': fs.get('attach_mode', 'READ_WRITE'),
                 'filesystem_mount_path': fs.get(
-                    'mount_path', f'/mnt/filesystem-skypilot-{i+1}'),
-                'filesystem_mount_tag': f'filesystem-skypilot-{i+1}'
+                    'mount_path', f'/mnt/filesystem-skypilot-{i + 1}'),
+                'filesystem_mount_tag': f'filesystem-skypilot-{i + 1}'
             })
 
         resources_vars: Dict[str, Any] = {
@@ -356,10 +356,11 @@ class Nebius(clouds.Cloud):
             f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.iam_token_path()} \n'  # pylint: disable=line-too-long
             f'{_INDENT_PREFIX} or generate  {nebius.credentials_path()} \n')
 
-        tenant_msg = (f'{_INDENT_PREFIX} Copy your tenant ID from the web console and save it to file \n'  # pylint: disable=line-too-long
-                      f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # pylint: disable=line-too-long
-                      f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
-                      f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long
+        tenant_msg = (
+            f'{_INDENT_PREFIX} Copy your tenant ID from the web console and save it to file \n'  # pylint: disable=line-too-long
+            f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # pylint: disable=line-too-long
+            f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
+            f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long
         if not nebius.is_token_or_cred_file_exist():
             return False, f'{token_cred_msg}'
         sdk = nebius.sdk()
