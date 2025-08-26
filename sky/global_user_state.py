@@ -437,11 +437,15 @@ def get_user(user_id: str) -> Optional[models.User]:
 def _get_users(user_ids: Set[str]) -> Dict[str, models.User]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(user_table).filter(user_table.c.id.in_(user_ids)).all()
-    return {row.id: models.User(id=row.id,
-                                name=row.name,
-                                password=row.password,
-                                created_at=row.created_at) for row in rows}
+        rows = session.query(user_table).filter(
+            user_table.c.id.in_(user_ids)).all()
+    return {
+        row.id: models.User(id=row.id,
+                            name=row.name,
+                            password=row.password,
+                            created_at=row.created_at) for row in rows
+    }
+
 
 @_init_db
 def get_user_by_name(username: str) -> List[models.User]:
@@ -775,6 +779,18 @@ def get_last_cluster_event(cluster_hash: str,
     if row is None:
         return None
     return row.reason
+
+
+def _get_last_cluster_event_multiple(
+        cluster_hashes: Set[str],
+        event_type: ClusterEventType) -> Dict[str, str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(cluster_event_table).filter(
+            cluster_event_table.c.cluster_hash.in_(cluster_hashes),
+            cluster_event_table.c.type == event_type.value).order_by(
+                cluster_event_table.c.transitioned_at.desc()).all()
+    return {row.cluster_hash: row.reason for row in rows}
 
 
 def cleanup_cluster_events_with_retention(retention_hours: float) -> None:
@@ -1287,20 +1303,25 @@ def get_clusters() -> List[Dict[str, Any]]:
     # get user hash for each row
     row_to_user_hash = {}
     for row in rows:
-        user_hash = (row.user_hash if row.user_hash is not None else current_user_hash)
-        row_to_user_hash[row.name] = user_hash
+        user_hash = (row.user_hash
+                     if row.user_hash is not None else current_user_hash)
+        row_to_user_hash[row.cluster_hash] = user_hash
 
     # get all users needed for the rows at once
     user_hashes = set(row_to_user_hash.values())
     user_hash_to_user = _get_users(user_hashes)
 
+    # get last cluster event for each row
+    cluster_hashes = set(row_to_user_hash.keys())
+    last_cluster_event_dict = _get_last_cluster_event_multiple(
+        cluster_hashes, ClusterEventType.STATUS_CHANGE)
+
     # get user for each row
     for row in rows:
-        user_hash = row_to_user_hash[row.name]
+        user_hash = row_to_user_hash[row.cluster_hash]
         user = user_hash_to_user[user_hash]
         user_name = user.name if user is not None else None
-        last_event = get_last_cluster_event(
-            row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
+        last_event = last_cluster_event_dict[row.cluster_hash]
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
