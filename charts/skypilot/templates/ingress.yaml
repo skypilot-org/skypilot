@@ -61,6 +61,12 @@ spec:
   ingressClassName: {{ .Values.ingress.ingressClassName }}
   {{- end }}
   rules:
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+  - hosts:
+    - {{ .Values.ingress.host }}
+    secretName: {{ .Release.Name }}-tls-secrets
+  {{- end }}
   - host: {{ .Values.ingress.host }}
     http:
       paths:
