@@ -1321,13 +1321,15 @@ def get_clusters(
         user_hashes_filter: If specified, only include clusters
             that has user_hash field set to one of the values.
     """
-    # is a cluster has a null user_hash, we treat it as belonging to the current user.
+    # is a cluster has a null user_hash,
+    # we treat it as belonging to the current user.
     current_user_hash = common_utils.get_user_hash()
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(cluster_table)
         if is_managed_filter is not None:
-            query = query.filter(cluster_table.c.is_managed == int(is_managed_filter))
+            query = query.filter(
+                cluster_table.c.is_managed == int(is_managed_filter))
         if workspaces_filter is not None:
             query = query.filter(
                 cluster_table.c.workspace.in_(workspaces_filter))
@@ -1338,7 +1340,7 @@ def get_clusters(
                 # clusters that have a null user_hash.
                 query = query.filter(
                     cluster_table.c.user_hash.in_(user_hashes_filter) |
-                    (cluster_table.c.user_hash == None))
+                    (cluster_table.c.user_hash is None))
             else:
                 query = query.filter(
                     cluster_table.c.user_hash.in_(user_hashes_filter))
