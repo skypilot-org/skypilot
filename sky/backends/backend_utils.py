@@ -2938,14 +2938,15 @@ def get_clusters(
 
         for record in filtered_records:
             handle = record['handle']
-            record['resources_str'] = resources_utils.get_readable_resources_repr(
-                handle, simplify=True)
+            record[
+                'resources_str'] = resources_utils.get_readable_resources_repr(
+                    handle, simplify=True)
             record[
                 'resources_str_full'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=False)
             credentials = ssh_credential_from_yaml(handle.cluster_yaml,
-                                                handle.docker_user,
-                                                handle.ssh_user)
+                                                   handle.docker_user,
+                                                   handle.ssh_user)
             if not credentials:
                 continue
             ssh_private_key_path = credentials.get('ssh_private_key', None)
@@ -2953,14 +2954,14 @@ def get_clusters(
                 if not os.path.exists(os.path.expanduser(ssh_private_key_path)):
                     auth.create_ssh_key_files_from_db(ssh_private_key_path)
                 with open(os.path.expanduser(ssh_private_key_path),
-                        'r',
-                        encoding='utf-8') as f:
+                          'r',
+                          encoding='utf-8') as f:
                     credentials['ssh_private_key_content'] = f.read()
             else:
                 private_key_path, _ = auth.get_or_generate_keys()
                 with open(os.path.expanduser(private_key_path),
-                        'r',
-                        encoding='utf-8') as f:
+                          'r',
+                          encoding='utf-8') as f:
                     credentials['ssh_private_key_content'] = f.read()
             record['credentials'] = credentials
 
