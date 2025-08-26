@@ -434,6 +434,16 @@ def get_user(user_id: str) -> Optional[models.User]:
 
 
 @_init_db
+def _get_users(user_ids: Set[str]) -> Dict[str, models.User]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(user_table).filter(user_table.c.id.in_(user_ids)).all()
+    return {row.id: models.User(id=row.id,
+                                name=row.name,
+                                password=row.password,
+                                created_at=row.created_at) for row in rows}
+
+@_init_db
 def get_user_by_name(username: str) -> List[models.User]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).filter_by(name=username).all()
@@ -1272,9 +1282,22 @@ def get_clusters() -> List[Dict[str, Any]]:
         rows = session.query(cluster_table).order_by(
             sqlalchemy.desc(cluster_table.c.launched_at)).all()
     records = []
+    current_user_hash = common_utils.get_user_hash()
+
+    # get user hash for each row
+    row_to_user_hash = {}
     for row in rows:
-        user_hash = _get_user_hash_or_current_user(row.user_hash)
-        user = get_user(user_hash)
+        user_hash = (row.user_hash if row.user_hash is not None else current_user_hash)
+        row_to_user_hash[row.name] = user_hash
+
+    # get all users needed for the rows at once
+    user_hashes = set(row_to_user_hash.values())
+    user_hash_to_user = _get_users(user_hashes)
+
+    # get user for each row
+    for row in rows:
+        user_hash = row_to_user_hash[row.name]
+        user = user_hash_to_user[user_hash]
         user_name = user.name if user is not None else None
         last_event = get_last_cluster_event(
             row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
