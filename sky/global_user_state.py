@@ -1319,9 +1319,9 @@ def get_clusters() -> List[Dict[str, Any]]:
     # get user for each row
     for row in rows:
         user_hash = row_to_user_hash[row.cluster_hash]
-        user = user_hash_to_user[user_hash]
+        user = user_hash_to_user.get(user_hash, None)
         user_name = user.name if user is not None else None
-        last_event = last_cluster_event_dict[row.cluster_hash]
+        last_event = last_cluster_event_dict.get(row.cluster_hash, None)
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
