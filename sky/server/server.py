@@ -928,8 +928,9 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         zip_file_path.rename(zip_file_path.with_suffix(''))
         missing_chunks = get_missing_chunks(total_chunks)
         if missing_chunks:
-            return payloads.UploadZipFileResponse(status='uploading',
-                                                  missing_chunks=missing_chunks)
+            return payloads.UploadZipFileResponse(
+                status=responses.UploadStatus.UPLOADING.value,
+                missing_chunks=missing_chunks)
         zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
         async with aiofiles.open(zip_file_path, 'wb') as zip_file:
             for chunk in range(total_chunks):
@@ -946,7 +947,8 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     unzip_file(zip_file_path, client_file_mounts_dir)
     if total_chunks > 1:
         shutil.rmtree(chunk_dir)
-    return payloads.UploadZipFileResponse(status='completed')
+    return payloads.UploadZipFileResponse(
+        status=responses.UploadStatus.COMPLETED.value)
 
 
 def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
