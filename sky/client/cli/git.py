@@ -29,7 +29,8 @@ class GitUrlInfo:
                  path: str,
                  protocol: str,
                  user: Optional[str] = None,
-                 port: Optional[int] = None):
+                 port: Optional[int] = None,
+                 add_suffix: bool = False):
         self.host = host
         # Repository path (e.g., 'user/repo' or 'org/subgroup/repo').
         # The path is the part after the host.
@@ -39,6 +40,7 @@ class GitUrlInfo:
         # SSH username
         self.user = user
         self.port = port
+        self.add_suffix = add_suffix
 
 
 class GitCloneInfo:
@@ -99,8 +101,10 @@ class GitRepo:
         """
         # Remove trailing .git if present
         clean_url = url.rstrip('/')
+        suffix_removed = False
         if clean_url.endswith('.git'):
             clean_url = clean_url[:-4]
+            suffix_removed = True
 
         # Pattern for HTTPS/HTTP URLs
         https_pattern = r'^(https?)://(?:([^@]+)@)?([^:/]+)(?::(\d+))?/(.+)$'
@@ -119,7 +123,8 @@ class GitRepo:
                               path=path,
                               protocol=protocol,
                               user=user,
-                              port=port)
+                              port=port,
+                              add_suffix=suffix_removed)
 
         # Pattern for SSH URLs (full format)
         ssh_full_pattern = r'^ssh://(?:([^@]+)@)?([^:/]+)(?::(\d+))?/(.+)$'
@@ -138,7 +143,8 @@ class GitRepo:
                               path=path,
                               protocol='ssh',
                               user=user,
-                              port=port)
+                              port=port,
+                              add_suffix=suffix_removed)
 
         # Pattern for SSH SCP-like format (exclude URLs with ://)
         scp_pattern = r'^(?:([^@]+)@)?([^:/]+):(.+)$'
@@ -157,7 +163,8 @@ class GitRepo:
                               path=path,
                               protocol='ssh',
                               user=user,
-                              port=None)
+                              port=None,
+                              add_suffix=suffix_removed)
 
         raise exceptions.GitError(
             f'Unsupported git URL format: {url}. '
@@ -176,13 +183,15 @@ class GitRepo:
         port_str = f':{self._parsed_url.port}' if self._parsed_url.port else ''
         path = self._parsed_url.path
         # # Remove .git suffix if present (but not individual characters)
-        # if path.endswith('.git'):
-        #     path = path[:-4]
+        if path.endswith('.git'):
+            path = path[:-4]
 
         if with_token and self.git_token:
             return f'https://{self.git_token}@{self._parsed_url.host}' \
-                f'{port_str}/{path}'
-        return f'https://{self._parsed_url.host}{port_str}/{path}'
+                f'{port_str}/{path}' \
+                f'{".git" if self._parsed_url.add_suffix else ""}'
+        return f'https://{self._parsed_url.host}{port_str}/{path}' \
+                f'{".git" if self._parsed_url.add_suffix else ""}'
 
     def get_ssh_url(self) -> str:
         """Get SSH URL for the repository in full format.
@@ -195,9 +204,10 @@ class GitRepo:
         port_str = f':{self._parsed_url.port}' if self._parsed_url.port else ''
         path = self._parsed_url.path
         # Remove .git suffix if present (but not individual characters)
-        # if path.endswith('.git'):
-        #     path = path[:-4]
-        return f'ssh://{ssh_user}@{self._parsed_url.host}{port_str}/{path}'
+        if path.endswith('.git'):
+            path = path[:-4]
+        return f'ssh://{ssh_user}@{self._parsed_url.host}{port_str}/{path}' \
+                f'{".git" if self._parsed_url.add_suffix else ""}'
 
     def get_repo_clone_info(self) -> GitCloneInfo:
         """Validate the repository access with comprehensive authentication
