@@ -911,6 +911,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     try:
         async with aiofiles.open(zip_file_path, 'wb') as f:
             async for chunk in request.stream():
+                logger.info(f'Writing chunk, size: {len(chunk)}')
                 await f.write(chunk)
     except starlette.requests.ClientDisconnect as e:
         # Client disconnected, remove the zip file.
