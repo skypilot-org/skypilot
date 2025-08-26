@@ -125,14 +125,19 @@ class Volume:
 
     def _validate_config(self) -> None:
         """Validate the volume config."""
+        assert self.cloud is not None, 'Cloud must be specified'
+        cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
+        assert cloud_obj is not None
+
+        valid, err_msg = cloud_obj.is_volume_name_valid(self.name)
+        if not valid:
+            raise ValueError(f'{err_msg}')
+
         if not self.resource_name and not self.size:
             raise ValueError('Size is required for new volumes. '
                              'Please specify the size in the YAML file or '
                              'use the --size flag.')
         if self.labels:
-            assert self.cloud is not None, 'Cloud must be specified'
-            cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
-            assert cloud_obj is not None
             for key, value in self.labels.items():
                 valid, err_msg = cloud_obj.is_label_valid(key, value)
                 if not valid:
