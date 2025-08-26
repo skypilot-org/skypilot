@@ -2346,9 +2346,12 @@ def _clear_api_server_config() -> None:
 
         config = skypilot_config.get_user_config()
         config = dict(config)
-        del config['api_server']
+        if 'api_server' in config:
+            # We might not have set the endpoint in the config file, so we
+            # need to check before deleting.
+            del config['api_server']
 
-        common_utils.dump_yaml(str(config_path), config, blank=True)
+            common_utils.dump_yaml(str(config_path), config, blank=True)
         skypilot_config.reload_config()
 
 

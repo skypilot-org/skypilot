@@ -6203,12 +6203,25 @@ def api_info():
     # Print client version and commit.
     click.echo(f'SkyPilot client version: {sky.__version__}, '
                f'commit: {sky.__commit__}')
+    
+    config = skypilot_config.get_user_config()
+    config = dict(config)
+
+    # Determine where the endpoint is set.
+    if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
+        location = 'Endpoint set via the environment variable ' + \
+                    constants.SKY_API_SERVER_URL_ENV_VAR
+    elif "api_server" in config and "endpoint" in config["api_server"]:
+        config_path = skypilot_config._resolve_user_config_path()
+        location = f'Endpoint set via {config_path}'
+    else:
+        location = 'Endpoint set via the command line.'
     click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '
                f'version: {api_server_info.version}\n'
-               f'{ux_utils.INDENT_LAST_SYMBOL}User: {user.name} ({user.id})')
-
+               f'{ux_utils.INDENT_SYMBOL}User: {user.name} ({user.id})\n'
+               f'{ux_utils.INDENT_LAST_SYMBOL}{location}')
 
 @cli.group(cls=_NaturalOrderGroup)
 def ssh():
