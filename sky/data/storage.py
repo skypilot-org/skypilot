@@ -605,14 +605,14 @@ class Storage(object):
         """
 
         def __init__(
-            self,
-            *,
-            storage_name: Optional[str],
-            source: Optional[SourceType],
-            mode: Optional[StorageMode] = None,
-            sky_stores: Optional[Dict[StoreType,
-                                      AbstractStore.StoreMetadata]] = None,
-            mount_options: Optional[str] = None):
+                self,
+                *,
+                storage_name: Optional[str],
+                source: Optional[SourceType],
+                mode: Optional[StorageMode] = None,
+                sky_stores: Optional[Dict[StoreType,
+                                          AbstractStore.StoreMetadata]] = None,
+                mount_options: Optional[str] = None):
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
@@ -797,7 +797,6 @@ class Storage(object):
             self.handle = self.StorageMetadata(storage_name=self.name,
                                                source=self.source,
                                                mode=self.mode)
-            
 
             for store in input_stores:
                 self.add_store(store)
@@ -1129,12 +1128,13 @@ class Storage(object):
                           list) and data_utils.is_cloud_store_url(source):
             name = None
 
-        storage_obj = cls(name=name,
-                          source=source,
-                          sync_on_reconstruction=override_args.get(
-                              'sync_on_reconstruction', True),
-                          mount_options=override_args.get(
-                              'mount_options', metadata.mount_options))
+        storage_obj = cls(
+            name=name,
+            source=source,
+            sync_on_reconstruction=override_args.get('sync_on_reconstruction',
+                                                     True),
+            mount_options=override_args.get('mount_options',
+                                            metadata.mount_options))
 
         # For backward compatibility
         if hasattr(metadata, 'mode'):
@@ -1375,8 +1375,7 @@ class Storage(object):
                           stores=stores,
                           _is_sky_managed=_is_sky_managed,
                           _bucket_sub_path=_bucket_sub_path,
-                          mount_options=mount_options
-                          )
+                          mount_options=mount_options)
 
         # Add force deletion flag
         storage_obj.force_delete = force_delete
@@ -1410,7 +1409,7 @@ class Storage(object):
         add_if_not_none('mode', self.mode.value)
 
         add_if_not_none('mount_options', self.mount_options)
-        
+
         if self.force_delete:
             config['_force_delete'] = True
         if self._bucket_sub_path is not None:
@@ -1838,7 +1837,7 @@ class S3CompatibleStore(AbstractStore):
         """Download file using S3 API."""
         self.bucket.download_file(remote_path, local_path)
 
-    def mount_command(self, mount_path: str) -> str:
+    def mount_command(self, mount_path: str, **kwargs: Any) -> str:
         """Get mount command using provider's mount factory."""
         if self.config.mount_cmd_factory is None:
             raise exceptions.NotSupportedError(
@@ -3438,14 +3437,13 @@ class AzureBlobStore(AbstractStore):
             str: a heredoc used to setup the AZ Container mount
         """
         install_cmd = mounting_utils.get_az_mount_install_cmd()
-        mount_cmd = mounting_utils.get_az_mount_cmd(self.container_name,
-                                                    self.storage_account_name,
-                                                    mount_path,
-                                                    self.storage_account_key,
-                                                    self._bucket_sub_path,
-                                                    custom_mount_options=kwargs.get(
-                                                        'mount_options', ''
-                                                    ))
+        mount_cmd = mounting_utils.get_az_mount_cmd(
+            self.container_name,
+            self.storage_account_name,
+            mount_path,
+            self.storage_account_key,
+            self._bucket_sub_path,
+            custom_mount_options=kwargs.get('mount_options', ''))
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
