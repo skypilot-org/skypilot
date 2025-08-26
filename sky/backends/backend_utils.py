@@ -2881,33 +2881,19 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    records = global_user_state.get_clusters()
 
-    # Filter out clusters created by the controller.
-    if (not env_options.Options.SHOW_DEBUG_INFO.get() and
-            not _include_is_managed):
-        records = [
-            record for record in records if not record.get('is_managed', False)
-        ]
-
-    # Filter by user if requested
+    exclude_managed_clusters = False
+    if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
+        exclude_managed_clusters = True
+    user_hashes_filter = None
     if not all_users:
-        current_user = common_utils.get_current_user()
-        records = [
-            record for record in records
-            if record['user_hash'] == current_user.id
-        ]
-
+        user_hashes_filter = {common_utils.get_current_user().id}
     accessible_workspaces = workspaces_core.get_workspaces()
 
-    workspace_filtered_records = []
-    for record in records:
-        cluster_workspace = record.get('workspace',
-                                       constants.SKYPILOT_DEFAULT_WORKSPACE)
-        if cluster_workspace in accessible_workspaces:
-            workspace_filtered_records.append(record)
-
-    records = workspace_filtered_records
+    records = global_user_state.get_clusters(
+        exclude_managed_clusters=exclude_managed_clusters,
+        user_hashes_filter=user_hashes_filter,
+        workspaces_filter=accessible_workspaces)
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
