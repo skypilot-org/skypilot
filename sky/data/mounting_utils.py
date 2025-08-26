@@ -23,7 +23,7 @@ FUSERMOUNT3_SOFT_LINK_CMD = ('[ ! -f /bin/fusermount3 ] && '
                              'sudo ln -s /bin/fusermount /bin/fusermount3 || '
                              'true')
 # https://github.com/Azure/azure-storage-fuse/releases
-BLOBFUSE2_VERSION = '2.2.0'
+BLOBFUSE2_VERSION = '2.5.0'
 _BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
 _BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
                        '{storage_account_name}_{container_name}')
