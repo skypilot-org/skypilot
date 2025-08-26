@@ -19,6 +19,16 @@ _PULL_FREQUENCY_HOURS = 7
 
 _df = common.read_catalog('nebius/vms.csv')
 
+# https://docs.nebius.com/compute/virtual-machines/types#cpu-configurations
+_DEFAULT_INSTANCE_FAMILY = [
+    # CPU: AMD EPYC Genoa
+    'cpu-d3',
+    # TODO(kevin): Enable if/when it's available in all regions.
+    # Today, it's only available in eu-north1.
+    # CPU: Intel Ice Lake
+    # 'cpu-e2'
+]
+
 
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
@@ -57,7 +67,11 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None) -> Optional[str]:
     del disk_tier  # unused
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
+    df = _df
+    instance_type_prefix = tuple(
+        f'{family}_' for family in _DEFAULT_INSTANCE_FAMILY)
+    df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus, memory, region,
                                                       zone)
 
 
