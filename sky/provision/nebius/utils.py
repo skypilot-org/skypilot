@@ -102,7 +102,9 @@ def list_instances(project_id: str) -> Dict[str, Dict[str, Any]]:
     service = nebius.compute().InstanceServiceClient(nebius.sdk())
     result = nebius.sync_call(
         service.list(
-            nebius.compute().ListInstancesRequest(parent_id=project_id),
+            # Temporary fix (DO NOT MERGE)
+            nebius.compute().ListInstancesRequest(parent_id=project_id,
+                                                  page_size=999),
             timeout=nebius.READ_TIMEOUT))
 
     instances = result
