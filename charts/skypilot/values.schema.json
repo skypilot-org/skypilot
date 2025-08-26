@@ -403,6 +403,17 @@
                 },
                 "path": {
                     "type": "string"
+                },
+                "tls": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": [
+                                "boolean",
+                                "null"
+                            ]
+                        }
+                    }
                 }
             }
         },
