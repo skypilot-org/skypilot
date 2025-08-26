@@ -19,6 +19,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import service_account_auth
 from sky.data import data_utils
 from sky.data import storage_utils
+from sky.schemas.api import responses as api_responses
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
@@ -201,7 +202,7 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
                 msg = ('Uploaded chunk: '
                        f'{params.chunk_index + 1} / {params.total_chunks} '
                        f'(Status: {status})')
-                if status == 'uploading':
+                if status == api_responses.UploadStatus.UPLOADING.value:
                     missing_chunks = data.get('missing_chunks')
                     if missing_chunks:
                         msg += f' - Waiting for chunks: {missing_chunks}'
@@ -371,7 +372,8 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                     ]
                     statuses = subprocess_utils.run_in_parallel(
                         _upload_chunk_with_retry, chunk_params)
-                    if any(status == 'completed' for status in statuses):
+                    if any(status == api_responses.UploadStatus.COMPLETED.value
+                           for status in statuses):
                         upload_completed = True
                         break
                     else:
