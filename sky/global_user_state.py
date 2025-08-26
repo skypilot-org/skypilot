@@ -1307,15 +1307,14 @@ def get_cluster_from_name(
 
 @_init_db
 def get_clusters(
-    is_managed_filter: Optional[bool] = None,
-) -> List[Dict[str, Any]]:
+    is_managed_filter: Optional[bool] = None,) -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(cluster_table)
         if is_managed_filter is not None:
-            query = query.filter(cluster_table.c.is_managed == is_managed_filter)
-        query = query.order_by(
-            sqlalchemy.desc(cluster_table.c.launched_at))
+            query = query.filter(
+                cluster_table.c.is_managed == int(is_managed_filter))
+        query = query.order_by(sqlalchemy.desc(cluster_table.c.launched_at))
         rows = query.all()
     records = []
     current_user_hash = common_utils.get_user_hash()

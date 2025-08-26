@@ -2885,7 +2885,8 @@ def get_clusters(
     if (not env_options.Options.SHOW_DEBUG_INFO.get() and
             not _include_is_managed):
         is_managed_filter = False
-    records = global_user_state.get_clusters(is_managed_filter=is_managed_filter)
+    records = global_user_state.get_clusters(
+        is_managed_filter=is_managed_filter)
 
     # Filter by user if requested
     if not all_users:
