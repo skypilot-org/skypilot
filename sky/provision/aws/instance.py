@@ -724,6 +724,7 @@ def terminate_instances(
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
+    instance_list = list(instances)
     default_sg = aws_config.get_security_group_from_vpc_id(
         ec2, _get_vpc_id(provider_config),
         aws_cloud.DEFAULT_SECURITY_GROUP_NAME)
@@ -757,7 +758,7 @@ def terminate_instances(
         # exist. We must block on instance termination so that we can
         # delete the security group.
         instances.terminate()
-        for instance in instances:
+        for instance in instance_list:
             instance.wait_until_terminated()
 
     # TODO(suquark): Currently, the implementation of GCP and Azure will
@@ -766,6 +767,13 @@ def terminate_instances(
     #  It's not clear that which behavior should be expected. We will not
     #  wait for the termination for now, since this is the default behavior
     #  of most cloud implementations (including AWS).
+
+    # TODO(hailong): Delete the placement group if EFA is enabled.
+    # We do not delete the placement group here because it requires to wait
+    # for all the instances to be terminated before deleting the placement
+    # group. This is time consuming, which will make failover or `sky down`
+    # take long time. For example, sky down a cluster with 1 x g6.8xlarge
+    # instance takes about 7-8 minutes.
 
 
 def _maybe_move_to_new_sg(

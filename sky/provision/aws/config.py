@@ -87,6 +87,12 @@ def bootstrap_instances(
         use_internal_ips=config.provider_config.get('use_internal_ips', False),
         vpc_name=config.provider_config.get('vpc_name'))
 
+    max_efa_interfaces = config.provider_config.get('max_efa_interfaces', 0)
+    enable_efa = max_efa_interfaces > 0
+    if enable_efa:
+        _configure_placement_group(ec2, cluster_name)
+        node_cfg['Placement'] = {'GroupName': cluster_name}
+
     # Cluster workers should be in a security group that permits traffic within
     # the group, and also SSH access from outside.
     if security_group_ids is None:
@@ -101,8 +107,6 @@ def bootstrap_instances(
         extended_ip_rules = security_group_config.get('IpPermissions', [])
         if extended_ip_rules is None:
             extended_ip_rules = []
-        max_efa_interfaces = config.provider_config.get('max_efa_interfaces', 0)
-        enable_efa = max_efa_interfaces > 0
         security_group_ids = _configure_security_group(ec2, vpc_id,
                                                        expected_sg_name,
                                                        extended_ip_rules,
@@ -149,6 +153,37 @@ def bootstrap_instances(
             'No ImageId found in the node_config. '
             'ImageId will need to be set manually in your cluster config.')
     return config
+
+
+def _configure_placement_group(ec2: 'mypy_boto3_ec2.ServiceResource',
+                               placement_group_name: str):
+    """Configure placement group for the cluster."""
+    # Create the placement group
+    logger.info(f'Creating placement group {placement_group_name}.')
+    try:
+        ec2.meta.client.create_placement_group(GroupName=placement_group_name,
+                                               Strategy='cluster')
+    except aws.botocore_exceptions().ClientError as exc:
+        if exc.response.get(
+                'Error', {}).get('Code') == 'InvalidPlacementGroup.Duplicate':
+            logger.debug(
+                f'Placement group {placement_group_name} already exists.')
+        else:
+            raise exc
+
+
+def delete_placement_group(ec2: 'mypy_boto3_ec2.ServiceResource',
+                           placement_group_name: str):
+    """Delete the placement group."""
+    try:
+        ec2.meta.client.delete_placement_group(GroupName=placement_group_name)
+    except aws.botocore_exceptions().ClientError as exc:
+        if exc.response.get('Error',
+                            {}).get('Code') == 'InvalidPlacementGroup.Unknown':
+            logger.debug(
+                f'Placement group {placement_group_name} does not exist.')
+        else:
+            raise exc
 
 
 def _configure_iam_role(iam) -> Dict[str, Any]:

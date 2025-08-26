@@ -94,6 +94,7 @@ _EFA_INSTANCE_TYPE_PREFIXES = [
     'p6-b200.',
     'c6in.',
 ]
+
 # Docker run options for EFA.
 # Refer to https://github.com/ofiwg/libfabric/issues/6437 for updating
 # memlock ulimit
@@ -102,6 +103,7 @@ _EFA_DOCKER_RUN_OPTIONS = [
     '--device=/dev/infiniband',
     '--ulimit memlock=-1:-1',
 ]
+
 # AWS EFA image name.
 # Refer to https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-base-gpu-ami-ubuntu-22-04.html for latest version. # pylint: disable=line-too-long
 # TODO(hailong):
@@ -603,9 +605,15 @@ class AWS(clouds.Cloud):
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        max_efa_interfaces = _get_max_efa_interfaces(resources.instance_type,
-                                                     region_name)
-        enable_efa = max_efa_interfaces > 0
+        network_tier = (resources.network_tier if resources.network_tier
+                        is not None else resources_utils.NetworkTier.BEST)
+        if network_tier == resources_utils.NetworkTier.BEST:
+            max_efa_interfaces = _get_max_efa_interfaces(
+                resources.instance_type, region_name)
+            enable_efa = max_efa_interfaces > 0
+        else:
+            max_efa_interfaces = 0
+            enable_efa = False
 
         docker_run_options = []
         if resources.extract_docker_image() is not None:
