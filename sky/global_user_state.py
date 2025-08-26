@@ -1307,15 +1307,16 @@ def get_cluster_from_name(
 
 @_init_db
 def get_clusters(
-    is_managed_filter: Optional[bool] = None,
+    *, # keyword only separator
+    exclude_managed_clusters: bool = False,
     workspaces_filter: Optional[Set[str]] = None,
     user_hashes_filter: Optional[Set[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Get clusters from the database.
 
     Args:
-        is_managed_filter: If specified, only include clusters
-            that has is_managed field set to the value.
+        exclude_managed_clusters: If True, exclude clusters that have
+            is_managed field set to True.
         workspaces_filter: If specified, only include clusters
             that has workspace field set to one of the values.
         user_hashes_filter: If specified, only include clusters
@@ -1327,9 +1328,9 @@ def get_clusters(
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(cluster_table)
-        if is_managed_filter is not None:
+        if exclude_managed_clusters:
             query = query.filter(
-                cluster_table.c.is_managed == int(is_managed_filter))
+                cluster_table.c.is_managed == 0)
         if workspaces_filter is not None:
             query = query.filter(
                 cluster_table.c.workspace.in_(workspaces_filter))

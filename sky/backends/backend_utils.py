@@ -2882,16 +2882,16 @@ def get_clusters(
         terminated, the record will be omitted from the returned list.
     """
 
-    is_managed_filter = None
+    exclude_managed_clusters = False
     if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
-        is_managed_filter = False
+        exclude_managed_clusters = True
     user_hashes_filter = None
     if not all_users:
         user_hashes_filter = {common_utils.get_current_user().id}
     accessible_workspaces = workspaces_core.get_workspaces()
 
     records = global_user_state.get_clusters(
-        is_managed_filter=is_managed_filter,
+        exclude_managed_clusters=exclude_managed_clusters,
         user_hashes_filter=user_hashes_filter,
         workspaces_filter=accessible_workspaces)
 
