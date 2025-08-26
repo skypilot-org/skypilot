@@ -92,7 +92,6 @@ _EFA_INSTANCE_TYPE_PREFIXES = [
     'p5e.',
     'p5en.',
     'p6-b200.',
-    'c6in.',
 ]
 
 # Docker run options for EFA.
@@ -106,9 +105,7 @@ _EFA_DOCKER_RUN_OPTIONS = [
 
 # AWS EFA image name.
 # Refer to https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-base-gpu-ami-ubuntu-22-04.html for latest version. # pylint: disable=line-too-long
-# TODO(hailong):
-#  - may need to update the version later.
-#  - may need to build our own EFA image.
+# TODO(hailong): may need to update the version later.
 _EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
 ' (Ubuntu 22.04) 20250808'
 
@@ -120,7 +117,6 @@ def _is_efa_instance_type(instance_type: str) -> bool:
         for prefix in _EFA_INSTANCE_TYPE_PREFIXES)
 
 
-# TODO(hailong): may need to build our own EFA image.
 def _get_efa_image_id(region_name: str) -> Optional[str]:
     """Get the EFA image id for the given region."""
     try:
