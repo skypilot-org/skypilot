@@ -175,14 +175,14 @@ class GitRepo:
         """
         port_str = f':{self._parsed_url.port}' if self._parsed_url.port else ''
         path = self._parsed_url.path
-        # Remove .git suffix if present (but not individual characters)
-        if path.endswith('.git'):
-            path = path[:-4]
+        # # Remove .git suffix if present (but not individual characters)
+        # if path.endswith('.git'):
+        #     path = path[:-4]
 
         if with_token and self.git_token:
             return f'https://{self.git_token}@{self._parsed_url.host}' \
-                f'{port_str}/{path}.git'
-        return f'https://{self._parsed_url.host}{port_str}/{path}.git'
+                f'{port_str}/{path}'
+        return f'https://{self._parsed_url.host}{port_str}/{path}'
 
     def get_ssh_url(self) -> str:
         """Get SSH URL for the repository in full format.
@@ -195,9 +195,9 @@ class GitRepo:
         port_str = f':{self._parsed_url.port}' if self._parsed_url.port else ''
         path = self._parsed_url.path
         # Remove .git suffix if present (but not individual characters)
-        if path.endswith('.git'):
-            path = path[:-4]
-        return f'ssh://{ssh_user}@{self._parsed_url.host}{port_str}/{path}.git'
+        # if path.endswith('.git'):
+        #     path = path[:-4]
+        return f'ssh://{ssh_user}@{self._parsed_url.host}{port_str}/{path}'
 
     def get_repo_clone_info(self) -> GitCloneInfo:
         """Validate the repository access with comprehensive authentication
