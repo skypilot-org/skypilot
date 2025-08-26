@@ -1,5 +1,6 @@
 """Responses for the API server."""
 
+import enum
 from typing import Any, Dict, List, Optional
 
 import pydantic
@@ -117,3 +118,9 @@ class StatusResponse(ResponseBaseModel):
     cpus: Optional[str] = None
     memory: Optional[str] = None
     accelerators: Optional[str] = None
+
+
+class UploadStatus(enum.Enum):
+    """Status of the upload."""
+    UPLOADING = 'uploading'
+    COMPLETED = 'completed'

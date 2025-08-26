@@ -434,6 +434,20 @@ def get_user(user_id: str) -> Optional[models.User]:
 
 
 @_init_db
+def _get_users(user_ids: Set[str]) -> Dict[str, models.User]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(user_table).filter(
+            user_table.c.id.in_(user_ids)).all()
+    return {
+        row.id: models.User(id=row.id,
+                            name=row.name,
+                            password=row.password,
+                            created_at=row.created_at) for row in rows
+    }
+
+
+@_init_db
 def get_user_by_name(username: str) -> List[models.User]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).filter_by(name=username).all()
@@ -765,6 +779,32 @@ def get_last_cluster_event(cluster_hash: str,
     if row is None:
         return None
     return row.reason
+
+
+def _get_last_cluster_event_multiple(
+        cluster_hashes: Set[str],
+        event_type: ClusterEventType) -> Dict[str, str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Use a subquery to get the latest event for each cluster_hash
+        latest_events = session.query(
+            cluster_event_table.c.cluster_hash,
+            sqlalchemy.func.max(cluster_event_table.c.transitioned_at).label(
+                'max_time')).filter(
+                    cluster_event_table.c.cluster_hash.in_(cluster_hashes),
+                    cluster_event_table.c.type == event_type.value).group_by(
+                        cluster_event_table.c.cluster_hash).subquery()
+
+        # Join with original table to get the full event details
+        rows = session.query(cluster_event_table).join(
+            latest_events,
+            sqlalchemy.and_(
+                cluster_event_table.c.cluster_hash ==
+                latest_events.c.cluster_hash,
+                cluster_event_table.c.transitioned_at ==
+                latest_events.c.max_time)).all()
+
+    return {row.cluster_hash: row.reason for row in rows}
 
 
 def cleanup_cluster_events_with_retention(retention_hours: float) -> None:
@@ -1272,12 +1312,30 @@ def get_clusters() -> List[Dict[str, Any]]:
         rows = session.query(cluster_table).order_by(
             sqlalchemy.desc(cluster_table.c.launched_at)).all()
     records = []
+    current_user_hash = common_utils.get_user_hash()
+
+    # get user hash for each row
+    row_to_user_hash = {}
     for row in rows:
-        user_hash = _get_user_hash_or_current_user(row.user_hash)
-        user = get_user(user_hash)
+        user_hash = (row.user_hash
+                     if row.user_hash is not None else current_user_hash)
+        row_to_user_hash[row.cluster_hash] = user_hash
+
+    # get all users needed for the rows at once
+    user_hashes = set(row_to_user_hash.values())
+    user_hash_to_user = _get_users(user_hashes)
+
+    # get last cluster event for each row
+    cluster_hashes = set(row_to_user_hash.keys())
+    last_cluster_event_dict = _get_last_cluster_event_multiple(
+        cluster_hashes, ClusterEventType.STATUS_CHANGE)
+
+    # get user for each row
+    for row in rows:
+        user_hash = row_to_user_hash[row.cluster_hash]
+        user = user_hash_to_user.get(user_hash, None)
         user_name = user.name if user is not None else None
-        last_event = get_last_cluster_event(
-            row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
+        last_event = last_cluster_event_dict.get(row.cluster_hash, None)
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
