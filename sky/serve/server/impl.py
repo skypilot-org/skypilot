@@ -79,7 +79,7 @@ def _get_service_record(
     """Get the service record."""
     noun = 'pool' if pool else 'service'
 
-    if handle.is_grpc_enabled:
+    if handle.is_grpc_enabled_with_flag:
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         try:
             service_statuses = serve_rpc_utils.RpcRunner.get_service_status(
@@ -311,7 +311,7 @@ def up(
                 # This function will check the controller job id in the database
                 # and return the endpoint if the job id matches. Otherwise it
                 # will return None.
-                if controller_handle.is_grpc_enabled:
+                if controller_handle.is_grpc_enabled_with_flag:
                     lb_port = serve_rpc_utils.RpcRunner.wait_service_registration(  # pylint: disable=line-too-long
                         controller_handle, service_name, controller_job_id,
                         pool)
@@ -522,7 +522,7 @@ def update(
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
             task, task_type='serve')
 
-    if handle.is_grpc_enabled:
+    if handle.is_grpc_enabled_with_flag:
         try:
             current_version = serve_rpc_utils.RpcRunner.add_version(
                 handle, service_name)
@@ -568,7 +568,7 @@ def update(
                                      {remote_task_yaml_path: service_file.name},
                                      storage_mounts=None)
 
-        if handle.is_grpc_enabled:
+        if handle.is_grpc_enabled_with_flag:
             try:
                 _ = serve_rpc_utils.RpcRunner.update_service(
                     handle, service_name, current_version, mode, pool)
@@ -659,7 +659,7 @@ def down(
     service_names = None if all else service_names
 
     try:
-        if handle.is_grpc_enabled:
+        if handle.is_grpc_enabled_with_flag:
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             stdout = serve_rpc_utils.RpcRunner.terminate_services(
                 handle, service_names, purge, pool)
@@ -715,7 +715,7 @@ def status(
         stopped_message=controller_type.value.default_hint_if_non_existent.
         replace('service', noun))
 
-    if handle.is_grpc_enabled:
+    if handle.is_grpc_enabled_with_flag:
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         try:
             service_records = serve_rpc_utils.RpcRunner.get_service_status(
@@ -850,7 +850,7 @@ def _get_all_replica_targets(
         handle: backends.CloudVmRayResourceHandle,
         pool: bool) -> Set[serve_utils.ServiceComponentTarget]:
     """Helper function to get targets for all live replicas."""
-    if handle.is_grpc_enabled:
+    if handle.is_grpc_enabled_with_flag:
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         try:
             service_records = serve_rpc_utils.RpcRunner.get_service_status(

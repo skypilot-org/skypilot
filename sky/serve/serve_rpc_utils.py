@@ -103,7 +103,7 @@ class RpcRunner:
     def get_service_status(cls, handle: backends.CloudVmRayResourceHandle,
                            service_names: Optional[List[str]],
                            pool: bool) -> List[Dict[str, Any]]:
-        assert handle.is_grpc_enabled
+        assert handle.is_grpc_enabled_with_flag
         request = GetServiceStatusRequestConverter.to_proto(service_names, pool)
         response = backend_utils.invoke_skylet_with_retries(
             handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
@@ -114,7 +114,7 @@ class RpcRunner:
     @classmethod
     def add_version(cls, handle: backends.CloudVmRayResourceHandle,
                     service_name: str) -> int:
-        assert handle.is_grpc_enabled
+        assert handle.is_grpc_enabled_with_flag
         request = servev1_pb2.AddVersionRequest(service_name=service_name)
         response = backend_utils.invoke_skylet_with_retries(
             handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
@@ -125,7 +125,7 @@ class RpcRunner:
     def terminate_services(cls, handle: backends.CloudVmRayResourceHandle,
                            service_names: Optional[List[str]], purge: bool,
                            pool: bool) -> str:
-        assert handle.is_grpc_enabled
+        assert handle.is_grpc_enabled_with_flag
         request = TerminateServiceRequestConverter.to_proto(
             service_names, purge, pool)
         response = backend_utils.invoke_skylet_with_retries(
@@ -137,7 +137,7 @@ class RpcRunner:
     def terminate_replica(cls, handle: backends.CloudVmRayResourceHandle,
                           service_name: str, replica_id: int,
                           purge: bool) -> str:
-        assert handle.is_grpc_enabled
+        assert handle.is_grpc_enabled_with_flag
         request = servev1_pb2.TerminateReplicaRequest(service_name=service_name,
                                                       replica_id=replica_id,
                                                       purge=purge)
@@ -151,7 +151,7 @@ class RpcRunner:
                                   handle: backends.CloudVmRayResourceHandle,
                                   service_name: str, job_id: int,
                                   pool: bool) -> int:
-        assert handle.is_grpc_enabled
+        assert handle.is_grpc_enabled_with_flag
         request = servev1_pb2.WaitRegistrationRequest(service_name=service_name,
                                                       job_id=job_id,
                                                       pool=pool)
@@ -164,7 +164,7 @@ class RpcRunner:
     def update_service(cls, handle: backends.CloudVmRayResourceHandle,
                        service_name: str, version: int,
                        mode: serve_utils.UpdateMode, pool: bool) -> str:
-        assert handle.is_grpc_enabled
+        assert handle.is_grpc_enabled_with_flag
         request = servev1_pb2.UpdateServiceRequest(service_name=service_name,
                                                    version=version,
                                                    mode=mode.value,

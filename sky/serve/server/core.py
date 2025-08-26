@@ -108,7 +108,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
         'Please spin up a service first.',
     )
 
-    if handle.is_grpc_enabled:
+    if handle.is_grpc_enabled_with_flag:
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         try:
             stdout = serve_rpc_utils.RpcRunner.terminate_replica(
