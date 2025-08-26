@@ -2743,6 +2743,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             num_ips = 1
         return num_ips
 
+    @property
+    def is_grpc_enabled_with_flag(self) -> bool:
+        """Returns whether this handle has gRPC enabled and gRPC flag is set."""
+        return env_options.Options.ENABLE_GRPC.get() and self.is_grpc_enabled
+
     def __setstate__(self, state):
         self._version = self._VERSION
 
@@ -4996,7 +5001,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
-            if env_options.Options.ENABLE_GRPC.get() and handle.is_grpc_enabled:
+            if handle.is_grpc_enabled_with_flag:
                 request = autostopv1_pb2.SetAutostopRequest(
                     idle_minutes=idle_minutes_to_autostop,
                     backend=self.NAME,
@@ -5041,7 +5046,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # The head node of the cluster is not UP or in an abnormal state.
             # We cannot check if the cluster is autostopping.
             return False
-        if env_options.Options.ENABLE_GRPC.get() and handle.is_grpc_enabled:
+        if handle.is_grpc_enabled_with_flag:
             try:
                 request = autostopv1_pb2.IsAutostoppingRequest()
                 response = backend_utils.invoke_skylet_with_retries(
