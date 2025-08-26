@@ -61,7 +61,7 @@ spec:
   ingressClassName: {{ .Values.ingress.ingressClassName }}
   {{- end }}
   rules:
-  {{- if .Values.ingress.tls.enabled }}
+  {{- if .Values.ingress.tls.enabled | default false }}
   tls:
   - hosts:
     - {{ .Values.ingress.host }}

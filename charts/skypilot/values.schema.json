@@ -408,10 +408,7 @@
                     "type": "object",
                     "properties": {
                         "enabled": {
-                            "type": [
-                                "boolean",
-                                "null"
-                            ]
+                            "type": "boolean"
                         }
                     }
                 }
