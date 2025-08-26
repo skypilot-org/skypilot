@@ -2918,44 +2918,52 @@ def get_clusters(
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
 
-    def _update_record_with_credentials_and_resources_str(
-            record: Optional[Dict[str, Any]]) -> None:
+    def _update_records_with_credentials_and_resources_str(
+            records: List[Optional[Dict[str, Any]]]) -> None:
         """Add the credentials to the record.
 
         This is useful for the client side to setup the ssh config of the
         cluster.
         """
-        if record is None:
-            return
-        handle = record['handle']
-        if handle is None:
-            return
-        record['resources_str'] = resources_utils.get_readable_resources_repr(
-            handle, simplify=True)
-        record[
-            'resources_str_full'] = resources_utils.get_readable_resources_repr(
-                handle, simplify=False)
-        credentials = ssh_credential_from_yaml(handle.cluster_yaml,
-                                               handle.docker_user,
-                                               handle.ssh_user)
+        filtered_records = []
 
-        if not credentials:
+        # only act on records that have a handle
+        for record in records:
+            if record is None:
+                continue
+            if record['handle'] is None:
+                continue
+            filtered_records.append(record)
+        if len(filtered_records) == 0:
             return
-        ssh_private_key_path = credentials.get('ssh_private_key', None)
-        if ssh_private_key_path is not None:
-            if not os.path.exists(os.path.expanduser(ssh_private_key_path)):
-                auth.create_ssh_key_files_from_db(ssh_private_key_path)
-            with open(os.path.expanduser(ssh_private_key_path),
-                      'r',
-                      encoding='utf-8') as f:
-                credentials['ssh_private_key_content'] = f.read()
-        else:
-            private_key_path, _ = auth.get_or_generate_keys()
-            with open(os.path.expanduser(private_key_path),
-                      'r',
-                      encoding='utf-8') as f:
-                credentials['ssh_private_key_content'] = f.read()
-        record['credentials'] = credentials
+
+        for record in filtered_records:
+            handle = record['handle']
+            record['resources_str'] = resources_utils.get_readable_resources_repr(
+                handle, simplify=True)
+            record[
+                'resources_str_full'] = resources_utils.get_readable_resources_repr(
+                    handle, simplify=False)
+            credentials = ssh_credential_from_yaml(handle.cluster_yaml,
+                                                handle.docker_user,
+                                                handle.ssh_user)
+            if not credentials:
+                continue
+            ssh_private_key_path = credentials.get('ssh_private_key', None)
+            if ssh_private_key_path is not None:
+                if not os.path.exists(os.path.expanduser(ssh_private_key_path)):
+                    auth.create_ssh_key_files_from_db(ssh_private_key_path)
+                with open(os.path.expanduser(ssh_private_key_path),
+                        'r',
+                        encoding='utf-8') as f:
+                    credentials['ssh_private_key_content'] = f.read()
+            else:
+                private_key_path, _ = auth.get_or_generate_keys()
+                with open(os.path.expanduser(private_key_path),
+                        'r',
+                        encoding='utf-8') as f:
+                    credentials['ssh_private_key_content'] = f.read()
+            record['credentials'] = credentials
 
     def _update_records_with_resources(
             records: List[Optional[Dict[str, Any]]]) -> None:
@@ -2982,9 +2990,7 @@ def get_clusters(
                 if handle.launched_resources.accelerators else None)
 
     # Add auth_config to the records
-    for record in records:
-        _update_record_with_credentials_and_resources_str(record)
-
+    _update_records_with_credentials_and_resources_str(records)
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
         _update_records_with_resources(records)
@@ -3024,7 +3030,7 @@ def get_clusters(
                 cluster_name,
                 force_refresh_statuses=force_refresh_statuses,
                 acquire_per_cluster_status_lock=True)
-            _update_record_with_credentials_and_resources_str(record)
+            _update_records_with_credentials_and_resources_str([record])
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
