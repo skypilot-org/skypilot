@@ -1310,6 +1310,14 @@ def get_clusters(
     is_managed_filter: Optional[bool] = None,
     workspaces_filter: Optional[Set[str]] = None,
 ) -> List[Dict[str, Any]]:
+    """Get clusters from the database.
+
+    Args:
+        is_managed_filter: If specified, only include clusters
+            that has is_managed field set to the value.
+        workspaces_filter: If specified, only include clusters
+            that has workspace field set to one of the values.
+    """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(cluster_table)
