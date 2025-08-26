@@ -226,7 +226,7 @@ def _get_config_from_path(path: Optional[str]) -> config_utils.Config:
     return parse_and_validate_config_file(path)
 
 
-def _resolve_user_config_path() -> Optional[str]:
+def resolve_user_config_path() -> Optional[str]:
     # find the user config file path, None if not resolved.
     user_config_path = _get_config_file_path(ENV_VAR_GLOBAL_CONFIG)
     if user_config_path:
@@ -251,7 +251,7 @@ def _resolve_user_config_path() -> Optional[str]:
 
 def get_user_config() -> config_utils.Config:
     """Returns the user config."""
-    return _get_config_from_path(_resolve_user_config_path())
+    return _get_config_from_path(resolve_user_config_path())
 
 
 def _resolve_project_config_path() -> Optional[str]:
@@ -609,7 +609,7 @@ def _reload_config_as_client() -> None:
     _set_loaded_config_path(None)
 
     overrides: List[config_utils.Config] = []
-    user_config_path = _resolve_user_config_path()
+    user_config_path = resolve_user_config_path()
     user_config = _get_config_from_path(user_config_path)
     if user_config:
         overrides.append(user_config)

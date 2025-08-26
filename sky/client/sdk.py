@@ -2388,6 +2388,16 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
+    # If the user has set the endpoint via the environment variable, we should
+    # not do anything as we can't disambiguate between the env var and the
+    # config file.
+    if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Cannot login to API server when the endpoint '
+                               'is set via the environment variable. Run unset '
+                               f'{constants.SKY_API_SERVER_URL_ENV_VAR} to '
+                               'clear the environment variable.')
+
     # Validate and normalize endpoint
     endpoint = _validate_endpoint(endpoint)
 
@@ -2622,6 +2632,16 @@ def api_logout() -> None:
     """Logout of the API server.
 
     Clears all cookies and settings stored in ~/.sky/config.yaml"""
+    # If the user has set the endpoint via the environment variable, we should
+    # not do anything as we can't disambiguate between the env var and the
+    # config file.
+    if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Cannot log out of API server when the endpoint '
+                               'is set via the environment variable. Run unset '
+                               f'{constants.SKY_API_SERVER_URL_ENV_VAR} to '
+                               'clear the environment variable.')
+
     if server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Local api server cannot be logged out. '
