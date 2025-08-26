@@ -1307,19 +1307,17 @@ def get_cluster_from_name(
 
 @_init_db
 def get_clusters(
-    is_managed_filter: Optional[bool] = None,) -> List[Dict[str, Any]]:
+    is_managed_filter: Optional[bool] = None,
+    workspaces_filter: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(cluster_table)
         if is_managed_filter is not None:
-            if is_managed_filter:
-                query = query.filter(cluster_table.c.is_managed == 1)
-            else:
-                # backwards compatibility for old clusters.
-                # If is_managed is None, it means the cluster is not managed.
-                query = query.filter((cluster_table.c.is_managed == 0) |
-                                     (cluster_table.c.is_managed == None))
-
+            query = query.filter(cluster_table.c.is_managed == int(is_managed_filter))
+        if workspaces_filter is not None:
+            query = query.filter(
+                cluster_table.c.workspace.in_(workspaces_filter))
         query = query.order_by(sqlalchemy.desc(cluster_table.c.launched_at))
         rows = query.all()
     records = []
