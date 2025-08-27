@@ -68,7 +68,6 @@ def test_log_collection_to_gcp(generic_cloud: str):
                  f'{validate_logs_cmd}'),
             ],
             f'sky down -y {name}',
-            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
