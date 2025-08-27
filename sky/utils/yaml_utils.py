@@ -8,28 +8,28 @@ if TYPE_CHECKING:
 else:
     yaml = common.LazyImport('yaml')
 
-_csafe_loader_import_error = False
+_csafe_loader_unavailable = False
 
 
 def safe_load(stream) -> Any:
-    global _csafe_loader_import_error
-    if _csafe_loader_import_error:
+    global _csafe_loader_unavailable
+    if _csafe_loader_unavailable:
         return yaml.load(stream, Loader=yaml.SafeLoader)
 
     try:
         return yaml.load(stream, Loader=yaml.CSafeLoader)
-    except ImportError:
-        _csafe_loader_import_error = True
+    except AttributeError:
+        _csafe_loader_unavailable = True
         return yaml.load(stream, Loader=yaml.SafeLoader)
 
 
 def safe_load_all(stream) -> Any:
-    global _csafe_loader_import_error
-    if _csafe_loader_import_error:
+    global _csafe_loader_unavailable
+    if _csafe_loader_unavailable:
         return yaml.load_all(stream, Loader=yaml.SafeLoader)
 
     try:
         return yaml.load_all(stream, Loader=yaml.CSafeLoader)
-    except ImportError:
-        _csafe_loader_import_error = True
+    except AttributeError:
+        _csafe_loader_unavailable = True
         return yaml.load_all(stream, Loader=yaml.SafeLoader)
