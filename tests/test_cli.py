@@ -356,8 +356,9 @@ class TestWithNoCloudEnabled:
             1] == f'Using SkyPilot API server and dashboard: {server_url}'
         assert output[
             2] == f'├── Status: {mock_api_info.status}, commit: {mock_api_info.commit}, version: {mock_api_info.version}'
-        assert output[3] == f'└── User: {current_user.name} ({current_user.id})'
-        assert len(output) == 5
+        assert output[3] == f'├── User: {current_user.name} ({current_user.id})'
+        assert output[4] == f'└── Endpoint set via the command line.'
+        assert len(output) == 6
 
 
 class TestHelperFunctions:
