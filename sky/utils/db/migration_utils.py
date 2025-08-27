@@ -36,7 +36,9 @@ _sqlite_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
 
 def get_engine(db_name: str):
     global _postgres_engine_cache, _sqlite_engine_cache
-    conn_string = os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER)
+    conn_string = None
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
         if conn_string not in _postgres_engine_cache:
             _postgres_engine_cache[conn_string] = sqlalchemy.create_engine(
