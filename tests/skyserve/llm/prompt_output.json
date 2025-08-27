@@ -1,4 +1,4 @@
 {
     "Introduce yourself!": "Hello! I'm here to help you with questions, tasks, or anything else you need. How can I assist you today?",
-    "What is Deep Learning? Explain in less than 30 words.": "Deep learning is a (type|subset) of machine learning where neural networks learn patterns (in|from) data, enabling complex tasks like image recognition and speech processing."
+    "What is Deep Learning? Explain in less than 30 words.": "Deep learning is a (type|subset) of machine learning where neural networks learn patterns (in|from) data, enabling (complex)? tasks like image recognition and speech processing."
 }
