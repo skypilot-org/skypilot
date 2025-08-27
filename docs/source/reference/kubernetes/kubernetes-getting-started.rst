@@ -348,7 +348,7 @@ FAQs
       # ~/.sky/config.yaml
       kubernetes:
         provision_timeout: 900  # Wait 15 minutes for nodes to get provisioned before failover. Set to -1 to wait indefinitely.
-        autoscaler: gke  # [gke, karpenter, generic]; required if using GPUs/TPUs in scale-to-zero setting
+        autoscaler: gke  # [gke, karpenter, coreweave, generic]; required if using GPUs/TPUs in scale-to-zero setting
 
 * **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 
