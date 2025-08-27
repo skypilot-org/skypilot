@@ -60,6 +60,7 @@ from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -484,8 +485,8 @@ def _replace_yaml_dicts(
                 if key in old_block:
                     _restore_block(value, old_block[key])
 
-    new_config = yaml.safe_load(new_yaml)
-    old_config = yaml.safe_load(old_yaml)
+    new_config = yaml_utils.safe_load(new_yaml)
+    old_config = yaml_utils.safe_load(old_yaml)
     excluded_results = {}
     # Find all key values excluded from restore
     for exclude_restore_key_name_list in restore_key_names_exceptions:

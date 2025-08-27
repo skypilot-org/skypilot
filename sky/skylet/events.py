@@ -7,7 +7,6 @@ import time
 import traceback
 
 import psutil
-import yaml
 
 from sky import clouds
 from sky import sky_logging
@@ -24,6 +23,7 @@ from sky.utils import cluster_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 # Seconds of sleep between the processing of skylet events.
 EVENT_CHECKING_INTERVAL_SECONDS = 20
@@ -309,7 +309,7 @@ class AutostopEvent(SkyletEvent):
         else:
             yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: true',
                                              yaml_str)
-        config = yaml.safe_load(yaml_str)
+        config = yaml_utils.safe_load(yaml_str)
         # Set the private key with the existed key on the remote instance.
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
         # NOTE: We must do this, otherwise with ssh_proxy_command still under
