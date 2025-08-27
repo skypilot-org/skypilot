@@ -37,6 +37,7 @@ Install SkyPilot using pip:
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
           pip install "skypilot[nebius]"
+          pip install "skypilot[primeintellect]"
           pip install "skypilot[all]"
 
 
@@ -67,6 +68,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
           pip install "skypilot-nightly[nebius]"
+          pip install "skypilot-nightly[primeintellect]"
           pip install "skypilot-nightly[all]"
 
 
@@ -99,6 +101,7 @@ Install SkyPilot using pip:
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
           pip install -e ".[nebius]"
+          pip install -e ".[primeintellect]"
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
@@ -574,6 +577,18 @@ In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instr
   aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
   aws configure set region <REGION> --profile nebius
   aws configure set endpoint_url <ENDPOINT>  --profile nebius
+
+Prime Intellect
+~~~~~~~~~~~~~~
+
+`Prime Intellect <https://primeintellect.ai/>`__ makes it easy to find global compute resources and train state-of-the-art models through distributed training across clusters. To configure Prime Intellect access, install and configure `Prime Intellect CLI <https://docs.primeintellect.ai/cli-reference/introduction>`__:
+
+.. code-block:: shell
+
+  mkdir -p ~/.prime
+  prime login
+  # optional: set team id
+  prime config set-team-id <team_id>
 
 Request quotas for first time users
 --------------------------------------
