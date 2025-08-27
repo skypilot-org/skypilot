@@ -273,3 +273,95 @@ async def test_requests_gc_daemon_disabled(isolated_database):
                 # Verify sleep was called with max(-1, 3600) = 3600
                 assert mock_sleep.call_count == 2
                 mock_sleep.assert_any_call(3600)
+
+
+@pytest.mark.asyncio
+async def test_get_request_async(isolated_database):
+    """Test async version of get_request."""
+    request = requests.Request(request_id='test-async-request-1',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=time.time(),
+                               user_id='test-user')
+
+    # Create the request first
+    requests.create_if_not_exists(request)
+
+    # Test retrieving the request asynchronously
+    retrieved_request = await requests.get_request_async('test-async-request-1')
+
+    assert retrieved_request is not None
+    assert retrieved_request.request_id == 'test-async-request-1'
+    assert retrieved_request.name == 'test-request'
+    assert retrieved_request.status == RequestStatus.PENDING
+    assert retrieved_request.user_id == 'test-user'
+
+
+@pytest.mark.asyncio
+async def test_get_request_async_nonexistent(isolated_database):
+    """Test get_request_async with non-existent request."""
+    result = await requests.get_request_async('nonexistent-request')
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_create_if_not_exists_async(isolated_database):
+    """Test async version of create_if_not_exists."""
+    request = requests.Request(request_id='test-async-create-1',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=time.time(),
+                               user_id='test-user')
+
+    # Test creating a new request
+    created = await requests.create_if_not_exists_async(request)
+    assert created is True
+
+    # Verify the request was created
+    retrieved_request = await requests.get_request_async('test-async-create-1')
+    assert retrieved_request is not None
+    assert retrieved_request.request_id == 'test-async-create-1'
+
+    # Test creating the same request again (should return False)
+    created_again = await requests.create_if_not_exists_async(request)
+    assert created_again is False
+
+
+@pytest.mark.asyncio
+async def test_update_request_async(isolated_database):
+    """Test async version of update_request."""
+    request = requests.Request(request_id='test-async-update-1',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=time.time(),
+                               user_id='test-user')
+
+    # Create the request first
+    await requests.create_if_not_exists_async(request)
+
+    # Test updating the request asynchronously
+    async with requests.update_request_async('test-async-update-1') as req:
+        assert req is not None
+        assert req.status == RequestStatus.PENDING
+        # Update the status
+        req.status = RequestStatus.RUNNING
+        req.pid = 12345
+
+    # Verify the request was updated
+    updated_request = await requests.get_request_async('test-async-update-1')
+    assert updated_request is not None
+    assert updated_request.status == RequestStatus.RUNNING
+    assert updated_request.pid == 12345
+
+
+@pytest.mark.asyncio
+async def test_update_request_async_nonexistent(isolated_database):
+    """Test update_request_async with non-existent request."""
+    async with requests.update_request_async('nonexistent-request') as req:
+        assert req is None

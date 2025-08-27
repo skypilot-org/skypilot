@@ -276,6 +276,10 @@ def override_request_env_and_config(
         request_id: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
+    # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API server
+    # affecting client requests. If set on the client side, it will be
+    # overridden by the request body.
+    os.environ.pop('SKYPILOT_DEBUG', None)
     os.environ.update(request_body.env_vars)
     # Note: may be overridden by AuthProxyMiddleware.
     # TODO(zhwu): we need to make the entire request a context available to the
@@ -456,7 +460,7 @@ async def execute_request_coroutine(request: api_requests.Request):
                                                   **request_body.to_kwargs())
 
     async def poll_task(request_id: str) -> bool:
-        request = api_requests.get_request(request_id)
+        request = await api_requests.get_request_async(request_id)
         if request is None:
             raise RuntimeError('Request not found')
 

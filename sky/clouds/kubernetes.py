@@ -57,6 +57,8 @@ class Kubernetes(clouds.Cloud):
     # where the suffix is 21 characters long.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
+    _MAX_VOLUME_NAME_LEN_LIMIT = 253
+
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
     _DEFAULT_NUM_VCPUS = 2
@@ -1040,6 +1042,31 @@ class Kubernetes(clouds.Cloud):
             identity = [cls.get_identity_from_context(context)]
             identities.append(identity)
         return identities
+
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the volume name is valid for this cloud.
+
+        Follows Kubernetes DNS-1123 subdomain rules:
+        - must be <= 253 characters
+        - must match: '[a-z0-9]([-a-z0-9]*[a-z0-9])?(.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*' # pylint: disable=line-too-long
+        """
+        # Max length per DNS-1123 subdomain
+        if len(volume_name) > cls._MAX_VOLUME_NAME_LEN_LIMIT:
+            return (False, f'Volume name exceeds the maximum length of '
+                    f'{cls._MAX_VOLUME_NAME_LEN_LIMIT} characters '
+                    '(DNS-1123 subdomain).')
+
+        # DNS-1123 label: [a-z0-9]([-a-z0-9]*[a-z0-9])?
+        label = r'[a-z0-9]([-a-z0-9]*[a-z0-9])?'
+        # DNS-1123 subdomain: label(\.-separated label)*
+        subdomain_pattern = rf'^{label}(\.{label})*$'
+        if re.fullmatch(subdomain_pattern, volume_name) is None:
+            return (False, 'Volume name must be a valid DNS-1123 subdomain: '
+                    'lowercase alphanumeric, "-", and "."; start/end with '
+                    'alphanumeric.')
+        return True, None
 
     @classmethod
     def is_label_valid(cls, label_key: str,

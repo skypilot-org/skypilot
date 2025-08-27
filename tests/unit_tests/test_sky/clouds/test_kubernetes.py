@@ -1047,5 +1047,46 @@ class TestGKEDWSConfig(unittest.TestCase):
             override_configs=cluster_overrides)
 
 
+class TestKubernetesVolumeNameValidation(unittest.TestCase):
+
+    def test_valid_volume_names(self):
+        valid_names = [
+            'data',
+            'data1',
+            'data-1',
+            'data-1.volume',
+            'a-b.c-d',
+            'a' * 10 + '.' + 'b' * 10,
+        ]
+        for name in valid_names:
+            ok, reason = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertTrue(ok, msg=f'{name} should be valid, got: {reason}')
+
+    def test_invalid_due_to_length(self):
+        too_long = 'a' * 254  # > 253
+        ok, reason = kubernetes.Kubernetes.is_volume_name_valid(too_long)
+        self.assertFalse(ok)
+        self.assertIn('maximum length', reason or '')
+
+    def test_invalid_characters(self):
+        # Uppercase and underscore are invalid
+        for name in ['Data', 'data_volume', 'data@vol', 'data+vol']:
+            ok, _ = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertFalse(ok, msg=f'{name} should be invalid')
+
+    def test_invalid_start_or_end(self):
+        for name in ['-data', 'data-', '.data', 'data.']:
+            ok, _ = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertFalse(ok, msg=f'{name} should be invalid')
+
+    def test_invalid_double_dot(self):
+        ok, _ = kubernetes.Kubernetes.is_volume_name_valid('a..b')
+        self.assertFalse(ok)
+
+    def test_empty_string_invalid(self):
+        ok, _ = kubernetes.Kubernetes.is_volume_name_valid('')
+        self.assertFalse(ok)
+
+
 if __name__ == '__main__':
     unittest.main()

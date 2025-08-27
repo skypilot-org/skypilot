@@ -1441,6 +1441,12 @@ def query_instances(
         phase = pod.status.phase
         pod_status = status_map[phase]
         if non_terminated_only and pod_status is None:
+            logger.debug(f'Pod {pod.metadata.name} is terminated, but '
+                         'query_instances is called with '
+                         f'non_terminated_only=True. Phase: {phase}')
+            if phase == 'Failed':
+                reason_for_debug = _get_pod_termination_reason(pod)
+                logger.debug(f'Termination reason: {reason_for_debug}')
             continue
         reason = None
         if phase == 'Failed':

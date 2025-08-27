@@ -2881,37 +2881,41 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    records = global_user_state.get_clusters()
-    current_user = common_utils.get_current_user()
 
-    # Filter out clusters created by the controller.
-    if (not env_options.Options.SHOW_DEBUG_INFO.get() and
-            not _include_is_managed):
-        records = [
-            record for record in records if not record.get('is_managed', False)
-        ]
-
-    # Filter by user if requested
+    exclude_managed_clusters = False
+    if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
+        exclude_managed_clusters = True
+    user_hashes_filter = None
     if not all_users:
-        records = [
-            record for record in records
-            if record['user_hash'] == current_user.id
-        ]
-
+        user_hashes_filter = {common_utils.get_current_user().id}
     accessible_workspaces = workspaces_core.get_workspaces()
 
-    workspace_filtered_records = []
-    for record in records:
-        cluster_workspace = record.get('workspace',
-                                       constants.SKYPILOT_DEFAULT_WORKSPACE)
-        if cluster_workspace in accessible_workspaces:
-            workspace_filtered_records.append(record)
-
-    records = workspace_filtered_records
+    records = global_user_state.get_clusters(
+        exclude_managed_clusters=exclude_managed_clusters,
+        user_hashes_filter=user_hashes_filter,
+        workspaces_filter=accessible_workspaces)
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
+
+    if cluster_names is not None:
+        if isinstance(cluster_names, str):
+            cluster_names = [cluster_names]
+        cluster_names = _get_glob_clusters(cluster_names, silent=True)
+        new_records = []
+        not_exist_cluster_names = []
+        for cluster_name in cluster_names:
+            for record in records:
+                if record['name'] == cluster_name:
+                    new_records.append(record)
+                    break
+            else:
+                not_exist_cluster_names.append(cluster_name)
+        if not_exist_cluster_names:
+            clusters_str = ', '.join(not_exist_cluster_names)
+            logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
+        records = new_records
 
     def _update_record_with_credentials_and_resources_str(
             record: Optional[Dict[str, Any]]) -> None:
@@ -2951,24 +2955,6 @@ def get_clusters(
                       encoding='utf-8') as f:
                 credentials['ssh_private_key_content'] = f.read()
         record['credentials'] = credentials
-
-    if cluster_names is not None:
-        if isinstance(cluster_names, str):
-            cluster_names = [cluster_names]
-        cluster_names = _get_glob_clusters(cluster_names, silent=True)
-        new_records = []
-        not_exist_cluster_names = []
-        for cluster_name in cluster_names:
-            for record in records:
-                if record['name'] == cluster_name:
-                    new_records.append(record)
-                    break
-            else:
-                not_exist_cluster_names.append(cluster_name)
-        if not_exist_cluster_names:
-            clusters_str = ', '.join(not_exist_cluster_names)
-            logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
-        records = new_records
 
     def _update_records_with_resources(
             records: List[Optional[Dict[str, Any]]]) -> None:
