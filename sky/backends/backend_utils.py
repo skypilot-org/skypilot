@@ -1414,28 +1414,56 @@ def ssh_credentials_from_handles(
 ) -> List[Dict[str, Any]]:
     """Returns ssh_user, ssh_private_key and ssh_control name.
     """
-    credentials = []
+    return_dicts: List[Dict[str, Any]] = []
 
     non_empty_cluster_yaml_paths = [
-        handle.cluster_yaml for handle in handles if handle.cluster_yaml is not None]
-    cluster_yaml_dicts = global_user_state.get_cluster_yaml_dict_multiple(non_empty_cluster_yaml_paths)
-    
-    # If the cluster yaml is not in the database, check if it exists
-    # on the local file system and migrate it to the database.
-    # TODO(syang): remove this check once we have a way to migrate the
-    # cluster from file to database. Remove on v0.12.0.
-    for cluster_yaml_path in non_empty_cluster_yaml_paths:
-        if not os.path.exists(cluster_yaml_path):
-            global_user_state.set_cluster_yaml(cluster_yaml_path)
-    for handle, cluster_yaml_dict in zip(handles, cluster_yaml_dicts):
-        if handle.cluster_yaml is not None:
-            credentials.append(
-                ssh_credential_from_yaml(cluster_yaml_dict, handle.docker_user,
-                                         handle.ssh_user))
-        else:
-            credentials.append(None)
-    
-    return credentials
+        handle.cluster_yaml
+        for handle in handles
+        if handle.cluster_yaml is not None
+    ]
+    cluster_yaml_dicts = global_user_state.get_cluster_yaml_dict_multiple(
+        non_empty_cluster_yaml_paths)
+    cluster_yaml_dicts_to_index = {
+        cluster_yaml_path: cluster_yaml_dict
+        for cluster_yaml_path, cluster_yaml_dict in zip(
+            non_empty_cluster_yaml_paths, cluster_yaml_dicts)
+    }
+
+    for handle in handles:
+        ssh_user = handle.ssh_user
+        docker_user = handle.docker_user
+        if handle.cluster_yaml is None:
+            return_dicts.append(dict())
+            continue
+        config = cluster_yaml_dicts_to_index[handle.cluster_yaml]
+        auth_section = config['auth']
+        if ssh_user is None:
+            ssh_user = auth_section['ssh_user'].strip()
+        ssh_private_key_path = auth_section.get('ssh_private_key')
+        ssh_control_name = config.get('cluster_name', '__default__')
+        ssh_proxy_command = auth_section.get('ssh_proxy_command')
+
+        # Update the ssh_user placeholder in proxy command, if required
+        if (ssh_proxy_command is not None and
+                constants.SKY_SSH_USER_PLACEHOLDER in ssh_proxy_command):
+            ssh_proxy_command = ssh_proxy_command.replace(
+                constants.SKY_SSH_USER_PLACEHOLDER, ssh_user)
+
+        credentials = {
+            'ssh_user': ssh_user,
+            'ssh_private_key': ssh_private_key_path,
+            'ssh_control_name': ssh_control_name,
+            'ssh_proxy_command': ssh_proxy_command,
+        }
+        if docker_user is not None:
+            credentials['docker_user'] = docker_user
+        ssh_provider_module = config['provider']['module']
+        # If we are running ssh command on kubernetes node.
+        if 'kubernetes' in ssh_provider_module:
+            credentials['disable_control_master'] = True
+        return_dicts.append(credentials)
+
+    return return_dicts
 
 
 def parallel_data_transfer_to_nodes(

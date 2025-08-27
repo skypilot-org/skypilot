@@ -2073,14 +2073,17 @@ def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
         return _set_cluster_yaml_from_file(cluster_yaml_path, cluster_name)
     return row.yaml
 
+
 def get_cluster_yaml_str_multiple(cluster_yaml_paths: List[str]) -> List[str]:
     """Get the cluster yaml from the database or the local file system.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    cluster_names = []
+    cluster_names_to_yaml_paths = {}
     for cluster_yaml_path in cluster_yaml_paths:
         cluster_name, _ = os.path.splitext(os.path.basename(cluster_yaml_path))
-        cluster_names.append(cluster_name)
+        cluster_names_to_yaml_paths[cluster_name] = cluster_yaml_path
+
+    cluster_names = list(cluster_names_to_yaml_paths.keys())
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(cluster_yaml_table).filter(
             cluster_yaml_table.c.cluster_name.in_(cluster_names)).all()
@@ -2091,11 +2094,14 @@ def get_cluster_yaml_str_multiple(cluster_yaml_paths: List[str]) -> List[str]:
         if cluster_name in row_cluster_names_to_yaml:
             yaml_strs.append(row_cluster_names_to_yaml[cluster_name])
         else:
-            yaml_str = _set_cluster_yaml_from_file(cluster_yaml_path, cluster_name)
+            yaml_str = _set_cluster_yaml_from_file(
+                cluster_names_to_yaml_paths[cluster_name], cluster_name)
             yaml_strs.append(yaml_str)
     return yaml_strs
 
-def _set_cluster_yaml_from_file(cluster_yaml_path: str, cluster_name: str) -> Optional[str]:
+
+def _set_cluster_yaml_from_file(cluster_yaml_path: str,
+                                cluster_name: str) -> Optional[str]:
     """Set the cluster yaml in the database from a file."""
     # If the cluster yaml is not in the database, check if it exists
     # on the local file system and migrate it to the database.
@@ -2108,6 +2114,7 @@ def _set_cluster_yaml_from_file(cluster_yaml_path: str, cluster_name: str) -> Op
         return yaml_str
     return None
 
+
 def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
     """Get the cluster yaml as a dictionary from the database.
 
@@ -2119,15 +2126,18 @@ def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
     return yaml_utils.safe_load(yaml_str)
 
 
-def get_cluster_yaml_dict_multiple(cluster_yaml_paths: List[str]) -> List[Dict[str, Any]]:
+def get_cluster_yaml_dict_multiple(
+        cluster_yaml_paths: List[str]) -> List[Dict[str, Any]]:
     """Get the cluster yaml as a dictionary from the database."""
     yaml_strs = get_cluster_yaml_str_multiple(cluster_yaml_paths)
     yaml_dicts = []
     for idx, yaml_str in enumerate(yaml_strs):
         if yaml_str is None:
-            raise ValueError(f'Cluster yaml {cluster_yaml_paths[idx]} not found.')
+            raise ValueError(
+                f'Cluster yaml {cluster_yaml_paths[idx]} not found.')
         yaml_dicts.append(yaml.safe_load(yaml_str))
     return yaml_dicts
+
 
 @_init_db
 def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
