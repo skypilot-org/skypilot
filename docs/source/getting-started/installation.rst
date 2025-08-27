@@ -129,13 +129,46 @@ To use more than one cloud, combine the pip extras:
 
 Installing via ``uv`` is also supported:
 
-.. code-block:: shell
+.. tab-set::
 
-  uv venv --seed --python 3.10
-  uv pip install "skypilot[kubernetes,aws,gcp]"
-  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-  uv pip install --prerelease allow azure-cli
-  uv pip install "skypilot[all]"
+    .. tab-item:: uv venv (traditional)
+        :sync: uv-venv-tab
+
+        .. code-block:: shell
+
+          uv venv --seed --python 3.10
+          uv pip install "skypilot[kubernetes,aws,gcp]"
+          # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+          uv pip install --prerelease allow azure-cli
+          uv pip install "skypilot[all]"
+
+    .. tab-item:: uv tool (recommended)
+        :sync: uv-tool-tab
+
+        .. code-block:: shell
+
+          # Install SkyPilot as a global tool with uv
+          uv tool install "skypilot[all]"
+          
+          # For specific cloud providers:
+          # uv tool install "skypilot[kubernetes,aws,gcp]"
+          
+          # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+          # Install azure-cli separately if needed:
+          # uv pip install --prerelease allow azure-cli
+
+    .. tab-item:: uv run (temporary use)
+        :sync: uv-run-tab
+
+        .. code-block:: shell
+
+          # Run SkyPilot commands without installation using uv run
+          # This creates an isolated environment for each command
+          uv run --with "skypilot[all]" sky check
+          uv run --with "skypilot[all]" sky launch my_task.yaml
+          
+          # For specific cloud providers:
+          # uv run --with "skypilot[kubernetes,aws,gcp]" sky check
 
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
