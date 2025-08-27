@@ -14,6 +14,7 @@ from sky.utils import common_utils
 _df = None
 _lookup_dict = None
 
+DEFAULT_BASE_URL = 'https://api.primeintellect.ai'
 CREDENTIALS_PATH = '~/.prime/config.json'
 INITIAL_BACKOFF_SECONDS = 10
 MAX_BACKOFF_FACTOR = 10
@@ -140,8 +141,7 @@ class PrimeIntellectAPIClient:
             self._credentials = json.load(f)
         self.api_key = self._credentials.get('api_key')
         self.team_id = self._credentials.get('team_id')
-        self.base_url = self._credentials.get('base_url',
-                                              'https://api.primeintellect.ai')
+        self.base_url = self._credentials.get('base_url', DEFAULT_BASE_URL)
         self.headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json'
