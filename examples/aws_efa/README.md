@@ -1,9 +1,10 @@
-# Using AWS Elastic Fabric Adapter (EFA) on HyperPod/EKS with SkyPilot
+# Using Elastic Fabric Adapter (EFA) on AWS with SkyPilot
 
 Elastic Fabric Adapter (EFA) is an AWS alternative to Nvidia infiniband that enables high levels of inter-node communications. It is specifically useful for distributed AI training and inference, which requires high network bandwidth across nodes.
 
+## Using EFA on HyperPod/EKS with SkyPilot
 
-## TL;DR: enable EFA with SkyPilot
+### TL;DR: enable EFA with SkyPilot
 
 You can enable EFA on AWS HyperPod/EKS clusters with an simple additional setting in your SkyPilot YAML:
 
@@ -22,7 +23,7 @@ config:
 
 
 
-## Enable EFA with HyperPod/EKS
+### Enable EFA with HyperPod/EKS
 
 * On HyperPod (backed by EKS), EFA is enabled by default, and you don't need to do anything.
 * On EKS, you may need to enable EFA with the [official AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/node-efa.html).
@@ -39,11 +40,11 @@ hyperpod-i-0da69b9076c7ff6a4   ml.p4d.24xlarge   8     4
 ...
 ```
 
-## Access HyperPod and run distributed job with SkyPilot
+### Access HyperPod and run distributed job with SkyPilot
 
 To access HyperPod and run distributed job with SkyPilot, see the SkyPilot [HyperPod example](https://github.com/skypilot-org/skypilot/blob/master/examples/hyperpod-eks).
 
-### Adding EFA configurations in SkyPilot YAML
+#### Adding EFA configurations in SkyPilot YAML
 
 To enable EFA in SkyPilot YAML, you can specify the following section in the SkyPilot YAML:
 
@@ -103,7 +104,7 @@ Check the following table for the GPU and EFA count mapping for AWS instance typ
 
 Update the EFA number in the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the GPUs you use.
 
-## Running NCCL test with EFA using SkyPilot
+### Running NCCL test with EFA using SkyPilot
 
 Check the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the complete SkyPilot cluster yaml configurations.
 
@@ -127,7 +128,7 @@ SkyPilot will:
 > sky launch -c efa --env USE_EFA=false nccl_efa.yaml
 > ```
 
-### Benchmark results
+#### Benchmark results
 
 We compare the performance with and without EFA using NCCL test reports on the same HyperPod cluster (2x p4d.24xlarge, i.e. 2xA100:8).
 
@@ -165,7 +166,7 @@ The `Speed-up` column is calculated by `busbw EFA (GB/s) / busbw Non-EFA (GB/s)`
 | 1 GB         | 75.34       | 4.08        | 18.4 x        |
 | 2 GB         | 77.35       | 4.13        | 18.7 x        |
 
-### What stands out
+#### What stands out
 
 | Range         | Observation                                                                                                                                     |
 |---------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -174,3 +175,22 @@ The `Speed-up` column is calculated by `busbw EFA (GB/s) / busbw Non-EFA (GB/s)`
 | ≥ 32 MB       | The fabric really kicks in: ≥ 8 x at 32 MB, climbing to ~18 x for 1–2 GB messages. Non-EFA tops out around 4 GB/s, while EFA pushes ≈ 77 GB/s. |
 
 EFA provides much higher throughput than the traditional TCP transport. Enabling EFA could enhance the performance of inter-instance communication significantly, which could speedup distributed AI training and inference.
+
+## Using EFA on AWS VM
+
+For the instance types listed in the GPU and EFA count mapping table in the [Adding EFA configurations in SkyPilot YAML](#adding-efa-configurations-in-skypilot-yaml) section, the EFA will be enabled automatically when you launch SkyPilot clusters with them.
+
+> **NOTE:**
+> We can turn off EFA by setting `resources.network_tier: standard` in the task YAML:
+> ```yaml
+> resources:
+>   network_tier: standard
+> ```
+
+To run the NCCL test with EFA support with AWS VM:
+
+```bash
+sky launch -c efa efa_vm.yaml
+```
+
+Check the [`efa_vm.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/efa_vm.yaml) for the complete SkyPilot cluster yaml configurations.
