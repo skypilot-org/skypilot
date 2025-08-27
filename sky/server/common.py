@@ -61,7 +61,7 @@ AVAILABLE_LOCAL_API_SERVER_URLS = [
 
 API_SERVER_CMD = '-m sky.server.server'
 # The client dir on the API server for storing user-specific data, such as file
-# mounts, logs, etc. This dir is empheral and will be cleaned up when the API
+# mounts, logs, etc. This dir is ephemeral and will be cleaned up when the API
 # server is restarted.
 API_SERVER_CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
 RETRY_COUNT_ON_TIMEOUT = 3
