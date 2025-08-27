@@ -4,6 +4,7 @@ import contextlib
 import logging
 import os
 import pathlib
+from typing import Optional
 
 from alembic import command as alembic_command
 from alembic.config import Config
@@ -30,18 +31,26 @@ SERVE_DB_NAME = 'serve_db'
 SERVE_VERSION = '001'
 SERVE_LOCK_PATH = '~/.sky/locks/.serve_db.lock'
 
+_postgres_engine: Optional[sqlalchemy.engine.Engine] = None
+_sqlite_engine: Optional[sqlalchemy.engine.Engine] = None
+
 
 def get_engine(db_name: str):
+    global _postgres_engine, _sqlite_engine
     conn_string = None
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
-        engine = sqlalchemy.create_engine(conn_string,
-                                          poolclass=sqlalchemy.NullPool)
+        if _postgres_engine is None:
+            _postgres_engine = sqlalchemy.create_engine(
+                conn_string, poolclass=sqlalchemy.NullPool)
+        engine = _postgres_engine
     else:
         db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
-        engine = sqlalchemy.create_engine('sqlite:///' + db_path)
+        if _sqlite_engine is None:
+            _sqlite_engine = sqlalchemy.create_engine('sqlite:///' + db_path)
+        engine = _sqlite_engine
     return engine
 
 
