@@ -30,6 +30,7 @@ from sky.usage import constants as usage_constants
 from sky.utils import annotations
 from sky.utils import ux_utils
 from sky.utils import validator
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import jinja2
@@ -577,13 +578,13 @@ def read_yaml(path: Optional[str]) -> Dict[str, Any]:
     if path is None:
         raise ValueError('Attempted to read a None YAML.')
     with open(path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
+        config = yaml_utils.safe_load(f)
     return config
 
 
 def read_yaml_all_str(yaml_str: str) -> List[Dict[str, Any]]:
     stream = io.StringIO(yaml_str)
-    config = yaml.safe_load_all(stream)
+    config = yaml_utils.safe_load_all(stream)
     configs = list(config)
     if not configs:
         # Empty YAML file.

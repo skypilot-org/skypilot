@@ -23,7 +23,6 @@ import zipfile
 import aiofiles
 import fastapi
 from fastapi.middleware import cors
-from passlib.hash import apr_md5_crypt
 import starlette.middleware.base
 import uvloop
 
@@ -121,7 +120,7 @@ def _try_set_basic_auth_user(request: fastapi.Request):
         username_encoded = username.encode('utf8')
         db_username_encoded = user.name.encode('utf8')
         if (username_encoded == db_username_encoded and
-                apr_md5_crypt.verify(password, user.password)):
+                common.crypt_ctx.verify(password, user.password)):
             request.state.auth_user = user
             break
 
@@ -221,7 +220,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             username_encoded = username.encode('utf8')
             db_username_encoded = user.name.encode('utf8')
             if (username_encoded == db_username_encoded and
-                    apr_md5_crypt.verify(password, user.password)):
+                    common.crypt_ctx.verify(password, user.password)):
                 valid_user = True
                 request.state.auth_user = user
                 await authn.override_user_info_in_request_body(request, user)
@@ -1768,6 +1767,11 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
 @app.get('/api/completion/volume_name')
 async def complete_volume_name(incomplete: str,) -> List[str]:
     return global_user_state.get_volume_names_start_with(incomplete)
+
+
+@app.get('/api/completion/api_request')
+async def complete_api_request(incomplete: str,) -> List[str]:
+    return requests_lib.get_api_request_ids_start_with(incomplete)
 
 
 @app.get('/dashboard/{full_path:path}')

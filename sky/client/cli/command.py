@@ -89,6 +89,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
 from sky.volumes import utils as volumes_utils
 from sky.volumes.client import sdk as volumes_sdk
@@ -286,9 +287,10 @@ def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
     del ctx, param  # Unused.
     # TODO(zhwu): we send requests to API server for completion, which can cause
     # large latency. We should investigate caching mechanism if needed.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/cluster_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
@@ -299,9 +301,10 @@ def _complete_storage_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for storage names."""
     del ctx, param  # Unused.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/storage_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
@@ -312,12 +315,31 @@ def _complete_volume_name(ctx: click.Context, param: click.Parameter,
                           incomplete: str) -> List[str]:
     """Handle shell completion for volume names."""
     del ctx, param  # Unused.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/volume_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
+    return response.json()
+
+
+def _complete_api_request(ctx: click.Context, param: click.Parameter,
+                          incomplete: str) -> List[str]:
+    """Handle shell completion for API requests."""
+    del ctx, param  # Unused.
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/api/completion/api_request?incomplete={incomplete}',
+        retry=False,
+        timeout=2.0,
+    )
+    try:
+        response.raise_for_status()
+    except requests_lib.exceptions.HTTPError:
+        # Server may be outdated/missing this API. Silently skip.
+        return []
     return response.json()
 
 
@@ -589,7 +611,7 @@ def _check_yaml_only(
     try:
         with open(entrypoint, 'r', encoding='utf-8') as f:
             try:
-                config = list(yaml.safe_load_all(f))
+                config = list(yaml_utils.safe_load_all(f))
                 if config:
                     # FIXME(zongheng): in a chain DAG YAML it only returns the
                     # first section. OK for downstream but is weird.
@@ -6017,7 +6039,10 @@ def api_stop():
 
 @api.command('logs', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_id', required=False, type=str)
+@click.argument('request_id',
+                required=False,
+                type=str,
+                **_get_shell_complete_args(_complete_api_request))
 @click.option('--server-logs',
               is_flag=True,
               default=False,
@@ -6061,7 +6086,11 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_ids', required=False, type=str, nargs=-1)
+@click.argument('request_ids',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
 @flags.all_users_option('Cancel all requests from all users.')
 @usage_lib.entrypoint
@@ -6093,7 +6122,11 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
 
 @api.command('status', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_ids', required=False, type=str, nargs=-1)
+@click.argument('request_ids',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_api_request))
 @click.option('--all-status',
               '-a',
               is_flag=True,

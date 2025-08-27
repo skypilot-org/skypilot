@@ -23,6 +23,7 @@ import uuid
 import cachetools
 import colorama
 import filelock
+from passlib import context as passlib_context
 from typing_extensions import ParamSpec
 
 from sky import exceptions
@@ -61,7 +62,7 @@ AVAILABLE_LOCAL_API_SERVER_URLS = [
 
 API_SERVER_CMD = '-m sky.server.server'
 # The client dir on the API server for storing user-specific data, such as file
-# mounts, logs, etc. This dir is empheral and will be cleaned up when the API
+# mounts, logs, etc. This dir is ephemeral and will be cleaned up when the API
 # server is restarted.
 API_SERVER_CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
 RETRY_COUNT_ON_TIMEOUT = 3
@@ -101,6 +102,11 @@ ApiVersion = Optional[str]
 logger = sky_logging.init_logger(__name__)
 
 hinted_for_server_install_version_mismatch = False
+
+crypt_ctx = passlib_context.CryptContext([
+    'bcrypt', 'sha256_crypt', 'sha512_crypt', 'des_crypt', 'apr_md5_crypt',
+    'ldap_sha1'
+])
 
 
 class ApiServerStatus(enum.Enum):
