@@ -108,7 +108,7 @@ class SeewebNodeProvider:
                         self._power_off(srv.name)
             else:
                 logger.info(f'\nServer {srv.name} has status'
-                            f"'{srv.status}', skipping\n")
+                            f'{srv.status}, skipping\n')
         # Wait for all servers to be actually stopped with forced refresh
         self._wait_for_stop_with_forced_refresh()
 

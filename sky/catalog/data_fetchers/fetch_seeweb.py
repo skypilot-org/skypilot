@@ -12,47 +12,63 @@ import configparser
 import csv
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-import ecsapi
+from sky.adaptors.seeweb import ecsapi
 
 # GPU name mapping from Seeweb to SkyPilot canonical names
 SEEWEB_GPU_NAME_TO_SKYPILOT_GPU_NAME = {
-    'GPU11': 'RTX4090',
-    'GPU10': 'H200',
-    'GPU9': 'RTX4090',
-    'GPU8': 'RTX4090',
-    'GPU7': 'RTX4090',
-    'GPU6': 'RTX4090',
-    'GPU5': 'RTX4090',
-    'GPU4': 'RTX4090',
-    'GPU3': 'RTX4090',
-    'GPU2': 'RTX4090',
-    'GPU1': 'RTX4090',
+    'H200 141GB': 'H200',
+    'RTX A6000 48GB': 'RTX4090',
+    'A100 80GB': 'A100',
+    'L4 24GB': 'L4',
+    'L40s 48GB': 'L40s',
+    'H100 80GB': 'H100',
     'MI300X': 'MI300X',
-    'MI300': 'MI300',
-    'GRAYSKULL': 'GRAYSKULL',
+    'A30': 'A30',
+    'RTX 6000 24GB': 'RTX6000',
+    'Tenstorrent Grayskull e75': 'GRAYSKULL-E75',
+    'Tenstorrent Grayskull e150': 'GRAYSKULL-E150',
 }
 
 # GPU VRAM mapping in MB
 VRAM = {
     'RTX4090': 24576,  # 24GB
-    'H200': 81920,  # 80GB
+    'H200': 144384,  # 141GB
+    'A100': 81920,  # 80GB
+    'L4': 24576,  # 24GB
+    'L40s': 49152,  # 48GB
+    'H100': 81920,  # 80GB
     'MI300X': 192000,  # 192GB
-    'MI300': 128000,  # 128GB
-    'GRAYSKULL': 8192,  # 8GB
+    'A30': 24576,  # 24GB
+    'RTX6000': 24576,  # 24GB
+    'GRAYSKULL-E75': 8192,  # 8GB
+    'GRAYSKULL-E150': 8192,  # 8GB
 }
 
 
-def get_api_key(path: str) -> str:
-    """Get API key from config file."""
-    parser = configparser.ConfigParser()
-    parser.read(path)
+def get_api_key(path: Optional[str] = None) -> str:
+    """Get API key from config file or environment variable."""
+    # Step 1: Try to get from config file
+    if path is None:
+        path = os.path.expanduser('~/.seeweb_cloud/seeweb_keys')
+    else:
+        path = os.path.expanduser(path)
 
     try:
+        parser = configparser.ConfigParser()
+        parser.read(path)
         return parser['DEFAULT']['api_key'].strip()
-    except KeyError as exc:
-        raise ValueError(f'Missing api_key in {path}') from exc
+    except (KeyError, FileNotFoundError) as exc:
+        # Step 2: Try environment variable
+        api_key = os.environ.get('SEEWEB_API_KEY')
+        if api_key:
+            return api_key.strip()
+
+        # If neither found, raise error
+        raise ValueError(
+            f'API key not found in {path} or ENV variable SEEWEB_API_KEY'
+        ) from exc
 
 
 def normalize_gpu_name(gpu_name: str) -> str:
@@ -160,7 +176,7 @@ def get_gpu_info(gpu_count: int, gpu_name: str, gpu_vram_mb: int = 0) -> str:
         'TotalGpuMemoryInMiB': gpu_vram_mb * gpu_count if gpu_vram_mb else 0
     }
 
-    return json.dumps(gpu_info).replace('"', "'")
+    return json.dumps(gpu_info)
 
 
 def fetch_seeweb_data(api_key: str) -> List[Dict]:
