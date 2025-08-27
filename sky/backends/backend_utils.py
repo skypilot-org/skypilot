@@ -1051,9 +1051,74 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_fluidstack_authentication(config)
     elif isinstance(cloud, clouds.Hyperbolic):
         config = auth.setup_hyperbolic_authentication(config)
+    elif isinstance(cloud, clouds.Seeweb):
+        config = auth.setup_seeweb_authentication(config)
     else:
         assert False, cloud
     common_utils.dump_yaml(tmp_yaml_path, config)
+
+
+# ---------------------------------------------------------------------
+# SEEWEB – query cluster status
+# ---------------------------------------------------------------------
+def _query_status_seeweb(
+    cluster: str,
+    ray_config: Dict[str, Any],
+) -> List[status_lib.ClusterStatus]:
+    """Returns the list of statuses (one per node) for the Seeweb cluster.
+
+    • Uses the `notes` field of ECS servers to identify which cluster
+      an instance belongs to (*notes == cluster_name_on_cloud*).
+    • Translates Seeweb statuses → SkyPilot ClusterStatus enum.
+    """
+    # ray_config is unused for Seeweb
+    del ray_config
+
+    try:
+        import configparser  # pylint: disable=import-outside-toplevel
+        from pathlib import Path  # pylint: disable=import-outside-toplevel
+
+        import ecsapi  # pylint: disable=import-outside-toplevel
+
+        # Leggi API key
+        parser = configparser.ConfigParser()
+        parser.read(Path('~/.seeweb_cloud/seeweb_keys').expanduser())
+        api_key = parser['DEFAULT']['api_key'].strip()
+
+        client = ecsapi.Api(token=api_key)
+    except Exception as e:  # pragma: no cover  # pylint: disable=broad-except
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Impossibile interrogare Seeweb: {e}. '
+                               'Verifica che SEEWEB_TOKEN sia valido.') from e
+
+    # --- 2. Filtra le istanze del cluster ------------------------------------
+    servers = [
+        s for s in client.servers.list()  # GET /servers
+        if s.get('notes') == cluster
+    ]
+
+    if not servers:
+        # Nessuna istanza con quel tag → cluster terminato
+        return []
+
+    # --- 3. Mappa stato Seeweb → ClusterStatus -------------------------------
+    translate = {
+        'Running': status_lib.ClusterStatus.UP,
+        'Booting': status_lib.ClusterStatus.INIT,
+        'PoweringOn': status_lib.ClusterStatus.INIT,
+        'Off': status_lib.ClusterStatus.STOPPED,
+        'PoweringOff': status_lib.ClusterStatus.STOPPED,
+    }
+
+    return [
+        translate.get(s['status'], status_lib.ClusterStatus.INIT)
+        for s in servers
+    ]
+
+
+_QUERY_STATUS_FUNCS = {
+    'Seeweb': _query_status_seeweb,
+}
 
 
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
@@ -2956,6 +3021,24 @@ def get_clusters(
                 credentials['ssh_private_key_content'] = f.read()
         record['credentials'] = credentials
 
+    if cluster_names is not None:
+        if isinstance(cluster_names, str):
+            cluster_names = [cluster_names]
+        cluster_names = _get_glob_clusters(cluster_names, silent=True)
+        new_records = []
+        not_exist_cluster_names = []
+        for cluster_name in cluster_names:
+            for record in records:
+                if record['name'] == cluster_name:
+                    new_records.append(record)
+                    break
+            else:
+                not_exist_cluster_names.append(cluster_name)
+        if not_exist_cluster_names:
+            clusters_str = ', '.join(not_exist_cluster_names)
+            logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
+        records = new_records
+
     def _update_records_with_resources(
             records: List[Optional[Dict[str, Any]]]) -> None:
         """Add the resources to the record."""
@@ -2988,7 +3071,6 @@ def get_clusters(
         # Add resources to the records
         _update_records_with_resources(records)
         return records
-
     plural = 's' if len(records) > 1 else ''
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
