@@ -601,7 +601,7 @@ def setup_primeintellect_authentication(
 
     # Add the public key to Prime Intellect account
     client = primeintellect_utils.PrimeIntellectAPIClient()
-    client.get_or_add_ssh_key(public_key)    # Get or generate SkyPilot-managed SSH keys
+    client.get_or_add_ssh_key(public_key)
 
     config.setdefault('auth', {})
     config['auth']['ssh_public_key'] = public_key_path

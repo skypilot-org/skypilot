@@ -360,7 +360,7 @@ def get_cluster_info(
     running_instances = _filter_instances(cluster_name_on_cloud, ['ACTIVE'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
-    head_instance_ssh_user = None
+    head_ssh_user = None
     for instance_id, instance in running_instances.items():
         retry_count = 0
         max_retries = 6
@@ -408,31 +408,32 @@ def get_cluster_info(
             head_instance_id = instance_id
             # Extract SSH user from connection string
             # Format is typically "user@host" or ["user@host", "other_info"]
-            head_instance_ssh_user = None
+            head_ssh_user = None
             try:
                 if isinstance(ssh_connection, str) and '@' in ssh_connection:
-                    head_instance_ssh_user = ssh_connection.split('@', 1)[0].strip()
+                    head_ssh_user = ssh_connection.split('@', 1)[0].strip()
                 if isinstance(ssh_connection, list) and ssh_connection:
                     ssh_conn_str = ssh_connection[0]
                     if '@' in ssh_conn_str:
-                        head_instance_ssh_user = ssh_conn_str.split('@', 1)[0].strip()
-            except Exception as e:
-                # Ultimate fallback
-                head_instance_ssh_user = 'ubuntu'
-                logger.warning(f'Failed to extract SSH user from connection {ssh_connection}: {e}. Using ubuntu as fallback.')
+                        head_ssh_user = ssh_conn_str.split('@', 1)[0].strip()
+            except (AttributeError, TypeError, IndexError) as e:
+                logger.warning(
+                    f'Failed to extract SSH user from connection '
+                    f'{ssh_connection}: {e}'
+                )
 
-            if head_instance_ssh_user is not None:
-                logger.info(f'Detected SSH user "{head_instance_ssh_user}" from connection: {ssh_connection}')
-            else:
-                head_instance_ssh_user = 'ubuntu'
-                logger.warning(f'Failed to extract SSH user from connection {ssh_connection}: {e}. Using ubuntu as fallback.')
+            if head_ssh_user is None:
+                head_ssh_user = 'ubuntu'
+                logger.warning(
+                    f'Using ubuntu as fallback.'
+                )
 
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
         provider_name='primeintellect',
         provider_config=provider_config,
-        ssh_user=head_instance_ssh_user,
+        ssh_user=head_ssh_user,
     )
 
 
