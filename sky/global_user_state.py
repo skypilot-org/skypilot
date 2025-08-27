@@ -904,8 +904,7 @@ def update_last_use(cluster_name: str):
 
 
 @_init_db
-def remove_cluster(cluster_name: str, terminate: bool,
-                   remove_events: bool) -> None:
+def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
@@ -933,14 +932,6 @@ def remove_cluster(cluster_name: str, terminate: bool,
 
         if terminate:
             session.query(cluster_table).filter_by(name=cluster_name).delete()
-        if remove_events:
-            # delete events for the cluster.
-            # we keep the debug events for the cluster and let
-            # retention daemon handle them.
-            session.query(cluster_event_table).filter(
-                cluster_event_table.c.cluster_hash == cluster_hash,
-                cluster_event_table.c.type !=
-                ClusterEventType.DEBUG.value).delete()
         else:
             handle = get_handle_from_cluster_name(cluster_name)
             if handle is None:
