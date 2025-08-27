@@ -28,8 +28,6 @@ A scalable system for distributed AI model evaluation using SkyPilot. The system
 
 ## Quick Start
 
-### Option 1: With SkyPilot API Server (Recommended for Production)
-
 If you have a centralized SkyPilot API server, the eval head can auto-discover game servers:
 
 ```bash
@@ -48,18 +46,13 @@ sky launch -c exp-game-2 configs/game_server.yaml
 
 The eval head will automatically discover all clusters and services with the matching prefix through the API server.
 
-### Option 2: Using SkyServe for Game Servers (Recommended for Reliability)
 
-Deploy game servers as SkyServe services for automatic failover and scaling using the same YAML:
+You can also deploy game servers as SkyServe services for automatic failover and scaling:
 
 ```bash
-# Launch the evaluation head first
-sky launch -c eval-head configs/eval_head.yaml \
-  --env GAME_SERVER_PREFIX=exp-game
-
 # Deploy game servers as SkyServe services (with autoscaling and failover)
 # Note: Uses the same game_server.yaml - the service field is used by sky serve
-sky serve up -n exp-game-svc configs/game_server.yaml
+sky serve up -n exp-game-svc configs/game_server_service.yaml
 ```
 
 SkyServe provides:
@@ -67,20 +60,6 @@ SkyServe provides:
 - Autoscaling based on load (1-5 replicas)
 - Health checks and automatic restarts
 - Load balancing across replicas
-
-### Option 3: Without API Server (Simple Setup)
-
-For local development or simple deployments without auto-discovery:
-
-```bash
-# Launch the evaluation head
-sky launch -c eval-head configs/eval_head.yaml \
-  --env GAME_SERVER_PREFIX=exp-game
-
-# Launch game servers (eval head will auto-discover them)
-sky launch -c exp-game-1 configs/game_server.yaml
-sky launch -c exp-game-2 configs/game_server.yaml
-```
 
 ### 3. Monitor the System
 
