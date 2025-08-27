@@ -934,8 +934,12 @@ def remove_cluster(cluster_name: str, terminate: bool,
         if terminate:
             session.query(cluster_table).filter_by(name=cluster_name).delete()
         if remove_events:
-            session.query(cluster_event_table).filter_by(
-                cluster_hash=cluster_hash).delete()
+            # delete events for the cluster.
+            # we keep the debug events for the cluster and let
+            # retention daemon handle them.
+            session.query(cluster_event_table).filter(
+                cluster_event_table.c.cluster_hash == cluster_hash,
+                cluster_event_table.c.type != ClusterEventType.DEBUG.value).delete()
         else:
             handle = get_handle_from_cluster_name(cluster_name)
             if handle is None:
