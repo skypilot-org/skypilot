@@ -138,18 +138,16 @@ def _build_sky_wheel() -> pathlib.Path:
         # Use `python -m pip` instead of `pip3` for better compatibility across
         # different environments (conda, venv, UV, system Python, etc.)
         try:
-            # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture
-            # of the output.
             subprocess.run([
                 sys.executable, '-m', 'pip', 'wheel', '--no-deps', norm_path,
                 '--wheel-dir',
                 str(tmp_dir)
             ],
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.PIPE,
-                           check=True)
+                           capture_output=True,
+                           check=True,
+                           text=True)
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr.decode()
+            error_msg = e.stderr
             if 'No module named pip' in error_msg:
                 # pip module not found - provide helpful suggestions based on
                 # the available package managers
