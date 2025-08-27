@@ -124,8 +124,7 @@ sky status --endpoint 8080 eval-head
 EVAL_HEAD_ENDPOINT=$(sky status --endpoint 8080 eval-head)
 
 # Launch additional servers
-sky launch -c exp-game-N configs/game_server.yaml \
-  --env EVAL_HEAD_ENDPOINT
+sky launch -c exp-game-N configs/game_server.yaml
 ```
 
 ### Remove Game Servers
