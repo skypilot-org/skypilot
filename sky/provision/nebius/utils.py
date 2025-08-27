@@ -350,7 +350,7 @@ def launch(cluster_name_on_cloud: str,
                             error_msg += f' {operation.status.message}'
                         raise RuntimeError(error_msg)
                 # If we've fetched too many operations, or there are no more
-                # operations to fetch, we can just raise a generic error.
+                # operations to fetch, just raise a generic error.
                 if total_operations > _MAX_OPERATIONS_TO_FETCH or \
                         not operations_response.next_page_token:
                     raise RuntimeError(

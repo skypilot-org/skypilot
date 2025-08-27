@@ -23,10 +23,9 @@ _df = common.read_catalog('nebius/vms.csv')
 _DEFAULT_INSTANCE_FAMILY = [
     # CPU: AMD EPYC Genoa
     'cpu-d3',
-    # TODO(kevin): Enable if/when it's available in all regions.
-    # Today, it's only available in eu-north1.
     # CPU: Intel Ice Lake
-    # 'cpu-e2'
+    # Only available in eu-north1
+    'cpu-e2'
 ]
 
 
