@@ -132,6 +132,24 @@ def download_logs_from_api_server(
 # === Upload files to API server ===
 
 
+def chunk_iter(file_obj, chunk_size: int, chunk_index: int):
+    file_obj.seek(chunk_index * chunk_size)
+    bytes_read = 0
+    count = 0
+    while bytes_read < chunk_size:
+        # Read a smaller buffer size to keep memory usage low
+        buffer_size = min(64 * 1024, chunk_size - bytes_read)  # 64KB buffer
+        data = file_obj.read(buffer_size)
+        if not data:
+            break
+        bytes_read += len(data)
+        count += 1
+        if count % 1000 == 0:
+            logger.info(
+                f'Reading {count} chunk {chunk_index} of size {buffer_size}')
+        yield data
+
+
 class FileChunkIterator:
     """A file-like object that reads from a file in chunks."""
 
@@ -189,8 +207,7 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
                     'chunk_index': str(params.chunk_index),
                     'total_chunks': str(params.total_chunks),
                 },
-                content=FileChunkIterator(f, _UPLOAD_CHUNK_BYTES,
-                                          params.chunk_index),
+                content=chunk_iter(f, _UPLOAD_CHUNK_BYTES, params.chunk_index),
                 headers={
                     'Content-Type': 'application/octet-stream',
                     **sa_headers,

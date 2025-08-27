@@ -420,6 +420,21 @@ async def cleanup_upload_ids():
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
+async def start_loop_lag_monitor(loop: asyncio.AbstractEventLoop,
+                                 interval: float = 0.1) -> None:
+    target = loop.time() + interval
+
+    def tick():
+        nonlocal target
+        now = loop.time()
+        lag = max(0.0, now - target)
+        metrics.sky_apiserver_event_loop_lag_seconds.observe(lag)
+        target = now + interval
+        loop.call_at(target, tick)
+
+    loop.call_at(target, tick)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
@@ -445,6 +460,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             # can safely ignore the error if the task is already scheduled.
             logger.debug(f'Request {event.id} already exists.')
     asyncio.create_task(cleanup_upload_ids())
+    asyncio.create_task(start_loop_lag_monitor(asyncio.get_running_loop()))
     yield
     # Shutdown: Add any cleanup code here if needed
 
@@ -876,6 +892,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     try:
         async with aiofiles.open(zip_file_path, 'wb') as f:
             async for chunk in request.stream():
+                logger.info(f'Writing chunk, size: {len(chunk)}')
                 await f.write(chunk)
     except starlette.requests.ClientDisconnect as e:
         # Client disconnected, remove the zip file.
@@ -1388,7 +1405,7 @@ async def local_down(request: fastapi.Request) -> None:
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     while True:
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}', flush=True)
             raise fastapi.HTTPException(
@@ -1405,7 +1422,7 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
             return request_task.encode()
         # yield control to allow other coroutines to run, sleep shortly
         # to avoid storming the DB and CPU in the meantime
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.5)
 
 
 @app.get('/api/stream')
@@ -1474,7 +1491,7 @@ async def stream(
 
     # Original plain text streaming logic
     if request_id is not None:
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
@@ -1561,7 +1578,7 @@ async def api_status(
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
-            request_task = requests_lib.get_request(request_id)
+            request_task = await requests_lib.get_request_async(request_id)
             if request_task is None:
                 continue
             encoded_request_tasks.append(request_task.readable_encode())

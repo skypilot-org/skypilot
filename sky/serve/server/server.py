@@ -107,7 +107,8 @@ async def tail_logs(
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )
 
-    request_task = api_requests.get_request(request.state.request_id)
+    request_task = await api_requests.get_request_async(request.state.request_id
+                                                       )
 
     return stream_utils.stream_response(
         request_id=request_task.request_id,

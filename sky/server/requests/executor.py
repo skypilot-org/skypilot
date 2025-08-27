@@ -41,6 +41,7 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -361,10 +362,13 @@ def _request_execution_wrapper(request_id: str,
     5. Maintain the lifecycle of the temp dir used by the request.
     """
     # Handle the SIGTERM signal to abort the request processing gracefully.
+    start_time = time.time()
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
     pid = multiprocessing.current_process().pid
     logger.info(f'Running request {request_id} with pid {pid}')
+    request_type = ''
+    worker_type = ''
     with api_requests.update_request(request_id) as request_task:
         assert request_task is not None, request_id
         log_path = request_task.log_path
@@ -372,6 +376,8 @@ def _request_execution_wrapper(request_id: str,
         request_task.status = api_requests.RequestStatus.RUNNING
         func = request_task.entrypoint
         request_body = request_task.request_body
+        request_type = request_task.name
+        worker_type = request_task.schedule_type.value
 
     # Append to the log file instead of overwriting it since there might be
     # logs from previous retries.
@@ -422,6 +428,9 @@ def _request_execution_wrapper(request_id: str,
                 request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
+        finally:
+            metrics_lib.sky_apiserver_request_execution_duration_seconds.labels(
+                request_type, worker_type).observe(time.time() - start_time)
 
 
 async def execute_request_coroutine(request: api_requests.Request):
@@ -451,7 +460,7 @@ async def execute_request_coroutine(request: api_requests.Request):
                                                   **request_body.to_kwargs())
 
     async def poll_task(request_id: str) -> bool:
-        request = api_requests.get_request(request_id)
+        request = await api_requests.get_request_async(request_id)
         if request is None:
             raise RuntimeError('Request not found')
 

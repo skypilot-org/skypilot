@@ -9,6 +9,7 @@ import aiofiles
 import fastapi
 
 from sky import sky_logging
+from sky.server import metrics as metrics_lib
 from sky.server.requests import requests as requests_lib
 from sky.utils import message_utils
 from sky.utils import rich_utils
@@ -56,7 +57,7 @@ async def log_streamer(request_id: Optional[str],
     if request_id is not None:
         status_msg = rich_utils.EncodedStatusMessage(
             f'[dim]Checking request: {request_id}[/dim]')
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
 
         if request_task is None:
             raise fastapi.HTTPException(
@@ -88,8 +89,8 @@ async def log_streamer(request_id: Optional[str],
             # Sleep shortly to avoid storming the DB and CPU and allow other
             # coroutines to run. This busy waiting loop is performance critical
             # for short-running requests, so we do not want to yield too long.
-            await asyncio.sleep(0.1)
-            request_task = requests_lib.get_request(request_id)
+            await asyncio.sleep(0.5)
+            request_task = await requests_lib.get_request_async(request_id)
             if not follow:
                 break
         if show_request_waiting_spinner:
@@ -151,7 +152,7 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
         line: Optional[bytes] = await f.readline()
         if not line:
             if request_id is not None:
-                request_task = requests_lib.get_request(request_id)
+                request_task = await requests_lib.get_request_async(request_id)
                 if request_task.status > requests_lib.RequestStatus.RUNNING:
                     if (request_task.status ==
                             requests_lib.RequestStatus.CANCELLED):
@@ -179,7 +180,7 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
             # Sleep shortly to avoid storming the DB and CPU, this has
             # little impact on the responsivness here since we are waiting
             # for a new line to come in.
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
             continue
 
         # Refresh the heartbeat time, this is a trivial optimization for
