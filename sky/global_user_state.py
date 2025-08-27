@@ -53,6 +53,7 @@ _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24.0
+DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 7 * 24.0
 MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
@@ -807,12 +808,15 @@ def _get_last_cluster_event_multiple(
     return {row.cluster_hash: row.reason for row in rows}
 
 
-def cleanup_cluster_events_with_retention(retention_hours: float) -> None:
+def cleanup_cluster_events_with_retention(retention_hours: float,
+                                          event_type: ClusterEventType) -> None:
     assert _SQLALCHEMY_ENGINE is not None
+    # Once for events with type STATUS_CHANGE.
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(cluster_event_table).filter(
-            cluster_event_table.c.transitioned_at < time.time() -
-            retention_hours * 3600)
+            cluster_event_table.c.transitioned_at <
+            time.time() - retention_hours * 3600,
+            cluster_event_table.c.type == event_type.value)
         logger.debug(f'Deleting {query.count()} cluster events.')
         query.delete()
         session.commit()
@@ -827,9 +831,20 @@ async def cluster_event_retention_daemon():
         retention_hours = skypilot_config.get_nested(
             ('api_server', 'cluster_event_retention_hours'),
             DEFAULT_CLUSTER_EVENT_RETENTION_HOURS)
+        debug_retention_hours = skypilot_config.get_nested(
+            ('api_server', 'cluster_event_retention_hours_debug'),
+            DEBUG_CLUSTER_EVENT_RETENTION_HOURS)
         try:
             if retention_hours >= 0:
-                cleanup_cluster_events_with_retention(retention_hours)
+                logger.debug('Cleaning up cluster events with retention '
+                             f'{retention_hours} hours.')
+                cleanup_cluster_events_with_retention(
+                    retention_hours, ClusterEventType.STATUS_CHANGE)
+            if debug_retention_hours >= 0:
+                logger.debug('Cleaning up debug cluster events with retention '
+                             f'{debug_retention_hours} hours.')
+                cleanup_cluster_events_with_retention(debug_retention_hours,
+                                                      ClusterEventType.DEBUG)
         except asyncio.CancelledError:
             logger.info('Cluster event retention daemon cancelled')
             break
@@ -837,8 +852,9 @@ async def cluster_event_retention_daemon():
             logger.error(f'Error running cluster event retention daemon: {e}')
 
         # Run daemon at most once every hour to avoid too frequent cleanup.
-        sleep_amount = max(retention_hours * 3600,
-                           MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS)
+        sleep_amount = max(
+            min(retention_hours * 3600, debug_retention_hours * 3600),
+            MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS)
         await asyncio.sleep(sleep_amount)
 
 
