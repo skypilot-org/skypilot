@@ -471,6 +471,7 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
 
 @contextlib.asynccontextmanager
 @init_db_async
+@metrics_lib.measure_duration_async
 async def update_request_async(request_id: str):
     """Async version of update_request."""
     request = await _get_request_no_lock_async(request_id)
@@ -528,6 +529,7 @@ def get_request(request_id: str) -> Optional[Request]:
 
 
 @init_db_async
+@metrics_lib.measure_duration_async
 async def get_request_async(request_id: str) -> Optional[Request]:
     """Async version of get_request."""
     async with filelock.AsyncFileLock(request_lock_path(request_id)):

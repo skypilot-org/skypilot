@@ -1422,7 +1422,7 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
             return request_task.encode()
         # yield control to allow other coroutines to run, sleep shortly
         # to avoid storming the DB and CPU in the meantime
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.5)
 
 
 @app.get('/api/stream')

@@ -89,7 +89,7 @@ async def log_streamer(request_id: Optional[str],
             # Sleep shortly to avoid storming the DB and CPU and allow other
             # coroutines to run. This busy waiting loop is performance critical
             # for short-running requests, so we do not want to yield too long.
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
             request_task = await requests_lib.get_request_async(request_id)
             if not follow:
                 break
@@ -180,7 +180,7 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
             # Sleep shortly to avoid storming the DB and CPU, this has
             # little impact on the responsivness here since we are waiting
             # for a new line to come in.
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
             continue
 
         # Refresh the heartbeat time, this is a trivial optimization for

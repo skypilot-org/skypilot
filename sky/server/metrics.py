@@ -157,3 +157,23 @@ def measure_duration(func):
                 function=func.__name__).observe(duration)
 
     return wrapper
+
+def measure_duration_async(func):
+    """Decorator to measure and record async function execution duration.
+    
+    Records the duration in the sky_apiserver_function_duration_seconds
+    histogram with the function name as a label.
+    """
+
+    @functools.wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        start_time = time.time()
+        try:
+            result = await func(*args, **kwargs)
+            return result
+        finally:
+            duration = time.time() - start_time
+            sky_apiserver_function_duration_seconds.labels(
+                function=func.__name__).observe(duration)
+
+    return async_wrapper
