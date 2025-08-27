@@ -14,6 +14,7 @@ from sky import skypilot_config
 
 @pytest.mark.no_vast  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
+@pytest.mark.no_nebius  # Requires GCP to be enabled
 def test_log_collection_to_gcp(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Calculate timestamp 1 hour ago in ISO format
@@ -67,6 +68,7 @@ def test_log_collection_to_gcp(generic_cloud: str):
                  f'{validate_logs_cmd}'),
             ],
             f'sky down -y {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
