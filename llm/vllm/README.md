@@ -15,29 +15,29 @@ This README contains instructions to run a demo for vLLM, an open-source library
 ## Prerequisites
 Install the latest SkyPilot and check your setup of the cloud credentials:
 ```bash
-pip install git+https://github.com/skypilot-org/skypilot.git
+uv pip install skypilot
 sky check
 ```
 See the vLLM SkyPilot [YAMLs](https://github.com/skypilot-org/skypilot/tree/master/llm/vllm).
 
 
-## Serving Llama-2 with vLLM's OpenAI-compatible API server
+## Serving Llama with vLLM's OpenAI-compatible API server
 
-Before you get started, you need to have access to the Llama-2 model weights on huggingface. Please check the prerequisites section in [Llama-2 example](https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2/README.md#pre-requisites) for more details.
+Before you get started, you need to have access to the Llama model weights on huggingface. Please check the prerequisites section in [Llama example](https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2/README.md#pre-requisites) for more details.
 
-1. Start serving the Llama-2 model:
+1. Start serving the Llama model:
 ```bash
-sky launch -c vllm-llama2 serve-openai-api.yaml --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
+sky launch -c vllm-llama serve-openai-api.yaml --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
 ```
 **Optional**: Only GCP offers the specified L4 GPUs currently. To use other clouds, use the `--gpus` flag to request other GPUs. For example, to use H100 GPUs:
 ```bash
-sky launch -c vllm-llama2 serve-openai-api.yaml --gpus H100:1 --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
+sky launch -c vllm-llama serve-openai-api.yaml --gpus H100:1 --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
 ```
 **Tip**: You can also use the vLLM docker container for faster setup. Refer to [serve-openai-api-docker.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vllm/serve-openai-api-docker.yaml) for more.
 
 2. Check the IP for the cluster with:
 ```
-IP=$(sky status --ip vllm-llama2)
+IP=$(sky status --ip vllm-llama)
 ```
 3. You can now use the OpenAI API to interact with the model.
   - Query the models hosted on the cluster:
@@ -110,7 +110,7 @@ curl http://$IP:8000/v1/chat/completions \
 }
 ```
 
-## Serving Llama-2 with vLLM for more traffic using SkyServe
+## Serving Llama with vLLM for more traffic using SkyServe
 To scale up the model serving for more traffic, we introduced SkyServe to enable a user to easily deploy multiple replica of the model:
 1. Adding an `service` section in the above `serve-openai-api.yaml` file to make it an [`SkyServe Service YAML`](https://docs.skypilot.co/en/latest/serving/service-yaml-spec.html):
 
@@ -127,12 +127,12 @@ The entire Service YAML can be found here: [service.yaml](https://github.com/sky
 
 2. Start serving by using [SkyServe](https://docs.skypilot.co/en/latest/serving/sky-serve.html) CLI:
 ```bash
-sky serve up -n vllm-llama2 service.yaml
+sky serve up -n vllm-llama service.yaml
 ```
 
 3. Use `sky serve status` to check the status of the serving:
 ```bash
-sky serve status vllm-llama2
+sky serve status vllm-llama
 ```
 
 You should get a similar output as the following:
@@ -140,17 +140,17 @@ You should get a similar output as the following:
 ```console
 Services
 NAME           UPTIME     STATUS    REPLICAS   ENDPOINT
-vllm-llama2    7m 43s     READY     2/2        3.84.15.251:30001
+vllm-llama    7m 43s     READY     2/2        3.84.15.251:30001
 
 Service Replicas
 SERVICE_NAME   ID   IP             LAUNCHED       RESOURCES          STATUS  REGION
-vllm-llama2    1    34.66.255.4    11 mins ago    1x GCP({'L4': 1})  READY   us-central1
-vllm-llama2    2    35.221.37.64   15 mins ago    1x GCP({'L4': 1})  READY   us-east4
+vllm-llama     1    34.66.255.4    11 mins ago    1x GCP({'L4': 1})  READY   us-central1
+vllm-llama     2    35.221.37.64   15 mins ago    1x GCP({'L4': 1})  READY   us-east4
 ```
 
 4. Check the endpoint of the service:
 ```bash
-ENDPOINT=$(sky serve status --endpoint vllm-llama2)
+ENDPOINT=$(sky serve status --endpoint vllm-llama)
 ```
 
 4. Once it status is `READY`, you can use the endpoint to interact with the model:
