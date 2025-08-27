@@ -5,13 +5,13 @@ A scalable system for distributed AI model evaluation using SkyPilot. The system
 ## Architecture
 
 ```
-┌─────────────────┐
-│   Eval Head     │  ← Auto-discovers game servers via sky.endpoints()
-│   (1 node)      │    Sends actions to control game simulations
-└────────┬────────┘    Web dashboard at :8080
-         │
-    ┌────┴────┬──────────┬─────────┐
-    ↓         ↓          ↓         ↓
+┌──────────────┐
+│  Eval Head   │  ← Auto-discovers game servers via sky.endpoints()
+│  (1 node)    │    Sends actions to control game simulations
+└─────┬────────┘    Web dashboard at :8080
+      │
+ ┌────┴────┬──────────┬─────────┐
+ ↓         ↓          ↓         ↓
 ┌─────────┐ ┌─────────┐ ┌─────────┐
 │ Game    │ │ Game    │ │ Game    │  ← Simulation servers
 │ Server  │ │ Server  │ │ Server  │    Wait for actions on port 8081
