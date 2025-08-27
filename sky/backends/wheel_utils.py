@@ -143,9 +143,13 @@ def _build_sky_wheel() -> pathlib.Path:
                            stdout=subprocess.DEVNULL,
                            stderr=subprocess.PIPE,
                            check=True)
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError('Failed to build pip wheel for SkyPilot. '
-                               f'Error message: {e.stderr.decode()}') from e
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            if isinstance(e, FileNotFoundError):
+                msg = 'pip3 not found. Please install pip3.'
+            else:
+                msg = f'Error message: {e.stderr.decode()}'
+            raise RuntimeError('Failed to build pip wheel for SkyPilot. ' +
+                               msg) from e
 
         try:
             wheel_path = next(tmp_dir.glob(_WHEEL_PATTERN))
