@@ -16,6 +16,7 @@ import tempfile
 import textwrap
 import threading
 import time
+import re
 from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
                     Tuple, Union)
 
@@ -29,6 +30,7 @@ from sky.utils import context_utils
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import rich_utils
 
 SKY_LOG_WAITING_GAP_SECONDS = 1
 SKY_LOG_WAITING_MAX_RETRY = 5
@@ -461,12 +463,111 @@ def _should_stream_the_whole_tail_lines(head_lines_of_log_file: List[str],
     # lines, we should not stream the whole tail lines.
     return False
 
+def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool, start_streaming_at: str) -> bool:
+    """Watch the setup logs and print logs with a spinner during setup."""
+
+    # The logic of this function is complicated by the fact that during 
+    # detached setup the setup logs and the runtime logs are interleaved. That
+    # means we need to parse the logs until we see the first setup log, and then
+    # parse using a spinner until setup is complete.
+
+    # Setup line format: (setup pid=<pid>) <message> or
+    # (setup pid=<pid>, ip=<ip>) <message>
+    # Use regex to parse the line.
+    setup_line_pattern_one = r'\(setup pid=(\d+)\) (.*)'
+    setup_line_pattern_two = r'\(setup pid=(\d+), ip=(\S+)\) (.*)'
+
+    def parse_setup_line(line: str) -> Tuple[str, str]:
+        # Attempt to match the two patterns. Return all None if failed, but
+        # don't error out in case it's just a version change.
+        match = re.match(setup_line_pattern_one, line)
+        if match:
+            pid = match.group(1)
+            message = match.group(2)
+            return pid, None, message
+        match = re.match(setup_line_pattern_two, line)
+        if match:
+            pid = match.group(1)
+            ip = match.group(2)
+            message = match.group(3)
+            return pid, ip, message
+        logger.debug(f'Failed to parse setup line: {line}')
+        return None, None, None
+
+    def is_setup_line(line: str) -> bool:
+        return "(setup" in line
+
+    def is_setup_complete(line: str) -> bool:
+        return "Setup complete" in line
+
+    carry_over_line = None
+    # Step 1: parse until we see the first setup log.
+    # Get output from follow_job_logs
+    for line in _follow_job_logs(log_file,
+                                job_id=job_id,
+                                start_streaming=start_streaming,
+                                start_streaming_at=start_streaming_at):
+        if is_setup_line(line):
+            carry_over_line = line
+            break
+        else:
+            print(line, end='', flush=True)
+    
+    # Step 2: parse using a spinner until setup is complete.
+    setup_timeout = 3
+    pids = set()
+    completed_pids = set()
+
+    def update_pids(line: str) -> None:
+        pid, ip, message = parse_setup_line(line)
+        if pid == None or message == None:
+            return
+        pids.add(pid)
+        if ip != None:
+            pids.add(ip)
+        if is_setup_complete(message):
+            completed_pids.add(pid)
+
+    def resolve_str() -> str:
+        str = f"Job setup in progress: {len(completed_pids)}/{len(pids)}"
+        uncompleted_pids = pids - completed_pids
+        # Sort so the spinner doesn't interchange the order of the pids.
+        uncompleted_pids = sorted(list(uncompleted_pids))
+        for i in range(len(uncompleted_pids)):
+            pid = uncompleted_pids[i]
+            indent_symbol = ux_utils.INDENT_SYMBOL if i != len(uncompleted_pids) - 1 else ux_utils.INDENT_SYMBOL_LAST
+            str += f"\n{indent_symbol} Worker: {pid} may have stalled, check logs with: sky logs lloyd-test 1 --no-follow | grep pid={pid}"
+        return str
+
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(
+            f'Job setup in progress')):
+        if carry_over_line is not None:
+            pid, ip, message = parse_setup_line(carry_over_line)
+            if pid == None or message == None:
+
+            print(f'Lloyd: pid: {pid}, ip: {ip}, message: {message}')
+            print(line, end='', flush=True)
+        for line in _follow_job_logs(log_file,
+                                    job_id=job_id,
+                                    start_streaming=start_streaming,
+                                    start_streaming_at=start_streaming_at):
+            pid, ip, message = parse_setup_line(line)
+            print(f'Lloyd: pid: {pid}, ip: {ip}, message: {message}')
+            print(line, end='', flush=True)
+
+    for line in _follow_job_logs(log_file,
+                                job_id=job_id,
+                                start_streaming=start_streaming,
+                                start_streaming_at=start_streaming_at):
+        print(line, end='', flush=True)
 
 def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
               managed_job_id: Optional[int] = None,
               follow: bool = True,
-              tail: int = 0) -> None:
+              tail: int = 0,
+              setup_spinner: bool = True) -> None:
     """Tail the logs of a job.
 
     Args:
@@ -544,11 +645,14 @@ def tail_logs(job_id: Optional[int],
                 print(end='', flush=True)
             # Now, the cursor is at the end of the last lines
             # if tail > 0
-            for line in _follow_job_logs(log_file,
-                                         job_id=job_id,
-                                         start_streaming=start_streaming,
-                                         start_streaming_at=start_stream_at):
-                print(line, end='', flush=True)
+            if setup_spinner:
+                _setup_watcher(log_file, job_id, start_streaming, start_stream_at)
+            else:
+                for line in _follow_job_logs(log_file,
+                                            job_id=job_id,
+                                            start_streaming=start_streaming,
+                                            start_streaming_at=start_stream_at):
+                    print(line, end='', flush=True)
     else:
         try:
             start_streaming = False
