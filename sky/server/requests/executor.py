@@ -275,6 +275,10 @@ def override_request_env_and_config(
         request_id: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
+    # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API server
+    # affecting client requests. If set on the client side, it will be
+    # overridden by the request body.
+    os.environ.pop('SKYPILOT_DEBUG', None)
     os.environ.update(request_body.env_vars)
     # Note: may be overridden by AuthProxyMiddleware.
     # TODO(zhwu): we need to make the entire request a context available to the

@@ -7,7 +7,6 @@ import contextlib
 import datetime
 import hashlib
 import json
-import logging
 import multiprocessing
 import os
 import pathlib
@@ -24,7 +23,6 @@ import zipfile
 import aiofiles
 import fastapi
 from fastapi.middleware import cors
-from passlib.hash import apr_md5_crypt
 import starlette.middleware.base
 import uvloop
 
@@ -69,7 +67,6 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
-from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest
@@ -85,31 +82,6 @@ P = ParamSpec('P')
 
 _SERVER_USER_HASH_KEY = 'server_user_hash'
 
-
-def _add_timestamp_prefix_for_server_logs() -> None:
-    server_logger = sky_logging.init_logger('sky.server')
-    # Clear existing handlers first to prevent duplicates
-    server_logger.handlers.clear()
-    # Disable propagation to avoid the root logger of SkyPilot being affected
-    server_logger.propagate = False
-    # Add date prefix to the log message printed by loggers under
-    # server.
-    stream_handler = logging.StreamHandler(sys.stdout)
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        stream_handler.setLevel(logging.DEBUG)
-    else:
-        stream_handler.setLevel(logging.INFO)
-    stream_handler.flush = sys.stdout.flush  # type: ignore
-    stream_handler.setFormatter(sky_logging.FORMATTER)
-    server_logger.addHandler(stream_handler)
-    # Add date prefix to the log message printed by uvicorn.
-    for name in ['uvicorn', 'uvicorn.access']:
-        uvicorn_logger = logging.getLogger(name)
-        uvicorn_logger.handlers.clear()
-        uvicorn_logger.addHandler(stream_handler)
-
-
-_add_timestamp_prefix_for_server_logs()
 logger = sky_logging.init_logger(__name__)
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
@@ -148,7 +120,7 @@ def _try_set_basic_auth_user(request: fastapi.Request):
         username_encoded = username.encode('utf8')
         db_username_encoded = user.name.encode('utf8')
         if (username_encoded == db_username_encoded and
-                apr_md5_crypt.verify(password, user.password)):
+                common.crypt_ctx.verify(password, user.password)):
             request.state.auth_user = user
             break
 
@@ -248,7 +220,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             username_encoded = username.encode('utf8')
             db_username_encoded = user.name.encode('utf8')
             if (username_encoded == db_username_encoded and
-                    apr_md5_crypt.verify(password, user.password)):
+                    common.crypt_ctx.verify(password, user.password)):
                 valid_user = True
                 request.state.auth_user = user
                 await authn.override_user_info_in_request_body(request, user)
@@ -852,6 +824,15 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         chunk_index: The chunk index, starting from 0.
         total_chunks: The total number of chunks.
     """
+    # Field _body would be set if the request body has been received, fail fast
+    # to surface potential memory issues, i.e. catch the issue in our smoke
+    # test.
+    # pylint: disable=protected-access
+    if hasattr(request, '_body'):
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail='Upload request body should not be received before streaming'
+        )
     # Add the upload id to the cleanup list.
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
@@ -919,8 +900,9 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         zip_file_path.rename(zip_file_path.with_suffix(''))
         missing_chunks = get_missing_chunks(total_chunks)
         if missing_chunks:
-            return payloads.UploadZipFileResponse(status='uploading',
-                                                  missing_chunks=missing_chunks)
+            return payloads.UploadZipFileResponse(
+                status=responses.UploadStatus.UPLOADING.value,
+                missing_chunks=missing_chunks)
         zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
         async with aiofiles.open(zip_file_path, 'wb') as zip_file:
             for chunk in range(total_chunks):
@@ -937,7 +919,8 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     unzip_file(zip_file_path, client_file_mounts_dir)
     if total_chunks > 1:
         shutil.rmtree(chunk_dir)
-    return payloads.UploadZipFileResponse(status='completed')
+    return payloads.UploadZipFileResponse(
+        status=responses.UploadStatus.COMPLETED.value)
 
 
 def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
@@ -1861,6 +1844,8 @@ if __name__ == '__main__':
     import uvicorn
 
     from sky.server import uvicorn as skyuvicorn
+
+    skyuvicorn.add_timestamp_prefix_for_server_logs()
 
     # Initialize global user state db
     global_user_state.initialize_and_get_db()

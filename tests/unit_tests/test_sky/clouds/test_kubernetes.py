@@ -624,7 +624,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertEqual(deploy_vars['k8s_resource_key'], 'nvidia.com/gpu')
         self.assertFalse(deploy_vars['tpu_requested'])  # H100 is GPU, not TPU
 
-    @patch('yaml.safe_load')
+    @patch('sky.utils.yaml_utils.safe_load')
     @patch('sky.utils.common_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_merged_with_ipc_lock_capability(
@@ -713,7 +713,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
-    @patch('yaml.safe_load')
+    @patch('sky.utils.yaml_utils.safe_load')
     @patch('sky.utils.common_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_without_ipc_lock_capability(
@@ -796,7 +796,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 class TestKubernetesVolumeMerging(unittest.TestCase):
     """Test cases for merging user-specified volume mounts and volumes with pod_config."""
 
-    @patch('yaml.safe_load')
+    @patch('sky.utils.yaml_utils.safe_load')
     @patch('sky.utils.common_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_volume_mounts_merged_correctly(self,
@@ -1045,6 +1045,47 @@ class TestGKEDWSConfig(unittest.TestCase):
             keys=('dws',),
             default_value={},
             override_configs=cluster_overrides)
+
+
+class TestKubernetesVolumeNameValidation(unittest.TestCase):
+
+    def test_valid_volume_names(self):
+        valid_names = [
+            'data',
+            'data1',
+            'data-1',
+            'data-1.volume',
+            'a-b.c-d',
+            'a' * 10 + '.' + 'b' * 10,
+        ]
+        for name in valid_names:
+            ok, reason = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertTrue(ok, msg=f'{name} should be valid, got: {reason}')
+
+    def test_invalid_due_to_length(self):
+        too_long = 'a' * 254  # > 253
+        ok, reason = kubernetes.Kubernetes.is_volume_name_valid(too_long)
+        self.assertFalse(ok)
+        self.assertIn('maximum length', reason or '')
+
+    def test_invalid_characters(self):
+        # Uppercase and underscore are invalid
+        for name in ['Data', 'data_volume', 'data@vol', 'data+vol']:
+            ok, _ = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertFalse(ok, msg=f'{name} should be invalid')
+
+    def test_invalid_start_or_end(self):
+        for name in ['-data', 'data-', '.data', 'data.']:
+            ok, _ = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertFalse(ok, msg=f'{name} should be invalid')
+
+    def test_invalid_double_dot(self):
+        ok, _ = kubernetes.Kubernetes.is_volume_name_valid('a..b')
+        self.assertFalse(ok)
+
+    def test_empty_string_invalid(self):
+        ok, _ = kubernetes.Kubernetes.is_volume_name_valid('')
+        self.assertFalse(ok)
 
 
 if __name__ == '__main__':

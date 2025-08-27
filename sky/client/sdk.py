@@ -571,7 +571,7 @@ def launch(
                     idle_minutes=idle_minutes_to_autostop,
                     wait_for=wait_for)
             if resource.autostop_config is not None:
-                # For backward-compatbility, get the final autostop config for
+                # For backward-compatibility, get the final autostop config for
                 # admin policy.
                 # TODO(aylei): remove this after 0.12.0
                 down = resource.autostop_config.down

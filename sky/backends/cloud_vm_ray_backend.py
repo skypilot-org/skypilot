@@ -22,7 +22,6 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 import psutil
-import yaml
 
 from sky import backends
 from sky import catalog
@@ -77,6 +76,7 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import grpc
@@ -2351,7 +2351,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # If the cluster yaml is not available,
                 # we skip updating the cluster info.
                 return
-            config = yaml.safe_load(yaml_str)
+            config = yaml_utils.safe_load(yaml_str)
             try:
                 cluster_info = provision_lib.get_cluster_info(
                     provider_name,
@@ -2736,6 +2736,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             num_ips = 1
         return num_ips
 
+    @property
+    def is_grpc_enabled_with_flag(self) -> bool:
+        """Returns whether this handle has gRPC enabled and gRPC flag is set."""
+        return env_options.Options.ENABLE_GRPC.get() and self.is_grpc_enabled
+
     def __setstate__(self, state):
         self._version = self._VERSION
 
@@ -2819,6 +2824,34 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
 class LocalResourcesHandle(CloudVmRayResourceHandle):
     """A handle for local resources."""
+
+    def __init__(
+            self,
+            *,
+            cluster_name: str,
+            cluster_name_on_cloud: str,
+            cluster_yaml: Optional[str],
+            launched_nodes: int,
+            launched_resources: resources_lib.Resources,
+            stable_internal_external_ips: Optional[List[Tuple[str,
+                                                              str]]] = None,
+            stable_ssh_ports: Optional[List[int]] = None,
+            cluster_info: Optional[provision_common.ClusterInfo] = None
+    ) -> None:
+        super().__init__(
+            cluster_name=cluster_name,
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            cluster_yaml=cluster_yaml,
+            launched_nodes=launched_nodes,
+            launched_resources=launched_resources,
+            stable_internal_external_ips=stable_internal_external_ips,
+            stable_ssh_ports=stable_ssh_ports,
+            cluster_info=cluster_info)
+        # TODO (kyuds): handle jobs consolidation mode. Currently,
+        # jobs consolidation mode will not run a skylet, hence
+        # grpc server will not run. In the future, we should
+        # figure out a way to start grpc in consolidation mode.
+        self.is_grpc_enabled = False
 
     @context_utils.cancellation_guard
     @annotations.lru_cache(scope='global')
@@ -4912,7 +4945,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
-            if env_options.Options.ENABLE_GRPC.get() and handle.is_grpc_enabled:
+            if handle.is_grpc_enabled_with_flag:
                 request = autostopv1_pb2.SetAutostopRequest(
                     idle_minutes=idle_minutes_to_autostop,
                     backend=self.NAME,
@@ -4957,7 +4990,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # The head node of the cluster is not UP or in an abnormal state.
             # We cannot check if the cluster is autostopping.
             return False
-        if env_options.Options.ENABLE_GRPC.get() and handle.is_grpc_enabled:
+        if handle.is_grpc_enabled_with_flag:
             try:
                 request = autostopv1_pb2.IsAutostoppingRequest()
                 response = backend_utils.invoke_skylet_with_retries(
