@@ -89,7 +89,6 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 @pytest.mark.no_hyperbolic  # Doesn't support Hyperbolic for now
-@pytest.mark.no_nebius  # Nebius images does not have Docker installed.
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.parametrize(
     'image_id',
@@ -394,7 +393,6 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 @pytest.mark.no_hyperbolic  # Doesn't support Hyperbolic for now
-@pytest.mark.no_nebius  # Nebius images does not have Docker installed.
 # TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
