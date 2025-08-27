@@ -20,7 +20,6 @@ provider. See the comments in setup_lambda_authentication)
 """
 import copy
 import functools
-import json
 import os
 import re
 import socket
