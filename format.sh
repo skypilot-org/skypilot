@@ -21,16 +21,43 @@ builtin cd "$(dirname "${BASH_SOURCE:-$0}")"
 ROOT="$(git rev-parse --show-toplevel)"
 builtin cd "$ROOT" || exit 1
 
+# Check if the environment used is created with uv
+IS_UV_ENV=false
+if [ -x "$(command -v uv)" ]; then
+  echo "Checking if it's a uv environment"
+  CUR_ENV=$(python -c 'import sys; print(sys.prefix)')
+  # check if pyvenv.cfg exists in the environment
+  if [[ -f "$CUR_ENV/pyvenv.cfg" ]]; then
+    IS_UV_ENV=$(cat $CUR_ENV/pyvenv.cfg |  grep -q -E 'uv = .+' && echo true || echo false)
+  fi
+fi
+PIP_CMD="pip"
+if [[ "$IS_UV_ENV" == true ]]; then
+  tput setaf 3
+  echo "This is a uv environment: 'uv pip list' will be used to check the versions of the tools instead of 'pip list'"
+  tput sgr0
+  PIP_CMD="uv pip"
+fi
+
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
 PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
-PYLINT_QUOTES_VERSION=$(pip list | grep pylint-quotes | awk '{print $2}')
+
+PYLINT_QUOTES_VERSION=$((eval "$PIP_CMD" list | grep pylint-quotes | awk '{print $2}') || echo '')
+if [[ -z "$PYLINT_QUOTES_VERSION" ]]; then
+    tput setaf 1
+    echo "pylint-quotes is not installed"
+    tput sgr0
+    exit 1
+fi
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
 BLACK_VERSION=$(black --version | head -n 1 | awk '{print $2}')
 
 # # params: tool name, tool version, required version
 tool_version_check() {
     if [[ $2 != $3 ]]; then
+        tput setaf 1
         echo "Wrong $1 version installed: $3 is required, not $2."
+        tput sgr0
         exit 1
     fi
 }
