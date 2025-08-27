@@ -78,19 +78,11 @@ def dump_yaml(path: str,
 
 def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
     """Dumps a YAML string.
-
     Args:
         config: the configuration to dump.
-
     Returns:
         The YAML string.
     """
-    global _c_extension_unavailable
-
-    if isinstance(config, list):
-        dump_func = yaml.dump_all  # type: ignore
-    else:
-        dump_func = yaml.dump  # type: ignore
 
     # https://github.com/yaml/pyyaml/issues/127
     class LineBreakDumper(yaml.SafeDumper):
@@ -100,28 +92,11 @@ def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
             if len(self.indents) == 1:
                 super().write_line_break()
 
-    if _c_extension_unavailable:
-        return dump_func(config,
-                         Dumper=LineBreakDumper,
-                         sort_keys=False,
-                         default_flow_style=False)
-
-    try:
-        # https://github.com/yaml/pyyaml/issues/127
-        class CLineBreakDumper(yaml.CSafeDumper):
-
-            def write_line_break(self, data=None):
-                super().write_line_break(data)
-                if len(self.indents) == 1:
-                    super().write_line_break()
-
-        return dump_func(config,
-                         Dumper=CLineBreakDumper,
-                         sort_keys=False,
-                         default_flow_style=False)
-    except AttributeError:
-        _c_extension_unavailable = True
-        return dump_func(config,
-                         Dumper=LineBreakDumper,
-                         sort_keys=False,
-                         default_flow_style=False)
+    if isinstance(config, list):
+        dump_func = yaml.dump_all  # type: ignore
+    else:
+        dump_func = yaml.dump  # type: ignore
+    return dump_func(config,
+                     Dumper=LineBreakDumper,
+                     sort_keys=False,
+                     default_flow_style=False)
