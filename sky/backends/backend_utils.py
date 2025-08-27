@@ -2981,7 +2981,7 @@ def get_clusters(
         This is useful for the client side to setup the ssh config of the
         cluster.
         """
-        filtered_records = []
+        records_with_handle = []
 
         # only act on records that have a handle
         for record in records:
@@ -2996,13 +2996,13 @@ def get_clusters(
             record[
                 'resources_str_full'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=False)
-            filtered_records.append(record)
-        if len(filtered_records) == 0:
+            records_with_handle.append(record)
+        if len(records_with_handle) == 0:
             return
 
-        handles = [record['handle'] for record in filtered_records]
+        handles = [record['handle'] for record in records_with_handle]
         credentials = ssh_credentials_from_handles(handles)
-        for record, credential in zip(filtered_records, credentials):
+        for record, credential in zip(records_with_handle, credentials):
             if not credential:
                 continue
             ssh_private_key_path = credential.get('ssh_private_key', None)

@@ -2135,7 +2135,7 @@ def get_cluster_yaml_dict_multiple(
         if yaml_str is None:
             raise ValueError(
                 f'Cluster yaml {cluster_yaml_paths[idx]} not found.')
-        yaml_dicts.append(yaml.safe_load(yaml_str))
+        yaml_dicts.append(yaml_utils.safe_load(yaml_str))
     return yaml_dicts
 
 
