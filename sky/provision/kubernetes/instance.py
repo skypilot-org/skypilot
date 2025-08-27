@@ -1315,6 +1315,9 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                     transitioned_at=int(
                         event.metadata.creation_timestamp.timestamp()),
                     expose_duplicate_error=True)
+                logger.debug(f'[pod {pod_name}] encountered new pod event: '
+                             f'{event.metadata.creation_timestamp} '
+                             f'{event.reason} {event.message}')
             except db_utils.UniqueConstraintViolationError:
                 insert_new_pod_event = False
             else:
@@ -1353,6 +1356,10 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                         transitioned_at=int(
                             event.metadata.creation_timestamp.timestamp()),
                         expose_duplicate_error=True)
+                    logger.debug(
+                        f'[pod {pod_name}] encountered new node event: '
+                        f'{event.metadata.creation_timestamp} '
+                        f'{event.reason} {event.message}')
                 except db_utils.UniqueConstraintViolationError:
                     insert_new_node_event = False
                 else:
@@ -1360,9 +1367,9 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                     inserted_node_events += 1
 
         logger.debug(f'[pod {pod_name}: node {last_scheduled_node}] '
-                    f'processed {len(node_events)} node events and '
-                    f'inserted {inserted_node_events} new node events '
-                    'previously unseen')
+                     f'processed {len(node_events)} node events and '
+                     f'inserted {inserted_node_events} new node events '
+                     'previously unseen')
     else:
         logger.debug(f'[pod {pod_name}] could not determine the node '
                      'the pod was scheduled to')
