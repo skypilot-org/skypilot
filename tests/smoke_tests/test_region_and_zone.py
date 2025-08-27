@@ -239,7 +239,7 @@ def test_gcp_zone():
 # is running remotely. We should fix this.
 @pytest.mark.no_vast  # Requires AWS
 @pytest.mark.no_hyperbolic  # Requires AWS
-@pytest.mark.no_nebius  # Nebius image does not have Docker installed.
+@pytest.mark.no_nebius  # Nebius images does not have Docker installed.
 @pytest.mark.parametrize(
     'image_id',
     [
