@@ -49,14 +49,14 @@ SkyPilot cuts your cloud costs & maximizes GPU availability:
 
 ## Clusters
 
-- [Interactive Development]({{BASE_URL}}/examples/interactive-development.html.md): SSH, sync code, and connect IDEs
+- [Interactive Development]({{BASE_URL}}/examples/interactive-development.html.md): SSH, sync code, and connect IDEs on cloud and Kubernetes
 - [Cluster Jobs]({{BASE_URL}}/reference/job-queue.html.md): Job queue and scheduling
 - [Auto-failover]({{BASE_URL}}/examples/auto-failover.html.md): Automatic failover across regions/clouds
 - [Auto-stop]({{BASE_URL}}/reference/auto-stop.html.md): Automatically stop idle clusters
 
 ## Jobs
 
-- [Managed Jobs]({{BASE_URL}}/examples/managed-jobs.html.md): Auto-recover from preemptions with managed spot instances
+- [Managed Jobs]({{BASE_URL}}/examples/managed-jobs.html.md): Auto-recover from job failure and preemptions.
 - [Multi-Node Jobs]({{BASE_URL}}/running-jobs/distributed-jobs.html.md): Run distributed training and inference
 - [Many Parallel Jobs]({{BASE_URL}}/running-jobs/many-jobs.html.md): Run many jobs efficiently
 - [Model Training Guide]({{BASE_URL}}/reference/training-guide.html.md): Best practices for training
