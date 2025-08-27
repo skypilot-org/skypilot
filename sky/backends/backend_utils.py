@@ -1414,8 +1414,6 @@ def ssh_credentials_from_handles(
 ) -> List[Dict[str, Any]]:
     """Returns ssh_user, ssh_private_key and ssh_control name.
     """
-    return_dicts: List[Dict[str, Any]] = []
-
     non_empty_cluster_yaml_paths = [
         handle.cluster_yaml
         for handle in handles
@@ -1429,12 +1427,13 @@ def ssh_credentials_from_handles(
             non_empty_cluster_yaml_paths, cluster_yaml_dicts)
     }
 
+    credentials_to_return: List[Dict[str, Any]] = []
     for handle in handles:
+        if handle.cluster_yaml is None:
+            credentials_to_return.append(dict())
+            continue
         ssh_user = handle.ssh_user
         docker_user = handle.docker_user
-        if handle.cluster_yaml is None:
-            return_dicts.append(dict())
-            continue
         config = cluster_yaml_dicts_to_index[handle.cluster_yaml]
         auth_section = config['auth']
         if ssh_user is None:
@@ -1461,9 +1460,9 @@ def ssh_credentials_from_handles(
         # If we are running ssh command on kubernetes node.
         if 'kubernetes' in ssh_provider_module:
             credentials['disable_control_master'] = True
-        return_dicts.append(credentials)
+        credentials_to_return.append(credentials)
 
-    return return_dicts
+    return credentials_to_return
 
 
 def parallel_data_transfer_to_nodes(
@@ -2988,20 +2987,18 @@ def get_clusters(
         for record in records:
             if record is None:
                 continue
-            if record['handle'] is None:
-                continue
-            filtered_records.append(record)
-        if len(filtered_records) == 0:
-            return
-
-        for record in filtered_records:
             handle = record['handle']
+            if handle is None:
+                continue
             record[
                 'resources_str'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=True)
             record[
                 'resources_str_full'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=False)
+            filtered_records.append(record)
+        if len(filtered_records) == 0:
+            return
 
         handles = [record['handle'] for record in filtered_records]
         credentials = ssh_credentials_from_handles(handles)
