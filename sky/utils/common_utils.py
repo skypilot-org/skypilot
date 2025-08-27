@@ -624,22 +624,40 @@ def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
         The YAML string.
     """
 
-    # https://github.com/yaml/pyyaml/issues/127
-    class LineBreakDumper(yaml.SafeDumper):
-
-        def write_line_break(self, data=None):
-            super().write_line_break(data)
-            if len(self.indents) == 1:
-                super().write_line_break()
-
     if isinstance(config, list):
         dump_func = yaml.dump_all  # type: ignore
     else:
         dump_func = yaml.dump  # type: ignore
-    return dump_func(config,
-                     Dumper=LineBreakDumper,
-                     sort_keys=False,
-                     default_flow_style=False)
+
+    try:
+        # pylint: disable=import-outside-toplevel
+        from yaml import CSafeDumper
+
+        # https://github.com/yaml/pyyaml/issues/127
+        class CLineBreakDumper(CSafeDumper):
+
+            def write_line_break(self, data=None):
+                super().write_line_break(data)
+                if len(self.indents) == 1:
+                    super().write_line_break()
+
+        return dump_func(config,
+                         Dumper=CLineBreakDumper,
+                         sort_keys=False,
+                         default_flow_style=False)
+    except ImportError:
+        # https://github.com/yaml/pyyaml/issues/127
+        class LineBreakDumper(yaml.SafeDumper):
+
+            def write_line_break(self, data=None):
+                super().write_line_break(data)
+                if len(self.indents) == 1:
+                    super().write_line_break()
+
+        return dump_func(config,
+                         Dumper=LineBreakDumper,
+                         sort_keys=False,
+                         default_flow_style=False)
 
 
 def make_decorator(cls, name_or_fn: Union[str, Callable],
