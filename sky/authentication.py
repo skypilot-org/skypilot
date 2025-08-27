@@ -388,8 +388,7 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                                 },
                                 type='rsa').get_result()
         vpc_key_id = res['id']
-        name = res['name']
-        logger.debug(f'Created new key: {name}')
+        logger.debug(f'Created new key: {res["name"]}')
 
     except ibm.ibm_cloud_sdk_core.ApiException as e:
         if 'Key with fingerprint already exists' in e.message:
@@ -397,8 +396,7 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 if (ssh_key_data in key['public_key'] or
                         key['public_key'] in ssh_key_data):
                     vpc_key_id = key['id']
-                    key_name = key['name']
-                    logger.debug(f'Reusing key:{key_name}, '
+                    logger.debug(f'Reusing key:{key["name"]}, '
                                  f'matching existing public key.')
                     break
         elif 'Key with name already exists' in e.message:
