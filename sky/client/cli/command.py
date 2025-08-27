@@ -89,6 +89,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
 from sky.volumes import utils as volumes_utils
 from sky.volumes.client import sdk as volumes_sdk
@@ -589,7 +590,7 @@ def _check_yaml_only(
     try:
         with open(entrypoint, 'r', encoding='utf-8') as f:
             try:
-                config = list(yaml.safe_load_all(f))
+                config = list(yaml_utils.safe_load_all(f))
                 if config:
                     # FIXME(zongheng): in a chain DAG YAML it only returns the
                     # first section. OK for downstream but is weird.

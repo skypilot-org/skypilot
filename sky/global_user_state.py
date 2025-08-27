@@ -25,7 +25,6 @@ from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
-import yaml
 
 from sky import models
 from sky import sky_logging
@@ -35,6 +34,7 @@ from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import registry
 from sky.utils import status_lib
+from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 
@@ -2091,7 +2091,7 @@ def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
     yaml_str = get_cluster_yaml_str(cluster_yaml_path)
     if yaml_str is None:
         raise ValueError(f'Cluster yaml {cluster_yaml_path} not found.')
-    return yaml.safe_load(yaml_str)
+    return yaml_utils.safe_load(yaml_str)
 
 
 @_init_db

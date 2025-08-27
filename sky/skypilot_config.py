@@ -75,6 +75,7 @@ from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 from sky.utils.kubernetes import config_map_utils
 
@@ -532,7 +533,7 @@ def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
         if len(key) == 0 or len(value) == 0:
             raise ValueError(f'Invalid config override: {arg}. '
                              'Please use the format: key=value')
-        value = yaml.safe_load(value)
+        value = yaml_utils.safe_load(value)
         nested_keys = tuple(key.split('.'))
         config.set_nested(nested_keys, value)
     return config
@@ -585,7 +586,8 @@ def _reload_config_as_server() -> None:
                     row = session.query(config_yaml_table).filter_by(
                         key=key).first()
                 if row:
-                    db_config = config_utils.Config(yaml.safe_load(row.value))
+                    db_config = config_utils.Config(
+                        yaml_utils.safe_load(row.value))
                     db_config.pop_nested(('db',), None)
                     return db_config
                 return None

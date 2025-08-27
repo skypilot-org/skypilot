@@ -38,6 +38,7 @@ from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import jinja2
@@ -1898,7 +1899,7 @@ def is_kubeconfig_exec_auth(
 
     # Load the kubeconfig for the context
     kubeconfig_text = _get_kubeconfig_text_for_context(context)
-    kubeconfig = yaml.safe_load(kubeconfig_text)
+    kubeconfig = yaml_utils.safe_load(kubeconfig_text)
 
     # Get the user details
     user_details = kubeconfig['users']
@@ -2601,7 +2602,7 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
                               image=ssh_jump_image,
                               secret=ssh_key_secret,
                               service_type=service_type)
-    content = yaml.safe_load(cont)
+    content = yaml_utils.safe_load(cont)
     return content
 
 
@@ -2750,7 +2751,7 @@ def combine_pod_config_fields(
     """
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
-    yaml_obj = yaml.safe_load(yaml_content)
+    yaml_obj = yaml_utils.safe_load(yaml_content)
     # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
     if isinstance(cloud, clouds.SSH):
@@ -2795,7 +2796,7 @@ def combine_metadata_fields(cluster_yaml_path: str,
 
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
-    yaml_obj = yaml.safe_load(yaml_content)
+    yaml_obj = yaml_utils.safe_load(yaml_content)
 
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
@@ -3689,7 +3690,7 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     """
     # TODO(kyuds): GC cache files
     with open(kubeconfig_path, 'r', encoding='utf-8') as file:
-        config = yaml.safe_load(file)
+        config = yaml_utils.safe_load(file)
     normalized = yaml.dump(config, sort_keys=True)
     hashed = hashlib.sha1(normalized.encode('utf-8')).hexdigest()
     path = os.path.expanduser(

@@ -4,7 +4,6 @@ import inspect
 import json
 import os
 import re
-import typing
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
@@ -15,7 +14,6 @@ from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import docker_utils
@@ -26,11 +24,7 @@ from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
-
-if typing.TYPE_CHECKING:
-    import yaml
-else:
-    yaml = adaptors_common.LazyImport('yaml')
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -836,7 +830,7 @@ class Task:
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
             # to raise errors on duplicate keys.
             user_specified_yaml = f.read()
-            config = yaml.safe_load(user_specified_yaml)
+            config = yaml_utils.safe_load(user_specified_yaml)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():
@@ -1611,7 +1605,7 @@ class Task:
         if use_user_specified_yaml:
             if self._user_specified_yaml is None:
                 return self._to_yaml_config(redact_secrets=True)
-            config = yaml.safe_load(self._user_specified_yaml)
+            config = yaml_utils.safe_load(self._user_specified_yaml)
             if config.get('secrets') is not None:
                 config['secrets'] = {k: '<redacted>' for k in config['secrets']}
             return config
