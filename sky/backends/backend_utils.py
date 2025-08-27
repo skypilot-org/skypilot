@@ -3001,9 +3001,11 @@ def get_clusters(
 
         handles = [record['handle'] for record in records_with_handle]
         credentials = ssh_credentials_from_handles(handles)
-        for record, credential in zip(records_with_handle, credentials):
+
+        def _get_ssh_private_key_content(
+                credential: Dict[str, Any]) -> Optional[str]:
             if not credential:
-                continue
+                return None
             ssh_private_key_path = credential.get('ssh_private_key', None)
             if ssh_private_key_path is not None:
                 if not os.path.exists(os.path.expanduser(ssh_private_key_path)):
@@ -3011,13 +3013,21 @@ def get_clusters(
                 with open(os.path.expanduser(ssh_private_key_path),
                           'r',
                           encoding='utf-8') as f:
-                    credential['ssh_private_key_content'] = f.read()
+                    return f.read()
             else:
                 private_key_path, _ = auth.get_or_generate_keys()
                 with open(os.path.expanduser(private_key_path),
                           'r',
                           encoding='utf-8') as f:
-                    credential['ssh_private_key_content'] = f.read()
+                    return f.read()
+
+        ssh_private_key_contents = subprocess_utils.run_in_parallel(
+            _get_ssh_private_key_content, credentials)
+        for record, credential, ssh_private_key_content in zip(
+                records_with_handle, credentials, ssh_private_key_contents):
+            if not credential:
+                continue
+            credential['ssh_private_key_content'] = ssh_private_key_content
             record['credentials'] = credential
 
     def _update_records_with_resources(
