@@ -63,6 +63,10 @@ class Nebius(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces are not supported on '
              f'{_REPR}.'),
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            ('Custom image_id is currently not supported on Nebius.'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            ('Docker images are currently not supported on Nebius.'),
     }
     # Nebius maximum instance name length defined as <= 63 as a hostname length
     # 63 - 8 - 5 = 50 characters since
