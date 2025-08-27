@@ -33,6 +33,7 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import subprocess_utils
+from sky.utils import yaml_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_managed_jobs_recovery to make sure the
@@ -450,7 +451,7 @@ def override_sky_config(
         original_config = skypilot_config.config_utils.Config()
     overlay_config = skypilot_config.overlay_skypilot_config(
         original_config, override_sky_config_dict)
-    temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
+    temp_config_file.write(yaml_utils.dump_yaml_str(dict(overlay_config)))
     temp_config_file.flush()
     # Update the environment variable to use the temporary file
     env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG] = temp_config_file.name

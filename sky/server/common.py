@@ -41,6 +41,7 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import aiohttp
@@ -816,7 +817,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
         return str(client_file_mounts_dir /
                    file_mounts_mapping[original_path].lstrip('/'))
 
-    task_configs = common_utils.read_yaml_all(str(client_task_path))
+    task_configs = yaml_utils.read_yaml_all(str(client_task_path))
     for task_config in task_configs:
         if task_config is None:
             continue
@@ -869,7 +870,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     # We can switch to using string, but this is to make it easier to debug, by
     # persisting the translated task yaml file.
     translated_client_task_path = client_dir / f'{task_id}_translated.yaml'
-    common_utils.dump_yaml(str(translated_client_task_path), task_configs)
+    yaml_utils.dump_yaml(str(translated_client_task_path), task_configs)
 
     dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
     return dag

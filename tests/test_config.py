@@ -14,9 +14,9 @@ from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import annotations
-from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
+from sky.utils import yaml_utils
 
 DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'
@@ -333,7 +333,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     # Check that dumping the config to a file with the new None can be reloaded
     new_config2 = skypilot_config.set_nested(('aws', 'ssh_proxy_command'), None)
     new_config_path = tmp_path / 'new_config.yaml'
-    common_utils.dump_yaml(new_config_path, new_config2)
+    yaml_utils.dump_yaml(new_config_path, new_config2)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', new_config_path)
     skypilot_config.reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
@@ -348,7 +348,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     del new_config3['aws']['ssh_proxy_command']
     del new_config3['aws']['use_internal_ips']
     new_config_path = tmp_path / 'new_config3.yaml'
-    common_utils.dump_yaml(new_config_path, new_config3)
+    yaml_utils.dump_yaml(new_config_path, new_config3)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', new_config_path)
     skypilot_config.reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
@@ -411,7 +411,7 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
             tmp_path / (cluster_name + '.yml'))
 
     # Load the cluster YAML
-    cluster_config = common_utils.read_yaml(cluster_yaml)
+    cluster_config = yaml_utils.read_yaml(cluster_yaml)
     head_node_type = cluster_config['head_node_type']
     cluster_pod_config = cluster_config['available_node_types'][head_node_type][
         'node_config']
@@ -468,7 +468,7 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
             tmp_path / (cluster_name + '.yml'))
 
     # Load the cluster YAML
-    cluster_config = common_utils.read_yaml(cluster_yaml)
+    cluster_config = yaml_utils.read_yaml(cluster_yaml)
     assert cluster_config['provider']['vpc_name'] == VPC_NAME
     assert '-v /tmp:/tmp' in cluster_config['docker'][
         'run_options'], cluster_config
