@@ -23,7 +23,7 @@ SkyPilot gives AI teams a simple interface to run jobs on any infra. Infra teams
 
 ## Clusters
 
-- [Interactive Development]({{BASE_URL}}/examples/interactive-development.html.md): SSH, sync code, and connect IDEs
+- [Interactive Development]({{BASE_URL}}/examples/interactive-development.html.md): SSH, sync code, and connect IDEs on cloud and Kubernetes
 - [Cluster Jobs]({{BASE_URL}}/reference/job-queue.html.md): Job queue and scheduling
 - [Auto-failover]({{BASE_URL}}/examples/auto-failover.html.md): Automatic failover across regions/clouds
 - [Auto-stop]({{BASE_URL}}/reference/auto-stop.html.md): Automatically stop idle clusters
