@@ -255,10 +255,10 @@ Example:
   api_server:
     cluster_event_retention_hours: -1 # Disable all cluster event GC
   
-.. _config-yaml-api-server-cluster-event-retention-hours:
+.. _config-yaml-api-server-cluster-event-retention-hours-debug:
 
 ``api_server.cluster_event_retention_hours_debug``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Retention period for cluster events in hours (optional). Set to a negative value to disable cluster event GC.
 
