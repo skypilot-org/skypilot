@@ -7,7 +7,6 @@ import contextlib
 import datetime
 import hashlib
 import json
-import logging
 import multiprocessing
 import os
 import pathlib
@@ -24,7 +23,6 @@ import zipfile
 import aiofiles
 import fastapi
 from fastapi.middleware import cors
-from passlib.hash import apr_md5_crypt
 import starlette.middleware.base
 import uvloop
 
@@ -69,7 +67,6 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
-from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest
@@ -83,31 +80,8 @@ else:
 
 P = ParamSpec('P')
 
+_SERVER_USER_HASH_KEY = 'server_user_hash'
 
-def _add_timestamp_prefix_for_server_logs() -> None:
-    server_logger = sky_logging.init_logger('sky.server')
-    # Clear existing handlers first to prevent duplicates
-    server_logger.handlers.clear()
-    # Disable propagation to avoid the root logger of SkyPilot being affected
-    server_logger.propagate = False
-    # Add date prefix to the log message printed by loggers under
-    # server.
-    stream_handler = logging.StreamHandler(sys.stdout)
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        stream_handler.setLevel(logging.DEBUG)
-    else:
-        stream_handler.setLevel(logging.INFO)
-    stream_handler.flush = sys.stdout.flush  # type: ignore
-    stream_handler.setFormatter(sky_logging.FORMATTER)
-    server_logger.addHandler(stream_handler)
-    # Add date prefix to the log message printed by uvicorn.
-    for name in ['uvicorn', 'uvicorn.access']:
-        uvicorn_logger = logging.getLogger(name)
-        uvicorn_logger.handlers.clear()
-        uvicorn_logger.addHandler(stream_handler)
-
-
-_add_timestamp_prefix_for_server_logs()
 logger = sky_logging.init_logger(__name__)
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
@@ -146,7 +120,7 @@ def _try_set_basic_auth_user(request: fastapi.Request):
         username_encoded = username.encode('utf8')
         db_username_encoded = user.name.encode('utf8')
         if (username_encoded == db_username_encoded and
-                apr_md5_crypt.verify(password, user.password)):
+                common.crypt_ctx.verify(password, user.password)):
             request.state.auth_user = user
             break
 
@@ -246,7 +220,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             username_encoded = username.encode('utf8')
             db_username_encoded = user.name.encode('utf8')
             if (username_encoded == db_username_encoded and
-                    apr_md5_crypt.verify(password, user.password)):
+                    common.crypt_ctx.verify(password, user.password)):
                 valid_user = True
                 request.state.auth_user = user
                 await authn.override_user_info_in_request_body(request, user)
@@ -850,6 +824,15 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         chunk_index: The chunk index, starting from 0.
         total_chunks: The total number of chunks.
     """
+    # Field _body would be set if the request body has been received, fail fast
+    # to surface potential memory issues, i.e. catch the issue in our smoke
+    # test.
+    # pylint: disable=protected-access
+    if hasattr(request, '_body'):
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail='Upload request body should not be received before streaming'
+        )
     # Add the upload id to the cleanup list.
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
@@ -917,8 +900,9 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         zip_file_path.rename(zip_file_path.with_suffix(''))
         missing_chunks = get_missing_chunks(total_chunks)
         if missing_chunks:
-            return payloads.UploadZipFileResponse(status='uploading',
-                                                  missing_chunks=missing_chunks)
+            return payloads.UploadZipFileResponse(
+                status=responses.UploadStatus.UPLOADING.value,
+                missing_chunks=missing_chunks)
         zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
         async with aiofiles.open(zip_file_path, 'wb') as zip_file:
             for chunk in range(total_chunks):
@@ -935,7 +919,8 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     unzip_file(zip_file_path, client_file_mounts_dir)
     if total_chunks > 1:
         shutil.rmtree(chunk_dir)
-    return payloads.UploadZipFileResponse(status='completed')
+    return payloads.UploadZipFileResponse(
+        status=responses.UploadStatus.COMPLETED.value)
 
 
 def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
@@ -1183,10 +1168,6 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
-    # Only initialize the context in logs handler to limit the scope of this
-    # experimental change.
-    # TODO(aylei): init in lifespan() to enable SkyPilot context in all APIs.
-    context.initialize()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
@@ -1196,8 +1177,14 @@ async def logs(
     )
     task = asyncio.create_task(executor.execute_request_coroutine(request_task))
 
-    def cancel_task():
-        task.cancel()
+    async def cancel_task():
+        try:
+            logger.info('Client disconnected for request: '
+                        f'{request.state.request_id}')
+            task.cancel()
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # Cancel the task after the request is done or client disconnects
     background_tasks.add_task(cancel_task)
@@ -1650,7 +1637,10 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
-    cluster_records = core.status(cluster_name, all_users=True)
+    # Run core.status in another thread to avoid blocking the event loop.
+    cluster_records = await context_utils.to_thread(core.status,
+                                                    cluster_name,
+                                                    all_users=True)
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         raise fastapi.HTTPException(
@@ -1823,15 +1813,48 @@ async def root():
     return fastapi.responses.RedirectResponse(url='/dashboard/')
 
 
+def _init_or_restore_server_user_hash():
+    """Restores the server user hash from the global user state db.
+
+    The API server must have a stable user hash across restarts and potential
+    multiple replicas. Thus we persist the user hash in db and restore it on
+    startup. When upgrading from old version, the user hash will be read from
+    the local file (if any) to keep the user hash consistent.
+    """
+
+    def apply_user_hash(user_hash: str) -> None:
+        # For local API server, the user hash in db and local file should be
+        # same so there is no harm to override here.
+        common_utils.set_user_hash_locally(user_hash)
+        # Refresh the server user hash for current process after restore or
+        # initialize the user hash in db, child processes will get the correct
+        # server id from the local cache file.
+        common_lib.refresh_server_id()
+
+    user_hash = global_user_state.get_system_config(_SERVER_USER_HASH_KEY)
+    if user_hash is not None:
+        apply_user_hash(user_hash)
+        return
+
+    # Initial deployment, generate a user hash and save it to the db.
+    user_hash = common_utils.get_user_hash()
+    global_user_state.set_system_config(_SERVER_USER_HASH_KEY, user_hash)
+    apply_user_hash(user_hash)
+
+
 if __name__ == '__main__':
     import uvicorn
 
     from sky.server import uvicorn as skyuvicorn
 
+    skyuvicorn.add_timestamp_prefix_for_server_logs()
+
     # Initialize global user state db
     global_user_state.initialize_and_get_db()
     # Initialize request db
     requests_lib.reset_db_and_logs()
+    # Restore the server user hash
+    _init_or_restore_server_user_hash()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')

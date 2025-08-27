@@ -62,10 +62,10 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
             kubernetes:
                 networking: {NODEPORT_MODE_NAME}
                 pod_config:
+                    metadata:
+                        annotations:
+                            my_annotation: my_value
                     spec:
-                        metadata:
-                            annotations:
-                                my_annotation: my_value
                         runtimeClassName: nvidia    # Custom runtimeClassName for GPU pods.
                         imagePullSecrets:
                             - name: my-secret     # Pull images from a private registry using a secret
@@ -802,7 +802,7 @@ def test_parse_dotlist():
 def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
     """Test override_skypilot_config with disallowed keys."""
     with mock.patch('sky.skypilot_config.logger') as mock_logger:
-        mock_logger.level = INFO
+        mock_logger.getEffectiveLevel.return_value = INFO
         os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
         # Create original config file
         config_path = tmp_path / 'config.yaml'

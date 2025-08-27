@@ -65,6 +65,7 @@ install_requires = [
     # Required for API server metrics
     'prometheus_client>=0.8.0',
     'passlib',
+    'bcrypt',
     'pyjwt',
     'gitpython',
     'types-paramiko',
@@ -72,12 +73,27 @@ install_requires = [
     'aiohttp',
 ]
 
+# See requirements-dev.txt for the version of grpc and protobuf
+# used to generate the code during development.
+
+# The grpc version at runtime has to be newer than the version
+# used to generate the code.
+GRPC = 'grpcio>=1.63.0'
+# >= 5.26.1 because the runtime version can't be older than the version
+# used to generate the code.
+# < 7.0.0 because code generated for a major version V will be supported by
+# protobuf runtimes of version V and V+1.
+# https://protobuf.dev/support/cross-version-runtime-guarantee
+PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
+
 server_dependencies = [
     'casbin',
     'sqlalchemy_adapter',
     'passlib',
     'pyjwt',
     'aiohttp',
+    GRPC,
+    PROTOBUF,
 ]
 
 local_ray = [
@@ -88,18 +104,9 @@ local_ray = [
     'ray[default] >= 2.2.0, != 2.6.0',
 ]
 
-# See requirements-dev.txt for the version of grpc and protobuf
-# used to generate the code during development.
 remote = [
-    # The grpc version at runtime has to be newer than the version
-    # used to generate the code.
-    'grpcio>=1.63.0',
-    # >= 5.26.1 because the runtime version can't be older than the version
-    # used to generate the code.
-    # < 7.0.0 because code generated for a major version V will be supported by
-    # protobuf runtimes of version V and V+1.
-    # https://protobuf.dev/support/cross-version-runtime-guarantee
-    'protobuf >= 5.26.1, < 7.0.0',
+    GRPC,
+    PROTOBUF,
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
@@ -159,8 +166,10 @@ extras_require: Dict[str, List[str]] = {
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
-    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0', 'websockets'],
-    'ssh': ['kubernetes>=20.0.0,!=32.0.0', 'websockets'],
+    'kubernetes': [
+        'kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'
+    ],
+    'ssh': ['kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'],
     'remote': remote,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1

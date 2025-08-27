@@ -16,7 +16,8 @@ import logging
 import os
 import subprocess
 import typing
-from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
+from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
+                    TypeVar, Union)
 from urllib import parse as urlparse
 
 import click
@@ -570,7 +571,7 @@ def launch(
                     idle_minutes=idle_minutes_to_autostop,
                     wait_for=wait_for)
             if resource.autostop_config is not None:
-                # For backward-compatbility, get the final autostop config for
+                # For backward-compatibility, get the final autostop config for
                 # admin policy.
                 # TODO(aylei): remove this after 0.12.0
                 down = resource.autostop_config.down
@@ -794,17 +795,44 @@ def exec(  # pylint: disable=redefined-builtin
     return server_common.get_request_id(response)
 
 
-# TODO(aylei): when retry logs request, there will be duplciated log entries.
+@typing.overload
+def tail_logs(
+        cluster_name: str,
+        job_id: Optional[int],
+        follow: bool,
+        tail: int = 0,
+        output_stream: Optional['io.TextIOBase'] = None,
+        *,  # keyword only separator
+        preload_content: Literal[True] = True) -> int:
+    ...
+
+
+@typing.overload
+def tail_logs(cluster_name: str,
+              job_id: Optional[int],
+              follow: bool,
+              tail: int = 0,
+              output_stream: None = None,
+              *,
+              preload_content: Literal[False]) -> Iterator[Optional[str]]:
+    ...
+
+
+# TODO(aylei): when retry logs request, there will be duplicated log entries.
 # We should fix this.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 @rest.retry_transient_errors()
-def tail_logs(cluster_name: str,
-              job_id: Optional[int],
-              follow: bool,
-              tail: int = 0,
-              output_stream: Optional['io.TextIOBase'] = None) -> int:
+def tail_logs(
+    cluster_name: str,
+    job_id: Optional[int],
+    follow: bool,
+    tail: int = 0,
+    output_stream: Optional['io.TextIOBase'] = None,
+    *,  # keyword only separator
+    preload_content: bool = True
+) -> Union[int, Iterator[Optional[str]]]:
     """Tails the logs of a job.
 
     Args:
@@ -814,12 +842,21 @@ def tail_logs(cluster_name: str,
             immediately.
         tail: if > 0, tail the last N lines of the logs.
         output_stream: the stream to write the logs to. If None, print to the
-            console.
+            console. Cannot be used with preload_content=False.
+        preload_content: if False, returns an Iterator[str | None] containing
+            the logs without the function blocking on the retrieval of entire
+            log. Iterator returns None when the log has been completely
+            streamed. Default True. Cannot be used with output_stream.
 
     Returns:
-        Exit code based on success or failure of the job. 0 if success,
-        100 if the job failed. See exceptions.JobExitCode for possible exit
-        codes.
+        If preload_content is True:
+            Exit code based on success or failure of the job. 0 if success,
+            100 if the job failed. See exceptions.JobExitCode for possible exit
+            codes.
+        If preload_content is False:
+            Iterator[str | None] containing the logs without the function
+            blocking on the retrieval of entire log. Iterator returns None
+            when the log has been completely streamed.
 
     Request Raises:
         ValueError: if arguments are invalid or the cluster is not supported.
@@ -832,6 +869,10 @@ def tail_logs(cluster_name: str,
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
+    if output_stream is not None and not preload_content:
+        raise ValueError(
+            'output_stream cannot be specified when preload_content is False')
+
     body = payloads.ClusterJobBody(
         cluster_name=cluster_name,
         job_id=job_id,
@@ -847,12 +888,15 @@ def tail_logs(cluster_name: str,
                  None))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
-    # Log request is idempotent when tail is 0, thus can resume previous
-    # streaming point on retry.
-    return stream_response(request_id=request_id,
-                           response=response,
-                           output_stream=output_stream,
-                           resumable=(tail == 0))
+    if preload_content:
+        # Log request is idempotent when tail is 0, thus can resume previous
+        # streaming point on retry.
+        return stream_response(request_id=request_id,
+                               response=response,
+                               output_stream=output_stream,
+                               resumable=(tail == 0))
+    else:
+        return rich_utils.decode_rich_status(response)
 
 
 @usage_lib.entrypoint
@@ -1466,8 +1510,16 @@ def status(
 def endpoints(
     cluster: str,
     port: Optional[Union[int, str]] = None
-) -> server_common.RequestId[Dict[str, str]]:
+) -> server_common.RequestId[Dict[int, str]]:
     """Gets the endpoint for a given cluster and port number (endpoint).
+
+    Example:
+        .. code-block:: python
+
+            import sky
+            request_id = sky.endpoints('test-cluster')
+            sky.get(request_id)
+
 
     Args:
         cluster: The name of the cluster.
@@ -1478,8 +1530,9 @@ def endpoints(
         The request ID of the endpoints request.
 
     Request Returns:
-        A dictionary of port numbers to endpoints. If port is None,
-        the dictionary will contain all ports:endpoints exposed on the cluster.
+        A dictionary of port numbers to endpoints.
+        If port is None, the dictionary contains all
+            ports:endpoints exposed on the cluster.
 
     Request Raises:
         ValueError: if the cluster is not UP or the endpoint is not exposed.
@@ -1944,6 +1997,7 @@ def stream_and_get(request_id: None = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@rest.retry_transient_errors()
 def stream_and_get(
     request_id: Optional[server_common.RequestId[T]] = None,
     log_path: Optional[str] = None,
@@ -1995,7 +2049,7 @@ def stream_and_get(
     if response.status_code in [404, 400]:
         detail = response.json().get('detail')
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Failed to stream logs: {detail}')
+            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
         # TODO(syang): handle the case where the requestID is not provided
         # see https://github.com/skypilot-org/skypilot/issues/6549

@@ -393,7 +393,13 @@ def override_sky_config(
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
     echo = Test.echo_without_prefix if test is None else test.echo
     env_before_override: Optional[Dict[str, Any]] = None
-    override_sky_config_dict = skypilot_config.config_utils.Config()
+    config_file_override = pytest_config_file_override()
+    if config_file_override:
+        override_sky_config_dict = (
+            skypilot_config.parse_and_validate_config_file(config_file_override)
+        )
+    else:
+        override_sky_config_dict = (skypilot_config.config_utils.Config())
 
     if env_dict is None:
         env_dict = os.environ
@@ -428,6 +434,8 @@ def override_sky_config(
             f'Overriding controller cloud: '
             f'{override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
         )
+    if is_grpc_enabled_test():
+        env_dict[env_options.Options.ENABLE_GRPC.env_key] = '1'
 
     if not override_sky_config_dict:
         yield None
@@ -646,6 +654,12 @@ _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 # without cloud credentials or cloud dependencies locally. To do this, we run
 # the cloud commands required in tests on a separate remote cluster with the
 # cloud credentials and dependencies setup.
+#
+# Set `skip_remote_server_check=True` to opt-in to using the remote helper
+# cluster regardless of whether the API server is local or remote. This is
+# useful for running cloud commands while the cluster being tested is
+# stopped and you need to run cloud commands.
+#
 # Example usage:
 # Test(
 #     'mytest',
@@ -658,10 +672,13 @@ _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 #     ],
 #     f'sky down -y mytest-cluster && {down_cluster_for_cloud_cmd('mytest-cluster')}',
 # )
-def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
+def launch_cluster_for_cloud_cmd(cloud: str,
+                                 test_cluster_name: str,
+                                 skip_remote_server_check: bool = False) -> str:
     """Launch the cluster for cloud commands asynchronously."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local() and not is_remote_server_test():
+    if not skip_remote_server_check and sky.server.common.is_api_server_local(
+    ) and not is_remote_server_test():
         # We need is_remote_server_test() because we override the SKY_API_SERVER_URL_ENV_VAR
         # in the middle of the test, which is after the test is launched, so the
         # is_api_server_local() already cached and returned True but we're actually
@@ -676,10 +693,12 @@ def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
 def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              cmd: str,
                              envs: Set[str] = None,
-                             timeout: int = 180) -> str:
+                             timeout: int = 180,
+                             skip_remote_server_check: bool = False) -> str:
     """Run the cloud command on the remote cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local() and not is_remote_server_test():
+    if not skip_remote_server_check and sky.server.common.is_api_server_local(
+    ) and not is_remote_server_test():
         return cmd
     else:
         cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cmd}'
@@ -696,10 +715,12 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
                 f'sky logs {cluster_name} --status')
 
 
-def down_cluster_for_cloud_cmd(test_cluster_name: str) -> str:
+def down_cluster_for_cloud_cmd(test_cluster_name: str,
+                               skip_remote_server_check: bool = False) -> str:
     """Down the cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local() and not is_remote_server_test():
+    if not skip_remote_server_check and sky.server.common.is_api_server_local(
+    ) and not is_remote_server_test():
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
@@ -743,7 +764,8 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
 
 
 def is_remote_server_test() -> bool:
-    return 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ
+    return os.environ.get('PYTEST_SKYPILOT_REMOTE_SERVER_TEST',
+                          None) is not None
 
 
 def pytest_controller_cloud() -> Optional[str]:
@@ -754,7 +776,15 @@ def is_postgres_backend_test() -> bool:
     return os.environ.get('PYTEST_SKYPILOT_POSTGRES_BACKEND', None) is not None
 
 
-def override_env_config(config: Dict[str, str]):
+def is_grpc_enabled_test() -> bool:
+    return os.environ.get('PYTEST_SKYPILOT_GRPC_ENABLED', None) is not None
+
+
+def pytest_config_file_override() -> Optional[str]:
+    return os.environ.get('PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE', None)
+
+
+def pytest_override_env_config_file(config: Dict[str, str]):
     """Override the environment variable for the test."""
     for key, value in config.items():
         os.environ[key] = value

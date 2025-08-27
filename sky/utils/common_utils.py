@@ -28,9 +28,9 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
-from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils import validator
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import jinja2
@@ -41,7 +41,7 @@ else:
     psutil = adaptors_common.LazyImport('psutil')
     yaml = adaptors_common.LazyImport('yaml')
 
-_USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
 
 # We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
@@ -131,19 +131,24 @@ def get_user_hash() -> str:
         assert user_hash is not None
         return user_hash
 
-    if os.path.exists(_USER_HASH_FILE):
+    if os.path.exists(USER_HASH_FILE):
         # Read from cached user hash file.
-        with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
+        with open(USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
             user_hash = f.read().strip()
         if is_valid_user_hash(user_hash):
             return user_hash
 
     user_hash = generate_user_hash()
-    os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
-        f.write(user_hash)
+    set_user_hash_locally(user_hash)
     return user_hash
+
+
+def set_user_hash_locally(user_hash: str) -> None:
+    """Sets the user hash to local file."""
+    os.makedirs(os.path.dirname(USER_HASH_FILE), exist_ok=True)
+    with open(USER_HASH_FILE, 'w', encoding='utf-8') as f:
+        f.write(user_hash)
 
 
 def base36_encode(hex_str: str) -> str:
@@ -343,7 +348,7 @@ def get_current_user() -> 'models.User':
 
 def get_current_user_name() -> str:
     """Returns the current user name."""
-    name = common_utils.get_current_user().name
+    name = get_current_user().name
     assert name is not None
     return name
 
@@ -573,13 +578,13 @@ def read_yaml(path: Optional[str]) -> Dict[str, Any]:
     if path is None:
         raise ValueError('Attempted to read a None YAML.')
     with open(path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
+        config = yaml_utils.safe_load(f)
     return config
 
 
 def read_yaml_all_str(yaml_str: str) -> List[Dict[str, Any]]:
     stream = io.StringIO(yaml_str)
-    config = yaml.safe_load_all(stream)
+    config = yaml_utils.safe_load_all(stream)
     configs = list(config)
     if not configs:
         # Empty YAML file.
@@ -886,7 +891,7 @@ def get_cleaned_username(username: str = '') -> str:
     Returns:
       A cleaned username.
     """
-    username = username or common_utils.get_current_user_name()
+    username = username or get_current_user_name()
     username = username.lower()
     username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)

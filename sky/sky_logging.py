@@ -202,7 +202,10 @@ def set_sky_logging_levels(level: int):
 
 
 def logging_enabled(logger: logging.Logger, level: int) -> bool:
-    return logger.level <= level
+    # Note(cooperc): This may return true in a lot of cases where we won't
+    # actually log anything, since the log level is set on the handler in
+    # _setup_logger.
+    return logger.getEffectiveLevel() <= level
 
 
 @contextlib.contextmanager

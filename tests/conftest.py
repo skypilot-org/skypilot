@@ -1,28 +1,21 @@
 import fcntl
-import json
 import os
-import pathlib
+import shutil
 import signal
 import socket
 import subprocess
 import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import filelock
 import pytest
 import requests
 from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
-from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import orm
-from sqlalchemy import text as sqlalchemy_text
-import sqlalchemy_adapter
 
-from sky import global_user_state
+from sky import cloud_stores
 from sky import sky_logging
-from sky import skypilot_config
-from sky.skylet import constants
 from sky.utils import common_utils
 
 # Initialize logger at the top level
@@ -174,6 +167,12 @@ def pytest_addoption(parser):
         help='Skip tests marked as resource_heavy',
     )
     parser.addoption(
+        '--resource-heavy',
+        action='store_true',
+        default=False,
+        help='Only run tests marked as resource_heavy',
+    )
+    parser.addoption(
         '--helm-version',
         type=str,
         default='',
@@ -192,6 +191,18 @@ def pytest_addoption(parser):
         help=('If set, the tests will be run in jobs consolidation mode '
               '(The config change is made in buildkite so this is a flag to '
               'ensure the tests will not be skipped but no actual effect)'),
+    )
+    parser.addoption(
+        '--grpc',
+        action='store_true',
+        default=False,
+        help='Run tests with GRPC enabled',
+    )
+    parser.addoption(
+        '--env-file',
+        type=str,
+        default=None,
+        help='Path to the env file to override the default env file',
     )
 
 
@@ -250,8 +261,15 @@ def pytest_collection_modifyitems(config, items):
         reason='skipped, because --tpu option is set')
     skip_marks['local'] = pytest.mark.skip(
         reason='test requires local API server')
+    skip_marks['no_remote_server'] = pytest.mark.skip(
+        reason='skip tests marked as no_remote_server if --remote-server is set'
+    )
     skip_marks['no_resource_heavy'] = pytest.mark.skip(
-        reason='skipped, because --no-resource-heavy option is set')
+        reason=
+        'skip tests marked as resource_heavy if --no-resource-heavy is set')
+    skip_marks['resource_heavy'] = pytest.mark.skip(
+        reason=
+        'skip tests not marked as resource_heavy if --resource-heavy is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -297,6 +315,13 @@ def pytest_collection_modifyitems(config, items):
         if 'resource_heavy' in marks and config.getoption(
                 '--no-resource-heavy'):
             item.add_marker(skip_marks['no_resource_heavy'])
+        # Skip tests not marked as resource_heavy if --resource-heavy is set
+        if 'resource_heavy' not in marks and config.getoption(
+                '--resource-heavy'):
+            item.add_marker(skip_marks['resource_heavy'])
+        # Skip tests marked as no_remote_server if --remote-server is set
+        if 'no_remote_server' in marks and config.getoption('--remote-server'):
+            item.add_marker(skip_marks['no_remote_server'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -608,7 +633,8 @@ def setup_docker_container(request):
 
 @pytest.fixture(scope='session', autouse=True)
 def setup_controller_cloud_env(request):
-    """Setup controller cloud environment variable if --controller-cloud is specified."""
+    """Setup controller cloud environment variable if --controller-cloud is
+    specified."""
     if not request.config.getoption('--controller-cloud'):
         yield
         return
@@ -621,9 +647,78 @@ def setup_controller_cloud_env(request):
 
 @pytest.fixture(scope='session', autouse=True)
 def setup_postgres_backend_env(request):
-    """Setup Postgres Backend environment variable if --postgres is specified."""
+    """Setup Postgres Backend environment variable if --postgres is specified.
+    """
     if not request.config.getoption('--postgres'):
         yield
         return
     os.environ['PYTEST_SKYPILOT_POSTGRES_BACKEND'] = '1'
     yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_grpc_backend_env(request):
+    """Setup gRPC enabled environment variable if --grpc is specified.
+    """
+    if not request.config.getoption('--grpc'):
+        yield
+        return
+    os.environ['PYTEST_SKYPILOT_GRPC_ENABLED'] = '1'
+    yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def prepare_env_file(request):
+    """Prepare environment file for tests.
+
+    If the env-file option is a local directory or file, use it directly.
+    Otherwise, treat it as a cloud storage URL (e.g., s3://bucket/path) and
+    download from storage.
+    """
+    env_file_path = request.config.getoption('--env-file')
+    if env_file_path is None:
+        yield
+        return
+
+    # Check if it's a local file or directory
+    expanded_path = os.path.expanduser(env_file_path)
+    if os.path.exists(expanded_path):
+        # It's a local file/directory, use it directly
+        logger.info(f'Using local env file: {expanded_path}')
+        yield expanded_path
+        return
+
+    # Not a local file, treat as cloud storage URL (e.g., s3://bucket/path)
+
+    logger.info(
+        f'Attempting to download env file from cloud storage: {env_file_path}')
+
+    # Create temporary directory for downloaded files
+    temp_dir = tempfile.mkdtemp(prefix='skypilot_env_')
+
+    try:
+        # Get the appropriate CloudStorage handler for the URL
+        cloud_storage = cloud_stores.get_storage_from_path(env_file_path)
+
+        # Generate the download command - assert it's a file
+        assert not cloud_storage.is_directory(env_file_path), (
+            f'Expected file but got directory: {env_file_path}')
+        download_cmd = cloud_storage.make_sync_file_command(
+            env_file_path, temp_dir)
+
+        logger.info(f'Executing download command: {download_cmd}')
+
+        # Execute the download command
+        subprocess.run(download_cmd, shell=True, check=True)
+
+        # Get the filename from the original URL
+        file_name = os.path.basename(env_file_path)
+        file_path = os.path.join(temp_dir, file_name)
+
+        logger.info(f'Downloaded env file to: {file_path}')
+        os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = file_path
+        yield file_path
+    finally:
+        # Clean up temporary directory
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)

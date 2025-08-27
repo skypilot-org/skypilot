@@ -275,6 +275,10 @@ def override_request_env_and_config(
         request_id: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
+    # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API server
+    # affecting client requests. If set on the client side, it will be
+    # overridden by the request body.
+    os.environ.pop('SKYPILOT_DEBUG', None)
     os.environ.update(request_body.env_vars)
     # Note: may be overridden by AuthProxyMiddleware.
     # TODO(zhwu): we need to make the entire request a context available to the
@@ -427,9 +431,9 @@ async def execute_request_coroutine(request: api_requests.Request):
     event loop. This is designed for executing tasks that are not CPU
     intensive, e.g. sky logs.
     """
+    context.initialize()
     ctx = context.get()
-    if ctx is None:
-        raise ValueError('Context is not initialized')
+    assert ctx is not None, 'Context is not initialized'
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body

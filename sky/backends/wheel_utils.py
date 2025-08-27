@@ -27,13 +27,14 @@ import sky
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.server import common
+from sky.utils import directory_utils
 
 logger = sky_logging.init_logger(__name__)
 
 # Local wheel path is same as the remote path.
 WHEEL_DIR = pathlib.Path(os.path.expanduser(backend_utils.SKY_REMOTE_PATH))
 _WHEEL_LOCK_PATH = WHEEL_DIR.parent / '.wheels_lock'
-SKY_PACKAGE_PATH = pathlib.Path(sky.__file__).parent.parent / 'sky'
+SKY_PACKAGE_PATH = pathlib.Path(directory_utils.get_sky_dir())
 
 # NOTE: keep the same as setup.py's setuptools.setup(name=..., ...).
 _PACKAGE_WHEEL_NAME = 'skypilot'

@@ -673,7 +673,7 @@ If not specified, SkyPilot will use the default debian-based image suitable for 
 
 **Docker support**
 
-You can specify docker image to use by setting the image_id to ``docker:<image name>`` for Azure, AWS and GCP. For example,
+You can specify docker image to use by setting the image_id to ``docker:<image name>`` for Azure, AWS, GCP, and RunPod. For example,
 
 .. code-block:: yaml
 
@@ -779,7 +779,7 @@ https://github.com/IBM/vpc-img-inst
 .. code-block:: yaml
 
   resources:
-    image_id: ami-0868a20f5a3bf9702  # AWS example
+    image_id: ami-0868a20f5a3bf9702  # IBM example
     # image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310  # GCP example
     # image_id: docker:pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime # Docker example
 
@@ -791,6 +791,29 @@ OR
     image_id:
       us-east-1: ami-123
       us-west-2: ami-456
+
+
+**RunPod**
+
+RunPod natively supports Docker images. You can specify any Docker image:
+
+.. code-block:: yaml
+
+  resources:
+    image_id: docker:ubuntu:22.04
+    # Or use a specific registry
+    image_id: docker:nvcr.io/nvidia/pytorch:24.10-py3
+
+For multi-region deployments, you can specify different images per region:
+
+.. code-block:: yaml
+
+  resources:
+    image_id:
+      US: docker:us-registry.io/myapp:latest
+      CA: docker:ca-registry.io/myapp:latest
+      CZ: docker:eu-registry.io/myapp:latest
+
 
 .. _yaml-spec-resources-labels:
 
