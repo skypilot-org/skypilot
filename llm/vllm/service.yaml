@@ -8,7 +8,7 @@ service:
 
 # Fields below are the same with `serve-openai-api.yaml`.
 envs:
-  MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
+  MODEL_NAME: meta-llama/Llama-3.2-1B-Instruct
 secrets:
   HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
@@ -18,22 +18,19 @@ resources:
     - 8000
 
 setup: |
-  conda activate vllm
-  if [ $? -ne 0 ]; then
-    conda create -n vllm python=3.10 -y
-    conda activate vllm
-  fi
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
 
-  pip install transformers==4.38.0
-  pip install vllm==0.3.2
+  uv pip install "vllm>=0.8.3"
 
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 
 run: |
-  conda activate vllm
+  source .venv/bin/activate
   echo 'Starting vllm openai api server...'
-  python -m vllm.entrypoints.openai.api_server \
-    --model $MODEL_NAME --tokenizer hf-internal-testing/llama-tokenizer \
-    --host 0.0.0.0
+  vllm serve $MODEL_NAME \
+    --port 8000 \
+    --dtype auto \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE
 
