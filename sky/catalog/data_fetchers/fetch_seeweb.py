@@ -19,7 +19,7 @@ from sky.adaptors.seeweb import ecsapi
 # GPU name mapping from Seeweb to SkyPilot canonical names
 SEEWEB_GPU_NAME_TO_SKYPILOT_GPU_NAME = {
     'H200 141GB': 'H200',
-    'RTX A6000 48GB': 'RTX4090',
+    'RTX A6000 48GB': 'RTXA6000',
     'A100 80GB': 'A100',
     'L4 24GB': 'L4',
     'L40s 48GB': 'L40s',
@@ -33,7 +33,7 @@ SEEWEB_GPU_NAME_TO_SKYPILOT_GPU_NAME = {
 
 # GPU VRAM mapping in MB
 VRAM = {
-    'RTX4090': 24576,  # 24GB
+    'RTXA6000': 48384,  # 48GB
     'H200': 144384,  # 141GB
     'A100': 81920,  # 80GB
     'L4': 24576,  # 24GB
@@ -176,7 +176,7 @@ def get_gpu_info(gpu_count: int, gpu_name: str, gpu_vram_mb: int = 0) -> str:
         'TotalGpuMemoryInMiB': gpu_vram_mb * gpu_count if gpu_vram_mb else 0
     }
 
-    return json.dumps(gpu_info)
+    return json.dumps(gpu_info).replace('"', '\'')
 
 
 def fetch_seeweb_data(api_key: str) -> List[Dict]:
