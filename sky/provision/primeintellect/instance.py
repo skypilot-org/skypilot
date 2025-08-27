@@ -10,6 +10,8 @@ from sky.utils import common_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
 
+logger = sky_logging.init_logger(__name__)
+
 # The maximum number of times to poll for the status of an operation.
 POLL_INTERVAL = 5
 MAX_POLLS = 60 // POLL_INTERVAL
@@ -404,11 +406,26 @@ def get_cluster_info(
         ]
         if instance['name'].endswith('-head'):
             head_instance_id = instance_id
-            if isinstance(ssh_connection, str):
-                head_instance_ssh_user = ssh_connection.split('@', 1)[0].strip()
+            # Extract SSH user from connection string
+            # Format is typically "user@host" or ["user@host", "other_info"]
+            head_instance_ssh_user = None
+            try:
+                if isinstance(ssh_connection, str) and '@' in ssh_connection:
+                    head_instance_ssh_user = ssh_connection.split('@', 1)[0].strip()
+                if isinstance(ssh_connection, list) and ssh_connection:
+                    ssh_conn_str = ssh_connection[0]
+                    if '@' in ssh_conn_str:
+                        head_instance_ssh_user = ssh_conn_str.split('@', 1)[0].strip()
+            except Exception as e:
+                # Ultimate fallback
+                head_instance_ssh_user = 'ubuntu'
+                logger.warning(f'Failed to extract SSH user from connection {ssh_connection}: {e}. Using ubuntu as fallback.')
+
+            if head_instance_ssh_user is not None:
+                logger.info(f'Detected SSH user "{head_instance_ssh_user}" from connection: {ssh_connection}')
             else:
-                head_instance_ssh_user = (ssh_connection[0].split('@',
-                                                                  1)[0].strip())
+                head_instance_ssh_user = 'ubuntu'
+                logger.warning(f'Failed to extract SSH user from connection {ssh_connection}: {e}. Using ubuntu as fallback.')
 
     return common.ClusterInfo(
         instances=instances,

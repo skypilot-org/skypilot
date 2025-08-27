@@ -121,10 +121,6 @@ def _try_request_with_backoff(
     return {}
 
 
-def get_key_suffix():
-    return str(uuid.uuid4()).replace('-', '')[:8]
-
-
 def get_upstream_cloud_id(instance_type: str) -> Optional[str]:
     global _df, _lookup_dict
     if _df is None:
@@ -235,13 +231,15 @@ class PrimeIntellectAPIClient:
 
     def get_or_add_ssh_key(self, ssh_pub_key: str = '') -> Dict[str, str]:
         """Add ssh key if not already added."""
+        # Check if the public key is already added
         ssh_keys = self.list_ssh_keys()
         for key in ssh_keys:
             if key['publicKey'].strip().split()[:2] == ssh_pub_key.strip(
             ).split()[:2]:
                 return {'name': key['name'], 'ssh_key': ssh_pub_key}
 
-        ssh_key_name = 'skypilot-' + get_key_suffix()
+        # Add the public key to Prime Intellect account if not already added
+        ssh_key_name = 'skypilot-' + str(uuid.uuid4()).replace('-', '')[:8]
         _try_request_with_backoff(
             'post',
             f'{self.base_url}/api/v1/ssh_keys',

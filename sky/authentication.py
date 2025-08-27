@@ -587,6 +587,7 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Set up auth section for Ray template
     config.setdefault('auth', {})
     config['auth']['ssh_user'] = 'ubuntu'
+    config['auth']['ssh_public_key'] = public_key_path
 
     return configure_ssh_info(config)
 
@@ -597,29 +598,15 @@ def setup_primeintellect_authentication(
     - Generates a new SSH key pair if one does not exist.
     - Adds the public SSH key to the user's Prime Intellect account.
     """
-    prime_config = '~/.prime/config.json'
-    if not os.path.isfile(os.path.expanduser(prime_config)):
-        raise Exception(f'{prime_config} does not exist')
-
-    public_key_path = None
-    with open(os.path.expanduser(prime_config), encoding='UTF-8') as f:
-        data = json.load(f)
-        public_key_path = data.get('ssh_key_path') + '.pub'
-
-    client = primeintellect_utils.PrimeIntellectAPIClient()
-    public_key = None
-    with open(public_key_path, 'r', encoding='UTF-8') as f:
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
-    client.get_or_add_ssh_key(public_key)
-    config['auth']['ssh_user'] = 'ubuntu'
-    config['auth']['ssh_private_key'] = data.get('ssh_key_path')
-    config['auth']['ssh_public_key'] = public_key
 
-    config_str = common_utils.dump_yaml_str(config)
-    config_str = config_str.replace('skypilot:ssh_user',
-                                    config['auth']['ssh_user'])
-    config_str = config_str.replace('skypilot:ssh_public_key_content',
-                                    config['auth']['ssh_public_key'])
-    config = yaml.safe_load(config_str)
+    # Add the public key to Prime Intellect account
+    client = primeintellect_utils.PrimeIntellectAPIClient()
+    client.get_or_add_ssh_key(public_key)    # Get or generate SkyPilot-managed SSH keys
 
-    return config
+    config.setdefault('auth', {})
+    config['auth']['ssh_public_key'] = public_key_path
+
+    return configure_ssh_info(config)
