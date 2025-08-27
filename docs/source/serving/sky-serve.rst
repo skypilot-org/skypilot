@@ -37,11 +37,6 @@ How it works:
 .. features a simple YAML spec to describe your services (referred to as a *service
 .. YAML* in the following) and a centralized controller to manage the deployments.
 
-
-.. tip::
-
-  To get started with SkyServe, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
-
 Quick tour: LLM serving
 -----------------------
 
@@ -508,11 +503,26 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
     # NOTE: these settings only take effect for a new SkyServe controller, not if
     # you have an existing one.
     controller:
+      # Enable high availability mode for the controller (optional).
+      #
+      # When set to true, the controller will be deployed with high availability
+      # capabilities on Kubernetes using Deployments. This allows the controller and load balancer
+      # to automatically recover from failures (e.g., node failures, pod crashes)
+      # and maintain service continuity.
+      #
+      # NOTE: This feature is ONLY supported when Kubernetes cloud is enabled. To enable kubernetes, see :ref:`Kubernetes Setup <kubernetes-setup>`.
+      # The service controller cluster will be scheduled to kubernetes. The k8s deployment needs to be always-on to keep the controller running. If using a local kubernetes deployment (e.g. `sky local up`), keeping the laptop/machines up is required.
+      # When enabled:
+      # - The controller is deployed as a Kubernetes Deployment instead of a Pod
+      # - Automatic pod rescheduling and recovery is handled by Kubernetes
+      #
+      # Default: false.
+      high_availability: true
+
       resources:
         # All configs below are optional.
         # Specify the location of the SkyServe controller.
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         # Specify the maximum number of services that can be run concurrently.
         cpus: 2+  # number of vCPUs, max concurrent services = min(4 * cpus, memory in GiB)
         # Specify the disk_size in GB of the SkyServe controller.

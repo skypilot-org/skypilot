@@ -437,3 +437,54 @@ def test_nested_config_override_with_nonexistent_key():
                                     default_value=None,
                                     override_configs=override_config)
     assert result == override_config['kubernetes']['pod_config']
+
+
+def test_merge_k8s_configs_with_patch_merge_keys():
+    """Test merging Kubernetes configs using patch merge keys."""
+    base_config = {
+        'env': [{
+            'name': 'ENV1',
+            'value': 'value1'
+        }, {
+            'name': 'ENV2',
+            'value': 'value2'
+        }],
+        'ports': [{
+            'containerPort': 8080,
+            'protocol': 'TCP'
+        }]
+    }
+    override_config = {
+        'env': [{
+            'name': 'ENV1',
+            'value': 'updated_value1'
+        }, {
+            'name': 'ENV3',
+            'value': 'value3'
+        }],
+        'ports': [{
+            'containerPort': 8080,
+            'protocol': 'UDP'
+        }, {
+            'containerPort': 9090,
+            'protocol': 'TCP'
+        }]
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    # Check env variables
+    assert len(base_config['env']) == 3
+    env1 = next(e for e in base_config['env'] if e['name'] == 'ENV1')
+    assert env1['value'] == 'updated_value1'
+    env3 = next(e for e in base_config['env'] if e['name'] == 'ENV3')
+    assert env3['value'] == 'value3'
+
+    # Check ports
+    assert len(base_config['ports']) == 2
+    port_8080 = next(
+        p for p in base_config['ports'] if p['containerPort'] == 8080)
+    assert port_8080['protocol'] == 'UDP'
+    port_9090 = next(
+        p for p in base_config['ports'] if p['containerPort'] == 9090)
+    assert port_9090['protocol'] == 'TCP'

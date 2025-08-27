@@ -1,6 +1,7 @@
 """Utils shared between all of sky"""
 
 import difflib
+import enum
 import functools
 import getpass
 import hashlib
@@ -11,6 +12,7 @@ import platform
 import random
 import re
 import socket
+import subprocess
 import sys
 import time
 import typing
@@ -20,6 +22,7 @@ import uuid
 import jsonschema
 
 from sky import exceptions
+from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
@@ -27,6 +30,7 @@ from sky.usage import constants as usage_constants
 from sky.utils import annotations
 from sky.utils import ux_utils
 from sky.utils import validator
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import jinja2
@@ -37,7 +41,7 @@ else:
     psutil = adaptors_common.LazyImport('psutil')
     yaml = adaptors_common.LazyImport('yaml')
 
-_USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
 
 # We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
@@ -50,6 +54,25 @@ _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 _VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 
 logger = sky_logging.init_logger(__name__)
+
+
+class ProcessStatus(enum.Enum):
+    """Process status."""
+
+    # The process is scheduled to run, but not started yet.
+    SCHEDULED = 'SCHEDULED'
+
+    # The process is running
+    RUNNING = 'RUNNING'
+
+    # The process is finished and succeeded
+    SUCCEEDED = 'SUCCEEDED'
+
+    # The process is interrupted
+    INTERRUPTED = 'INTERRUPTED'
+
+    # The process failed
+    FAILED = 'FAILED'
 
 
 @annotations.lru_cache(scope='request')
@@ -66,24 +89,35 @@ def get_usage_run_id() -> str:
     return str(uuid.uuid4())
 
 
-def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+def is_valid_user_hash(user_hash: Optional[str]) -> bool:
     if user_hash is None:
         return False
-    try:
-        int(user_hash, 16)
-    except (TypeError, ValueError):
-        return False
-    return len(user_hash) == USER_HASH_LENGTH
+    # Must start with a letter, followed by alphanumeric characters and hyphens
+    # This covers both old hex format (e.g., "abc123") and new service account
+    # format (e.g., "sa-abc123-token-xyz")
+    return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$', user_hash))
 
 
 def generate_user_hash() -> str:
     """Generates a unique user-machine specific hash."""
     hash_str = user_and_hostname_hash()
     user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
-    if not _is_valid_user_hash(user_hash):
+    if not is_valid_user_hash(user_hash):
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     return user_hash
+
+
+def get_git_commit(path: Optional[str] = None) -> Optional[str]:
+    try:
+        result = subprocess.run(['git', 'rev-parse', 'HEAD'],
+                                capture_output=True,
+                                text=True,
+                                cwd=path,
+                                check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
 
 
 def get_user_hash() -> str:
@@ -93,23 +127,28 @@ def get_user_hash() -> str:
     hostname changes causing a new user hash to be generated.
     """
     user_hash = os.getenv(constants.USER_ID_ENV_VAR)
-    if _is_valid_user_hash(user_hash):
+    if is_valid_user_hash(user_hash):
         assert user_hash is not None
         return user_hash
 
-    if os.path.exists(_USER_HASH_FILE):
+    if os.path.exists(USER_HASH_FILE):
         # Read from cached user hash file.
-        with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
+        with open(USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
             user_hash = f.read().strip()
-        if _is_valid_user_hash(user_hash):
+        if is_valid_user_hash(user_hash):
             return user_hash
 
     user_hash = generate_user_hash()
-    os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
-        f.write(user_hash)
+    set_user_hash_locally(user_hash)
     return user_hash
+
+
+def set_user_hash_locally(user_hash: str) -> None:
+    """Sets the user hash to local file."""
+    os.makedirs(os.path.dirname(USER_HASH_FILE), exist_ok=True)
+    with open(USER_HASH_FILE, 'w', encoding='utf-8') as f:
+        f.write(user_hash)
 
 
 def base36_encode(hex_str: str) -> str:
@@ -256,11 +295,14 @@ class Backoff:
 _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
 _using_remote_api_server: Optional[bool] = None
+_current_user: Optional['models.User'] = None
+_current_request_id: Optional[str] = None
 
 
-def set_client_status(client_entrypoint: Optional[str],
-                      client_command: Optional[str],
-                      using_remote_api_server: bool):
+def set_request_context(client_entrypoint: Optional[str],
+                        client_command: Optional[str],
+                        using_remote_api_server: bool,
+                        user: Optional['models.User'], request_id: str) -> None:
     """Override the current client entrypoint and command.
 
     This is useful when we are on the SkyPilot API server side and we have a
@@ -269,9 +311,20 @@ def set_client_status(client_entrypoint: Optional[str],
     global _current_command
     global _current_client_entrypoint
     global _using_remote_api_server
+    global _current_user
+    global _current_request_id
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
     _using_remote_api_server = using_remote_api_server
+    _current_user = user
+    _current_request_id = request_id
+
+
+def get_current_request_id() -> str:
+    """Returns the current request id."""
+    if _current_request_id is not None:
+        return _current_request_id
+    return 'dummy-request-id'
 
 
 def get_current_command() -> str:
@@ -284,6 +337,26 @@ def get_current_command() -> str:
         return _current_command
 
     return get_pretty_entrypoint_cmd()
+
+
+def get_current_user() -> 'models.User':
+    """Returns the current user."""
+    if _current_user is not None:
+        return _current_user
+    return models.User.get_current_user()
+
+
+def get_current_user_name() -> str:
+    """Returns the current user name."""
+    name = get_current_user().name
+    assert name is not None
+    return name
+
+
+def set_current_user(user: 'models.User'):
+    """Sets the current user."""
+    global _current_user
+    _current_user = user
 
 
 def get_current_client_entrypoint(server_entrypoint: str) -> str:
@@ -324,7 +397,152 @@ def get_pretty_entrypoint_cmd() -> str:
         # Turn '/.../anaconda/envs/py36/bin/sky' into 'sky', but keep other
         # things like 'examples/app.py'.
         argv[0] = basename
+
+    # Redact sensitive values from secrets arguments
+    argv = _redact_secrets_values(argv)
+
     return ' '.join(argv)
+
+
+def read_last_n_lines(file_path: str,
+                      n: int,
+                      chunk_size: int = 8192,
+                      encoding: str = 'utf-8',
+                      errors: str = 'replace') -> List[str]:
+    """Read the last N lines of a file.
+
+    Args:
+        file_path: Path to the file to read.
+        n: Number of lines to read from the end of the file.
+        chunk_size: Size of chunks in bytes.
+        encoding: Encoding to use when decoding binary chunks.
+        errors: Error handling for decode errors (e.g., 'replace', 'ignore').
+
+    Returns:
+        A list of the last N lines, preserving newlines where applicable.
+    """
+
+    assert n >= 0, f'n must be non-negative. Got {n}'
+    assert chunk_size > 0, f'chunk_size must be positive. Got {chunk_size}'
+    assert os.path.exists(file_path), f'File not found: {file_path}'
+
+    if n == 0:
+        return []
+
+    try:
+        with open(file_path, 'rb') as f:
+            # Start reading from the end of the file
+            f.seek(0, os.SEEK_END)
+            file_size = f.tell()
+            if file_size == 0:
+                return []
+
+            pos = file_size
+            lines_found = 0
+            chunks = []
+
+            # Read backwards in chunks until we've found at least n newlines
+            while pos > 0 and lines_found <= n:
+                read_size = min(chunk_size, pos)
+                pos -= read_size
+                f.seek(pos)
+                chunk = f.read(read_size)
+                chunks.append(chunk)
+                lines_found += chunk.count(b'\n')
+
+            # Combine all chunks in reverse order since we read backwards
+            full_bytes = b''.join(reversed(chunks))
+
+            # Split by newline byte. Note: this handles '\n' endings.
+            all_lines = full_bytes.split(b'\n')
+
+            # Handle edge case: if file ends with a newline, last element is b''
+            if all_lines and all_lines[-1] == b'':
+                result_bytes = all_lines[-n - 1:-1]
+            else:
+                result_bytes = all_lines[-n:]
+
+            # Decode each line and normalize CR/LF endings
+            decoded_lines = [
+                line.decode(encoding, errors=errors).rstrip('\r') + '\n'
+                for line in result_bytes[:-1]
+            ]
+
+            # Decode the final line — only add newline if it was present
+            last_line = result_bytes[-1].decode(encoding,
+                                                errors=errors).rstrip('\r')
+            decoded_lines.append(last_line)
+
+            return decoded_lines
+
+    except OSError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Failed to read last {n} lines from {file_path}: {e}') from e
+
+
+def _redact_secrets_values(argv: List[str]) -> List[str]:
+    """Redact sensitive values from --secret arguments.
+
+    Args:
+        argv: Command line arguments
+
+    Returns:
+        Modified argv with redacted --secret values, or original argv if any
+        error
+
+    Examples:
+        ['sky', 'launch', '--secret', 'HF_TOKEN=secret'] ->
+        ['sky', 'launch', '--secret', 'HF_TOKEN=<redacted>']
+
+        ['sky', 'launch', '--secret=HF_TOKEN=secret'] ->
+        ['sky', 'launch', '--secret=HF_TOKEN=<redacted>']
+
+        ['sky', 'launch', '--secret', 'HF_TOKEN'] ->
+        ['sky', 'launch', '--secret', 'HF_TOKEN'] (no change)
+    """
+    try:
+        if not argv:
+            return argv or []
+
+        result = []
+        i = 0
+
+        while i < len(argv):
+            arg = argv[i]
+
+            # Ensure arg is a string
+            if not isinstance(arg, str):
+                result.append(arg)
+                i += 1
+                continue
+
+            if arg == '--secret' and i + 1 < len(argv):
+                result.append(arg)
+                next_arg = argv[i + 1]
+                # Ensure next_arg is a string and handle redaction safely
+                if isinstance(next_arg, str):
+                    redacted = re.sub(r'^([^=]+)=.*', r'\1=<redacted>',
+                                      next_arg)
+                    result.append(redacted)
+                else:
+                    result.append(next_arg)
+                i += 2
+            elif arg.startswith('--secret='):
+                # Redact only if there's a value after the key
+                redacted = re.sub(r'^(--secret=[^=]+)=.*', r'\1=<redacted>',
+                                  arg)
+                result.append(redacted)
+                i += 1
+            else:
+                result.append(arg)
+                i += 1
+
+        return result
+    except Exception:  # pylint: disable=broad-except
+        # If anything goes wrong with redaction, return original argv
+        # This ensures the command can still execute
+        return argv or []
 
 
 def user_and_hostname_hash() -> str:
@@ -360,13 +578,13 @@ def read_yaml(path: Optional[str]) -> Dict[str, Any]:
     if path is None:
         raise ValueError('Attempted to read a None YAML.')
     with open(path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
+        config = yaml_utils.safe_load(f)
     return config
 
 
 def read_yaml_all_str(yaml_str: str) -> List[Dict[str, Any]]:
     stream = io.StringIO(yaml_str)
-    config = yaml.safe_load_all(stream)
+    config = yaml_utils.safe_load_all(stream)
     configs = list(config)
     if not configs:
         # Empty YAML file.
@@ -379,8 +597,9 @@ def read_yaml_all(path: str) -> List[Dict[str, Any]]:
         return read_yaml_all_str(f.read())
 
 
-def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
-                                       Dict[str, Any]]) -> None:
+def dump_yaml(path: str,
+              config: Union[List[Dict[str, Any]], Dict[str, Any]],
+              blank: bool = False) -> None:
     """Dumps a YAML file.
 
     Args:
@@ -388,7 +607,11 @@ def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
         config: the configuration to dump.
     """
     with open(path, 'w', encoding='utf-8') as f:
-        f.write(dump_yaml_str(config))
+        contents = dump_yaml_str(config)
+        if blank and isinstance(config, dict) and len(config) == 0:
+            # when dumping to yaml, an empty dict will go in as {}.
+            contents = ''
+        f.write(contents)
 
 
 def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
@@ -668,7 +891,7 @@ def get_cleaned_username(username: str = '') -> str:
     Returns:
       A cleaned username.
     """
-    username = username or getpass.getuser()
+    username = username or get_current_user_name()
     username = username.lower()
     username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)
@@ -723,10 +946,43 @@ def deprecated_function(
     return new_func
 
 
-def truncate_long_string(s: str, max_length: int = 35) -> str:
-    """Truncate a string to a maximum length, preserving whole words."""
+def truncate_long_string(s: str,
+                         max_length: int = 35,
+                         truncate_middle: bool = False) -> str:
+    """Truncate a string to a maximum length.
+
+    Args:
+        s: String to truncate.
+        max_length: Maximum length of the truncated string.
+        truncate_middle: Whether to truncate in the middle of the string.
+            If True, the middle part of the string is replaced with '...'.
+            If False, truncation happens at the end preserving whole words.
+
+    Returns:
+        Truncated string.
+    """
     if len(s) <= max_length:
         return s
+
+    if truncate_middle:
+        # Reserve 3 characters for '...'
+        if max_length <= 3:
+            return '...'
+
+        # Calculate how many characters to keep from beginning and end
+        half_length = (max_length - 3) // 2
+        remainder = (max_length - 3) % 2
+
+        # Keep one more character at the beginning if max_length - 3 is odd
+        start_length = half_length + remainder
+        end_length = half_length
+
+        # When end_length is 0, just show the start part and '...'
+        if end_length == 0:
+            return s[:start_length] + '...'
+        return s[:start_length] + '...' + s[-end_length:]
+
+    # Original end-truncation logic
     splits = s.split(' ')
     if len(splits[0]) > max_length:
         return splits[0][:max_length] + '...'  # Use '…'?
@@ -900,3 +1156,9 @@ def _get_cgroup_memory_limit() -> Optional[int]:
 def _is_cgroup_v2() -> bool:
     """Return True if the environment is running cgroup v2."""
     return os.path.isfile('/sys/fs/cgroup/cgroup.controllers')
+
+
+def removeprefix(string: str, prefix: str) -> str:
+    if string.startswith(prefix):
+        return string[len(prefix):]
+    return string

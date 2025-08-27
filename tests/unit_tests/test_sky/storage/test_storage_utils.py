@@ -1,5 +1,6 @@
 import io
 import os
+import socket
 import subprocess
 import tempfile
 import textwrap
@@ -37,12 +38,20 @@ def tmp_dir_with_files_to_ignore():
             'remove_dir_pattern/remove.txt',
             'remove_dir_pattern/remove.a',
         ]
+        # Verify that socket files are not included in the zip file
+        sockets = [
+            'docker.sock',
+            'fsmonitor--daemon.ipc',
+        ]
         for dir_name in dirs:
             os.makedirs(os.path.join(temp_dir, dir_name), exist_ok=True)
         for file_path in files:
             full_path = os.path.join(temp_dir, file_path)
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write('test content')
+        for socket_path in sockets:
+            full_path = os.path.join(temp_dir, socket_path)
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM).bind(full_path)
 
         # Create symlinks
         os.symlink(os.path.join(temp_dir, 'keep.py'),

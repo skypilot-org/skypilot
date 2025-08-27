@@ -1,10 +1,19 @@
+'use client';
+
 import React from 'react';
+import dynamic from 'next/dynamic';
 import PropTypes from 'prop-types';
 import '@/app/globals.css';
 import { useEffect } from 'react';
 import { BASE_PATH } from '@/data/connectors/constants';
+import { TourProvider } from '@/hooks/useTour';
 
-function MyApp({ Component, pageProps }) {
+const Layout = dynamic(
+  () => import('@/components/elements/layout').then((mod) => mod.Layout),
+  { ssr: false }
+);
+
+function App({ Component, pageProps }) {
   useEffect(() => {
     const link = document.createElement('link');
     link.rel = 'icon';
@@ -12,12 +21,18 @@ function MyApp({ Component, pageProps }) {
     document.head.appendChild(link);
   }, []);
 
-  return <Component {...pageProps} />;
+  return (
+    <TourProvider>
+      <Layout highlighted={pageProps.highlighted}>
+        <Component {...pageProps} />
+      </Layout>
+    </TourProvider>
+  );
 }
 
-MyApp.propTypes = {
+App.propTypes = {
   Component: PropTypes.elementType.isRequired,
   pageProps: PropTypes.object.isRequired,
 };
 
-export default MyApp;
+export default App;

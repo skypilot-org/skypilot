@@ -9,7 +9,7 @@
 name: minimal
 
 resources:
-  cloud: aws
+  infra: aws
 
 setup: |
   echo "running setup"

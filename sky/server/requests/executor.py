@@ -18,8 +18,9 @@ The number of the workers is determined by the system resources.
 
 See the [README.md](../README.md) for detailed architecture of the executor.
 """
+import asyncio
+import concurrent.futures
 import contextlib
-import enum
 import multiprocessing
 import os
 import queue as queue_lib
@@ -32,11 +33,13 @@ from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
 import setproctitle
 
+from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
 from sky.server import common as server_common
+from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -47,8 +50,12 @@ from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import subprocess_utils
+from sky.utils import tempstore
 from sky.utils import timeline
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import types
@@ -60,7 +67,6 @@ else:
     from typing_extensions import ParamSpec
 
 P = ParamSpec('P')
-
 logger = sky_logging.init_logger(__name__)
 
 # On macOS, the default start method for multiprocessing is 'fork', which
@@ -69,53 +75,6 @@ logger = sky_logging.init_logger(__name__)
 # The 'spawn' start method is generally more compatible across different
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
-
-# Constants based on profiling the peak memory usage while serving various
-# sky commands. These estimation are highly related to usage patterns
-# (clouds enabled, type of requests, etc. see `tests/load_tests` for details.),
-# the profiling covers major clouds and common usage patterns. For user has
-# deviated usage pattern, they can override the default estimation by
-# environment variables.
-# NOTE(dev): update these constants for each release according to the load
-# test results.
-# TODO(aylei): maintaining these constants is error-prone, we may need to
-# automatically tune parallelism at runtime according to system usage stats
-# in the future.
-_LONG_WORKER_MEM_GB = 0.4
-_SHORT_WORKER_MEM_GB = 0.25
-# To control the number of long workers.
-_CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
-# Limit the number of long workers of local API server, since local server is
-# typically:
-# 1. launched automatically in an environment with high resource contention
-#    (e.g. Laptop)
-# 2. used by a single user
-_MAX_LONG_WORKERS_LOCAL = 4
-# Percentage of memory for long requests
-# from the memory reserved for SkyPilot.
-# This is to reserve some memory for short requests.
-_MAX_MEM_PERCENT_FOR_BLOCKING = 0.6
-# Minimal number of long workers to ensure responsiveness.
-_MIN_LONG_WORKERS = 1
-# Minimal number of short workers, there is a daemon task running on short
-# workers so at least 2 workers are needed to ensure responsiveness.
-_MIN_SHORT_WORKERS = 2
-
-# Default number of burstable workers for local API server. A heuristic number
-# that is large enough for most local cases.
-# TODO(aylei): the number of burstable workers should be auto-tuned based on the
-# system usage stats.
-_BURSTABLE_WORKERS_FOR_LOCAL = 1024
-
-
-class QueueBackend(enum.Enum):
-    # Local queue backend serves queues in each process locally, which has
-    # lower resource usage but the consumer must be in the same process, i.e.
-    # this only works in single-process mode.
-    LOCAL = 'local'
-    # Multi-process queue backend starts a dedicated process for serving queues.
-    MULTIPROCESSING = 'multiprocessing'
-    # TODO(zhwu): we can add redis backend in the future.
 
 
 class RequestQueue:
@@ -126,31 +85,31 @@ class RequestQueue:
 
     def __init__(self,
                  schedule_type: api_requests.ScheduleType,
-                 backend: Optional[QueueBackend] = None) -> None:
+                 backend: Optional[server_config.QueueBackend] = None) -> None:
         self.name = schedule_type.value
         self.backend = backend
-        if backend == QueueBackend.MULTIPROCESSING:
+        if backend == server_config.QueueBackend.MULTIPROCESSING:
             self.queue = mp_queue.get_queue(self.name)
-        elif backend == QueueBackend.LOCAL:
+        elif backend == server_config.QueueBackend.LOCAL:
             self.queue = local_queue.get_queue(self.name)
         else:
             raise RuntimeError(f'Invalid queue backend: {backend}')
 
-    def put(self, request: Tuple[str, bool]) -> None:
+    def put(self, request: Tuple[str, bool, bool]) -> None:
         """Put and request to the queue.
 
         Args:
-            request: A tuple of request_id and ignore_return_value.
+            request: A tuple of request_id, ignore_return_value, and retryable.
         """
         self.queue.put(request)  # type: ignore
 
-    def get(self) -> Optional[Tuple[str, bool]]:
+    def get(self) -> Optional[Tuple[str, bool, bool]]:
         """Get a request from the queue.
 
         It is non-blocking if the queue is empty, and returns None.
 
         Returns:
-            A tuple of request_id and ignore_return_value.
+            A tuple of request_id, ignore_return_value, and retryable.
         """
         try:
             return self.queue.get(block=False)
@@ -162,7 +121,7 @@ class RequestQueue:
         return self.queue.qsize()
 
 
-queue_backend = QueueBackend.MULTIPROCESSING
+queue_backend = server_config.QueueBackend.MULTIPROCESSING
 
 
 def executor_initializer(proc_group: str):
@@ -186,16 +145,29 @@ class RequestWorker:
     # if there are available CPU/memory resources.
     burstable_parallelism: int = 0
 
-    def __init__(self,
-                 schedule_type: api_requests.ScheduleType,
-                 garanteed_parallelism: int,
-                 burstable_parallelism: int = 0) -> None:
+    def __init__(self, schedule_type: api_requests.ScheduleType,
+                 config: server_config.WorkerConfig) -> None:
         self.schedule_type = schedule_type
-        self.garanteed_parallelism = garanteed_parallelism
-        self.burstable_parallelism = burstable_parallelism
+        self.garanteed_parallelism = config.garanteed_parallelism
+        self.burstable_parallelism = config.burstable_parallelism
+        self._thread: Optional[threading.Thread] = None
+        self._cancel_event = threading.Event()
 
     def __str__(self) -> str:
         return f'Worker(schedule_type={self.schedule_type.value})'
+
+    def run_in_background(self) -> None:
+        # Thread dispatcher is sufficient for current scale, refer to
+        # tests/load_tests/test_queue_dispatcher.py for more details.
+        # Use daemon thread for automatic cleanup.
+        thread = threading.Thread(target=self.run, daemon=True)
+        thread.start()
+        self._thread = thread
+
+    def cancel(self) -> None:
+        if self._thread is not None:
+            self._cancel_event.set()
+            self._thread.join()
 
     def process_request(self, executor: process.BurstableExecutor,
                         queue: RequestQueue) -> None:
@@ -204,7 +176,7 @@ class RequestWorker:
             if request_element is None:
                 time.sleep(0.1)
                 return
-            request_id, ignore_return_value = request_element
+            request_id, ignore_return_value, _ = request_element
             request = api_requests.get_request(request_id)
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
@@ -216,8 +188,12 @@ class RequestWorker:
             # multiple requests can share the same process pid, which may cause
             # issues with SkyPilot core functions if they rely on the exit of
             # the process, such as subprocess_daemon.py.
-            executor.submit_until_success(_request_execution_wrapper,
-                                          request_id, ignore_return_value)
+            fut = executor.submit_until_success(_request_execution_wrapper,
+                                                request_id, ignore_return_value)
+            # Monitor the result of the request execution.
+            threading.Thread(target=self.handle_task_result,
+                             args=(fut, request_element),
+                             daemon=True).start()
 
             logger.info(f'[{self}] Submitted request: {request_id}')
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -226,6 +202,31 @@ class RequestWorker:
                 f'[{self}] Error processing request: '
                 f'{request_id if "request_id" in locals() else ""} '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
+
+    def handle_task_result(self, fut: concurrent.futures.Future,
+                           request_element: Tuple[str, bool, bool]) -> None:
+        try:
+            fut.result()
+        except concurrent.futures.process.BrokenProcessPool as e:
+            # Happens when the worker process dies unexpectedly, e.g. OOM
+            # killed.
+            request_id, _, retryable = request_element
+            # Ensure the request status.
+            api_requests.set_request_failed(request_id, e)
+            logger.error(
+                f'Request {request_id} failed to get processed '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+            if retryable:
+                # If the request is retryable and disrupted by broken
+                # process pool, reschedule it immediately to get it
+                # retried in the new process pool.
+                queue = _get_queue(self.schedule_type)
+                queue.put(request_element)
+        except exceptions.ExecutionRetryableError as e:
+            time.sleep(e.retry_wait_seconds)
+            # Reschedule the request.
+            queue = _get_queue(self.schedule_type)
+            queue.put(request_element)
 
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
@@ -247,7 +248,7 @@ class RequestWorker:
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
                 initargs=(proc_group,))
-            while True:
+            while not self._cancel_event.is_set():
                 self.process_request(executor, queue)
         # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.
         except KeyboardInterrupt:
@@ -270,22 +271,43 @@ def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
 
 @contextlib.contextmanager
 def override_request_env_and_config(
-        request_body: payloads.RequestBody) -> Generator[None, None, None]:
+        request_body: payloads.RequestBody,
+        request_id: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
+    # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API server
+    # affecting client requests. If set on the client side, it will be
+    # overridden by the request body.
+    os.environ.pop('SKYPILOT_DEBUG', None)
     os.environ.update(request_body.env_vars)
+    # Note: may be overridden by AuthProxyMiddleware.
+    # TODO(zhwu): we need to make the entire request a context available to the
+    # entire request execution, so that we can access info like user through
+    # the execution.
     user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                        name=request_body.env_vars[constants.USER_ENV_VAR])
     global_user_state.add_or_update_user(user)
+    # Refetch the user to get the latest user info, including the created_at
+    # field.
+    user = global_user_state.get_user(user.id)
+
     # Force color to be enabled.
     os.environ['CLICOLOR_FORCE'] = '1'
     server_common.reload_for_new_request(
         client_entrypoint=request_body.entrypoint,
         client_command=request_body.entrypoint_command,
-        using_remote_api_server=request_body.using_remote_api_server)
+        using_remote_api_server=request_body.using_remote_api_server,
+        user=user,
+        request_id=request_id)
     try:
+        logger.debug(
+            f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
-                request_body.override_skypilot_config):
+                request_body.override_skypilot_config,
+                request_body.override_skypilot_config_path):
+            # Rejecting requests to workspaces that the user does not have
+            # permission to access.
+            workspaces_core.reject_request_for_unauthorized_workspace(user)
             yield
     finally:
         # We need to call the save_timeline() since atexit will not be
@@ -336,6 +358,7 @@ def _request_execution_wrapper(request_id: str,
     2. Update the request status based on the execution result;
     3. Redirect the stdout and stderr of the execution to log file;
     4. Handle the SIGTERM signal to abort the request gracefully.
+    5. Maintain the lifecycle of the temp dir used by the request.
     """
     # Handle the SIGTERM signal to abort the request processing gracefully.
     signal.signal(signal.SIGTERM, _sigterm_handler)
@@ -350,14 +373,17 @@ def _request_execution_wrapper(request_id: str,
         func = request_task.entrypoint
         request_body = request_task.request_body
 
-    with log_path.open('w', encoding='utf-8') as f:
+    # Append to the log file instead of overwriting it since there might be
+    # logs from previous retries.
+    with log_path.open('a', encoding='utf-8') as f:
         # Store copies of the original stdout and stderr file descriptors
         original_stdout, original_stderr = _redirect_output(f)
         # Redirect the stdout/stderr before overriding the environment and
         # config, as there can be some logs during override that needs to be
         # captured in the log file.
         try:
-            with override_request_env_and_config(request_body):
+            with override_request_env_and_config(request_body, request_id), \
+                tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
@@ -374,6 +400,17 @@ def _request_execution_wrapper(request_id: str,
             subprocess_utils.kill_children_processes()
             _restore_output(original_stdout, original_stderr)
             return
+        except exceptions.ExecutionRetryableError as e:
+            logger.error(e)
+            logger.info(e.hint)
+            with api_requests.update_request(request_id) as request_task:
+                assert request_task is not None, request_id
+                # Retried request will undergo rescheduling and a new execution,
+                # clear the pid of the request.
+                request_task.pid = None
+            # Yield control to the scheduler for uniform handling of retries.
+            _restore_output(original_stdout, original_stderr)
+            raise
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             api_requests.set_request_failed(request_id, e)
             _restore_output(original_stdout, original_stderr)
@@ -381,26 +418,130 @@ def _request_execution_wrapper(request_id: str,
                         f'{common_utils.format_exception(e)}')
             return
         else:
-            with api_requests.update_request(request_id) as request_task:
-                assert request_task is not None, request_id
-                request_task.status = api_requests.RequestStatus.SUCCEEDED
-                if not ignore_return_value:
-                    request_task.set_return_value(return_value)
+            api_requests.set_request_succeeded(
+                request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
 
 
-def schedule_request(
-        request_id: str,
-        request_name: str,
-        request_body: payloads.RequestBody,
-        func: Callable[P, Any],
-        request_cluster_name: Optional[str] = None,
-        ignore_return_value: bool = False,
-        schedule_type: api_requests.ScheduleType = (
-            api_requests.ScheduleType.LONG),
-        is_skypilot_system: bool = False,
-        precondition: Optional[preconditions.Precondition] = None) -> None:
+async def execute_request_coroutine(request: api_requests.Request):
+    """Execute a request in current event loop.
+
+    Similar to _request_execution_wrapper, but executed as coroutine in current
+    event loop. This is designed for executing tasks that are not CPU
+    intensive, e.g. sky logs.
+    """
+    context.initialize()
+    ctx = context.get()
+    assert ctx is not None, 'Context is not initialized'
+    logger.info(f'Executing request {request.request_id} in coroutine')
+    func = request.entrypoint
+    request_body = request.request_body
+    with api_requests.update_request(request.request_id) as request_task:
+        request_task.status = api_requests.RequestStatus.RUNNING
+    # Redirect stdout and stderr to the request log path.
+    original_output = ctx.redirect_log(request.log_path)
+    # Override environment variables that backs env_options.Options
+    # TODO(aylei): compared to process executor, running task in coroutine has
+    # two issues to fix:
+    # 1. skypilot config is not contextual
+    # 2. envs that read directly from os.environ are not contextual
+    ctx.override_envs(request_body.env_vars)
+    fut: asyncio.Future = context_utils.to_thread(func,
+                                                  **request_body.to_kwargs())
+
+    async def poll_task(request_id: str) -> bool:
+        request = api_requests.get_request(request_id)
+        if request is None:
+            raise RuntimeError('Request not found')
+
+        if request.status == api_requests.RequestStatus.CANCELLED:
+            ctx.cancel()
+            return True
+
+        if fut.done():
+            try:
+                result = await fut
+                api_requests.set_request_succeeded(request_id, result)
+            except asyncio.CancelledError:
+                # The task is cancelled by ctx.cancel(), where the status
+                # should already be set to CANCELLED.
+                pass
+            except Exception as e:  # pylint: disable=broad-except
+                ctx.redirect_log(original_output)
+                api_requests.set_request_failed(request_id, e)
+                logger.error(f'Request {request_id} failed due to '
+                             f'{common_utils.format_exception(e)}')
+            return True
+        return False
+
+    try:
+        while True:
+            res = await poll_task(request.request_id)
+            if res:
+                break
+            await asyncio.sleep(0.5)
+    except asyncio.CancelledError:
+        # Current coroutine is cancelled due to client disconnect, set the
+        # request status for consistency.
+        api_requests.set_request_cancelled(request.request_id)
+        pass
+    # pylint: disable=broad-except
+    except (Exception, KeyboardInterrupt, SystemExit) as e:
+        # Handle any other error
+        ctx.redirect_log(original_output)
+        ctx.cancel()
+        api_requests.set_request_failed(request.request_id, e)
+        logger.error(f'Request {request.request_id} interrupted due to '
+                     f'unhandled exception: {common_utils.format_exception(e)}')
+        raise
+
+
+def prepare_request(
+    request_id: str,
+    request_name: str,
+    request_body: payloads.RequestBody,
+    func: Callable[P, Any],
+    request_cluster_name: Optional[str] = None,
+    schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
+    is_skypilot_system: bool = False,
+) -> api_requests.Request:
+    """Prepare a request for execution."""
+    user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+    if is_skypilot_system:
+        user_id = constants.SKYPILOT_SYSTEM_USER_ID
+        global_user_state.add_or_update_user(
+            models.User(id=user_id, name=user_id))
+    request = api_requests.Request(request_id=request_id,
+                                   name=server_constants.REQUEST_NAME_PREFIX +
+                                   request_name,
+                                   entrypoint=func,
+                                   request_body=request_body,
+                                   status=api_requests.RequestStatus.PENDING,
+                                   created_at=time.time(),
+                                   schedule_type=schedule_type,
+                                   user_id=user_id,
+                                   cluster_name=request_cluster_name)
+
+    if not api_requests.create_if_not_exists(request):
+        raise exceptions.RequestAlreadyExistsError(
+            f'Request {request_id} already exists.')
+
+    request.log_path.touch()
+    return request
+
+
+def schedule_request(request_id: str,
+                     request_name: str,
+                     request_body: payloads.RequestBody,
+                     func: Callable[P, Any],
+                     request_cluster_name: Optional[str] = None,
+                     ignore_return_value: bool = False,
+                     schedule_type: api_requests.ScheduleType = (
+                         api_requests.ScheduleType.LONG),
+                     is_skypilot_system: bool = False,
+                     precondition: Optional[preconditions.Precondition] = None,
+                     retryable: bool = False) -> None:
     """Enqueue a request to the request queue.
 
     Args:
@@ -421,30 +562,11 @@ def schedule_request(
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
-    if is_skypilot_system:
-        user_id = server_constants.SKYPILOT_SYSTEM_USER_ID
-        global_user_state.add_or_update_user(
-            models.User(id=user_id, name=user_id))
-    request = api_requests.Request(request_id=request_id,
-                                   name=server_constants.REQUEST_NAME_PREFIX +
-                                   request_name,
-                                   entrypoint=func,
-                                   request_body=request_body,
-                                   status=api_requests.RequestStatus.PENDING,
-                                   created_at=time.time(),
-                                   schedule_type=schedule_type,
-                                   user_id=user_id,
-                                   cluster_name=request_cluster_name)
-
-    if not api_requests.create_if_not_exists(request):
-        logger.debug(f'Request {request_id} already exists.')
-        return
-
-    request.log_path.touch()
+    prepare_request(request_id, request_name, request_body, func,
+                    request_cluster_name, schedule_type, is_skypilot_system)
 
     def enqueue():
-        input_tuple = (request_id, ignore_return_value)
+        input_tuple = (request_id, ignore_return_value, retryable)
         logger.info(f'Queuing request: {request_id}')
         _get_queue(schedule_type).put(input_tuple)
 
@@ -455,80 +577,23 @@ def schedule_request(
         enqueue()
 
 
-def start(deploy: bool) -> List[multiprocessing.Process]:
+def start(
+    config: server_config.ServerConfig
+) -> Tuple[Optional[multiprocessing.Process], List[RequestWorker]]:
     """Start the request workers.
 
     Request workers run in background, schedule the requests and delegate the
-    request execution to executor processes. We have different assumptions for
-    the resources in different deployment modes, which leads to different
-    worker setups:
+    request execution to executor processes.
 
-    - Deployment mode (deploy=True), we assume the resources are dedicated to
-      the API server and the resources will be tuned for serious use cases, so:
-      - Use multiprocessing queue backend and dedicated workers processes to
-        avoid GIL contention.
-      - Parallelism (number of executor processes) is fixed and executor
-        processes have same lifecycle with the server, which ensures
-        best-effort cache reusing and stable resources consumption.
-      - Reject to start in low resource environments, to avoid flaky
-        deployments.
-    - Local mode (deploy=False), we assume the server is running in a shared
-      environment (e.g. laptop) and users typically do not pay attention to
-      the resource setup of the server. Moreover, existing users may expect
-      some consistent behaviors with old versions, i.e. before API server was
-      introduced, so:
-      - The max number of long-running executor processes are limited, to avoid
-        high memory consumption when the server is idle.
-      - Allow burstable workers to handle requests when all long-running
-        workers are busy, which mimics the behavior of local sky CLI before
-        API server was introduced.
-      - Works in low resources environments, and further reduce the memory
-        consumption in low resource environments.
-
-    Note that there is still significant overhead for SDK users when migrate to
-    local API server. Since the users are free to run sky operations in Threads
-    when using SDK but all client operations will occupy at least one worker
-    process after API server was introduced.
+    Returns:
+        A tuple of the queue server process and the list of request worker
+        threads.
     """
-    # Determine the job capacity of the workers based on the system resources.
-    cpu_count = common_utils.get_cpu_count()
-    mem_size_gb = common_utils.get_mem_size_gb()
-    mem_size_gb = max(0, mem_size_gb - server_constants.MIN_AVAIL_MEM_GB)
-    # Runs in low resource mode if the available memory is less than
-    # server_constants.MIN_AVAIL_MEM_GB.
-    max_parallel_for_long = _max_long_worker_parallism(cpu_count,
-                                                       mem_size_gb,
-                                                       local=not deploy)
-    max_parallel_for_short = _max_short_worker_parallism(
-        mem_size_gb, max_parallel_for_long)
-    if mem_size_gb < server_constants.MIN_AVAIL_MEM_GB:
-        # Permanent worker process may have significant memory consumption
-        # (~350MB per worker) after running commands like `sky check`, so we
-        # don't start any permanent workers in low resource local mode. This
-        # mimics the behavior of local sky CLI before API server was
-        # introduced, where the CLI will start new process everytime and
-        # never reject to start due to resource constraints.
-        # Note that the refresh daemon will still occupy one worker
-        # permanently because it never exits.
-        max_parallel_for_long = 0
-        max_parallel_for_short = 0
-        logger.warning(
-            'SkyPilot API server will run in low resource mode because '
-            'the available memory is less than '
-            f'{server_constants.MIN_AVAIL_MEM_GB}GB.')
-    else:
-        logger.info(
-            f'SkyPilot API server will start {max_parallel_for_long} workers '
-            f'for long requests and will allow at max '
-            f'{max_parallel_for_short} short requests in parallel.')
-    if not deploy:
-        # For local mode, use local queue backend since we only run 1 uvicorn
-        # worker in local mode.
-        global queue_backend
-        queue_backend = QueueBackend.LOCAL
-    sub_procs = []
+    global queue_backend
+    queue_backend = config.queue_backend
+    queue_server = None
     # Setup the queues.
-    if queue_backend == QueueBackend.MULTIPROCESSING:
+    if queue_backend == server_config.QueueBackend.MULTIPROCESSING:
         logger.info('Creating shared request queues')
         queue_names = [
             schedule_type.value for schedule_type in api_requests.ScheduleType
@@ -543,11 +608,10 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
         queue_server = multiprocessing.Process(
             target=mp_queue.start_queue_manager, args=(queue_names, port))
         queue_server.start()
-        sub_procs.append(queue_server)
         mp_queue.wait_for_queues_to_be_ready(queue_names,
                                              queue_server,
                                              port=port)
-    elif queue_backend == QueueBackend.LOCAL:
+    elif queue_backend == server_config.QueueBackend.LOCAL:
         # No setup is needed for local queue backend.
         pass
     else:
@@ -556,47 +620,16 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
 
     logger.info('Request queues created')
 
-    def run_worker_in_background(worker: RequestWorker):
-        # Thread dispatcher is sufficient for current scale, refer to
-        # tests/load_tests/test_queue_dispatcher.py for more details.
-        # Use daemon thread for automatic cleanup.
-        thread = threading.Thread(target=worker.run, daemon=True)
-        thread.start()
-
-    burstable_parallelism = _BURSTABLE_WORKERS_FOR_LOCAL if not deploy else 0
+    workers = []
     # Start a worker for long requests.
     long_worker = RequestWorker(schedule_type=api_requests.ScheduleType.LONG,
-                                garanteed_parallelism=max_parallel_for_long,
-                                burstable_parallelism=burstable_parallelism)
-    run_worker_in_background(long_worker)
+                                config=config.long_worker_config)
+    long_worker.run_in_background()
+    workers.append(long_worker)
 
     # Start a worker for short requests.
     short_worker = RequestWorker(schedule_type=api_requests.ScheduleType.SHORT,
-                                 garanteed_parallelism=max_parallel_for_short,
-                                 burstable_parallelism=burstable_parallelism)
-    run_worker_in_background(short_worker)
-    return sub_procs
-
-
-@annotations.lru_cache(scope='global', maxsize=1)
-def _max_long_worker_parallism(cpu_count: int,
-                               mem_size_gb: float,
-                               local=False) -> int:
-    """Max parallelism for long workers."""
-    cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_LONG_WORKERS
-    mem_based_max_parallel = int(mem_size_gb * _MAX_MEM_PERCENT_FOR_BLOCKING /
-                                 _LONG_WORKER_MEM_GB)
-    n = max(_MIN_LONG_WORKERS,
-            min(cpu_based_max_parallel, mem_based_max_parallel))
-    if local:
-        return min(n, _MAX_LONG_WORKERS_LOCAL)
-    return n
-
-
-@annotations.lru_cache(scope='global', maxsize=1)
-def _max_short_worker_parallism(mem_size_gb: float,
-                                long_worker_parallism: int) -> int:
-    """Max parallelism for short workers."""
-    available_mem = mem_size_gb - (long_worker_parallism * _LONG_WORKER_MEM_GB)
-    n = max(_MIN_SHORT_WORKERS, int(available_mem / _SHORT_WORKER_MEM_GB))
-    return n
+                                 config=config.short_worker_config)
+    short_worker.run_in_background()
+    workers.append(short_worker)
+    return queue_server, workers

@@ -3,7 +3,7 @@ envs:
   SEQ_LEN: 2048
   GC_SCALE: 4
   USE_FLASH_ATTN: 0
-  WANDB_API_KEY: # TODO: Fill with your own WANDB_API_KEY, or use --env to pass.
+  WANDB_API_KEY: null # Pass with `--secret WANDB_API_KEY` in CLI
 
 resources:
   accelerators: A100-80GB:8

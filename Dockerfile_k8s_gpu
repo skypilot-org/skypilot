@@ -9,7 +9,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
 RUN rm -rf /etc/apt/sources.list.d/cuda* && \
     apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat-openbsd curl -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat-openbsd curl jq -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup SSH and generate hostkeys
@@ -24,6 +24,10 @@ RUN sudo mkdir -p /var/run/sshd && \
 RUN sudo useradd -m -s /bin/bash sky && \
     sudo /bin/bash -c 'echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers' && \
     sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky"
+
+# give sky group write permission to /opt/conda
+RUN chown -R :sky /opt/conda && \
+    chmod -R g+w /opt/conda
 
 # Switch to sky user
 USER sky

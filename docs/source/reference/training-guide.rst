@@ -15,10 +15,120 @@ SkyPilot supports all distributed training frameworks, including but not limited
 - `Ray Train <https://docs.skypilot.co/en/latest/examples/training/ray.html>`_
 - `TensorFlow Distribution Strategies <https://docs.skypilot.co/en/latest/examples/training/distributed-tensorflow.html>`_
 
-The choice of framework depends on your specific needs, but all can be easily configured through SkyPilot's YAML specification.
+The choice of framework depends on your specific needs, but all can be easily configured in a SkyPilot YAML.
 
 Best practices
 --------------
+
+
+Use high-performance networking
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. tab-set::
+
+    .. tab-item:: Nebius with InfiniBand
+        :sync: nebius-infiniband-tab
+
+        InfiniBand is a high-throughput, low-latency networking standard. To accelerate ML, AI and high-performance computing (HPC) workloads that you run in your Managed Service for Kubernetes clusters or Nebius VMs, you can interconnect the GPUs using InfiniBand.
+
+        Use ``resources.network_tier: best`` to automatically enable InfiniBand for your clusters and jobs.
+
+        On Nebius managed Kubernetes clusters:
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: k8s
+            accelerators: H100:8
+            network_tier: best
+
+          num_nodes: 2
+
+        On Nebius VMs:
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: nebius
+            accelerators: H100:8
+            network_tier: best
+
+          num_nodes: 2
+
+        See more details in the `Nebius example <https://docs.skypilot.co/en/latest/examples/performance/nebius_infiniband.html>`_.
+
+    .. tab-item:: AWS EFA
+        :sync: aws-efa-tab
+
+        AWS Elastic Fabric Adapter (EFA) is a network interface similar to Nvidia Infiniband that enables users to run applications requiring high levels of inter-node communications at scale on AWS. You can enable EFA on AWS HyperPod/EKS clusters with a simple additional setting in your SkyPilot YAML.
+
+        Example configuration:
+
+        .. code-block:: yaml
+
+          config:
+            kubernetes:
+              pod_config:
+                spec:
+                  containers:
+                    - resources:
+                      limits:
+                        vpc.amazonaws.com/efa: 4
+                      requests:
+                        vpc.amazonaws.com/efa: 4
+
+        See `EFA example <https://docs.skypilot.co/en/latest/examples/performance/aws_efa.html>`_ for more details.
+
+    .. tab-item:: GCP GPUDirect-TCPX
+        :sync: gcp-gpu-direct-tcpx-tab
+
+        `GPUDirect-TCPX <https://cloud.google.com/compute/docs/gpus/gpudirect>`_ is a high-performance networking technology that enables direct communication between GPUs and network interfaces for `a3-highgpu-8g` or `a3-edgegpu-8g` VMs. You can enable it with the following additional setting in your SkyPilot YAML.
+
+        Example configuration:
+
+        .. code-block:: yaml
+
+          config:
+            gcp:
+              enable_gpu_direct: true
+
+        See `GPUDirect-TCPX example <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
+
+
+Use ``disk_tier: best``
+~~~~~~~~~~~~~~~~~~~~~~~
+Fast storage is critical for loading and storing data and model checkpoints.
+SkyPilot's ``disk_tier`` option supports the fastest available storage with high-performance local SSDs to reduce I/O bottlenecks.
+
+Example configuration:
+
+.. code-block:: yaml
+
+  resources:
+    disk_tier: best  # Use highest performance disk tier.
+    disk_size: 1000  # GiB. Make the disk size large enough for checkpoints.
+
+
+Use ``MOUNT_CACHED`` for checkpointing
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Cloud buckets with the ``MOUNT_CACHED`` mode provides high performance writing, making it ideal for model checkpoints, logs, and other outputs with fast local writes.
+
+Unlike ``MOUNT`` mode, it supports all write and append operations by using local disk as a cache for the files to be writen to cloud buckets. It can offer up to 9x writing speed of large checkpoints compared to the `MOUNT` mode.
+
+Example configuration:
+
+.. code-block:: yaml
+
+    file_mounts:
+      /checkpoints:
+        name: my-checkpoint-bucket
+        mode: MOUNT_CACHED
+
+
+For more on the differences between ``MOUNT`` and ``MOUNT_CACHED``, see :ref:`storage mounting modes <storage-mounting-modes>`.
 
 High performance instances
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -32,43 +142,10 @@ Example configuration:
 .. code-block:: yaml
 
   resources:
-    accelerators: 
-      A100:1  
-      A100-80GB:1  
-      H100:1  
-
-Use ``disk_tier: best``
-~~~~~~~~~~~~~~~~~~~~~~~
-Fast storage is critical for loading and storing data and model checkpoints.
-SkyPilot's ``disk_tier`` option supports the fastest available storage with high-performance local SSDs to reduce I/O bottlenecks.
-
-Example configuration:
-
-.. code-block:: yaml
-
-  resources:
-    disk_tier: best  # Use highest performance disk tier.
-    disk_size: 1000 # GiB. Make the disk size large enough for checkpoints.
-
-
-Use ``MOUNT_CACHED`` for checkpointing
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Cloud buckets with the ``MOUNT_CACHED`` mode provides high performance writing, making it ideal for model checkpoints, logs, and other outputs with fast local writes. 
-
-Unlike ``MOUNT`` mode, it supports all write and append operations by using local disk as a cache for the files to be writen to cloud buckets. It can offer up to 9x writing speed of large checkpoints compared to the `MOUNT` mode.
-
-Example configuration:
-
-.. code-block:: yaml
-
-    file_mounts:
-      /checkpoints:
-        name: my-checkpoint-bucket  
-        mode: MOUNT_CACHED
-
-
-For more on the differences between ``MOUNT`` and ``MOUNT_CACHED``, see :ref:`storage mounting modes <storage-mounting-modes>`.
+    accelerators:
+      A100:1
+      A100-80GB:1
+      H100:1
 
 Robust checkpointing for spot instances
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -94,7 +171,7 @@ Saving to the bucket is easy -- simply save to the mounted directory ``/checkpoi
 
 To make loading checkpoint robust against preemptions and incomplete checkpoitns, here is the recipe:
 
-- Always try loading from the latest checkpoint first 
+- Always try loading from the latest checkpoint first
 - If the latest checkpoint is found to be corrupted or incomplete,  fallback to earlier checkpoints
 
 Here's a simplified example showing the core concepts for :code:`torch.save`:
@@ -111,7 +188,7 @@ Here's a simplified example showing the core concepts for :code:`torch.save`:
                 key=lambda x: int(x.stem.split('_')[-1]),
                 reverse=True
             )
-            
+
             # Try each checkpoint from newest to oldest
             for checkpoint in checkpoints:
                 try:
@@ -124,7 +201,7 @@ Here's a simplified example showing the core concepts for :code:`torch.save`:
         except Exception as e:
             logger.error(f"Failed to find checkpoints: {e}")
             return None
-            
+
 Robust checkpointing with error handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 For a complete implementation with additional features like custom prefixes, extended metadata, and more detailed error handling, see the code below:
@@ -155,7 +232,7 @@ For a complete implementation with additional features like custom prefixes, ext
         ):
             """
             Decorator for saving checkpoints with fallback mechanism.
-            
+
             Args:
                 save_dir: Directory to save checkpoints
                 max_checkpoints: Maximum number of checkpoints to keep
@@ -200,14 +277,14 @@ For a complete implementation with additional features like custom prefixes, ext
                     try:
                         # Call the original save function
                         result = func(*args, **kwargs)
-                        
+
                         # Save metadata
                         metadata = {
                             'step': step,
                             'timestamp': datetime.now().isoformat(),
                             'model_type': kwargs.get('model', args[1] if len(args) > 1 else None).__class__.__name__,
                         }
-                        
+
                         metadata_path = save_dir_path / f"{checkpoint_prefix}_step_{step}_metadata.json"
                         with open(metadata_path, 'w') as f:
                             json.dump(metadata, f)
@@ -217,7 +294,7 @@ For a complete implementation with additional features like custom prefixes, ext
                             [f for f in save_dir_path.glob(f"{checkpoint_prefix}_step_*.pt")],
                             key=lambda x: int(x.stem.split('_')[-1])
                         )
-                        
+
                         while len(checkpoints) > max_checkpoints:
                             oldest_checkpoint = checkpoints.pop(0)
                             oldest_checkpoint.unlink()
@@ -242,7 +319,7 @@ For a complete implementation with additional features like custom prefixes, ext
             """
             Decorator for loading checkpoints with fallback mechanism.
             Tries to load from the latest checkpoint, if that fails tries the second latest, and so on.
-            
+
             Args:
                 save_dir: Directory containing checkpoints
                 checkpoint_prefix: Prefix for checkpoint files
@@ -280,7 +357,7 @@ For a complete implementation with additional features like custom prefixes, ext
                             key=lambda x: int(x.stem.split('_')[-1]),
                             reverse=True  # Sort in descending order (newest first)
                         )
-                        
+
                         if not checkpoints:
                             logger.warning("No checkpoints found")
                             return func(*args, **kwargs)
@@ -289,7 +366,7 @@ For a complete implementation with additional features like custom prefixes, ext
                         for checkpoint in checkpoints:
                             try:
                                 step = int(checkpoint.stem.split('_')[-1])
-                                
+
                                 # Call the original load function with the current step
                                 if 'step' in kwargs:
                                     kwargs['step'] = step
@@ -297,11 +374,11 @@ For a complete implementation with additional features like custom prefixes, ext
                                     args = list(args)
                                     args[0] = step
                                     args = tuple(args)
-                                
+
                                 result = func(*args, **kwargs)
                                 logger.info(f"Successfully loaded checkpoint from step {step}")
                                 return result
-                                
+
                             except Exception as e:
                                 logger.warning(f"Failed to load checkpoint at step {step}, trying previous checkpoint: {str(e)}")
                                 continue
@@ -388,7 +465,7 @@ BERT end-to-end
 We can take the SkyPilot YAML for BERT fine-tuning from :ref:`above <managed-job-quickstart>`, and add checkpointing/recovery to get everything working end-to-end.
 
 .. note::
-    
+
   You can find all the code for this example `in the documentation <https://docs.skypilot.co/en/latest/examples/spot/bert_qa.html>`_
 
 In this example, we fine-tune a BERT model on a question-answering task with HuggingFace.

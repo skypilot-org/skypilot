@@ -1,8 +1,8 @@
 """Accelerator registry."""
 import typing
-from typing import Optional
+from typing import List, Optional
 
-from sky.clouds import service_catalog
+from sky import catalog
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -34,7 +34,8 @@ if typing.TYPE_CHECKING:
 
 # Use a cached version of accelerators to cloud mapping, so that we don't have
 # to download and read the catalog file for every cloud locally.
-_accelerator_df = service_catalog.common.read_catalog('common/accelerators.csv')
+_accelerator_df = catalog.common.read_catalog('common/accelerators.csv')
+_memory_df = catalog.common.read_catalog('common/metadata.csv')
 
 # List of non-GPU accelerators that are supported by our backend for job queue
 # scheduling.
@@ -43,6 +44,32 @@ _SCHEDULABLE_NON_GPU_ACCELERATORS = [
     'inferentia',
     'trainium',
 ]
+
+
+def get_devices_by_memory(memory: float,
+                          plus: bool = False,
+                          manufacturer: Optional[str] = None) -> List[str]:
+    """Returns a list of device names that meet the memory and manufacturer
+       requirements.
+
+    Args:
+        memory: The minimum memory size in GB.
+        plus: If True, returns devices with memory >= memory, otherwise returns
+              devices with memory == memory.
+        manufacturer: The manufacturer of the GPU.
+    """
+
+    # Filter by memory requirements
+    if plus:
+        df = _memory_df[_memory_df['MemoryGB'] >= memory]
+    else:
+        df = _memory_df[_memory_df['MemoryGB'] == memory]
+
+    # Filter by manufacturer if specified
+    if manufacturer is not None:
+        df = df[df['Manufacturer'].str.lower() == manufacturer.lower()]
+
+    return df['GPU'].tolist()
 
 
 def is_schedulable_non_gpu_accelerator(accelerator_name: str) -> bool:
@@ -80,7 +107,7 @@ def canonicalize_accelerator_name(accelerator: str,
     if not names and cloud_str in ['Kubernetes', None]:
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Listing accelerators on Kubernetes')):
-            searched = service_catalog.list_accelerators(
+            searched = catalog.list_accelerators(
                 name_filter=accelerator,
                 case_sensitive=False,
                 clouds=cloud_str,

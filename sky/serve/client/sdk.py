@@ -1,28 +1,23 @@
 """SDK for SkyServe."""
 import json
 import typing
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-import click
-
-from sky.adaptors import common as adaptors_common
-from sky.client import common as client_common
+from sky.serve.client import impl
 from sky.server import common as server_common
+from sky.server import rest
 from sky.server.requests import payloads
 from sky.usage import usage_lib
-from sky.utils import dag_utils
+from sky.utils import context
 
 if typing.TYPE_CHECKING:
     import io
 
-    import requests
-
     import sky
     from sky.serve import serve_utils
-else:
-    requests = adaptors_common.LazyImport('requests')
 
 
+@context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def up(
@@ -31,7 +26,7 @@ def up(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[Tuple[str, str]]:
     """Spins up a service.
 
     Please refer to the sky.cli.serve_up for the document.
@@ -50,35 +45,13 @@ def up(
             argument.
         endpoint (str): The service endpoint.
     """
-
-    # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
-
-    dag = dag_utils.convert_entrypoint_to_dag(task)
-    sdk.validate(dag)
-    request_id = sdk.optimize(dag)
-    sdk.stream_and_get(request_id)
-    if _need_confirmation:
-        prompt = f'Launching a new service {service_name!r}. Proceed?'
-        if prompt is not None:
-            click.confirm(prompt, default=True, abort=True, show_default=True)
-
-    dag = client_common.upload_mounts_to_api_server(dag)
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-
-    body = payloads.ServeUpBody(
-        task=dag_str,
-        service_name=service_name,
-    )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/up',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
-    return server_common.get_request_id(response)
+    return impl.up(task,
+                   service_name,
+                   pool=False,
+                   _need_confirmation=_need_confirmation)
 
 
+@context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def update(
@@ -88,7 +61,7 @@ def update(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     """Updates an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -108,34 +81,11 @@ def update(
     Request Returns:
         None
     """
-    # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
-
-    dag = dag_utils.convert_entrypoint_to_dag(task)
-    sdk.validate(dag)
-    request_id = sdk.optimize(dag)
-    sdk.stream_and_get(request_id)
-    if _need_confirmation:
-        click.confirm(f'Updating service {service_name!r}. Proceed?',
-                      default=True,
-                      abort=True,
-                      show_default=True)
-
-    dag = client_common.upload_mounts_to_api_server(dag)
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-    body = payloads.ServeUpdateBody(
-        task=dag_str,
-        service_name=service_name,
-        mode=mode,
-    )
-
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/update',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
-    return server_common.get_request_id(response)
+    return impl.update(task,
+                       service_name,
+                       mode,
+                       pool=False,
+                       _need_confirmation=_need_confirmation)
 
 
 @usage_lib.entrypoint
@@ -144,7 +94,7 @@ def down(
     service_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False
-) -> server_common.RequestId:
+) -> server_common.RequestId[None]:
     """Tears down a service.
 
     Please refer to the sky.cli.serve_down for the docs.
@@ -166,24 +116,13 @@ def down(
         ValueError: if the arguments are invalid.
         RuntimeError: if failed to terminate the service.
     """
-    body = payloads.ServeDownBody(
-        service_names=service_names,
-        all=all,
-        purge=purge,
-    )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/down',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
-    return server_common.get_request_id(response)
+    return impl.down(service_names, all, purge, pool=False)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def terminate_replica(service_name: str, replica_id: int,
-                      purge: bool) -> server_common.RequestId:
+                      purge: bool) -> server_common.RequestId[None]:
     """Tears down a specific replica for the given service.
 
     Args:
@@ -206,20 +145,19 @@ def terminate_replica(service_name: str, replica_id: int,
         replica_id=replica_id,
         purge=purge,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/terminate-replica',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/serve/terminate-replica',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def status(
-        service_names: Optional[Union[str,
-                                      List[str]]]) -> server_common.RequestId:
+    service_names: Optional[Union[str, List[str]]]
+) -> server_common.RequestId[List[Dict[str, Any]]]:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
@@ -278,23 +216,18 @@ def status(
         RuntimeError: if failed to get the service status.
         exceptions.ClusterNotUpError: if the sky serve controller is not up.
     """
-    body = payloads.ServeStatusBody(service_names=service_names,)
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/status',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
-    return server_common.get_request_id(response)
+    return impl.status(service_names, pool=False)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@rest.retry_transient_errors()
 def tail_logs(service_name: str,
               target: Union[str, 'serve_utils.ServiceComponent'],
               replica_id: Optional[int] = None,
               follow: bool = True,
-              output_stream: Optional['io.TextIOBase'] = None) -> None:
+              output_stream: Optional['io.TextIOBase'] = None,
+              tail: Optional[int] = None) -> None:
     """Tails logs for a service.
 
     Usage:
@@ -356,24 +289,13 @@ def tail_logs(service_name: str,
         sky.exceptions.ClusterNotUpError: the sky serve controller is not up.
         ValueError: arguments not valid, or failed to tail the logs.
     """
-    # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
-
-    body = payloads.ServeLogsBody(
-        service_name=service_name,
-        target=target,
-        replica_id=replica_id,
-        follow=follow,
-    )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/logs',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        stream=True,
-        cookies=server_common.get_api_cookie_jar(),
-    )
-    request_id = server_common.get_request_id(response)
-    sdk.stream_response(request_id, response, output_stream)
+    return impl.tail_logs(service_name,
+                          target,
+                          replica_id,
+                          follow,
+                          output_stream,
+                          tail,
+                          pool=False)
 
 
 @usage_lib.entrypoint
@@ -383,9 +305,10 @@ def sync_down_logs(service_name: str,
                    *,
                    targets: Optional[Union[
                        str, 'serve_utils.ServiceComponent',
-                       List[Union[str,
-                                  'serve_utils.ServiceComponent']]]] = None,
-                   replica_ids: Optional[List[int]] = None) -> None:
+                       Sequence[Union[str,
+                                      'serve_utils.ServiceComponent']]]] = None,
+                   replica_ids: Optional[List[int]] = None,
+                   tail: Optional[int] = None) -> None:
     """Sync down logs from the service components to a local directory.
 
     This function syncs logs from the specified service components (controller,
@@ -414,24 +337,9 @@ def sync_down_logs(service_name: str,
         sky.exceptions.ClusterNotUpError: If the controller is not up.
         ValueError: Arguments not valid.
     """
-    # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
-
-    body = payloads.ServeDownloadLogsBody(
-        service_name=service_name,
-        # No need to set here, since the server will override it
-        # to a directory on the API server.
-        local_dir=local_dir,
-        targets=targets,
-        replica_ids=replica_ids,
-    )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/sync-down-logs',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-    )
-    remote_dir = sdk.stream_and_get(server_common.get_request_id(response))
-
-    # Download from API server paths to the client's local_dir
-    client_common.download_logs_from_api_server([remote_dir], remote_dir,
-                                                local_dir)
+    return impl.sync_down_logs(service_name,
+                               local_dir,
+                               targets=targets,
+                               replica_ids=replica_ids,
+                               tail=tail,
+                               pool=False)

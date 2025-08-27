@@ -16,6 +16,7 @@ env = [
     "SKYPILOT_DISABLE_USAGE_COLLECTION=1"
 ]
 addopts = "-s -n 16 -q --tb=short --dist loadgroup --disable-warnings"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
 python_version = "3.8"

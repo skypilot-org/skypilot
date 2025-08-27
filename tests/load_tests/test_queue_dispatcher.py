@@ -4,6 +4,7 @@ import time
 import uuid
 
 from sky import sky_logging
+from sky.server import config as server_config
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import process
@@ -37,8 +38,8 @@ def dummy_func(*args, **kwargs):
 def schedule():
     worker = executor.RequestWorker(
         schedule_type=api_requests.ScheduleType.LONG,
-        garanteed_parallelism=1,
-        burstable_parallelism=1)
+        config=server_config.WorkerConfig(garanteed_parallelism=1,
+                                          burstable_parallelism=1))
     mock_executor = MockExecutor(garanteed_workers=1, burst_workers=1)
     queue = executor._get_queue(api_requests.ScheduleType.LONG)  # pylint: disable=protected-access
     while not queue.queue.empty():

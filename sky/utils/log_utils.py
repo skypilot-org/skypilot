@@ -47,13 +47,16 @@ class RayUpLineProcessor(LineProcessor):
         RUNTIME_SETUP = 1
         PULLING_DOCKER_IMAGES = 2
 
-    def __init__(self, log_path: str):
+    def __init__(self, log_path: str, cluster_name: Optional[str] = None):
         self.log_path = log_path
+        self.cluster_name = cluster_name
 
     def __enter__(self) -> None:
         self.state = self.ProvisionStatus.LAUNCH
         self.status_display = rich_utils.safe_status(
-            ux_utils.spinner_message('Launching', self.log_path))
+            ux_utils.spinner_message('Launching',
+                                     self.log_path,
+                                     cluster_name=self.cluster_name))
         self.status_display.start()
 
     def process_line(self, log_line: str) -> None:
@@ -62,19 +65,25 @@ class RayUpLineProcessor(LineProcessor):
             logger.info('  Head VM is up.')
             self.status_display.update(
                 ux_utils.spinner_message(
-                    'Launching - Preparing SkyPilot runtime', self.log_path))
+                    'Launching - Preparing SkyPilot runtime',
+                    self.log_path,
+                    cluster_name=self.cluster_name))
             self.state = self.ProvisionStatus.RUNTIME_SETUP
         if ('Pulling from' in log_line and
                 self.state == self.ProvisionStatus.RUNTIME_SETUP):
             self.status_display.update(
                 ux_utils.spinner_message(
-                    'Launching - Initializing docker container', self.log_path))
+                    'Launching - Initializing docker container',
+                    self.log_path,
+                    cluster_name=self.cluster_name))
             self.state = self.ProvisionStatus.PULLING_DOCKER_IMAGES
         if ('Status: Downloaded newer image' in log_line and
                 self.state == self.ProvisionStatus.PULLING_DOCKER_IMAGES):
             self.status_display.update(
                 ux_utils.spinner_message(
-                    'Launching - Preparing SkyPilot runtime', self.log_path))
+                    'Launching - Preparing SkyPilot runtime',
+                    self.log_path,
+                    cluster_name=self.cluster_name))
             self.state = self.ProvisionStatus.RUNTIME_SETUP
 
     def __exit__(self, except_type: Optional[Type[BaseException]],
@@ -190,7 +199,7 @@ class SkyLocalUpLineProcessor(LineProcessor):
 
 
 class SkyRemoteUpLineProcessor(LineProcessor):
-    """A processor for deploy_remote_cluster.sh log lines."""
+    """A processor for deploy_remote_cluster.py log lines."""
 
     def __init__(self, log_path: str, is_local: bool):
         self.log_path = log_path
@@ -291,6 +300,223 @@ class SkyRemoteUpLineProcessor(LineProcessor):
         self.status_display.stop()
 
 
+class SkySSHUpLineProcessor(LineProcessor):
+    """A processor for deploy_remote_cluster.py log lines for SSH clusters"""
+
+    def __init__(self, log_path: str, is_local: bool):
+        self.log_path = log_path
+        self.is_local = is_local
+        self.current_cluster: Optional[str] = None
+        self.is_cleanup_mode = False
+
+    def __enter__(self) -> None:
+        status = rich_utils.safe_status(
+            ux_utils.spinner_message('Preparing to set up SSH Node Pools',
+                                     log_path=self.log_path,
+                                     is_local=self.is_local))
+        self.status_display = status
+        self.status_display.start()
+
+    def process_line(self, log_line: str) -> None:
+        # Detect cleanup mode
+        if 'SKYPILOT_CLEANUP_MODE:' in log_line:
+            self.is_cleanup_mode = True
+            if self.current_cluster:
+                self.status_display.update(
+                    ux_utils.spinner_message(
+                        f'Cleaning up Node Pool: \\[{self.current_cluster}]',
+                        log_path=self.log_path,
+                        is_local=self.is_local))
+
+        # Cluster detection message
+        if 'SKYPILOT_CLUSTER_INFO:' in log_line:
+            clusters_part = log_line.split('SKYPILOT_CLUSTER_INFO:',
+                                           1)[1].strip()
+            if clusters_part.startswith('Found'):
+                logger.info(f'{colorama.Style.RESET_ALL}'
+                            f'{colorama.Fore.CYAN}{clusters_part}'
+                            f'{colorama.Style.RESET_ALL}')
+
+        # Current cluster being operated on
+        if 'SKYPILOT_CURRENT_CLUSTER:' in log_line:
+            self.current_cluster = log_line.split('SKYPILOT_CURRENT_CLUSTER:',
+                                                  1)[1].strip()
+
+            if self.is_cleanup_mode:
+                self.status_display.update(
+                    ux_utils.spinner_message(
+                        f'Cleaning up Node Pool: {self.current_cluster}',
+                        log_path=self.log_path,
+                        is_local=self.is_local))
+                logger.info(f'{colorama.Fore.CYAN}\nCleaning up Node Pool: '
+                            f'{self.current_cluster}{colorama.Style.RESET_ALL}')
+            else:
+                self.status_display.update(
+                    ux_utils.spinner_message(
+                        f'Deploying SkyPilot \\[{self.current_cluster}]',
+                        log_path=self.log_path,
+                        is_local=self.is_local))
+                logger.info(f'{colorama.Style.RESET_ALL}'
+                            f'{colorama.Fore.CYAN}\nSetting up Node Pool: '
+                            f'{self.current_cluster}{colorama.Style.RESET_ALL}')
+
+        # Handle cluster completion marker
+        if 'SKYPILOT_CLUSTER_COMPLETED:' in log_line:
+            if self.is_cleanup_mode:
+                logger.info(
+                    f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+                    f'✔ Node Pool {self.current_cluster} cleaned up '
+                    f'successfully.{colorama.Style.RESET_ALL}')
+            else:
+                logger.info(
+                    f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+                    f'✔ Node Pool {self.current_cluster} deployed successfully.'
+                    f'{colorama.Style.RESET_ALL}')
+
+        # Pre-flight checks
+        if 'Checking SSH connection to head node' in log_line:
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
+                        'Checking SSH connection to head node...'
+                        f'{colorama.Style.RESET_ALL}')
+
+        if log_line.startswith('SSH connection successful'):
+            node_name = log_line.split('(')[-1].split(')')[0]
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                        '✔ SSH connection established to head node '
+                        f'{node_name}.{colorama.Style.RESET_ALL}')
+
+        # Kubernetes installation steps
+        if 'Deploying Kubernetes on head node' in log_line:
+            current_cluster_str = f' \\[{self.current_cluster}]' if (
+                self.current_cluster) else ''
+            self.status_display.update(
+                ux_utils.spinner_message(
+                    'Deploying SkyPilot runtime on head node'
+                    f'{current_cluster_str}',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
+
+        if 'K3s deployed on head node' in log_line:
+            node_name = log_line.split('(')[-1].split(')')[0]
+            logger.info(
+                f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                f'✔ SkyPilot runtime successfully deployed on head node '
+                f'{node_name}.{colorama.Style.RESET_ALL}')
+
+        # Worker nodes
+        if 'Deploying Kubernetes on worker node' in log_line:
+            self.status_display.update(
+                ux_utils.spinner_message(
+                    'Deploying SkyPilot runtime on worker nodes' +
+                    (f' \\[{self.current_cluster}]'
+                     if self.current_cluster else ''),
+                    log_path=self.log_path,
+                    is_local=self.is_local))
+
+        if 'Kubernetes deployed on worker node' in log_line:
+            node_name = log_line.split('(')[-1].split(')')[0]
+            logger.info(
+                f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                '✔ SkyPilot runtime successfully deployed on worker node '
+                f'{node_name}.{colorama.Style.RESET_ALL}')
+
+        if 'Failed to deploy K3s on worker node' in log_line:
+            node_name = log_line.split('(')[-1].split(')')[0]
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.RED}'
+                        '✗ Failed to deploy K3s on worker node '
+                        f'{node_name}.{colorama.Style.RESET_ALL}')
+
+        # Cluster configuration
+        if 'Configuring local kubectl to connect to the cluster...' in log_line:
+            self.status_display.update(
+                ux_utils.spinner_message('Setting up SkyPilot configuration' +
+                                         (f' \\[{self.current_cluster}]'
+                                          if self.current_cluster else ''),
+                                         log_path=self.log_path,
+                                         is_local=self.is_local))
+
+        if 'kubectl configured to connect to the cluster.' in log_line:
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                        '✔ SkyPilot configuration complete.'
+                        f'{colorama.Style.RESET_ALL}')
+
+        # GPU operator installation
+        if 'Installing Nvidia GPU Operator...' in log_line:
+            self.status_display.update(
+                ux_utils.spinner_message('Configuring Nvidia GPUs' +
+                                         (f' \\[{self.current_cluster}]'
+                                          if self.current_cluster else ''),
+                                         log_path=self.log_path,
+                                         is_local=self.is_local))
+
+        if 'GPU Operator installed.' in log_line:
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                        '✔ Nvidia GPUs configured successfully.'
+                        f'{colorama.Style.RESET_ALL}')
+
+        # Cleanup steps
+        if 'Cleaning up head node' in log_line:
+            self.status_display.update(
+                ux_utils.spinner_message('Cleaning up head node' +
+                                         (f' \\[{self.current_cluster}]'
+                                          if self.current_cluster else ''),
+                                         log_path=self.log_path,
+                                         is_local=self.is_local))
+
+        if 'Cleaning up worker node' in log_line:
+            self.status_display.update(
+                ux_utils.spinner_message('Cleaning up worker nodes' +
+                                         (f' \\[{self.current_cluster}]'
+                                          if self.current_cluster else ''),
+                                         log_path=self.log_path,
+                                         is_local=self.is_local))
+
+        # Handle node cleanup success messages
+        if 'Node' in log_line and 'cleaned up successfully' in log_line:
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                        f'{log_line.strip()}{colorama.Style.RESET_ALL}')
+
+        if 'Node' in log_line and 'Failed to clean up' in log_line:
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.RED}'
+                        f'{log_line.strip()}{colorama.Style.RESET_ALL}')
+
+        if 'Failed to clean up worker node' in log_line:
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.RED}'
+                        f'{log_line.strip()}{colorama.Style.RESET_ALL}')
+
+        # Final status for the cluster deployment
+        if 'Cluster deployment completed.' in log_line:
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                        '✔ SkyPilot runtime is up.'
+                        f'{colorama.Style.RESET_ALL}')
+
+        if 'Failed to deploy Kubernetes on the following nodes:' in log_line:
+            logger.info(log_line.strip())
+
+        if 'already exists in history. ' in log_line:
+            node_name = log_line.split('(')[-1].split(')')[0]
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.YELLOW}'
+                        '✔ SkyPilot runtime already deployed on worker node '
+                        f'{node_name}. Skipping.{colorama.Style.RESET_ALL}')
+
+        if 'Failed to setup TCP forwarding on head node' in log_line:
+            node_name = log_line.split('(')[-1].split(')')[0]
+            logger.info(
+                f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.RED}'
+                f'✗ Failed to setup TCP forwarding on head node {node_name}.'
+                f'{colorama.Style.RESET_ALL}')
+
+        if 'Error in deploying SSH Target' in log_line:
+            logger.info(f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.RED}'
+                        f'{log_line.strip()}{colorama.Style.RESET_ALL}')
+
+    def __exit__(self, except_type: Optional[Type[BaseException]],
+                 except_value: Optional[BaseException],
+                 traceback: Optional[types.TracebackType]) -> None:
+        del except_type, except_value, traceback  # unused
+        self.status_display.stop()
+
+
 def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:
     """Creates table with default style."""
     border = kwargs.pop('border', False)
@@ -354,6 +580,74 @@ def readable_time_duration(start: Optional[float],
         diff = diff.replace('hour', 'hr')
 
     return diff
+
+
+def human_duration(start: int, end: Optional[int] = None) -> str:
+    """Calculates the time elapsed between two timestamps and returns
+       it as a human-readable string, similar to Kubernetes' duration format.
+
+    Args:
+        start: The start time as a Unix timestamp (seconds since epoch).
+        end: The end time as a Unix timestamp (seconds since epoch).
+            If None, current time is used.
+
+    Returns:
+        A string representing the duration, e.g., "2d3h", "15m", "30s".
+        Returns "0s" for zero, negative durations, or if the timestamp
+        is invalid.
+    """
+    if not start or start <= 0:
+        return '0s'
+
+    if end is None:
+        end = int(time.time())
+    duration_seconds = end - start
+
+    units = {
+        'y': 365 * 24 * 60 * 60,
+        'd': 60 * 60 * 24,
+        'h': 60 * 60,
+        'm': 60,
+        's': 1,
+    }
+
+    if duration_seconds <= 0:
+        return '0s'
+    elif duration_seconds < 60 * 2:
+        return f'{duration_seconds}s'
+
+    minutes = int(duration_seconds / units['m'])
+    if minutes < 10:
+        s = int(duration_seconds / units['s']) % 60
+        if s == 0:
+            return f'{minutes}m'
+        return f'{minutes}m{s}s'
+    elif minutes < 60 * 3:
+        return f'{minutes}m'
+
+    hours = int(duration_seconds / units['h'])
+    days = int(hours / 24)
+    years = int(hours / 24 / 365)
+    if hours < 8:
+        m = int(duration_seconds / units['m']) % 60
+        if m == 0:
+            return f'{hours}h'
+        return f'{hours}h{m}m'
+    elif hours < 48:
+        return f'{hours}h'
+    elif hours < 24 * 8:
+        h = hours % 24
+        if h == 0:
+            return f'{days}d'
+        return f'{days}d{h}h'
+    elif hours < 24 * 365 * 2:
+        return f'{days}d'
+    elif hours < 24 * 365 * 8:
+        dy = int(hours / 24) % 365
+        if dy == 0:
+            return f'{years}y'
+        return f'{years}y{dy}d'
+    return f'{years}y'
 
 
 def follow_logs(

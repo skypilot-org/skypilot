@@ -1,6 +1,6 @@
 """Sky backend interface."""
 import typing
-from typing import Dict, Generic, Optional, Tuple
+from typing import Any, Dict, Generic, Optional, Tuple, Union
 
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -37,8 +37,9 @@ class Backend(Generic[_ResourceHandleType]):
     ResourceHandle = ResourceHandle  # pylint: disable=invalid-name
 
     # --- APIs ---
-    def check_resources_fit_cluster(self, handle: _ResourceHandleType,
-                                    task: 'task_lib.Task') -> None:
+    def check_resources_fit_cluster(
+            self, handle: _ResourceHandleType,
+            task: 'task_lib.Task') -> Optional['resources.Resources']:
         """Check whether resources of the task are satisfied by cluster."""
         raise NotImplementedError
 
@@ -89,8 +90,10 @@ class Backend(Generic[_ResourceHandleType]):
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
-    def sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:
-        return self._sync_workdir(handle, workdir)
+    def sync_workdir(self, handle: _ResourceHandleType,
+                     workdir: Union[Path, Dict[str, Any]],
+                     envs_and_secrets: Dict[str, str]) -> None:
+        return self._sync_workdir(handle, workdir, envs_and_secrets)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_file_mounts')
@@ -144,8 +147,9 @@ class Backend(Generic[_ResourceHandleType]):
     def teardown(self,
                  handle: _ResourceHandleType,
                  terminate: bool,
-                 purge: bool = False) -> None:
-        self._teardown(handle, terminate, purge)
+                 purge: bool = False,
+                 explicitly_requested: bool = False) -> None:
+        self._teardown(handle, terminate, purge, explicitly_requested)
 
     def register_info(self, **kwargs) -> None:
         """Register backend-specific information."""
@@ -164,7 +168,9 @@ class Backend(Generic[_ResourceHandleType]):
     ) -> Tuple[Optional[_ResourceHandleType], bool]:
         raise NotImplementedError
 
-    def _sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:
+    def _sync_workdir(self, handle: _ResourceHandleType,
+                      workdir: Union[Path, Dict[str, Any]],
+                      envs_and_secrets: Dict[str, str]) -> None:
         raise NotImplementedError
 
     def _sync_file_mounts(
@@ -195,5 +201,6 @@ class Backend(Generic[_ResourceHandleType]):
     def _teardown(self,
                   handle: _ResourceHandleType,
                   terminate: bool,
-                  purge: bool = False):
+                  purge: bool = False,
+                  explicitly_requested: bool = False):
         raise NotImplementedError

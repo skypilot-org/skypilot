@@ -21,7 +21,7 @@ Install SkyPilot using pip:
           conda create -y -n sky python=3.10
           conda activate sky
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install "skypilot[kubernetes]"
           pip install "skypilot[aws]"
@@ -54,7 +54,7 @@ Install SkyPilot using pip:
           conda create -y -n sky python=3.10
           conda activate sky
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[aws]"
@@ -87,7 +87,7 @@ Install SkyPilot using pip:
           git clone https://github.com/skypilot-org/skypilot.git
           cd skypilot
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install -e ".[kubernetes]"
           pip install -e ".[aws]"
@@ -233,25 +233,31 @@ SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
 
 See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
+.. tip::
+   If you do not have access to a Kubernetes cluster, you can :ref:`deploy a local Kubernetes cluster on your laptop <kubernetes-setup-kind>` with ``sky local up``.
+
 .. _aws-installation:
 
 AWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`__). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
+To set up AWS credentials, log into the AWS console and `create an access key for yourself <https://docs.aws.amazon.com/IAM/latest/UserGuide/access-key-self-managed.html#Using_CreateAccessKey>`_. If you don't see the "Security credentials" link shown in the AWS instructions, you may be using SSO; see :ref:`aws-sso`.
+
+Now configure your credentials.
 
 .. code-block:: shell
-
-  # Install boto
-  pip install boto3
 
   # Configure your AWS credentials
   aws configure
 
+- For **AWS Access Key ID**, copy the "Access key" value from console.
+- For the **AWS Secret Access Key**, copy the "Secret access key" value from console.
+- The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
+
 To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructions.
 
-**Optional**: To create a new AWS user with minimal permissions for SkyPilot, see :ref:`AWS User Creation <cloud-permissions-aws>`.
+**Optional**: To create a new AWS user with minimal permissions for SkyPilot, see :ref:`dedicated-aws-user`.
 
 .. _installation-gcp:
 
@@ -323,8 +329,9 @@ By default, the provisioned nodes will be in the root `compartment <https://docs
 .. code-block:: text
 
   oci:
-    default:
-      compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
+    region_configs:
+      default:
+        compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
 
 
 Lambda Cloud
@@ -355,7 +362,8 @@ Vast
 .. code-block:: shell
 
   pip install "vastai-sdk>=0.1.12"
-  echo "<your_api_key_here>" > ~/.vast_api_key
+  mkdir -p ~/.config/vastai
+  echo "<your_api_key_here>" > ~/.config/vastai/vast_api_key
 
 RunPod
 ~~~~~~~~~~
@@ -501,6 +509,8 @@ Here is an example of configuration within the credential file:
 
 After configuring the vSphere credentials, ensure that the necessary preparations for vSphere are completed. Please refer to this guide for more information: :ref:`Cloud Preparation for vSphere <cloud-prepare-vsphere>`
 
+.. _cloudflare-r2-installation:
+
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~
 
@@ -543,52 +553,14 @@ Nebius
 
   mkdir -p ~/.nebius
   nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
-
-If you have one tenant you can run:
-
-.. code-block:: shell
-
   nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
 
-You can specify a preferable project ID, which will be used if a project ID is required in the designated region.
 
-.. code-block:: shell
+**Optional**: You can specify specific project ID and fabric in `~/.sky/config.yaml`, see :ref:`Configuration project_id and fabric for Nebius <config-yaml-nebius>`.
 
-  echo $NEBIUS_PROJECT_ID > ~/.nebius/NEBIUS_PROJECT_ID.txt
+Alternatively, you can also use a service account to access Nebius, see :ref:`Using Service Account for Nebius <nebius-service-account>`.
 
-To use *Service Account* authentication, follow these steps:
-
-1. **Create a Service Account** using the Nebius web console.
-2. **Generate PEM Keys**:
-
-.. code-block:: shell
-
-   openssl genrsa -out private.pem 4096 && openssl rsa -in private.pem -outform PEM -pubout -out public.pem
-
-3.  **Generate and Save the Credentials File**:
-
-* Save the file as `~/.nebius/credentials.json`.
-* Ensure the file matches the expected format below:
-
-.. code-block:: json
-
-     {
-         "subject-credentials": {
-             "alg": "RS256",
-             "private-key": "PKCS#8 PEM with new lines escaped as \n",
-             "kid": "public-key-id",
-             "iss": "service-account-id",
-             "sub": "service-account-id"
-         }
-     }
-
-
-**Important Notes:**
-
-* The `NEBIUS_IAM_TOKEN` file, if present, will take priority for authentication.
-* Service Accounts are restricted to a single region. Ensure you configure the Service Account for the appropriate region during creation.
-
-Nebius offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
+Nebius also offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
 SkyPilot can download/upload data to Nebius buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Nebius support, run:
 
 .. code-block:: shell
@@ -604,8 +576,8 @@ In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instr
 
   aws configure set aws_access_key_id $NB_ACCESS_KEY_AWS_ID --profile nebius
   aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
-  aws configure set region eu-west1 --profile nebius
-  aws configure set endpoint_url https://storage.eu-west1.nebius.cloud:443  --profile nebius
+  aws configure set region <REGION> --profile nebius
+  aws configure set endpoint_url <ENDPOINT>  --profile nebius
 
 Request quotas for first time users
 --------------------------------------

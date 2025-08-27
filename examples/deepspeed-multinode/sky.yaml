@@ -10,7 +10,7 @@
 #   $ sky launch sky.yaml -r --down -c ds
 #
 #   If running on Kubernetes:
-#   $ sky launch sky.yaml -r --down -c ds --cloud kubernetes --image nvidia/cuda:12.1.1-devel-ubuntu20.04
+#   $ sky launch sky.yaml -r --down -c ds --cloud k8s --image-id nvidia/cuda:12.1.1-devel-ubuntu20.04
 #
 #   # Optional: After the job starts running, you can log into the two nodes and
 #   # check gpustat:
@@ -24,7 +24,7 @@ resources:
   # accelerators: A100-80GB:1  # Azure, GCP, SCP
   # accelerators: A10G:1  # AWS. Will OOM for (1) single_node/run_1.3b_lora.sh (2) multi_node/run_66b.sh.
   # accelerators: T4:1  # AWS, Azure, GCP. Will OOM for (1) single_node/run_1.3b_lora.sh (2) multi_node/run_66b.sh.
-  # image_id: docker:nvidia/cuda:12.1.1-devel-ubuntu20.04  # Use this image if running on Kubernetes
+  image_id: docker:nvidia/cuda:12.1.1-devel-ubuntu20.04  # This image is required for nvcc to be available on Kubernetes pods. Not necessary on most cloud providers.
 
 num_nodes: 2
 

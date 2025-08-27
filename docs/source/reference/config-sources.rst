@@ -78,8 +78,6 @@ Server configuration
 
 If you are using a remote :ref:`SkyPilot API server <sky-api-server>`, it looks for ``~/.sky/config.yaml`` in the API server instance/container to find the server configuration.
 
-To specify a different file, set ``SKYPILOT_GLOBAL_CONFIG`` environment variable to the desired path.
-
 If you are using a local API server, you can use :ref:`User configuration<config-client-user-config>` to set global configuration.
 
 .. _config-client-user-config:
@@ -88,8 +86,6 @@ User configuration
 ~~~~~~~~~~~~~~~~~~
 
 SkyPilot client looks for ``~/.sky/config.yaml`` to find the user configuration.
-
-To specify a different file, set ``SKYPILOT_GLOBAL_CONFIG`` environment variable to the desired path.
 
 .. _config-client-project-config:
 
@@ -113,6 +109,8 @@ The following fields are supported in SkyPilot YAML inline configuration:
 * :ref:`nvidia_gpus.disable_ecc <config-yaml-nvidia-gpus-disable-ecc>`
 * :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`
 * :ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`
+* :ref:`kubernetes.dws <config-yaml-kubernetes-dws>`
+* :ref:`kubernetes.kueue <config-yaml-kubernetes-kueue>`
 * :ref:`gcp.managed_instance_group <config-yaml-gcp-managed-instance-group>`
 
 Example:
@@ -126,6 +124,8 @@ Example:
     kubernetes:
       pod_config: ...
       provision_timeout: ...
+      dws: ...
+      kueue: ...
     gcp:
       managed_instance_group: ...
     nvidia_gpus:
@@ -138,7 +138,8 @@ CLI flag
 
 You can pass configuration arguments to the CLI using the ``--config`` flag.
 
-The ``--config`` flag can either be a path to a config YAML file, or a dotlist of key-value pairs. Only one ``--config`` flag can be provided.
+The ``--config`` flag can either be a path to a config YAML file, or a dotlist of key-value pairs.
+If passing in a config file, only one ``--config`` flag can be provided.
 
 Example:
 
@@ -147,8 +148,8 @@ Example:
   # pass a config file
   sky launch --config my_config.yaml ...
   # pass individual config options
-  sky launch --config 'kubernetes.provision_timeout=600,kubernetes.pod_config.spec.priorityClassName=high-priority' ...
-  sky launch --config 'kubernetes.custom_metadata.annotations.myannotation1=myvalue1,kubernetes.custom_metadata.annotations.myannotation2=myvalue2' ...
+  sky launch --config 'kubernetes.provision_timeout=600' --config 'kubernetes.pod_config.spec.priorityClassName=high-priority' ...
+  sky launch --config 'kubernetes.custom_metadata.annotations.myannotation1=myvalue1' --config 'kubernetes.custom_metadata.annotations.myannotation2=myvalue2' ...
 
 
 .. _config-overrides:

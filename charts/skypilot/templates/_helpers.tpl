@@ -34,6 +34,18 @@
 {{- end -}} 
 
 {{/*
+Check for apiService.config during upgrade and display warning
+*/}}
+{{- define "skypilot.checkUpgradeConfig" -}}
+{{- if and .Release.IsUpgrade .Values.apiService.config -}}
+WARNING: apiService.config is set during an upgrade operation, which will be IGNORED.
+
+To update your SkyPilot config, follow the instructions in the upgrade guide:
+https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#setting-the-skypilot-config
+{{- end -}}
+{{- end -}}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "skypilot.serviceAccountName" -}}
@@ -57,4 +69,73 @@ metadata:
     {{/* Keep the namespace when uninstalling the chart, so that the deployed sky resources (if any) can still work even if the API server get uninstalled */ -}}
     helm.sh/resource-policy: keep
 {{ end -}}
+{{- end -}}
+
+{{/* Whether to enable basic auth */}}
+{{- define "skypilot.enableBasicAuthInAPIServer" -}}
+{{- if and (not (index .Values.ingress "oauth2-proxy" "enabled")) .Values.apiService.enableUserManagement -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{/* Get initial basic auth secret name */}}
+{{- define "skypilot.initialBasicAuthSecretName" -}}
+{{- if .Values.apiService.initialBasicAuthSecret -}}
+{{ .Values.apiService.initialBasicAuthSecret }}
+{{- else if .Values.apiService.initialBasicAuthCredentials -}}
+{{ printf "%s-initial-basic-auth" .Release.Name }}
+{{- else -}}
+{{- /* Return empty string */ -}}
+{{ "" }}
+{{- end -}}
+{{- end -}}
+
+{{/* API server start arguments */}}
+{{- define "skypilot.apiArgs" -}}
+--deploy{{ if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }} --enable-basic-auth{{ end }}
+{{- end -}}
+
+{{- define "skypilot.oauth2ProxyURL" -}}
+http://{{ .Release.Name }}-oauth2-proxy:4180
+{{- end -}}
+
+{{- define "skypilot.serviceAccountAuthEnabled" -}}
+{{- if ne .Values.auth.serviceAccount.enabled nil -}}
+{{- .Values.auth.serviceAccount.enabled -}}
+{{- else -}}
+{{- .Values.apiService.enableServiceAccounts -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "skypilot.ingressBasicAuthEnabled" -}}
+{{- if and .Values.ingress.enabled (or .Values.ingress.authSecret .Values.ingress.authCredentials) -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{- define "skypilot.ingressOAuthEnabled" -}}
+{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{/* Validate the oauth config */}}
+{{- define "skypilot.validateOAuthConfig" -}}
+{{- $authOAuthEnabled := .Values.auth.oauth.enabled -}}
+{{- $ingressBasicAuthEnabled := include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" -}}
+{{- $ingressOAuthEnabled := include "skypilot.ingressOAuthEnabled" . | trim | eq "true" -}}
+
+{{- if and $authOAuthEnabled $ingressBasicAuthEnabled -}}
+  {{- fail "Error\nauth.oauth.enabled cannot be used together with ingress basic authentication (ingress.authSecret or ingress.authCredentials). These authentication methods are mutually exclusive. Please:\n1. Disable auth.oauth.enabled, OR\n2. Remove ingress.authSecret and ingress.authCredentials\nThen try again." -}}
+{{- end -}}
+
+{{- if and $authOAuthEnabled $ingressOAuthEnabled -}}
+  {{- fail "Error\nauth.oauth.enabled cannot be used together with ingress OAuth2 proxy authentication (ingress.oauth2-proxy.enabled). These authentication methods are mutually exclusive. Please:\n1. Disable auth.oauth.enabled, OR\n2. Set ingress.oauth2-proxy.enabled to false\nThen try again." -}}
+{{- end -}}
 {{- end -}}

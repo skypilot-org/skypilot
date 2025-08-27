@@ -16,7 +16,10 @@ install_requires = [
     'pip',
     'cachetools',
     # NOTE: ray requires click>=7.0.
-    'click >= 7.0',
+    # click 8.2.0 has a bug in parsing the command line arguments:
+    # https://github.com/pallets/click/issues/2894
+    # TODO(aylei): remove this once the bug is fixed in click.
+    'click >= 7.0, < 8.2.0',
     'colorama',
     'cryptography',
     # Jinja has a bug in older versions because of the lack of pinning
@@ -57,7 +60,44 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    'omegaconf>=2.4.0dev3,<2.5',
+    'sqlalchemy',
+    'psycopg2-binary',
+    # TODO(hailong): These three dependencies should be removed after we make
+    # the client-side actually not importing them.
+    'casbin',
+    'sqlalchemy_adapter',
+    # Required for API server metrics
+    'prometheus_client>=0.8.0',
+    'passlib',
+    'bcrypt',
+    'pyjwt',
+    'gitpython',
+    'types-paramiko',
+    'alembic',
+    'aiohttp',
+]
+
+# See requirements-dev.txt for the version of grpc and protobuf
+# used to generate the code during development.
+
+# The grpc version at runtime has to be newer than the version
+# used to generate the code.
+GRPC = 'grpcio>=1.63.0'
+# >= 5.26.1 because the runtime version can't be older than the version
+# used to generate the code.
+# < 7.0.0 because code generated for a major version V will be supported by
+# protobuf runtimes of version V and V+1.
+# https://protobuf.dev/support/cross-version-runtime-guarantee
+PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
+
+server_dependencies = [
+    'casbin',
+    'sqlalchemy_adapter',
+    'passlib',
+    'pyjwt',
+    'aiohttp',
+    GRPC,
+    PROTOBUF,
 ]
 
 local_ray = [
@@ -69,26 +109,13 @@ local_ray = [
 ]
 
 remote = [
-    # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L251-L252
-    # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard
-    # fails to start when ray start is called (#2054).
-    # Tracking issue: https://github.com/ray-project/ray/issues/30984
-    'grpcio >= 1.32.0, != 1.48.0; python_version < \'3.10\'',
-    'grpcio >= 1.42.0, != 1.48.0; python_version >= \'3.10\'',
-    # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
-    'protobuf >= 3.15.3, != 3.19.5',
+    GRPC,
+    PROTOBUF,
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
-    # botocore does not work with urllib3>=2.0.0, according to
-    # https://github.com/boto/botocore/issues/2926
-    # We have to explicitly pin the version to optimize the time for
-    # poetry install. See https://github.com/orgs/python-poetry/discussions/7937
-    'urllib3<2',
     # NOTE: this installs CLI V1. To use AWS SSO (e.g., `aws sso login`), users
     # should instead use CLI V2 which is not pip-installable. See
     # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
@@ -119,11 +146,18 @@ extras_require: Dict[str, List[str]] = {
         'azure-mgmt-compute>=33.0.0',
         'azure-storage-blob>=12.23.1',
         'msgraph-sdk',
+        'msrestazure',
     ],
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances. Reference:
     # https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
-    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'],
+    'gcp': [
+        'google-api-python-client>=2.69.0',
+        'google-cloud-storage',
+        # see https://github.com/conda/conda/issues/13619
+        # see https://github.com/googleapis/google-api-python-client/issues/2554
+        'pyopenssl >= 23.2.0, <24.3.0',
+    ],
     'ibm': [
         'ibm-cloud-sdk-core',
         'ibm-vpc',
@@ -136,7 +170,10 @@ extras_require: Dict[str, List[str]] = {
     'scp': local_ray,
     'oci': ['oci'],
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
-    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0', 'websockets'],
+    'kubernetes': [
+        'kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'
+    ],
+    'ssh': ['kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'],
     'remote': remote,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
@@ -156,8 +193,10 @@ extras_require: Dict[str, List[str]] = {
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
     'nebius': [
-        'nebius>=0.2.0',
-    ] + aws_dependencies
+        'nebius>=0.2.47',
+    ] + aws_dependencies,
+    'hyperbolic': [],  # No dependencies needed for hyperbolic
+    'server': server_dependencies,
 }
 
 # Calculate which clouds should be included in the [all] installation.

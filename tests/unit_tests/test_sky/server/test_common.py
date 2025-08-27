@@ -1,8 +1,14 @@
 """Unit tests for the SkyPilot API server common module."""
+from http.cookiejar import Cookie
+from http.cookiejar import MozillaCookieJar
+import pathlib
 import sys
+import tempfile
+import time
 from unittest import mock
 
 import pytest
+import requests
 
 import sky
 from sky import exceptions
@@ -11,6 +17,34 @@ from sky.server import common
 from sky.server import constants as server_constants
 from sky.server.common import ApiServerInfo
 from sky.server.common import ApiServerStatus
+
+
+def _create_test_cookie(name: str = 'test-cookie', value: str = 'test-value'):
+    """Create a test cookie."""
+
+    server_domain = common.get_server_url().split('://')[1].split(':')[0]
+
+    # write a cookie to the file
+    test_cookie = Cookie(
+        version=0,
+        name=name,
+        value=value,
+        port=None,
+        port_specified=False,
+        domain=server_domain,
+        domain_specified=True,
+        domain_initial_dot=False,
+        path='/',
+        path_specified=True,
+        secure=False,
+        expires=time.time() + 1000,
+        discard=False,
+        comment=None,
+        comment_url=None,
+        rest={},
+    )
+
+    return test_cookie
 
 
 @mock.patch('sky.server.common.get_api_server_status')
@@ -47,7 +81,7 @@ def test_local_client_server_mismatch(mock_is_local, mock_get_status):
             common.check_server_healthy()
 
         # Correct error message
-        assert 'Client and local API server version mismatch' in str(
+        assert 'The local SkyPilot API server is not compatible with the client' in str(
             exc_info.value)
         # Should hint user to restart local API server
         assert 'sky api stop; sky api start' in str(exc_info.value)
@@ -87,17 +121,14 @@ def test_remote_server_older(mock_is_local, mock_get_status):
         status=ApiServerStatus.VERSION_MISMATCH,
         api_version='0',
         version='1.0.0-dev20250415',
-        commit='abc123')
+        commit='abc123',
+        error='SkyPilot API server is too old')
 
     with pytest.raises(RuntimeError) as exc_info:
         common.check_server_healthy()
 
     # Correct error message
     assert 'SkyPilot API server is too old' in str(exc_info.value)
-    # Should hint user to upgrade remote server
-    assert 'Contact your administrator to upgrade the remote API server' in str(
-        exc_info.value)
-    assert 'or downgrade your local client with' in str(exc_info.value)
 
 
 @mock.patch('sky.server.common.get_api_server_status')
@@ -109,72 +140,20 @@ def test_client_older(mock_is_local, mock_get_status):
         status=ApiServerStatus.VERSION_MISMATCH,
         api_version=str(sys.maxsize),
         version='1.0.0-dev20250415',
-        commit='abc123')
+        commit='abc123',
+        error='Your SkyPilot client is too old')
 
     with pytest.raises(RuntimeError) as exc_info:
         common.check_server_healthy()
 
     # Correct error message
     assert 'Your SkyPilot client is too old' in str(exc_info.value)
-    # Should hint user to upgrade client
-    assert 'Upgrade your client with' in str(exc_info.value)
-
-
-def test_get_version_info_hint():
-    """Test the version info hint."""
-    # Test dev version
-    server_info = ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
-                                api_version='1',
-                                version='1.0.0-dev0',
-                                commit='abc123')
-    with mock.patch('sky.__version__', '1.0.0-dev0'), \
-         mock.patch('sky.__commit__', 'def456'):
-        hint = common._get_version_info_hint(server_info)
-        assert 'client version: v1.0.0-dev0 with commit def456' in hint
-        assert 'server version: v1.0.0-dev0 with commit abc123' in hint
-
-    # Test stable version
-    server_info = ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
-                                api_version='1',
-                                version='1.0.0',
-                                commit='abc123')
-    with mock.patch('sky.__version__', '1.1.0'):
-        hint = common._get_version_info_hint(server_info)
-        assert 'client version: v1.1.0' in hint
-        assert 'server version: v1.0.0' in hint
-
-
-def test_install_server_version_command():
-    """Test the install server version command."""
-    # Test dev version
-    server_info = ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
-                                api_version='1',
-                                version='1.0.0-dev0',
-                                commit='abc123')
-    cmd = common._install_server_version_command(server_info)
-    assert cmd == 'pip install git+https://github.com/skypilot-org/skypilot@abc123'
-
-    # Test nightly version
-    server_info = ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
-                                api_version='1',
-                                version='1.0.0-dev20250415',
-                                commit='abc123')
-    cmd = common._install_server_version_command(server_info)
-    assert cmd == 'pip install -U "skypilot-nightly==1.0.0-dev20250415"'
-
-    # Test stable version
-    server_info = ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
-                                api_version='1',
-                                version='1.0.0',
-                                commit='abc123')
-    cmd = common._install_server_version_command(server_info)
-    assert cmd == 'pip install -U "skypilot==1.0.0"'
 
 
 @pytest.fixture
 def mock_all_dependencies():
     """Mock all dependencies used in reload_for_new_request."""
-    with mock.patch('sky.utils.common_utils.set_client_status') as mock_status, \
+    with mock.patch('sky.utils.common_utils.set_request_context') as mock_status, \
          mock.patch('sky.usage.usage_lib.messages.reset') as mock_reset, \
          mock.patch('sky.sky_logging.reload_logger') as mock_logger:
         yield {
@@ -194,11 +173,14 @@ allowed_clouds:
 ''')
 
     # Set env var to point to the temp config
-    monkeypatch.setenv('SKYPILOT_CONFIG', str(config_path))
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
     common.reload_for_new_request(
         client_entrypoint='test_entry',
         client_command='test_cmd',
         using_remote_api_server=False,
+        user=mock.Mock(id='test_user'),
+        request_id='dummy-request-id',
     )
     assert skypilot_config.get_nested(keys=('allowed_clouds',),
                                       default_value=None) == ['aws']
@@ -210,6 +192,161 @@ allowed_clouds:
         client_entrypoint='test_entry',
         client_command='test_cmd',
         using_remote_api_server=False,
+        user=mock.Mock(id='test_user'),
+        request_id='dummy-request-id',
     )
     assert skypilot_config.get_nested(keys=('allowed_clouds',),
                                       default_value=None) == ['gcp']
+
+
+def test_get_dashboard_url():
+    """Test get_dashboard_url with default URL."""
+    common.get_server_url.cache_clear()
+    assert common.get_dashboard_url(server_url='http://127.0.0.1:46580'
+                                   ) == 'http://127.0.0.1:46580/dashboard'
+    """Test get_dashboard_url with basic URL."""
+    common.get_server_url.cache_clear()
+    assert common.get_dashboard_url(server_url='http://example.com:8080'
+                                   ) == 'http://example.com:8080/dashboard'
+    """Test get_dashboard_url with URL containing path."""
+    common.get_server_url.cache_clear()
+    assert common.get_dashboard_url(server_url='http://example.com:8080/api/'
+                                   ) == 'http://example.com:8080/api/dashboard'
+    """Test get_dashboard_url with URL containing credentials."""
+    common.get_server_url.cache_clear()
+    assert common.get_dashboard_url(
+        server_url='https://user:pass@example.com:8080'
+    ) == 'https://example.com:8080/dashboard'
+    """Test get_dashboard_url with URL containing username."""
+    common.get_server_url.cache_clear()
+    assert common.get_dashboard_url(server_url='https://user@example.com:8080'
+                                   ) == 'https://example.com:8080/dashboard'
+    """Test get_dashboard_url with host parameter."""
+    common.get_server_url.cache_clear()
+    assert common.get_dashboard_url(server_url='http://custom-host:8080'
+                                   ) == 'http://custom-host:8080/dashboard'
+    """Test get_dashboard_url with complex path."""
+    common.get_server_url.cache_clear()
+    assert common.get_dashboard_url(
+        server_url='https://user:pass@example.com:8080/api/v1'
+    ) == 'https://example.com:8080/api/v1/dashboard'
+    """Test get_dashboard_url without port."""
+    common.get_server_url.cache_clear()
+    assert common.get_dashboard_url(
+        server_url='http://example.com') == 'http://example.com/dashboard'
+
+
+def test_cookies_get_no_file(monkeypatch):
+    """Test getting cookies from local file."""
+
+    # make a up a temporary cookie file
+    temp_cookie_dir = tempfile.TemporaryDirectory(prefix='sky_cookies')
+    temp_cookie_path = pathlib.Path(temp_cookie_dir.name) / 'cookies.txt'
+
+    monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
+                        lambda: temp_cookie_path)
+
+    test_cookie_jar = common.get_api_cookie_jar()
+
+    assert not temp_cookie_path.exists()
+    assert isinstance(test_cookie_jar, requests.cookies.RequestsCookieJar)
+
+
+def test_cookies_get_with_file(monkeypatch):
+    """Test getting cookies from local file."""
+
+    # make a up a temporary cookie file
+    temp_cookie_dir = tempfile.TemporaryDirectory(prefix='sky_cookies')
+    temp_cookie_path = pathlib.Path(temp_cookie_dir.name) / 'cookies.txt'
+
+    test_cookie = _create_test_cookie()
+    cookie_jar = MozillaCookieJar(temp_cookie_path)
+    cookie_jar.set_cookie(test_cookie)
+    cookie_jar.save()
+
+    monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
+                        lambda: temp_cookie_path)
+
+    test_cookie_jar = common.get_api_cookie_jar()
+
+    assert isinstance(test_cookie_jar, requests.cookies.RequestsCookieJar)
+    assert len(test_cookie_jar) == 1
+    assert test_cookie_jar['test-cookie'] == test_cookie.value
+
+    temp_cookie_dir.cleanup()
+
+
+def test_cookies_set_with_no_file(monkeypatch):
+    """Test setting cookies to local file.
+    No file exists, so a new file is created.
+    """
+
+    # make a up a temporary cookie file
+    temp_cookie_dir = tempfile.TemporaryDirectory(prefix='sky_cookies')
+    temp_cookie_path = pathlib.Path(temp_cookie_dir.name) / 'cookies.txt'
+
+    monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
+                        lambda: temp_cookie_path)
+    cookie = _create_test_cookie(name='test-cookie-2', value='test-value-2')
+    cookie_jar = requests.cookies.RequestsCookieJar()
+    cookie_jar.set_cookie(cookie)
+    common.set_api_cookie_jar(cookie_jar, create_if_not_exists=True)
+
+    assert temp_cookie_path.exists()
+
+    temp_cookie_dir.cleanup()
+
+
+def test_cookies_set_empty(monkeypatch):
+    """Test setting an empty cookie should be a no-op."""
+    temp_cookie_dir = tempfile.TemporaryDirectory(prefix='sky_cookies')
+    temp_cookie_path = pathlib.Path(temp_cookie_dir.name) / 'cookies.txt'
+
+    monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
+                        lambda: temp_cookie_path)
+    common.set_api_cookie_jar(requests.cookies.RequestsCookieJar(),
+                              create_if_not_exists=True)
+
+    assert not temp_cookie_path.exists()
+
+
+def test_cookies_set_with_file(monkeypatch):
+    """Test setting cookies to local file.
+    A file exists, so the cookies are added to the file.
+    """
+
+    # make a up a temporary cookie file
+    temp_cookie_dir = tempfile.TemporaryDirectory(prefix='sky_cookies')
+    temp_cookie_path = pathlib.Path(temp_cookie_dir.name) / 'cookies.txt'
+
+    monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
+                        lambda: temp_cookie_path)
+
+    # write a cookie to the file
+    cookie = _create_test_cookie()
+    cookie_jar = MozillaCookieJar(temp_cookie_path)
+    cookie_jar.set_cookie(cookie)
+    cookie_jar.save()
+
+    # create a new cookie jar and add a new cookie
+    expected_cookie = _create_test_cookie(name='test-cookie-2',
+                                          value='test-value-2')
+    expected_cookie_jar = requests.cookies.RequestsCookieJar()
+    expected_cookie_jar.set_cookie(expected_cookie)
+
+    common.set_api_cookie_jar(expected_cookie_jar, create_if_not_exists=False)
+
+    assert temp_cookie_path.exists()
+
+    # read the cookie file
+    _found_cookie_jar = MozillaCookieJar(temp_cookie_path)
+    _found_cookie_jar.load()
+    # convert to RequestsCookieJar to use the RequestsCookieJar API for reading cookies
+    found_cookie_jar = requests.cookies.RequestsCookieJar()
+    found_cookie_jar.update(_found_cookie_jar)
+
+    assert len(found_cookie_jar) == 2
+    assert found_cookie_jar['test-cookie'] == cookie.value
+    assert found_cookie_jar['test-cookie-2'] == expected_cookie.value
+
+    temp_cookie_dir.cleanup()

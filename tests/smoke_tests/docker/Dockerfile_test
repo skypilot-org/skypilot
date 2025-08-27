@@ -1,4 +1,25 @@
-FROM ubuntu:latest
+# Stage 1: Install Google Cloud SDK using APT
+FROM python:3.10-slim AS gcloud-apt-install
+
+RUN apt-get update && \
+    apt-get install -y curl gnupg lsb-release && \
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" > /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
+    apt-get update && \
+    apt-get install --no-install-recommends -y \
+        google-cloud-cli \
+        google-cloud-cli-gke-gcloud-auth-plugin && \
+    apt-get clean && rm -rf /usr/lib/google-cloud-sdk/platform/bundledpythonunix \
+    /var/lib/apt/lists/*
+
+# Stage 2: Main image
+FROM python:3.10-slim
+
+# Copy Google Cloud SDK from Stage 1
+COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
+
+# Set environment variable
+ENV PATH="/opt/google-cloud-sdk/bin:$PATH"
 
 # Usage:
 # Command on Mac:
@@ -43,7 +64,9 @@ RUN apt update -y && \
     socat \
     uuid-runtime \
     docker.io \
-    rsync
+    rsync \
+    jq \
+    apache2-utils
 
 # Install kubectl
 RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(case "$(uname -m)" in \
@@ -112,19 +135,8 @@ RUN source ~/miniconda3/etc/profile.d/conda.sh && \
     # Install httpx with SOCKS support for proxy environments - necessary when system has proxy enabled
     uv pip install httpx[socks]
 
-RUN source ~/miniconda3/etc/profile.d/conda.sh && \
-    conda activate base && \
-    export PATH="$PATH:$HOME/.local/bin" && \
-    conda install -c conda-forge google-cloud-sdk -y && \
-    gcloud components install gke-gcloud-auth-plugin --quiet
-
-# Fix the gsutil problem
-# Install specific pyOpenSSL version to avoid SSL compatibility issues with gsutil
-# Higher versions can cause SSL errors when gsutil doesn't specify compatible SSL version
-RUN source ~/miniconda3/etc/profile.d/conda.sh && \
-    conda activate base && \
-    export PATH="$PATH:$HOME/.local/bin" && \
-    uv pip install pyOpenSSL==23.1.1
+# Install Helm
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # Copy the entrypoint script
 COPY tests/smoke_tests/docker/entrypoint.sh /home/${USERNAME}/entrypoint.sh

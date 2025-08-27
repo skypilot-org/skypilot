@@ -1,6 +1,6 @@
 """Utilities for loading and dumping DAGs from/to YAML files."""
 import copy
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import dag as dag_lib
 from sky import sky_logging
@@ -66,7 +66,9 @@ def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
 
 def _load_chain_dag(
         configs: List[Dict[str, Any]],
-        env_overrides: Optional[List[Tuple[str, str]]] = None) -> dag_lib.Dag:
+        env_overrides: Optional[List[Tuple[str, str]]] = None,
+        secrets_overrides: Optional[List[Tuple[str,
+                                               str]]] = None) -> dag_lib.Dag:
     """Loads a chain DAG from a list of YAML configs."""
     dag_name = None
     if set(configs[0].keys()) == {'name'}:
@@ -84,7 +86,8 @@ def _load_chain_dag(
         for task_config in configs:
             if task_config is None:
                 continue
-            task = task_lib.Task.from_yaml_config(task_config, env_overrides)
+            task = task_lib.Task.from_yaml_config(task_config, env_overrides,
+                                                  secrets_overrides)
             if current_task is not None:
                 current_task >> task  # pylint: disable=pointless-statement
             current_task = task
@@ -95,6 +98,7 @@ def _load_chain_dag(
 def load_chain_dag_from_yaml(
     path: str,
     env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secret_overrides: Optional[List[Tuple[str, str]]] = None,
 ) -> dag_lib.Dag:
     """Loads a chain DAG from a YAML file.
 
@@ -105,17 +109,22 @@ def load_chain_dag_from_yaml(
     the task's 'envs' section. If it is a chain dag, the envs will be updated
     for all tasks in the chain.
 
+    'secrets_overrides' is a list of (key, value) pairs that will be used to
+    update the task's 'secrets' section. If it is a chain dag, the secrets will
+    be updated for all tasks in the chain.
+
     Returns:
       A chain Dag with 1 or more tasks (an empty entrypoint would create a
       trivial task).
     """
     configs = common_utils.read_yaml_all(path)
-    return _load_chain_dag(configs, env_overrides)
+    return _load_chain_dag(configs, env_overrides, secret_overrides)
 
 
 def load_chain_dag_from_yaml_str(
     yaml_str: str,
     env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
 ) -> dag_lib.Dag:
     """Loads a chain DAG from a YAML string.
 
@@ -126,19 +135,25 @@ def load_chain_dag_from_yaml_str(
     the task's 'envs' section. If it is a chain dag, the envs will be updated
     for all tasks in the chain.
 
+    'secrets_overrides' is a list of (key, value) pairs that will be used to
+    update the task's 'secrets' section. If it is a chain dag, the secrets will
+    be updated for all tasks in the chain.
+
     Returns:
       A chain Dag with 1 or more tasks (an empty entrypoint would create a
       trivial task).
     """
     configs = common_utils.read_yaml_all_str(yaml_str)
-    return _load_chain_dag(configs, env_overrides)
+    return _load_chain_dag(configs, env_overrides, secrets_overrides)
 
 
-def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag) -> str:
+def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag,
+                               use_user_specified_yaml: bool = False) -> str:
     """Dumps a chain DAG to a YAML string.
 
     Args:
         dag: the DAG to dump.
+        redact_secrets: whether to redact secrets in the YAML string.
 
     Returns:
         The YAML string.
@@ -146,7 +161,9 @@ def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag) -> str:
     assert dag.is_chain(), dag
     configs = [{'name': dag.name}]
     for task in dag.tasks:
-        configs.append(task.to_yaml_config())
+        configs.append(
+            task.to_yaml_config(
+                use_user_specified_yaml=use_user_specified_yaml))
     return common_utils.dump_yaml_str(configs)
 
 
@@ -195,7 +212,9 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
         assert default_strategy is not None
         for resources in list(task_.resources):
             original_job_recovery = resources.job_recovery
-            job_recovery = {'strategy': default_strategy}
+            job_recovery: Dict[str, Optional[Union[str, int]]] = {
+                'strategy': default_strategy
+            }
             if isinstance(original_job_recovery, str):
                 job_recovery['strategy'] = original_job_recovery
             elif isinstance(original_job_recovery, dict):

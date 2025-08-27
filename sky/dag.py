@@ -24,6 +24,7 @@ class Dag:
         self.graph = nx.DiGraph()
         self.name: Optional[str] = None
         self.policy_applied: bool = False
+        self.pool: Optional[str] = None
 
     def add(self, task: 'task.Task') -> None:
         self.graph.add_node(task)
@@ -76,9 +77,26 @@ class Dag:
 
         return out_degree_condition and in_degree_condition
 
-    def validate(self, workdir_only: bool = False):
+    def validate(self,
+                 skip_file_mounts: bool = False,
+                 skip_workdir: bool = False):
         for task in self.tasks:
-            task.validate(workdir_only=workdir_only)
+            task.validate(skip_file_mounts=skip_file_mounts,
+                          skip_workdir=skip_workdir)
+
+    def resolve_and_validate_volumes(self) -> None:
+        for task in self.tasks:
+            task.resolve_and_validate_volumes()
+
+    def pre_mount_volumes(self) -> None:
+        vol_map = {}
+        # Deduplicate volume mounts.
+        for task in self.tasks:
+            if task.volume_mounts is not None:
+                for volume_mount in task.volume_mounts:
+                    vol_map[volume_mount.volume_name] = volume_mount
+        for volume_mount in vol_map.values():
+            volume_mount.pre_mount()
 
 
 class _DagContext(threading.local):

@@ -20,6 +20,12 @@ file_mounts:
     store: r2
     mode: MOUNT
 
+  # Mounting private buckets in MOUNT_CACHED mode
+  /mount_private_mount_cached:
+    name: {{storage_name}}
+    source: ~/tmp-workdir
+    store: r2
+    mode: MOUNT_CACHED
 run: |
   set -ex
 
@@ -37,3 +43,6 @@ run: |
   
   # Write to private bucket in MOUNT mode should pass
   echo "hello" > /mount_private_mount/hello.txt
+
+  # Write to private bucket in MOUNT_CACHED mode should pass
+  echo "hello2" > /mount_private_mount/hello2.txt

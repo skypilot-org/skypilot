@@ -9,7 +9,7 @@ ARG TARGETARCH
 
 # Initialize conda for root user, install ssh and other local dependencies
 RUN apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat-openbsd curl -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat-openbsd curl autossh jq -y && \
     rm -rf /var/lib/apt/lists/* && \
     apt remove -y python3 && \
     conda init
@@ -25,6 +25,10 @@ RUN mkdir -p /var/run/sshd && \
 RUN useradd -m -s /bin/bash sky && \
     echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
     echo 'Defaults        secure_path="/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/sudoers.d/sky
+
+# give sky group write permission to /opt/conda
+RUN chown -R :sky /opt/conda && \
+    chmod -R g+w /opt/conda
 
 # Switch to sky user
 USER sky

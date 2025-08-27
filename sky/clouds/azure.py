@@ -9,12 +9,12 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import colorama
 from packaging import version as pversion
 
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import azure
-from sky.clouds import service_catalog
 from sky.clouds.utils import azure_utils
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -24,6 +24,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -90,6 +91,12 @@ class Azure(clouds.Cloud):
         features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS: (
+                f'High availability controllers are not supported on {cls._REPR}.'
+            ),
+            clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK: (
+                f'Customized multiple network interfaces are not supported on {cls._REPR}.'
+            ),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -106,11 +113,11 @@ class Azure(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='azure')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='azure')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -147,23 +154,25 @@ class Azure(clouds.Cloud):
         return cost
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='azure')
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
+                                                 clouds='azure')
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         # Process skypilot images.
         if image_id.startswith('skypilot:'):
-            image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                             clouds='azure')
+            image_id = catalog.get_image_id_from_tag(image_id, clouds='azure')
             if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
                 # Avoid querying the image size from Azure as
                 # all skypilot custom images have the same size.
@@ -260,7 +269,7 @@ class Azure(clouds.Cloud):
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
         assert zone is None, 'Azure does not support zones'
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'azure')
 
         if region is not None:
@@ -295,36 +304,39 @@ class Azure(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='azure')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='azure')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='azure')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='azure')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Any]:
+        self,
+        resources: 'resources.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
 
-        r = resources
-        # r.accelerators is cleared but .instance_type encodes the info.
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        # resources.accelerators is cleared but .instance_type encodes the info.
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         acc_count = None
         if acc_dict is not None:
             acc_count = str(sum(acc_dict.values()))
@@ -334,10 +346,11 @@ class Azure(clouds.Cloud):
         if (resources.image_id is None or
                 resources.extract_docker_image() is not None):
             # pylint: disable=import-outside-toplevel
-            from sky.clouds.service_catalog import azure_catalog
+            from sky.catalog import azure_catalog
             gen_version = azure_catalog.get_gen_version_from_instance_type(
-                r.instance_type)
-            image_id = self._get_default_image_tag(gen_version, r.instance_type)
+                resources.instance_type)
+            image_id = self._get_default_image_tag(gen_version,
+                                                   resources.instance_type)
         else:
             if None in resources.image_id:
                 image_id = resources.image_id[None]
@@ -347,8 +360,7 @@ class Azure(clouds.Cloud):
 
         # Checked basic image syntax in resources.py
         if image_id.startswith('skypilot:'):
-            image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                             clouds='azure')
+            image_id = catalog.get_image_id_from_tag(image_id, clouds='azure')
             # Fallback if image does not exist in the specified region.
             # Putting fallback here instead of at image validation
             # when creating the resource because community images are
@@ -359,8 +371,8 @@ class Azure(clouds.Cloud):
             ) and region_name not in azure_catalog.COMMUNITY_IMAGE_AVAILABLE_REGIONS:
                 logger.info(f'Azure image {image_id} does not exist in region '
                             f'{region_name} so use the fallback image instead.')
-                image_id = service_catalog.get_image_id_from_tag(
-                    _FALLBACK_IMAGE_ID, clouds='azure')
+                image_id = catalog.get_image_id_from_tag(_FALLBACK_IMAGE_ID,
+                                                         clouds='azure')
 
         if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
             image_config = {'community_gallery_image_id': image_id}
@@ -374,8 +386,11 @@ class Azure(clouds.Cloud):
             }
 
         # Determine resource group for deploying the instance.
-        resource_group_name = skypilot_config.get_nested(
-            ('azure', 'resource_group_vm'), None)
+        resource_group_name = skypilot_config.get_effective_region_config(
+            cloud='azure',
+            region=region_name,
+            keys=('resource_group_vm',),
+            default_value=None)
         use_external_resource_group = resource_group_name is not None
         if resource_group_name is None:
             resource_group_name = f'{cluster_name.name_on_cloud}-{region_name}'
@@ -404,18 +419,19 @@ class Azure(clouds.Cloud):
             """).split('\n')
 
         def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
-            if (r.disk_tier is not None and
-                    r.disk_tier != resources_utils.DiskTier.BEST):
-                return r.disk_tier
+            if (resources.disk_tier is not None and
+                    resources.disk_tier != resources_utils.DiskTier.BEST):
+                return resources.disk_tier
             # Failover disk tier from high to low. Default disk tier
             # (Premium_LRS, medium) only support s-series instance types,
             # so we failover to lower tiers for non-s-series.
             all_tiers = list(reversed(resources_utils.DiskTier))
             start_index = all_tiers.index(
-                Azure._translate_disk_tier(r.disk_tier))
+                Azure._translate_disk_tier(resources.disk_tier))
             while start_index < len(all_tiers):
                 disk_tier = all_tiers[start_index]
-                ok, _ = Azure.check_disk_tier(r.instance_type, disk_tier)
+                ok, _ = Azure.check_disk_tier(resources.instance_type,
+                                              disk_tier)
                 if ok:
                     return disk_tier
                 start_index += 1
@@ -423,11 +439,11 @@ class Azure(clouds.Cloud):
 
         disk_tier = _failover_disk_tier()
 
-        resources_vars = {
-            'instance_type': r.instance_type,
+        resources_vars: Dict[str, Any] = {
+            'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'num_gpus': acc_count,
-            'use_spot': r.use_spot,
+            'use_spot': resources.use_spot,
             'region': region_name,
             # Azure does not support specific zones.
             'zones': None,
@@ -486,7 +502,9 @@ class Azure(clouds.Cloud):
             default_instance_type = Azure.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:
@@ -495,16 +513,16 @@ class Azure(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            cpus=resources.cpus,
-            memory=resources.memory,
-            use_spot=resources.use_spot,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='azure')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             cpus=resources.cpus,
+             memory=resources.memory,
+             use_spot=resources.use_spot,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='azure')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -512,12 +530,14 @@ class Azure(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this cloud's compute service."""
         return cls._check_credentials()
 
     @classmethod
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this cloud's storage service."""
         # TODO(seungjin): Implement separate check for
         # if the user has access to Azure Blob Storage.
@@ -583,8 +603,7 @@ class Azure(clouds.Cloud):
         }
 
     def instance_type_exists(self, instance_type):
-        return service_catalog.instance_type_exists(instance_type,
-                                                    clouds='azure')
+        return catalog.instance_type_exists(instance_type, clouds='azure')
 
     @classmethod
     @annotations.lru_cache(scope='global',

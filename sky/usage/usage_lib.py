@@ -10,6 +10,8 @@ import traceback
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 
+from typing_extensions import ParamSpec
+
 import sky
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -205,8 +207,8 @@ class UsageMessageToReport(MessageToReport):
                     logger.debug('Multiple accelerators are not supported: '
                                  f'{resources.accelerators}.')
                 self.task_accelerators = list(resources.accelerators.keys())[0]
-                self.task_num_accelerators = resources.accelerators[
-                    self.task_accelerators]
+                self.task_num_accelerators = int(
+                    resources.accelerators[self.task_accelerators])
             else:
                 self.task_accelerators = None
                 self.task_num_accelerators = None
@@ -245,7 +247,8 @@ class UsageMessageToReport(MessageToReport):
                 logger.debug('Multiple accelerators are not supported: '
                              f'{resources.accelerators}.')
             self.accelerators = list(resources.accelerators.keys())[0]
-            self.num_accelerators = resources.accelerators[self.accelerators]
+            self.num_accelerators = int(
+                resources.accelerators[self.accelerators])
         else:
             self.accelerators = None
             self.num_accelerators = None
@@ -516,26 +519,26 @@ def entrypoint_context(name: str, fallback: bool = False):
 
 
 T = typing.TypeVar('T')
+P = ParamSpec('P')
 
 
 @typing.overload
 def entrypoint(
         name_or_fn: str,
-        fallback: bool = False
-) -> Callable[[Callable[..., T]], Callable[..., T]]:
+        fallback: bool = False) -> Callable[[Callable[P, T]], Callable[P, T]]:
     ...
 
 
 @typing.overload
-def entrypoint(name_or_fn: Callable[..., T],
-               fallback: bool = False) -> Callable[..., T]:
+def entrypoint(name_or_fn: Callable[P, T],
+               fallback: bool = False) -> Callable[P, T]:
     ...
 
 
 def entrypoint(
-    name_or_fn: Union[str, Callable[..., T]],
+    name_or_fn: Union[str, Callable[P, T]],
     fallback: bool = False
-) -> Union[Callable[..., T], Callable[[Callable[..., T]], Callable[..., T]]]:
+) -> Union[Callable[P, T], Callable[[Callable[P, T]], Callable[P, T]]]:
     return common_utils.make_decorator(entrypoint_context,
                                        name_or_fn,
                                        fallback=fallback)

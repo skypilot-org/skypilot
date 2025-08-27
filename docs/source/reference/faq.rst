@@ -245,12 +245,12 @@ need to manually stop the old API server to have the new version take effect.
   sky api stop
 
 
-.. _migration-0.8.0:
+.. _migration-0.8.1:
 
-Migration from ``SkyPilot<=0.8.0``
+Migration from ``SkyPilot<=0.8.1``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-After ``SkyPilot v0.8.0``, SkyPilot has moved to a new client-server architecture, which is more flexible and powerful.
+After ``SkyPilot v0.8.1``, SkyPilot has moved to a new client-server architecture, which is more flexible and powerful.
 It also introduces the :ref:`asynchronous execution model <async>`, which may cause compatibility issues with user programs using  previous SkyPilot SDKs.
 
 
@@ -260,7 +260,7 @@ All SkyPilot SDKs (except log related functions: ``sky.tail_logs``, ``sky.jobs.t
 
 **Action needed**: Wrapping all SkyPilot SDK function calls with ``sky.stream_and_get()`` will make your program behave mostly the same as before:
 
-``SkyPilot<=0.8.0``:
+``SkyPilot<=0.8.1``:
 
 .. code-block:: python
 
@@ -268,7 +268,7 @@ All SkyPilot SDKs (except log related functions: ``sky.tail_logs``, ``sky.jobs.t
   job_id, handle = sky.launch(task)
   sky.tail_logs(job_id)
 
-``SkyPilot>0.8.0``:
+``SkyPilot>0.8.1``:
 
 .. code-block:: python
   :emphasize-lines: 2
@@ -281,6 +281,6 @@ Removed arguments: :code:`detach_setup`/:code:`detach_run`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 :code:`detach_setup`/:code:`detach_run` in :code:`sky.launch` were removed after
-:code:`0.8.0`, because setup and run are now detached by default with Python SDK.
+:code:`0.8.1`, because setup and run are now detached by default with Python SDK.
 If you would like to view the logs for the jobs submitted to a cluster, you can
 explicitly call ``sky.tail_logs(job_id)`` as shown above.

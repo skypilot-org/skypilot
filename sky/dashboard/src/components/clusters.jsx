@@ -5,9 +5,21 @@
  */
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from 'react';
+import { useRouter } from 'next/router';
 import { CircularProgress } from '@mui/material';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  NonCapitalizedTooltip,
+  REFRESH_INTERVAL,
+  TimestampWithTooltip,
+} from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -19,9 +31,11 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { getClusters } from '@/data/connectors/clusters';
+import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
+import { getWorkspaces } from '@/data/connectors/workspaces';
+import { getUsers } from '@/data/connectors/users';
 import { sortData } from '@/data/utils';
-import { SquareCode, Terminal, RotateCwIcon } from 'lucide-react';
+import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
 import {
@@ -29,50 +43,430 @@ import {
   VSCodeInstructionsModal,
 } from '@/components/elements/modals';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import { useMobile } from '@/hooks/useMobile';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
+import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import yaml from 'js-yaml';
+import { UserDisplay } from '@/components/elements/UserDisplay';
+
+// Helper function to format cost (copied from workspaces.jsx)
+// const formatCost = (cost) => { // Cost function removed
+//   if (cost >= 10) {
+//     // Use the user-updated threshold of 10
+//     return cost.toFixed(1);
+//   }
+//   return cost.toFixed(2);
+// };
+
+// Define filter options for the filter dropdown
+const PROPERTY_OPTIONS = [
+  {
+    label: 'Status',
+    value: 'status',
+  },
+  {
+    label: 'Cluster',
+    value: 'cluster',
+  },
+  {
+    label: 'User',
+    value: 'user',
+  },
+  {
+    label: 'Workspace',
+    value: 'workspace',
+  },
+  {
+    label: 'Infra',
+    value: 'infra',
+  },
+];
+
+// Helper function to format autostop information, similar to _get_autostop in CLI utils
+const formatAutostop = (autostop, toDown) => {
+  let autostopStr = '';
+  let separation = '';
+
+  if (autostop >= 0) {
+    autostopStr = autostop + 'm';
+    separation = ' ';
+  }
+
+  if (toDown) {
+    autostopStr += `${separation}(down)`;
+  }
+
+  if (autostopStr === '') {
+    autostopStr = '-';
+  }
+
+  return autostopStr;
+};
+
+// Helper function to format username for display (reuse from users.jsx)
+const formatUserDisplay = (username, userId) => {
+  if (username && username.includes('@')) {
+    const emailPrefix = username.split('@')[0];
+    // Show email prefix with userId if they're different
+    if (userId && userId !== emailPrefix) {
+      return `${emailPrefix} (${userId})`;
+    }
+    return emailPrefix;
+  }
+  // If no email, show username with userId in parentheses only if they're different
+  const usernameBase = username || userId || 'N/A';
+
+  // Skip showing userId if it's the same as username
+  if (userId && userId !== usernameBase) {
+    return `${usernameBase} (${userId})`;
+  }
+
+  return usernameBase;
+};
+
+// Helper function to format duration in a human-readable way
+const formatDuration = (durationSeconds) => {
+  if (!durationSeconds || durationSeconds === 0) {
+    return '-';
+  }
+
+  // Convert to a whole number if it's a float
+  durationSeconds = Math.floor(durationSeconds);
+
+  const units = [
+    { value: 31536000, label: 'y' }, // years (365 days)
+    { value: 2592000, label: 'mo' }, // months (30 days)
+    { value: 86400, label: 'd' }, // days
+    { value: 3600, label: 'h' }, // hours
+    { value: 60, label: 'm' }, // minutes
+    { value: 1, label: 's' }, // seconds
+  ];
+
+  let remaining = durationSeconds;
+  let result = '';
+  let count = 0;
+
+  for (const unit of units) {
+    if (remaining >= unit.value && count < 2) {
+      const value = Math.floor(remaining / unit.value);
+      result += `${value}${unit.label} `;
+      remaining %= unit.value;
+      count++;
+    }
+  }
+
+  return result.trim() || '0s';
+};
 
 export function Clusters() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const refreshDataRef = React.useRef(null);
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
 
+  // Initialize showHistory from URL parameter immediately
+  const getInitialShowHistory = () => {
+    if (typeof window !== 'undefined' && router.isReady) {
+      const historyParam = router.query.history;
+      return historyParam === 'true';
+    }
+    return false;
+  };
+
+  const [showHistory, setShowHistory] = useState(getInitialShowHistory);
+  const [shouldAnimate, setShouldAnimate] = useState(true); // Track if toggle should animate
+  const isMobile = useMobile();
+
+  const [filters, setFilters] = useState([]);
+  const [optionValues, setOptionValues] = useState({
+    status: [],
+    cluster: [],
+    user: [],
+    workspace: [],
+    infra: [],
+  }); /// Option values for properties
+
+  // Handle URL query parameters for workspace and user filtering and show history
+  useEffect(() => {
+    if (router.isReady) {
+      updateFiltersByURLParams();
+
+      // Sync showHistory state with URL if it has changed
+      const historyParam = router.query.history;
+      const expectedState = historyParam === 'true';
+
+      if (showHistory !== expectedState) {
+        setShouldAnimate(false); // Disable animation for programmatic changes
+        setShowHistory(expectedState);
+        // Re-enable animation after a short delay
+        setTimeout(() => setShouldAnimate(true), 50);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.history]);
+
+  useEffect(() => {
+    const fetchFilterData = async () => {
+      try {
+        // Trigger cache preloading for clusters page and background preload other pages
+        await cachePreloader.preloadForPage('clusters');
+
+        // Fetch configured workspaces for the filter dropdown
+        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
+        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
+
+        // Fetch all clusters to see if 'default' workspace is implicitly used
+        const allClusters = await dashboardCache.get(getClusters);
+        const uniqueClusterWorkspaces = [
+          ...new Set(
+            allClusters
+              .map((cluster) => cluster.workspace || 'default')
+              .filter((ws) => ws)
+          ),
+        ];
+
+        // Combine configured workspaces with any actively used 'default' workspace
+        const finalWorkspaces = new Set(configuredWorkspaceNames);
+        if (
+          uniqueClusterWorkspaces.includes('default') &&
+          !finalWorkspaces.has('default')
+        ) {
+          // Add 'default' if it's used by clusters but not in configured list
+          // This ensures 'default' appears if relevant, even if not explicitly in skypilot config
+        }
+        // Ensure all unique cluster workspaces are in the list, especially 'default'
+        uniqueClusterWorkspaces.forEach((wsName) =>
+          finalWorkspaces.add(wsName)
+        );
+
+        // Fetch users for the filter dropdown
+        const fetchedUsers = await dashboardCache.get(getUsers);
+        const uniqueClusterUsers = [
+          ...new Set(
+            allClusters
+              .map((cluster) => ({
+                userId: cluster.user_hash || cluster.user,
+                username: cluster.user,
+              }))
+              .filter((user) => user.userId)
+          ).values(),
+        ];
+
+        // Combine fetched users with unique cluster users
+        const finalUsers = new Map();
+
+        // Add fetched users first
+        fetchedUsers.forEach((user) => {
+          finalUsers.set(user.userId, {
+            userId: user.userId,
+            username: user.username,
+            display: formatUserDisplay(user.username, user.userId),
+          });
+        });
+
+        // Add any cluster users not in the fetched list
+        uniqueClusterUsers.forEach((user) => {
+          if (!finalUsers.has(user.userId)) {
+            finalUsers.set(user.userId, {
+              userId: user.userId,
+              username: user.username,
+              display: formatUserDisplay(user.username, user.userId),
+            });
+          }
+        });
+      } catch (error) {
+        console.error('Error fetching data for filters:', error);
+      }
+    };
+
+    fetchFilterData();
+  }, []);
+
+  // Helper function to update URL query parameters
+  const updateURLParams = (filters) => {
+    const query = { ...router.query };
+
+    let properties = [];
+    let operators = [];
+    let values = [];
+
+    filters.map((filter, _index) => {
+      properties.push(filter.property.toLowerCase() ?? '');
+      operators.push(filter.operator);
+      values.push(filter.value);
+    });
+
+    query.property = properties;
+    query.operator = operators;
+    query.value = values;
+
+    // Use replace to avoid adding to browser history for filter changes
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
+  // Helper function to update show history in URL
+  const updateShowHistoryURL = (showHistoryValue) => {
+    const query = { ...router.query };
+    query.history = showHistoryValue.toString();
+
+    // Use replace to avoid adding to browser history for show history changes
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
+  const updateFiltersByURLParams = () => {
+    const query = { ...router.query };
+
+    const properties = query.property;
+    const operators = query.operator;
+    const values = query.value;
+
+    if (properties === undefined) {
+      return;
+    }
+
+    let filters = [];
+
+    const length = Array.isArray(properties) ? properties.length : 1;
+
+    const propertyMap = new Map();
+    propertyMap.set('', '');
+    propertyMap.set('status', 'Status');
+    propertyMap.set('cluster', 'Cluster');
+    propertyMap.set('user', 'User');
+    propertyMap.set('workspace', 'Workspace');
+    propertyMap.set('infra', 'Infra');
+
+    if (length === 1) {
+      filters.push({
+        property: propertyMap.get(properties),
+        operator: operators,
+        value: values,
+      });
+    } else {
+      for (let i = 0; i < length; i++) {
+        filters.push({
+          property: propertyMap.get(properties[i]),
+          operator: operators[i],
+          value: values[i],
+        });
+      }
+    }
+
+    setFilters(filters);
+  };
+
   const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getClusterHistory);
+    dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidate(getUsers);
+
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
   };
 
   return (
-    <Layout highlighted="clusters">
-      <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base">
-          <Link href="/clusters" className="text-sky-blue leading-none">
+    <>
+      <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
+        <div className="flex items-center gap-2">
+          <Link
+            href="/clusters"
+            className="text-sky-blue hover:underline leading-none text-base"
+          >
             Sky Clusters
           </Link>
         </div>
-        <div className="flex items-center">
+        <div className="w-full sm:w-auto">
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={optionValues}
+            setFilters={setFilters}
+            updateURLParams={updateURLParams}
+            placeholder="Filter clusters"
+          />
+        </div>
+        <div className="flex items-center gap-2 ml-auto">
+          <label className="flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showHistory}
+              onChange={(e) => {
+                const newValue = e.target.checked;
+                setShowHistory(newValue);
+                updateShowHistoryURL(newValue);
+              }}
+              className="sr-only"
+            />
+            <div
+              className={`relative inline-flex h-5 w-9 items-center rounded-full ${shouldAnimate ? 'transition-colors' : ''} ${
+                showHistory ? 'bg-sky-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-3 w-3 transform rounded-full bg-white ${shouldAnimate ? 'transition-transform' : ''} ${
+                  showHistory ? 'translate-x-5' : 'translate-x-1'
+                }`}
+              />
+            </div>
+            <span className="ml-2 text-sm text-gray-700">
+              Show history (Last 30 days)
+            </span>
+          </label>
           {loading && (
-            <div className="flex items-center mr-2">
+            <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
+              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
           )}
-          <Button
-            variant="ghost"
+          <button
             onClick={handleRefresh}
             disabled={loading}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            <span>Refresh</span>
-          </Button>
+            {!isMobile && <span>Refresh</span>}
+          </button>
         </div>
       </div>
+
+      <Filters
+        filters={filters}
+        setFilters={setFilters}
+        updateURLParams={updateURLParams}
+      />
+
       <ClusterTable
-        refreshInterval={10000}
+        refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
+        filters={filters}
+        showHistory={showHistory}
         onOpenSSHModal={(cluster) => {
           setSelectedCluster(cluster);
           setIsSSHModalOpen(true);
@@ -81,6 +475,7 @@ export function Clusters() {
           setSelectedCluster(cluster);
           setIsVSCodeModalOpen(true);
         }}
+        setOptionValues={setOptionValues}
       />
 
       {/* SSH Instructions Modal */}
@@ -95,7 +490,7 @@ export function Clusters() {
         onClose={() => setIsVSCodeModalOpen(false)}
         cluster={selectedCluster}
       />
-    </Layout>
+    </>
   );
 }
 
@@ -103,8 +498,11 @@ export function ClusterTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
+  filters,
+  showHistory,
   onOpenSSHModal,
   onOpenVSCodeModal,
+  setOptionValues,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -116,20 +514,144 @@ export function ClusterTable({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
+  const fetchOptionValuesFromClusters = (clusters) => {
+    let optionValues = {
+      status: [],
+      cluster: [],
+      user: [],
+      workspace: [],
+      infra: [],
+    };
+
+    const pushWithoutDuplication = (array, item) => {
+      if (array.includes(item)) return;
+
+      array.push(item);
+    };
+
+    clusters.map((cluster) => {
+      pushWithoutDuplication(optionValues.status, cluster.status);
+      pushWithoutDuplication(optionValues.cluster, cluster.cluster);
+      pushWithoutDuplication(optionValues.user, cluster.user);
+      pushWithoutDuplication(optionValues.workspace, cluster.workspace);
+      pushWithoutDuplication(optionValues.infra, cluster.infra);
+    });
+
+    return optionValues;
+  };
+
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     setLocalLoading(true);
-    const initialData = await getClusters();
-    setData(initialData);
+
+    try {
+      const activeClusters = await dashboardCache.get(getClusters);
+
+      if (showHistory) {
+        const historyClusters = await dashboardCache.get(getClusterHistory);
+        // Mark clusters as active or historical for UI distinction
+        const markedActiveClusters = activeClusters.map((cluster) => ({
+          ...cluster,
+          isHistorical: false,
+        }));
+        const markedHistoryClusters = historyClusters.map((cluster) => ({
+          ...cluster,
+          isHistorical: true,
+        }));
+        // Combine and remove duplicates (prefer active over historical)
+        const combinedData = [...markedActiveClusters];
+        markedHistoryClusters.forEach((histCluster) => {
+          const existsInActive = activeClusters.some(
+            (activeCluster) =>
+              activeCluster.cluster_hash === histCluster.cluster_hash
+          );
+          if (!existsInActive) {
+            combinedData.push(histCluster);
+          }
+        });
+
+        setOptionValues(fetchOptionValuesFromClusters(combinedData));
+
+        setData(combinedData);
+      } else {
+        // Mark active clusters for consistency
+        const markedActiveClusters = activeClusters.map((cluster) => ({
+          ...cluster,
+          isHistorical: false,
+        }));
+
+        setOptionValues(fetchOptionValuesFromClusters(markedActiveClusters));
+
+        setData(markedActiveClusters);
+      }
+    } catch (error) {
+      console.error('Error fetching cluster data:', error);
+      setOptionValues(fetchOptionValuesFromClusters([]));
+      setData([]);
+    }
+
     setLoading(false);
     setLocalLoading(false);
     setIsInitialLoad(false);
-  }, [setLoading]);
+  }, [setLoading, showHistory, setOptionValues]);
+
+  // Utility: checks a condition based on operator
+  const evaluateCondition = (item, filter) => {
+    const { property, operator, value } = filter;
+
+    if (!value) return true; // skip empty filters
+
+    // Global search: check all values
+    if (!property) {
+      const strValue = value.toLowerCase();
+      return Object.values(item).some((val) =>
+        val?.toString().toLowerCase().includes(strValue)
+      );
+    }
+
+    const itemValue = item[property.toLowerCase()]?.toString().toLowerCase();
+    const filterValue = value.toString().toLowerCase();
+
+    switch (operator) {
+      case '=':
+        return itemValue === filterValue;
+      case ':':
+        return itemValue?.includes(filterValue);
+      default:
+        return true;
+    }
+  };
 
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
-    return sortData(data, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig]);
+    // Main filter function
+    const filterData = (data, filters) => {
+      if (filters.length === 0) {
+        return data;
+      }
+
+      return data.filter((item) => {
+        let result = null;
+
+        for (let i = 0; i < filters.length; i++) {
+          const filter = filters[i];
+          const current = evaluateCondition(item, filter);
+
+          if (result === null) {
+            result = current;
+          } else {
+            result = result && current;
+          }
+        }
+
+        return result;
+      });
+    };
+
+    const filteredData = filterData(data, filters);
+
+    return sortData(filteredData, sortConfig.key, sortConfig.direction);
+  }, [data, sortConfig, filters]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -200,104 +722,182 @@ export function ClusterTable({
   return (
     <div>
       <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('status')}
-              >
-                Status{getSortDirection('status')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('cluster')}
-              >
-                Cluster{getSortDirection('cluster')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('user')}
-              >
-                User{getSortDirection('user')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources_str')}
-              >
-                Resources{getSortDirection('resources_str')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('region')}
-              >
-                Region{getSortDirection('region')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('time')}
-              >
-                Started{getSortDirection('time')}
-              </TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
+        <div className="overflow-x-auto rounded-lg">
+          <Table className="min-w-full">
+            <TableHeader>
+              <TableRow>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('status')}
+                >
+                  Status{getSortDirection('status')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('cluster')}
+                >
+                  Cluster{getSortDirection('cluster')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('user')}
+                >
+                  User{getSortDirection('user')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('workspace')}
+                >
+                  Workspace{getSortDirection('workspace')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('infra')}
+                >
+                  Infra{getSortDirection('infra')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('resources_str')}
+                >
+                  Resources{getSortDirection('resources_str')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('time')}
+                >
+                  Started{getSortDirection('time')}
+                </TableHead>
+                {showHistory && (
+                  <TableHead
+                    className="sortable whitespace-nowrap"
+                    onClick={() => requestSort('duration')}
+                  >
+                    Duration{getSortDirection('duration')}
+                  </TableHead>
+                )}
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('autostop')}
+                >
+                  Autostop{getSortDirection('autostop')}
+                </TableHead>
+                <TableHead className="md:sticky md:right-0 md:bg-white">
+                  Actions
+                </TableHead>
+              </TableRow>
+            </TableHeader>
 
-          <TableBody>
-            {loading && isInitialLoad ? (
-              <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className="text-center py-6 text-gray-500"
-                >
-                  <div className="flex justify-center items-center">
-                    <CircularProgress size={20} className="mr-2" />
-                    <span>Loading...</span>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : paginatedData.length > 0 ? (
-              paginatedData.map((item, index) => {
-                return (
-                  <TableRow key={index}>
-                    <TableCell>
-                      <StatusBadge status={item.status} />
-                    </TableCell>
-                    <TableCell>
-                      <Link
-                        href={`/clusters/${item.cluster}`}
-                        className="text-blue-600"
-                      >
-                        {item.cluster}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{item.user}</TableCell>
-                    <TableCell>{item.resources_str}</TableCell>
-                    <TableCell>{item.region}</TableCell>
-                    <TableCell>{relativeTime(item.time)}</TableCell>
-                    <TableCell className="text-left">
-                      <Status2Actions
-                        cluster={item.cluster}
-                        status={item.status}
-                        onOpenSSHModal={onOpenSSHModal}
-                        onOpenVSCodeModal={onOpenVSCodeModal}
-                      />
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className="text-center py-6 text-gray-500"
-                >
-                  No active clusters
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+            <TableBody>
+              {loading && isInitialLoad ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={9}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    <div className="flex justify-center items-center">
+                      <CircularProgress size={20} className="mr-2" />
+                      <span>Loading...</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : paginatedData.length > 0 ? (
+                paginatedData.map((item, index) => {
+                  return (
+                    <TableRow key={index}>
+                      <TableCell>
+                        <StatusBadge status={item.status} />
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          href={`/clusters/${item.isHistorical ? item.cluster_hash : item.cluster || item.name}`}
+                          className="text-blue-600"
+                        >
+                          {item.cluster || item.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <UserDisplay
+                          username={item.user}
+                          userHash={item.user_hash}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          href="/workspaces"
+                          className="text-gray-700 hover:text-blue-600 hover:underline"
+                        >
+                          {item.workspace || 'default'}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <NonCapitalizedTooltip
+                          content={item.full_infra || item.infra}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span>
+                            <Link
+                              href="/infra"
+                              className="text-blue-600 hover:underline"
+                            >
+                              {item.cloud}
+                            </Link>
+                            {item.infra.includes('(') && (
+                              <span>
+                                {' ' +
+                                  item.infra.substring(item.infra.indexOf('('))}
+                              </span>
+                            )}
+                          </span>
+                        </NonCapitalizedTooltip>
+                      </TableCell>
+                      <TableCell>
+                        <NonCapitalizedTooltip
+                          content={
+                            item.resources_str_full || item.resources_str
+                          }
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span>{item.resources_str}</span>
+                        </NonCapitalizedTooltip>
+                      </TableCell>
+                      <TableCell>
+                        <TimestampWithTooltip date={item.time} />
+                      </TableCell>
+                      {showHistory && (
+                        <TableCell>{formatDuration(item.duration)}</TableCell>
+                      )}
+                      <TableCell>
+                        {item.isHistorical
+                          ? '-'
+                          : formatAutostop(item.autostop, item.to_down)}
+                      </TableCell>
+                      <TableCell className="text-left md:sticky md:right-0 md:bg-white">
+                        {!item.isHistorical && (
+                          <Status2Actions
+                            cluster={item.cluster}
+                            status={item.status}
+                            onOpenSSHModal={onOpenSSHModal}
+                            onOpenVSCodeModal={onOpenVSCodeModal}
+                          />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={9}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    {showHistory ? 'No clusters found' : 'No active clusters'}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </Card>
 
       {/* Pagination controls */}
@@ -336,8 +936,7 @@ export function ClusterTable({
               </div>
             </div>
             <div>
-              {startIndex + 1} – {Math.min(endIndex, data.length)} of{' '}
-              {data.length}
+              {`${startIndex + 1} - ${Math.min(endIndex, sortedData.length)} of ${sortedData.length}`}
             </div>
             <div className="flex items-center space-x-2">
               <Button
@@ -430,6 +1029,7 @@ export function Status2Actions({
   onOpenVSCodeModal,
 }) {
   const actions = enabledActions(status);
+  const isMobile = useMobile();
 
   const handleActionClick = (actionName) => {
     switch (actionName) {
@@ -476,7 +1076,7 @@ export function Status2Actions({
                   className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
                 >
                   {actionIcon}
-                  {label && <span className="ml-1.5">{label}</span>}
+                  {!isMobile && <span className="ml-1.5">{label}</span>}
                 </button>
               </Tooltip>
             );
@@ -492,7 +1092,7 @@ export function Status2Actions({
                 title={actionName}
               >
                 {actionIcon}
-                {label && <span className="ml-1.5">{label}</span>}
+                {!isMobile && <span className="ml-1.5">{label}</span>}
               </span>
             </Tooltip>
           );
@@ -501,3 +1101,296 @@ export function Status2Actions({
     </>
   );
 }
+
+const FilterDropdown = ({
+  propertyList = [],
+  valueList,
+  setFilters,
+  updateURLParams,
+  placeholder = 'Filter clusters',
+}) => {
+  const inputRef = useRef(null);
+  const dropdownRef = useRef(null);
+
+  const [isOpen, setIsOpen] = useState(false);
+  const [value, setValue] = useState('');
+  const [propertyValue, setPropertValue] = useState('status');
+  const [valueOptions, setValueOptions] = useState([]);
+
+  // Handle clicks outside the dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target) &&
+        inputRef.current &&
+        !inputRef.current.contains(event.target)
+      ) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  useEffect(() => {
+    let updatedValueOptions = [];
+
+    if (valueList && typeof valueList === 'object') {
+      switch (propertyValue) {
+        case 'status':
+          updatedValueOptions = valueList.status || [];
+          break;
+        case 'user':
+          updatedValueOptions = valueList.user || [];
+          break;
+        case 'cluster':
+          updatedValueOptions = valueList.cluster || [];
+          break;
+        case 'workspace':
+          updatedValueOptions = valueList.workspace || [];
+          break;
+        case 'infra':
+          updatedValueOptions = valueList.infra || [];
+          break;
+        default:
+          break;
+      }
+    }
+
+    // Filter options based on current input value
+    if (value.trim() !== '') {
+      updatedValueOptions = updatedValueOptions.filter(
+        (item) =>
+          item && item.toString().toLowerCase().includes(value.toLowerCase())
+      );
+    }
+
+    setValueOptions(updatedValueOptions);
+  }, [propertyValue, valueList, value]);
+
+  // Helper function to get the capitalized label for a property value
+  const getPropertyLabel = (propertyValue) => {
+    const propertyItem = propertyList.find(
+      (item) => item.value === propertyValue
+    );
+    return propertyItem ? propertyItem.label : propertyValue;
+  };
+
+  const handleValueChange = (e) => {
+    setValue(e.target.value);
+    if (!isOpen) {
+      setIsOpen(true);
+    }
+  };
+
+  const handleInputFocus = () => {
+    setIsOpen(true);
+  };
+
+  const handleOptionSelect = (option) => {
+    setFilters((prevFilters) => {
+      const updatedFilters = [
+        ...prevFilters,
+        {
+          property: getPropertyLabel(propertyValue),
+          operator: ':',
+          value: option,
+        },
+      ];
+
+      updateURLParams(updatedFilters);
+      return updatedFilters;
+    });
+    setIsOpen(false);
+    setValue('');
+    inputRef.current.focus();
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && value.trim() !== '') {
+      setFilters((prevFilters) => {
+        const updatedFilters = [
+          ...prevFilters,
+          {
+            property: getPropertyLabel(propertyValue),
+            operator: ':',
+            value: value,
+          },
+        ];
+
+        updateURLParams(updatedFilters);
+        return updatedFilters;
+      });
+      setValue('');
+      setIsOpen(false);
+    } else if (e.key === 'Escape') {
+      setIsOpen(false);
+      inputRef.current.blur();
+    }
+  };
+
+  return (
+    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible">
+      <div className="border-r border-gray-300 flex-shrink-0">
+        <Select onValueChange={setPropertValue} value={propertyValue}>
+          <SelectTrigger
+            aria-label="Filter Property"
+            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-20 sm:w-24 md:w-32 h-8 text-xs sm:text-sm"
+          >
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            {propertyList.map((item, index) => (
+              <SelectItem key={`property-item-${index}`} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="relative flex-1">
+        <input
+          type="text"
+          ref={inputRef}
+          placeholder={placeholder}
+          value={value}
+          onChange={handleValueChange}
+          onFocus={handleInputFocus}
+          onKeyDown={handleKeyDown}
+          className="h-8 w-full sm:w-96 px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
+          autoComplete="off"
+        />
+        {value && (
+          <button
+            onClick={() => {
+              setValue('');
+              setIsOpen(false);
+            }}
+            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            title="Clear filter"
+            tabIndex={-1}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        )}
+        {isOpen && valueOptions.length > 0 && (
+          <div
+            ref={dropdownRef}
+            className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"
+            style={{ zIndex: 9999 }}
+          >
+            {valueOptions.map((option, index) => (
+              <div
+                key={`${option}-${index}`}
+                className={`px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm ${
+                  index !== valueOptions.length - 1
+                    ? 'border-b border-gray-100'
+                    : ''
+                }`}
+                onClick={() => handleOptionSelect(option)}
+              >
+                <span className="text-sm text-gray-700">{option}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const Filters = ({ filters = [], setFilters, updateURLParams }) => {
+  const onRemove = (index) => {
+    setFilters((prevFilters) => {
+      const updatedFilters = prevFilters.filter(
+        (_, _index) => _index !== index
+      );
+
+      updateURLParams(updatedFilters);
+
+      return updatedFilters;
+    });
+  };
+
+  const clearFilters = () => {
+    updateURLParams([]);
+    setFilters([]);
+  };
+
+  return (
+    <>
+      <div className="flex items-center gap-4 py-2 px-2">
+        <div className="flex flex-wrap items-content gap-2">
+          {filters.map((filter, _index) => (
+            <FilterItem
+              key={`filteritem-${_index}`}
+              filter={filter}
+              onRemove={() => onRemove(_index)}
+            />
+          ))}
+
+          {filters.length > 0 && (
+            <>
+              <button
+                onClick={clearFilters}
+                className="rounded-full px-4 py-1 text-sm text-gray-700 bg-gray-200 hover:bg-gray-300"
+              >
+                Clear filters
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+};
+
+const FilterItem = ({ filter, onRemove }) => {
+  return (
+    <>
+      <div className="flex items-center text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
+        <div className="flex items-center gap-1 px-2">
+          <span>{`${filter.property} `}</span>
+          <span>{`${filter.operator} `}</span>
+          <span>{` ${filter.value}`}</span>
+        </div>
+
+        <button
+          onClick={() => onRemove()}
+          className="p-0.5 ml-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
+          title="Clear filter"
+        >
+          <svg
+            className="h-3 w-3"
+            fill="none"
+            stroke="white"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={5}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+      </div>
+    </>
+  );
+};

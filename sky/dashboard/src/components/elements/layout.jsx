@@ -1,23 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { TopBar, SidebarProvider } from './sidebar';
+import { useMobile } from '@/hooks/useMobile';
+import { WelcomeNotification } from './WelcomeNotification';
+import { TourButton } from './TourButton';
 
 function LayoutContent({ children, highlighted }) {
-  const [isMobile, setIsMobile] = useState(false);
-
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-
-    // Check on initial load
-    checkMobile();
-
-    // Add resize listener
-    window.addEventListener('resize', checkMobile);
-
-    // Cleanup
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+  const isMobile = useMobile();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -33,6 +21,11 @@ function LayoutContent({ children, highlighted }) {
       >
         <main className="p-6">{children}</main>
       </div>
+
+      {/* Welcome notification for first-time visitors */}
+      <WelcomeNotification />
+
+      <TourButton />
     </div>
   );
 }

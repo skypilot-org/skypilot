@@ -19,7 +19,7 @@ docker:
     username: |-
       {{docker_login_config.username}}
     password: |-
-      {{docker_login_config.password}}
+      {{docker_login_config.password | indent(6) }}
     server: |-
       {{docker_login_config.server}}
   {%- endif %}
@@ -50,7 +50,7 @@ provider:
   disable_launch_config_check: true
 
 auth:
-  ssh_user: ubuntu
+  ssh_user: {{ssh_user}}
   ssh_private_key: {{ssh_private_key}}
 {% if ssh_proxy_command is not none %}
   ssh_proxy_command: {{ssh_proxy_command}}
@@ -68,7 +68,7 @@ available_node_types:
       ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
       # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
       BlockDeviceMappings:
-        - DeviceName: /dev/sda1
+        - DeviceName: {{root_device_name}}
           Ebs:
             VolumeSize: {{disk_size}}
             VolumeType: {{disk_tier}}
@@ -131,6 +131,12 @@ available_node_types:
           - systemctl disable apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
           - systemctl mask apt-daily.service apt-daily-upgrade.service unattended-upgrades.service
           - systemctl daemon-reload
+        {%- if runcmd %}
+        runcmd:
+        {%- for cmd in runcmd %}
+          - {{cmd}}
+        {%- endfor %}
+        {%- endif %}
       TagSpecifications:
         - ResourceType: instance
           Tags:
@@ -142,7 +148,7 @@ available_node_types:
             {%- endfor %}
       # Use IDMSv2
       MetadataOptions:
-        HttpTokens: required 
+        HttpTokens: required
 
 head_node_type: ray.head.default
 
@@ -192,6 +198,7 @@ setup_commands:
     {%- if remote_identity != 'LOCAL_CREDENTIALS' %}
     rm ~/.aws/credentials || true;
     {%- endif %}
+    {{ ssh_max_sessions_config }}
 
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.
 # We do not need to list it here anymore.

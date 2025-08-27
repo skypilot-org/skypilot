@@ -1,0 +1,104 @@
+name: Buildkite Trigger and Wait
+
+on:
+  workflow_call:
+    inputs:
+      commit:
+        required: true
+        type: string
+        description: "Commit SHA to trigger build for"
+      branch:
+        required: false
+        type: string
+        default: "master"
+        description: "Branch to trigger build for"
+      message:
+        required: true
+        type: string
+        description: "Message for the build"
+      pipeline:
+        required: true
+        type: string
+        description: "Buildkite pipeline name (e.g., smoke-tests)"
+      build_env_vars:
+        required: false
+        type: string
+        default: '{}'
+        description: "JSON string of environment variables to pass to the build"
+      timeout_minutes:
+        required: false
+        type: number
+        default: 120
+        description: "Timeout in minutes for waiting"
+      wait:
+        required: false
+        type: boolean
+        default: true
+        description: "Whether to wait for the build to complete"
+      fail_on_buildkite_failure:
+        required: false
+        type: boolean
+        default: true
+        description: "Whether to fail the job if the Buildkite build fails"
+      sleep_seconds:
+        required: false
+        type: number
+        default: 0
+        description: "Number of seconds to sleep before triggering the build"
+    secrets:
+      BUILDKITE_TOKEN:
+        required: true
+        description: "Buildkite API token with read access"
+    outputs:
+      build_number:
+        description: "Buildkite build number"
+        value: ${{ jobs.extract-buildkite.outputs.build_number }}
+      build_status:
+        description: "Final status of the build (success, failure, timeout)"
+        value: ${{ jobs.wait-for-buildkite.outputs.build_status }}
+
+jobs:
+  trigger-buildkite:
+    runs-on: ubuntu-latest
+    outputs:
+      json: ${{ steps.trigger_buildkite.outputs.json }}
+    steps:
+      # Sleep before triggering if specified
+      - name: Sleep before trigger
+        if: ${{ inputs.sleep_seconds > 0 }}
+        run: |
+          echo "Sleeping for ${{ inputs.sleep_seconds }} seconds before triggering Buildkite build..."
+          sleep ${{ inputs.sleep_seconds }}
+          echo "Sleep completed, proceeding with trigger..."
+
+      # Trigger Buildkite smoke tests
+      - name: Trigger Buildkite Smoke Tests
+        id: trigger_buildkite
+        uses: buildkite/trigger-pipeline-action@v2.3.0
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
+          pipeline: skypilot-1/${{ inputs.pipeline }}
+          branch: ${{ inputs.branch }}
+          commit: ${{ inputs.commit }}
+          message: ${{ inputs.message }}
+          ignore_pipeline_branch_filter: true
+          build_env_vars: ${{ inputs.build_env_vars }}
+
+  extract-buildkite:
+    needs: trigger-buildkite
+    uses: ./.github/workflows/extract-buildkite.yml
+    with:
+      json_data: ${{ needs.trigger-buildkite.outputs.json }}
+
+  wait-for-buildkite:
+    needs: extract-buildkite
+    if: ${{ inputs.wait }}
+    uses: ./.github/workflows/wait-for-buildkite.yml
+    with:
+      organization: "skypilot-1"
+      pipeline: ${{ inputs.pipeline }}
+      build_number: ${{ needs.extract-buildkite.outputs.build_number }}
+      timeout_minutes: ${{ inputs.timeout_minutes }}
+      fail_on_buildkite_failure: ${{ inputs.fail_on_buildkite_failure }}
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}

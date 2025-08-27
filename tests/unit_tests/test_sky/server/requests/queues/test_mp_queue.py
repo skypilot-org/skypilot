@@ -27,7 +27,7 @@ def _validate_consumption(q_name: str, expected_items: List[str], port: int):
 
 def test_mp_queue():
     q_names = ['test_queue1', 'test_queue2', 'test_queue3']
-    port = 50015
+    port = common_utils.find_free_port(50015)
     server = multiprocessing.Process(target=mp_queue.start_queue_manager,
                                      args=(q_names, port))
     server.start()
@@ -64,7 +64,7 @@ def test_mp_queue():
 
 def test_mp_queue_memory_footprint():
     q_names = ['test_queue']
-    port = common_utils.find_free_port(50015)
+    port = common_utils.find_free_port(50115)
     server = multiprocessing.Process(target=mp_queue.start_queue_manager,
                                      args=(q_names, port))
     server.start()

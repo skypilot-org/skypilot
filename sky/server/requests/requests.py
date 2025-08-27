@@ -1,4 +1,5 @@
 """Utilities for REST API."""
+import asyncio
 import contextlib
 import dataclasses
 import enum
@@ -9,9 +10,10 @@ import pathlib
 import shutil
 import signal
 import sqlite3
+import threading
 import time
 import traceback
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import colorama
 import filelock
@@ -19,16 +21,17 @@ import filelock
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
-from sky.utils import common
 from sky.utils import common_utils
-from sky.utils import db_utils
-from sky.utils import env_options
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -37,7 +40,11 @@ REQUEST_TABLE = 'requests'
 COL_CLUSTER_NAME = 'cluster_name'
 COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
+COL_SHOULD_RETRY = 'should_retry'
+COL_FINISHED_AT = 'finished_at'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+
+DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
@@ -62,6 +69,10 @@ class RequestStatus(enum.Enum):
         color = _STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
+    @classmethod
+    def finished_status(cls) -> List['RequestStatus']:
+        return [cls.SUCCEEDED, cls.FAILED, cls.CANCELLED]
+
 
 _STATUS_TO_COLOR = {
     RequestStatus.PENDING: colorama.Fore.BLUE,
@@ -85,6 +96,8 @@ REQUEST_COLUMNS = [
     'schedule_type',
     COL_USER_ID,
     COL_STATUS_MSG,
+    COL_SHOULD_RETRY,
+    COL_FINISHED_AT,
 ]
 
 
@@ -93,27 +106,6 @@ class ScheduleType(enum.Enum):
     LONG = 'long'
     # Queue for requests that should be executed quickly for a quick response.
     SHORT = 'short'
-
-
-@dataclasses.dataclass
-class RequestPayload:
-    """The payload for the requests."""
-
-    request_id: str
-    name: str
-    entrypoint: str
-    request_body: str
-    status: str
-    created_at: float
-    user_id: str
-    return_value: str
-    error: str
-    pid: Optional[int]
-    schedule_type: str
-    user_name: Optional[str] = None
-    # Resources the request operates on.
-    cluster_name: Optional[str] = None
-    status_msg: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -136,6 +128,10 @@ class Request:
     cluster_name: Optional[str] = None
     # Status message of the request, indicates the reason of current status.
     status_msg: Optional[str] = None
+    # Whether the request should be retried.
+    should_retry: bool = False
+    # When the request finished.
+    finished_at: Optional[float] = None
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -179,7 +175,7 @@ class Request:
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
         content = dict(zip(REQUEST_COLUMNS, row))
-        return cls.decode(RequestPayload(**content))
+        return cls.decode(payloads.RequestPayload(**content))
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
@@ -188,7 +184,7 @@ class Request:
             row.append(getattr(payload, k))
         return tuple(row)
 
-    def readable_encode(self) -> RequestPayload:
+    def readable_encode(self) -> payloads.RequestPayload:
         """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -204,8 +200,9 @@ class Request:
         """
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
-        user_name = global_user_state.get_user(self.user_id).name
-        return RequestPayload(
+        user = global_user_state.get_user(self.user_id)
+        user_name = user.name if user is not None else None
+        return payloads.RequestPayload(
             request_id=self.request_id,
             name=self.name,
             entrypoint=self.entrypoint.__name__,
@@ -220,14 +217,16 @@ class Request:
             user_name=user_name,
             cluster_name=self.cluster_name,
             status_msg=self.status_msg,
+            should_retry=self.should_retry,
+            finished_at=self.finished_at,
         )
 
-    def encode(self) -> RequestPayload:
+    def encode(self) -> payloads.RequestPayload:
         """Serialize the SkyPilot API request."""
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
-            return RequestPayload(
+            return payloads.RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
@@ -241,6 +240,8 @@ class Request:
                 user_id=self.user_id,
                 cluster_name=self.cluster_name,
                 status_msg=self.status_msg,
+                should_retry=self.should_retry,
+                finished_at=self.finished_at,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -255,7 +256,7 @@ class Request:
             raise
 
     @classmethod
-    def decode(cls, payload: RequestPayload) -> 'Request':
+    def decode(cls, payload: payloads.RequestPayload) -> 'Request':
         """Deserialize the SkyPilot API request."""
         try:
             return cls(
@@ -272,6 +273,8 @@ class Request:
                 user_id=payload.user_id,
                 cluster_name=payload.cluster_name,
                 status_msg=payload.status_msg,
+                should_retry=payload.should_retry,
+                finished_at=payload.finished_at,
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -301,46 +304,6 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
             exclude_request_names=[exclude_request_name])
     ]
     kill_requests(request_ids)
-
-
-def refresh_cluster_status_event():
-    """Periodically refresh the cluster status."""
-    # pylint: disable=import-outside-toplevel
-    from sky import core
-
-    # Disable logging for periodic refresh to avoid the usage message being
-    # sent multiple times.
-    os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
-
-    while True:
-        logger.info('=== Refreshing cluster status ===')
-        # This periodically refresh will hold the lock for the cluster being
-        # refreshed, but it is OK because other operations will just wait for
-        # the lock and get the just refreshed status without refreshing again.
-        core.status(refresh=common.StatusRefreshMode.FORCE, all_users=True)
-        logger.info(
-            'Status refreshed. Sleeping '
-            f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
-            ' seconds for the next refresh...\n')
-        time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
-
-
-@dataclasses.dataclass
-class InternalRequestDaemon:
-    id: str
-    name: str
-    event_fn: Callable[[], None]
-
-
-# Register the events to run in the background.
-INTERNAL_REQUEST_DAEMONS = [
-    # This status refresh daemon can cause the autostopp'ed/autodown'ed cluster
-    # set to updated status automatically, without showing users the hint of
-    # cluster being stopped or down when `sky status -r` is called.
-    InternalRequestDaemon(id='skypilot-status-refresh-daemon',
-                          name='status',
-                          event_fn=refresh_cluster_status_event)
-]
 
 
 def kill_requests(request_ids: Optional[List[str]] = None,
@@ -373,7 +336,7 @@ def kill_requests(request_ids: Optional[List[str]] = None,
             # Skip internal requests. The internal requests are scheduled with
             # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
             if request_record.request_id in set(
-                    event.id for event in INTERNAL_REQUEST_DAEMONS):
+                    event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
                 continue
             if request_record.status > RequestStatus.RUNNING:
                 logger.debug(f'Request {request_id} already finished')
@@ -387,12 +350,9 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 #   process for each request.
                 os.kill(request_record.pid, signal.SIGTERM)
             request_record.status = RequestStatus.CANCELLED
+            request_record.finished_at = time.time()
             cancelled_request_ids.append(request_id)
     return cancelled_request_ids
-
-
-_DB_PATH = os.path.expanduser(server_constants.API_SERVER_REQUEST_DB_PATH)
-pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 
 def create_table(cursor, conn):
@@ -425,13 +385,21 @@ def create_table(cursor, conn):
         {COL_CLUSTER_NAME} TEXT,
         schedule_type TEXT,
         {COL_USER_ID} TEXT,
-        {COL_STATUS_MSG} TEXT)""")
+        {COL_STATUS_MSG} TEXT,
+        {COL_SHOULD_RETRY} INTEGER,
+        {COL_FINISHED_AT} REAL
+        )""")
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
                                  'TEXT')
+    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_SHOULD_RETRY,
+                                 'INTEGER')
+    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_FINISHED_AT,
+                                 'REAL')
 
 
 _DB = None
+_init_db_lock = threading.Lock()
 
 
 def init_db(func):
@@ -440,8 +408,15 @@ def init_db(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global _DB
-        if _DB is None:
-            _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+        if _DB is not None:
+            return func(*args, **kwargs)
+        with _init_db_lock:
+            if _DB is None:
+                db_path = os.path.expanduser(
+                    server_constants.API_SERVER_REQUEST_DB_PATH)
+                pathlib.Path(db_path).parents[0].mkdir(parents=True,
+                                                       exist_ok=True)
+                _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)
 
     return wrapper
@@ -464,7 +439,7 @@ def request_lock_path(request_id: str) -> str:
 
 @contextlib.contextmanager
 @init_db
-def update_request(request_id: str):
+def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get a SkyPilot API request."""
     request = _get_request_no_lock(request_id)
     yield request
@@ -523,6 +498,7 @@ def get_request_tasks(
     user_id: Optional[str] = None,
     exclude_request_names: Optional[List[str]] = None,
     include_request_names: Optional[List[str]] = None,
+    finished_before: Optional[float] = None,
 ) -> List[Request]:
     """Get a list of requests that match the given filters.
 
@@ -535,6 +511,8 @@ def get_request_tasks(
             If None, all users are included.
         include_request_names: a list of request names to filter on.
             Mutually exclusive with exclude_request_names.
+        finished_before: if provided, only include requests finished before this
+            timestamp.
 
     Raises:
         ValueError: If both exclude_request_names and include_request_names are
@@ -546,7 +524,7 @@ def get_request_tasks(
             'provided, not both.')
 
     filters = []
-    filter_params = []
+    filter_params: List[Any] = []
     if status is not None:
         status_list_str = ','.join(repr(status.value) for status in status)
         filters.append(f'status IN ({status_list_str})')
@@ -564,6 +542,9 @@ def get_request_tasks(
         request_names_str = ','.join(
             repr(name) for name in include_request_names)
         filters.append(f'name IN ({request_names_str})')
+    if finished_before is not None:
+        filters.append('finished_at < ?')
+        filter_params.append(finished_before)
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
@@ -605,4 +586,83 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.FAILED
+        request_task.finished_at = time.time()
         request_task.set_error(e)
+
+
+def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
+    """Set a request to succeeded and populate the result."""
+    with update_request(request_id) as request_task:
+        assert request_task is not None, request_id
+        request_task.status = RequestStatus.SUCCEEDED
+        request_task.finished_at = time.time()
+        if result is not None:
+            request_task.set_return_value(result)
+
+
+def set_request_cancelled(request_id: str) -> None:
+    """Set a request to cancelled."""
+    with update_request(request_id) as request_task:
+        assert request_task is not None, request_id
+        request_task.finished_at = time.time()
+        request_task.status = RequestStatus.CANCELLED
+
+
+@init_db
+def _delete_requests(requests: List[Request]):
+    """Clean up requests by their IDs."""
+    id_list_str = ','.join(repr(req.request_id) for req in requests)
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute(
+            f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+
+
+def clean_finished_requests_with_retention(retention_seconds: int):
+    """Clean up finished requests older than the retention period.
+
+    This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
+    from the database and cleans up their associated log files.
+
+    Args:
+        retention_seconds: Requests older than this many seconds will be
+            deleted.
+    """
+    reqs = get_request_tasks(status=RequestStatus.finished_status(),
+                             finished_before=time.time() - retention_seconds)
+
+    subprocess_utils.run_in_parallel(
+        func=lambda req: req.log_path.unlink(missing_ok=True),
+        args=reqs,
+        num_threads=len(reqs))
+
+    _delete_requests(reqs)
+
+    # To avoid leakage of the log file, logs must be deleted before the
+    # request task in the database.
+    logger.info(f'Cleaned up {len(reqs)} finished requests '
+                f'older than {retention_seconds} seconds')
+
+
+async def requests_gc_daemon():
+    """Garbage collect finished requests periodically."""
+    while True:
+        logger.info('Running requests GC daemon...')
+        # Use the latest config.
+        skypilot_config.reload_config()
+        retention_seconds = skypilot_config.get_nested(
+            ('api_server', 'requests_retention_hours'),
+            DEFAULT_REQUESTS_RETENTION_HOURS) * 3600
+        try:
+            # Negative value disables the requests GC
+            if retention_seconds >= 0:
+                clean_finished_requests_with_retention(retention_seconds)
+        except asyncio.CancelledError:
+            logger.info('Requests GC daemon cancelled')
+            break
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error running requests GC daemon: {e}')
+        # Run the daemon at most once every hour to avoid too frequent
+        # cleanup.
+        await asyncio.sleep(max(retention_seconds, 3600))

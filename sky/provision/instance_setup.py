@@ -8,6 +8,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sky import exceptions
+from sky import logs
 from sky import provision
 from sky import sky_logging
 from sky.provision import common
@@ -21,6 +22,7 @@ from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -501,7 +503,7 @@ def start_skylet_on_head_node(cluster_name: str,
 def _internal_file_mounts(file_mounts: Dict,
                           runner: command_runner.CommandRunner,
                           log_path: str) -> None:
-    if file_mounts is None or not file_mounts:
+    if not file_mounts:
         return
 
     for dst, src in file_mounts.items():
@@ -557,3 +559,36 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
         ssh_credentials=ssh_credentials,
         max_workers=subprocess_utils.get_max_workers_for_file_mounts(
             common_file_mounts, cluster_info.provider_name))
+
+
+@common.log_function_start_end
+@timeline.event
+def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
+                             cluster_name: resources_utils.ClusterName,
+                             cluster_info: common.ClusterInfo,
+                             ssh_credentials: Dict[str, Any]) -> None:
+    """Setup logging agent (fluentbit) on all nodes after provisioning."""
+    _hint_worker_log_path(cluster_name.name_on_cloud, cluster_info,
+                          'logging_setup')
+
+    @_auto_retry()
+    def _setup_node(runner: command_runner.CommandRunner, log_path: str):
+        cmd = logging_agent.get_setup_command(cluster_name)
+        logger.info(f'Running command on node: {cmd}')
+        returncode, stdout, stderr = runner.run(cmd,
+                                                stream_logs=False,
+                                                require_outputs=True,
+                                                log_path=log_path,
+                                                source_bashrc=True)
+        if returncode:
+            raise RuntimeError(f'Failed to setup logging agent\n{cmd}\n'
+                               f'(exit code {returncode}). Error: '
+                               f'===== stdout ===== \n{stdout}\n'
+                               f'===== stderr ====={stderr}')
+
+    _parallel_ssh_with_cache(_setup_node,
+                             cluster_name.name_on_cloud,
+                             stage_name='logging_setup',
+                             digest=None,
+                             cluster_info=cluster_info,
+                             ssh_credentials=ssh_credentials)

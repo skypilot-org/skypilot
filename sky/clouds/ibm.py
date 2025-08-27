@@ -5,11 +5,11 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
+from sky import catalog
 from sky import clouds
 from sky import sky_logging
 from sky.adaptors import ibm
 from sky.adaptors.ibm import CREDENTIAL_FILE
-from sky.clouds import service_catalog
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import status_lib
@@ -18,6 +18,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -50,6 +51,11 @@ class IBM(clouds.Cloud):
                 ),
             clouds.CloudImplementationFeatures.OPEN_PORTS:
                 (f'Opening ports is currently not supported on {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+                ('High availability controllers are not supported on IBM.'),
+            clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+                ('Customized multiple network interfaces are not supported on '
+                 f'{cls._REPR}.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -69,7 +75,7 @@ class IBM(clouds.Cloud):
         del accelerators  # unused
         if use_spot:
             return []
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'ibm')
 
         if region is not None:
@@ -129,11 +135,11 @@ class IBM(clouds.Cloud):
                                      zone: Optional[str] = None) -> float:
         # Currently doesn't support spot instances, hence use_spot set to False.
         del use_spot
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=False,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='ibm')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=False,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='ibm')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -173,7 +179,8 @@ class IBM(clouds.Cloud):
         zones: Optional[List['clouds.Zone']],
         num_nodes: int,
         dryrun: bool = False,
-    ) -> Dict[str, Optional[str]]:
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -202,30 +209,32 @@ class IBM(clouds.Cloud):
         # clouds implementing 'zones_provision_loop()'
         zone_names = [zone.name for zone in zones]  # type: ignore[union-attr]
 
-        r = resources
-        assert not r.use_spot, \
+        resources = resources.assert_launchable()
+        assert not resources.use_spot, \
             'IBM does not currently support spot instances in this framework'
 
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        instance_resources = _get_profile_resources(r.instance_type)
+        instance_resources = _get_profile_resources(resources.instance_type)
 
         worker_instance_type = get_cred_file_field('worker_instance_type',
-                                                   r.instance_type)
+                                                   resources.instance_type)
         worker_instance_resources = _get_profile_resources(worker_instance_type)
         # r.image_id: {clouds.Region:image_id} - property of Resources class
-        image_id = r.image_id[
-            region.name] if r.image_id else self.get_default_image(region_name)
+        image_id = resources.image_id[
+            region.name] if resources.image_id else self.get_default_image(
+                region_name)
 
         return {
-            'instance_type': r.instance_type,
+            'instance_type': resources.instance_type,
             'instance_resources': instance_resources,
             'worker_instance_type': worker_instance_type,
             'worker_instance_resources': worker_instance_resources,
             'custom_resources': custom_resources,
-            'use_spot': r.use_spot,
+            'use_spot': resources.use_spot,
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
@@ -239,8 +248,8 @@ class IBM(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='ibm')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='ibm')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -248,20 +257,23 @@ class IBM(clouds.Cloud):
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='ibm')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='ibm')
 
     @classmethod
     def get_default_instance_type(
-        cls,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional['resources_utils.DiskTier'] = None
-    ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='ibm')
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional['resources_utils.DiskTier'] = None,
+            region: Optional[str] = None,
+            zone: Optional[str] = None) -> Optional[str]:
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
+                                                 clouds='ibm')
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
@@ -296,7 +308,9 @@ class IBM(clouds.Cloud):
             default_instance_type = IBM.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:
@@ -305,15 +319,15 @@ class IBM(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            cpus=resources.cpus,
-            memory=resources.memory,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='ibm')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             cpus=resources.cpus,
+             memory=resources.memory,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='ibm')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -395,13 +409,15 @@ class IBM(clouds.Cloud):
         return image_size
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         IBM's compute service."""
         return cls._check_credentials()
 
     @classmethod
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         IBM's storage service."""
         # TODO(seungjin): Implement separate check for
@@ -456,11 +472,11 @@ class IBM(clouds.Cloud):
 
     def instance_type_exists(self, instance_type):
         """Returns whether the instance type exists for this cloud."""
-        return service_catalog.instance_type_exists(instance_type, clouds='ibm')
+        return catalog.instance_type_exists(instance_type, clouds='ibm')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         """Validates the region and zone."""
-        return service_catalog.validate_region_zone(region, zone, clouds='ibm')
+        return catalog.validate_region_zone(region, zone, clouds='ibm')
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

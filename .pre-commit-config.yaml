@@ -6,6 +6,7 @@ repos:
     -   id: trailing-whitespace
     -   id: end-of-file-fixer
     -   id: check-yaml
+        exclude: ^charts/
     -   id: check-added-large-files
 
 -   repo: https://github.com/psf/black
@@ -21,9 +22,7 @@ repos:
     # First isort command
     -   id: isort
         name: isort (general)
-        args:
-          - "--sg=build/**"  # Matches "${ISORT_YAPF_EXCLUDES[@]}"
-          - "--sg=sky/skylet/providers/ibm/**"
+        exclude: "(build/.*|sky/skylet/providers/ibm/.*|sky/schemas/generated/.*)"  # Matches "${ISORT_YAPF_EXCLUDES[@]}"
     # Second isort command
     -   id: isort
         name: isort (IBM specific)
@@ -41,7 +40,7 @@ repos:
             # From tests/mypy_files.txt
             - "sky"
             - "--exclude"
-            - "sky/benchmark|sky/callbacks|sky/skylet/providers/azure|sky/resources.py|sky/backends/monkey_patches"
+            - "sky/benchmark|sky/callbacks|sky/backends/monkey_patches"
         pass_filenames: false
         additional_dependencies:
             - types-aiofiles
@@ -50,13 +49,16 @@ repos:
             - types-setuptools
             - types-cachetools
             - types-pyvmomi
+            - types-paramiko
+            - types-protobuf
+            - types-python-dateutil
 
 -   repo: https://github.com/google/yapf
     rev: v0.32.0  # Match the version from requirements
     hooks:
     -   id: yapf
         name: yapf
-        exclude: (sky/skylet/providers/ibm/.*)  # Matches exclusions from the script
+        exclude: (sky/skylet/providers/ibm/.*|sky/schemas/generated/.*)  # Matches exclusions from the script
         args: ['--recursive', '--parallel', '--in-place']  # Only necessary flags
         additional_dependencies: [toml==0.10.2] # Match the version from requirements
 
@@ -64,6 +66,7 @@ repos:
     rev: v2.14.5  # Match the version from requirements
     hooks:
     -   id: pylint
+        language_version: python3.11 # pylint doesn't support python 3.12 until v3.0.0
         additional_dependencies:
             - pylint-quotes==0.2.3  # Match the version from requirements
         name: pylint
@@ -71,4 +74,9 @@ repos:
             - --rcfile=.pylintrc  # Use your custom pylint configuration
             - --load-plugins=pylint_quotes  # Load the pylint-quotes plugin
         files: ^sky/  # Only include files from the 'sky/' directory
-        exclude: ^sky/skylet/providers/ibm/
+        exclude: (^sky/skylet/providers/ibm/|^sky/schemas/generated/)
+
+-   repo: https://github.com/gruntwork-io/pre-commit
+    rev: v0.1.30  # Match the version from requirements
+    hooks:
+    -   id: helmlint

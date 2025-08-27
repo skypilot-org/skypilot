@@ -1,0 +1,33 @@
+{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") }}
+{{- $kubeVersion := .Capabilities.KubeVersion.Major -}}
+{{- $kubeMinorVersion := .Capabilities.KubeVersion.Minor | trimSuffix "+" | int -}}
+{{- $useNewIngressClass := or (gt ($kubeVersion | int) 1) (and (eq ($kubeVersion | int) 1) (ge $kubeMinorVersion 18)) -}}
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-oauth2-proxy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}-oauth2-proxy
+    skypilot.co/component: oauth2-proxy
+  annotations:
+    {{- if not $useNewIngressClass }}
+    kubernetes.io/ingress.class: nginx
+    {{- end }}
+spec:
+  {{- if $useNewIngressClass }}
+  ingressClassName: nginx
+  {{- end }}
+  rules:
+  - host: {{ .Values.ingress.host }}
+    http:
+      paths:
+      - path: /oauth2
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ .Release.Name }}-oauth2-proxy
+            port:
+              number: 4180
+{{- end }}

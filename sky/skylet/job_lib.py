@@ -3,6 +3,7 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
+import functools
 import getpass
 import json
 import os
@@ -10,9 +11,10 @@ import pathlib
 import shlex
 import signal
 import sqlite3
+import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import colorama
 import filelock
@@ -22,10 +24,10 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import db_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
+from sky.utils.db import db_utils
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -60,10 +62,8 @@ class JobInfoLoc(enum.IntEnum):
     END_AT = 7
     RESOURCES = 8
     PID = 9
-
-
-_DB_PATH = os.path.expanduser('~/.sky/jobs.db')
-os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
+    LOG_PATH = 10
+    METADATA = 11
 
 
 def create_table(cursor, conn):
@@ -103,7 +103,9 @@ def create_table(cursor, conn):
         start_at FLOAT DEFAULT -1,
         end_at FLOAT DEFAULT NULL,
         resources TEXT DEFAULT NULL,
-        pid INTEGER DEFAULT -1)""")
+        pid INTEGER DEFAULT -1,
+        log_dir TEXT DEFAULT NULL,
+        metadata TEXT DEFAULT '{}')""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
@@ -116,12 +118,38 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid',
                                  'INTEGER DEFAULT -1')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'log_dir',
+                                 'TEXT DEFAULT NULL')
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'jobs',
+                                 'metadata',
+                                 'TEXT DEFAULT \'{}\'',
+                                 value_to_replace_existing_entries='{}')
     conn.commit()
 
 
-_DB = db_utils.SQLiteConn(_DB_PATH, create_table)
-_CURSOR = _DB.cursor
-_CONN = _DB.conn
+_DB = None
+_db_init_lock = threading.Lock()
+
+
+def init_db(func):
+    """Initialize the database."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        global _DB
+        if _DB is not None:
+            return func(*args, **kwargs)
+
+        with _db_init_lock:
+            if _DB is None:
+                db_path = os.path.expanduser('~/.sky/jobs.db')
+                os.makedirs(pathlib.Path(db_path).parents[0], exist_ok=True)
+                _DB = db_utils.SQLiteConn(db_path, create_table)
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 class JobStatus(enum.Enum):
@@ -210,30 +238,37 @@ _PRE_RESOURCE_STATUSES = [JobStatus.PENDING]
 class JobScheduler:
     """Base class for job scheduler"""
 
+    @init_db
     def queue(self, job_id: int, cmd: str) -> None:
-        _CURSOR.execute('INSERT INTO pending_jobs VALUES (?,?,?,?)',
-                        (job_id, cmd, 0, int(time.time())))
-        _CONN.commit()
+        assert _DB is not None
+        _DB.cursor.execute('INSERT INTO pending_jobs VALUES (?,?,?,?)',
+                           (job_id, cmd, 0, int(time.time())))
+        _DB.conn.commit()
         set_status(job_id, JobStatus.PENDING)
         self.schedule_step()
 
+    @init_db
     def remove_job_no_lock(self, job_id: int) -> None:
-        _CURSOR.execute(f'DELETE FROM pending_jobs WHERE job_id={job_id!r}')
-        _CONN.commit()
+        assert _DB is not None
+        _DB.cursor.execute(f'DELETE FROM pending_jobs WHERE job_id={job_id!r}')
+        _DB.conn.commit()
 
+    @init_db
     def _run_job(self, job_id: int, run_cmd: str):
-        _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())} '
-                         f'WHERE job_id={job_id!r}'))
-        _CONN.commit()
+        assert _DB is not None
+        _DB.cursor.execute(
+            (f'UPDATE pending_jobs SET submit={int(time.time())} '
+             f'WHERE job_id={job_id!r}'))
+        _DB.conn.commit()
         pid = subprocess_utils.launch_new_process_tree(run_cmd)
         # TODO(zhwu): Backward compatibility, remove this check after 0.10.0.
         # This is for the case where the job is submitted with SkyPilot older
         # than #4318, using ray job submit.
         if 'job submit' in run_cmd:
             pid = -1
-        _CURSOR.execute((f'UPDATE jobs SET pid={pid} '
-                         f'WHERE job_id={job_id!r}'))
-        _CONN.commit()
+        _DB.cursor.execute((f'UPDATE jobs SET pid={pid} '
+                            f'WHERE job_id={job_id!r}'))
+        _DB.conn.commit()
 
     def schedule_step(self, force_update_jobs: bool = False) -> None:
         if force_update_jobs:
@@ -282,8 +317,10 @@ class JobScheduler:
 class FIFOScheduler(JobScheduler):
     """First in first out job scheduler"""
 
+    @init_db
     def _get_pending_job_ids(self) -> List[int]:
-        rows = _CURSOR.execute(
+        assert _DB is not None
+        rows = _DB.cursor.execute(
             'SELECT job_id FROM pending_jobs ORDER BY job_id').fetchall()
         return [row[0] for row in rows]
 
@@ -308,26 +345,67 @@ def make_job_command_with_user_switching(username: str,
     return ['sudo', '-H', 'su', '--login', username, '-c', command]
 
 
-def add_job(job_name: str, username: str, run_timestamp: str,
-            resources_str: str) -> int:
+@init_db
+def add_job(job_name: str,
+            username: str,
+            run_timestamp: str,
+            resources_str: str,
+            metadata: str = '{}') -> Tuple[int, str]:
     """Atomically reserve the next available job id for the user."""
+    assert _DB is not None
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
-    _CURSOR.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0)',
+    _DB.cursor.execute(
+        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',
         (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str))
-    _CONN.commit()
-    rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
-                           (run_timestamp,))
+         run_timestamp, None, resources_str, metadata))
+    _DB.conn.commit()
+    rows = _DB.cursor.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
+                              (run_timestamp,))
     for row in rows:
         job_id = row[0]
     assert job_id is not None
-    return job_id
+    log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, f'{job_id}-{job_name}')
+    set_log_dir_no_lock(job_id, log_dir)
+    return job_id, log_dir
 
 
+@init_db
+def set_log_dir_no_lock(job_id: int, log_dir: str) -> None:
+    """Set the log directory for the job.
+
+    We persist the log directory for the job to allow changing the log directory
+    generation logic over versions.
+
+    Args:
+        job_id: The ID of the job.
+        log_dir: The log directory for the job.
+    """
+    assert _DB is not None
+    _DB.cursor.execute('UPDATE jobs SET log_dir=(?) WHERE job_id=(?)',
+                       (log_dir, job_id))
+    _DB.conn.commit()
+
+
+@init_db
+def get_log_dir_for_job(job_id: int) -> Optional[str]:
+    """Get the log directory for the job.
+
+    Args:
+        job_id: The ID of the job.
+    """
+    assert _DB is not None
+    rows = _DB.cursor.execute('SELECT log_dir FROM jobs WHERE job_id=(?)',
+                              (job_id,))
+    for row in rows:
+        return row[0]
+    return None
+
+
+@init_db
 def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
     """Setting the status of the job in the database."""
+    assert _DB is not None
     assert status != JobStatus.RUNNING, (
         'Please use set_job_started() to set job status to RUNNING')
     if status.is_terminal():
@@ -339,15 +417,15 @@ def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
         check_end_at_str = ' AND end_at IS NULL'
         if status != JobStatus.FAILED_SETUP:
             check_end_at_str = ''
-        _CURSOR.execute(
+        _DB.cursor.execute(
             'UPDATE jobs SET status=(?), end_at=(?) '
             f'WHERE job_id=(?) {check_end_at_str}',
             (status.value, end_at, job_id))
     else:
-        _CURSOR.execute(
+        _DB.cursor.execute(
             'UPDATE jobs SET status=(?), end_at=NULL '
             'WHERE job_id=(?)', (status.value, job_id))
-    _CONN.commit()
+    _DB.conn.commit()
 
 
 def set_status(job_id: int, status: JobStatus) -> None:
@@ -357,16 +435,19 @@ def set_status(job_id: int, status: JobStatus) -> None:
         _set_status_no_lock(job_id, status)
 
 
+@init_db
 def set_job_started(job_id: int) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
     # pylint: disable=abstract-class-instantiated
+    assert _DB is not None
     with filelock.FileLock(_get_lock_path(job_id)):
-        _CURSOR.execute(
+        _DB.cursor.execute(
             'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
             'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
-        _CONN.commit()
+        _DB.conn.commit()
 
 
+@init_db
 def get_status_no_lock(job_id: int) -> Optional[JobStatus]:
     """Get the status of the job with the given id.
 
@@ -375,8 +456,9 @@ def get_status_no_lock(job_id: int) -> Optional[JobStatus]:
     the status in a while loop as in `log_lib._follow_job_logs`. Otherwise, use
     `get_status`.
     """
-    rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
-                           (job_id,))
+    assert _DB is not None
+    rows = _DB.cursor.execute('SELECT status FROM jobs WHERE job_id=(?)',
+                              (job_id,))
     for (status,) in rows:
         if status is None:
             return None
@@ -391,11 +473,13 @@ def get_status(job_id: int) -> Optional[JobStatus]:
         return get_status_no_lock(job_id)
 
 
+@init_db
 def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
+    assert _DB is not None
     # Per-job lock is not required here, since the staled job status will not
     # affect the caller.
     query_str = ','.join(['?'] * len(job_ids))
-    rows = _CURSOR.execute(
+    rows = _DB.cursor.execute(
         f'SELECT job_id, status FROM jobs WHERE job_id IN ({query_str})',
         job_ids)
     statuses = {job_id: None for job_id in job_ids}
@@ -419,14 +503,17 @@ def load_statuses_payload(
     return statuses
 
 
+@init_db
 def get_latest_job_id() -> Optional[int]:
-    rows = _CURSOR.execute(
+    assert _DB is not None
+    rows = _DB.cursor.execute(
         'SELECT job_id FROM jobs ORDER BY job_id DESC LIMIT 1')
     for (job_id,) in rows:
         return job_id
     return None
 
 
+@init_db
 def get_job_submitted_or_ended_timestamp_payload(job_id: int,
                                                  get_ended_time: bool) -> str:
     """Get the job submitted/ended timestamp.
@@ -440,9 +527,10 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
     `format_job_queue()`), because the job may stay in PENDING if the cluster is
     busy.
     """
+    assert _DB is not None
     field = 'end_at' if get_ended_time else 'submitted_at'
-    rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
-                           (job_id,))
+    rows = _DB.cursor.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
+                              (job_id,))
     for (timestamp,) in rows:
         return message_utils.encode_payload(timestamp)
     return message_utils.encode_payload(None)
@@ -492,14 +580,17 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'end_at': row[JobInfoLoc.END_AT.value],
             'resources': row[JobInfoLoc.RESOURCES.value],
             'pid': row[JobInfoLoc.PID.value],
+            'metadata': json.loads(row[JobInfoLoc.METADATA.value]),
         })
     return records
 
 
+@init_db
 def _get_jobs(
         user_hash: Optional[str],
         status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
     """Returns jobs with the given fields, sorted by job_id, descending."""
+    assert _DB is not None
     if status_list is None:
         status_list = list(JobStatus)
     status_str_list = [repr(status.value) for status in status_list]
@@ -509,14 +600,16 @@ def _get_jobs(
         # We use the old username field for compatibility.
         filter_str += ' AND username=(?)'
         params.append(user_hash)
-    rows = _CURSOR.execute(
+    rows = _DB.cursor.execute(
         f'SELECT * FROM jobs {filter_str} ORDER BY job_id DESC', params)
     records = _get_records_from_rows(rows)
     return records
 
 
+@init_db
 def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
-    rows = _CURSOR.execute(
+    assert _DB is not None
+    rows = _DB.cursor.execute(
         f"""\
         SELECT * FROM jobs
         WHERE job_id IN ({','.join(['?'] * len(job_ids))})
@@ -527,8 +620,10 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     return records
 
 
+@init_db
 def _get_pending_job(job_id: int) -> Optional[Dict[str, Any]]:
-    rows = _CURSOR.execute(
+    assert _DB is not None
+    rows = _DB.cursor.execute(
         'SELECT created_time, submit, run_cmd FROM pending_jobs '
         f'WHERE job_id={job_id!r}')
     for row in rows:
@@ -698,19 +793,29 @@ def update_job_status(job_ids: List[int],
     return statuses
 
 
+@init_db
 def fail_all_jobs_in_progress() -> None:
+    assert _DB is not None
     in_progress_status = [
         status.value for status in JobStatus.nonterminal_statuses()
     ]
-    _CURSOR.execute(
+    _DB.cursor.execute(
         f"""\
         UPDATE jobs SET status=(?)
         WHERE status IN ({','.join(['?'] * len(in_progress_status))})
         """, (JobStatus.FAILED_DRIVER.value, *in_progress_status))
-    _CONN.commit()
+    _DB.conn.commit()
 
 
 def update_status() -> None:
+    # This signal file suggests that the controller is recovering from a
+    # failure. See sky/jobs/utils.py::update_managed_jobs_statuses for more
+    # details. When recovering, we should not update the job status to failed
+    # driver as they will be recovered later.
+    if os.path.exists(
+            os.path.expanduser(
+                constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE)):
+        return
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     nonterminal_jobs = _get_jobs(user_hash=None,
@@ -720,12 +825,14 @@ def update_status() -> None:
     update_job_status(nonterminal_job_ids)
 
 
+@init_db
 def is_cluster_idle() -> bool:
     """Returns if the cluster is idle (no in-flight jobs)."""
+    assert _DB is not None
     in_progress_status = [
         status.value for status in JobStatus.nonterminal_statuses()
     ]
-    rows = _CURSOR.execute(
+    rows = _DB.cursor.execute(
         f"""\
         SELECT COUNT(*) FROM jobs
         WHERE status IN ({','.join(['?'] * len(in_progress_status))})
@@ -744,7 +851,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
     """
     job_table = log_utils.create_table([
         'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
-        'STATUS', 'LOG'
+        'STATUS', 'LOG', 'GIT COMMIT'
     ])
     for job in jobs:
         job_table.add_row([
@@ -759,6 +866,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
             job['resources'],
             job['status'].colored_str(),
             job['log_path'],
+            job.get('metadata', {}).get('git_commit', '-'),
         ])
     return job_table
 
@@ -794,7 +902,8 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     for job in jobs:
         job['status'] = JobStatus(job['status'])
         job['user_hash'] = job['username']
-        job['username'] = global_user_state.get_user(job['user_hash']).name
+        user = global_user_state.get_user(job['user_hash'])
+        job['username'] = user.name if user is not None else None
     return jobs
 
 
@@ -904,33 +1013,41 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
     return message_utils.encode_payload(cancelled_ids)
 
 
+@init_db
 def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
     """Returns the relative path to the log file for a job."""
-    _CURSOR.execute(
+    assert _DB is not None
+    _DB.cursor.execute(
         """\
             SELECT * FROM jobs
             WHERE job_id=(?)""", (job_id,))
-    row = _CURSOR.fetchone()
+    row = _DB.cursor.fetchone()
     if row is None:
         return None
     run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
     return run_timestamp
 
 
-def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
-    """Returns the relative paths to the log files for job with globbing."""
+@init_db
+def get_log_dir_for_jobs(job_ids: List[Optional[str]]) -> str:
+    """Returns the relative paths to the log files for jobs with globbing."""
+    assert _DB is not None
     query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
-    _CURSOR.execute(
+    _DB.cursor.execute(
         f"""\
             SELECT * FROM jobs
             WHERE {query_str}""", job_ids)
-    rows = _CURSOR.fetchall()
-    run_timestamps = {}
+    rows = _DB.cursor.fetchall()
+    job_to_dir = {}
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
-        run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-        run_timestamps[str(job_id)] = run_timestamp
-    return message_utils.encode_payload(run_timestamps)
+        if row[JobInfoLoc.LOG_PATH.value]:
+            job_to_dir[str(job_id)] = row[JobInfoLoc.LOG_PATH.value]
+        else:
+            run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
+            job_to_dir[str(job_id)] = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                                   run_timestamp)
+    return message_utils.encode_payload(job_to_dir)
 
 
 class JobLibCodeGen:
@@ -951,7 +1068,7 @@ class JobLibCodeGen:
 
     @classmethod
     def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
-                resources_str: str) -> str:
+                resources_str: str, metadata: str) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -962,12 +1079,25 @@ class JobLibCodeGen:
             '\nif int(constants.SKYLET_VERSION) < 9: '
             'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
-            '\njob_id = job_lib.add_job('
+            '\nresult = None',
+            '\nif int(constants.SKYLET_VERSION) < 15: '
+            '\n result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r})',
-            'print("Job ID: " + str(job_id), flush=True)',
+            '\nelse: '
+            '\n result = job_lib.add_job('
+            f'{job_name!r},'
+            f'{username!r},'
+            f'{run_timestamp!r},'
+            f'{resources_str!r},'
+            f'metadata={metadata!r})',
+            ('\nif isinstance(result, tuple):'
+             '\n  print("Job ID: " + str(result[0]), flush=True)'
+             '\n  print("Log Dir: " + str(result[1]), flush=True)'
+             '\nelse:'
+             '\n  print("Job ID: " + str(result), flush=True)'),
         ]
         return cls._build(code)
 
@@ -1036,9 +1166,17 @@ class JobLibCodeGen:
             # We use != instead of is not because 1 is not None will print a warning:
             # <stdin>:1: SyntaxWarning: "is not" with a literal. Did you mean "!="?
             f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',
-            'run_timestamp = job_lib.get_run_timestamp(job_id)',
-            f'log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)',
-            f'tail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}}}',
+            # For backward compatibility, use the legacy generation rule for
+            # jobs submitted before 0.11.0.
+            ('log_dir = None\n'
+             'if hasattr(job_lib, "get_log_dir_for_job"):\n'
+             '  log_dir = job_lib.get_log_dir_for_job(job_id)\n'
+             'if log_dir is None:\n'
+             '  run_timestamp = job_lib.get_run_timestamp(job_id)\n'
+             f'  log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)'
+            ),
+            # Add a newline to leave the if indent block above.
+            f'\ntail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}}}',
             f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 1: tail_log_kwargs["tail"] = {tail}',
             f'{_LINUX_NEW_LINE}log_lib.tail_logs(**tail_log_kwargs)',
             # After tailing, check the job status and exit with appropriate code
@@ -1047,6 +1185,10 @@ class JobLibCodeGen:
             # and older did not have JobExitCode, so we use 0 for those versions
             # TODO: Remove this special handling after 0.10.0.
             'exit_code = exceptions.JobExitCode.from_job_status(job_status) if getattr(constants, "SKYLET_LIB_VERSION", 1) > 2 else 0',
+            # Fix for dashboard: When follow=False and job is still running (NOT_FINISHED=101),
+            # exit with success (0) since fetching current logs is a successful operation.
+            # This prevents shell wrappers from printing "command terminated with exit code 101".
+            f'exit_code = 0 if not {follow} and exit_code == 101 else exit_code',
             'sys.exit(exit_code)',
         ]
         return cls._build(code)
@@ -1078,12 +1220,14 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_run_timestamp_with_globbing(cls,
-                                        job_ids: Optional[List[str]]) -> str:
+    def get_log_dirs_for_jobs(cls, job_ids: Optional[List[str]]) -> str:
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
             'else [job_lib.get_latest_job_id()]',
-            'log_dirs = job_lib.run_timestamp_with_globbing_payload(job_ids)',
+            # TODO(aylei): backward compatibility, remove after 0.12.0.
+            'log_dirs = job_lib.get_log_dir_for_jobs(job_ids) if '
+            'hasattr(job_lib, "get_log_dir_for_jobs") else '
+            'job_lib.run_timestamp_with_globbing_payload(job_ids)',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)

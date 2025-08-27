@@ -206,6 +206,8 @@ class KubernetesCommandRunner(CommandRunner):
     def __init__(
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
+        deployment: Optional[str] = ...,
+        **kwargs,
     ) -> None:
         ...
 
@@ -268,4 +270,61 @@ class KubernetesCommandRunner(CommandRunner):
               log_path: str = ...,
               stream_logs: bool = ...,
               max_retry: int = ...) -> None:
+        ...
+
+
+class LocalProcessCommandRunner(CommandRunner):
+
+    def __init__(self) -> None:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            port_forward: Optional[List[int]] = ...,
+            require_outputs: Literal[False] = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_lines: int = ...,
+            **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            port_forward: Optional[List[int]] = ...,
+            require_outputs: Literal[True],
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_lines: int = ...,
+            **kwargs) -> Tuple[int, str, str]:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            port_forward: Optional[List[int]] = ...,
+            require_outputs: bool = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_lines: int = ...,
+            **kwargs) -> Union[Tuple[int, str, str], int]:
         ...

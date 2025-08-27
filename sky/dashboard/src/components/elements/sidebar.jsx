@@ -10,29 +10,88 @@ import { useRouter } from 'next/router';
 
 import Link from 'next/link';
 import {
+  ChipIcon,
   ServerIcon,
   BriefcaseIcon,
-  ServiceBellIcon,
   ExternalLinkIcon,
   GitHubIcon,
   SlackIcon,
   CommentFeedbackIcon,
+  BookDocIcon,
+  UsersIcon,
+  StarIcon,
+  VolumeIcon,
 } from '@/components/elements/icons';
-import { BASE_PATH } from '@/data/connectors/constants';
+import { Settings, User } from 'lucide-react';
+import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
+import { useMobile } from '@/hooks/useMobile';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
 
 export function SidebarProvider({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [userEmail, setUserEmail] = useState(null);
+  const [userRole, setUserRole] = useState(null);
 
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev);
   };
 
+  const toggleMobileSidebar = () => {
+    setIsMobileSidebarOpen((prev) => !prev);
+  };
+
+  const baseUrl = window.location.origin;
+  const fullEndpoint = `${baseUrl}${ENDPOINT}`;
+  useEffect(() => {
+    // Fetch user info from health endpoint
+    fetch(`${fullEndpoint}/api/health`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user && data.user.name) {
+          setUserEmail(data.user.name);
+
+          // Get role from direct API endpoint to avoid cache interference
+          // Using cache would cause race condition, which leads to unexpected
+          // behavior in workspaces and users page.
+          const getUserRole = async () => {
+            try {
+              const response = await fetch(`${fullEndpoint}/users/role`);
+              if (response.ok) {
+                const roleData = await response.json();
+                if (roleData.role) {
+                  setUserRole(roleData.role);
+                }
+              }
+            } catch (error) {
+              // If role data is not available or there's an error,
+              // we just don't show the role - it's not critical
+              console.log('Could not fetch user role:', error);
+            }
+          };
+
+          getUserRole();
+        }
+      })
+      .catch((error) => {
+        console.error('Error fetching user data:', error);
+      });
+  }, [fullEndpoint]);
+
   return (
-    <SidebarContext.Provider value={{ isSidebarOpen, toggleSidebar }}>
+    <SidebarContext.Provider
+      value={{
+        isSidebarOpen,
+        toggleSidebar,
+        isMobileSidebarOpen,
+        toggleMobileSidebar,
+        userEmail,
+        userRole,
+      }}
+    >
       {children}
     </SidebarContext.Provider>
   );
@@ -49,28 +108,13 @@ export function useSidebar() {
 
 export function SideBar({ highlighted = 'clusters' }) {
   const { isSidebarOpen, toggleSidebar } = useSidebar();
-  const [isMobile, setIsMobile] = useState(false);
+  const isMobile = useMobile();
   const sidebarRef = useRef(null);
-
-  // Listen to window resize to detect mobile devices
-  useEffect(() => {
-    function handleResize() {
-      setIsMobile(window.innerWidth < 768);
-    }
-
-    // Check on initial load
-    handleResize();
-
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
 
   // Common link style
   const linkStyle = (isHighlighted) => `
-        flex items-center space-x-2 
-        ${isHighlighted ? 'text-blue-600 font-semibold bg-blue-50' : 'text-gray-700'} 
+        flex items-center space-x-2
+        ${isHighlighted ? 'text-blue-600 font-semibold bg-blue-50' : 'text-gray-700'}
         relative z-10 py-2 px-4 rounded-sm
         hover:bg-gray-100 hover:text-blue-700 transition-colors
         cursor-pointer w-full
@@ -104,15 +148,6 @@ export function SideBar({ highlighted = 'clusters' }) {
               <BriefcaseIcon className="w-5 h-5 min-w-5" />
               <span>Jobs</span>
             </Link>
-            <div
-              className={`flex items-center space-x-2 text-gray-400 relative z-10 py-2 px-4 rounded-sm w-full`}
-            >
-              <ServiceBellIcon className="w-5 h-5 min-w-5" />
-              <span>Services</span>
-              <span className="text-xs ml-2 px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">
-                Soon
-              </span>
-            </div>
           </div>
         </div>
       </nav>
@@ -122,167 +157,504 @@ export function SideBar({ highlighted = 'clusters' }) {
 
 export function TopBar() {
   const router = useRouter();
+  const isMobile = useMobile();
+  const { userEmail, userRole, isMobileSidebarOpen, toggleMobileSidebar } =
+    useSidebar();
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  // State to track if the viewport is mobile
-  const [isMobile, setIsMobile] = useState(false);
+  const dropdownRef = useRef(null);
+  const mobileNavRef = useRef(null);
 
-  // Effect to handle resize and determine if mobile
   useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-
-    // Set on mount
-    handleResize();
-
-    // Add event listener
-    window.addEventListener('resize', handleResize);
-
-    // Cleanup
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+      if (
+        mobileNavRef.current &&
+        !mobileNavRef.current.contains(event.target) &&
+        !event.target.closest('.mobile-menu-button')
+      ) {
+        // Close mobile sidebar if clicking outside and not on the hamburger button
+        if (isMobileSidebarOpen) {
+          toggleMobileSidebar();
+        }
+      }
+    }
+    // Bind the event listener
+    document.addEventListener('mousedown', handleClickOutside);
     return () => {
-      window.removeEventListener('resize', handleResize);
+      // Unbind the event listener on clean up
+      document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, []);
+  }, [dropdownRef, isMobileSidebarOpen, toggleMobileSidebar]);
+
+  // Function to get user initial
+  const getUserInitial = (email) => {
+    if (!email) return '?';
+
+    // If it's an email, get the first letter of the username part
+    if (email.includes('@')) {
+      return email.split('@')[0].charAt(0).toUpperCase();
+    }
+
+    // If it's just a name, get the first letter
+    return email.charAt(0).toUpperCase();
+  };
 
   // Function to determine if a path is active
   const isActivePath = (path) => {
+    // Special case: highlight workspaces for both /workspaces and /workspace paths
+    if (path === '/workspaces') {
+      return (
+        router.pathname.startsWith('/workspaces') ||
+        router.pathname.startsWith('/workspace')
+      );
+    }
     return router.pathname.startsWith(path);
   };
 
-  // Get link classes based on active state
+  // Modify the getLinkClasses function to handle mobile styles
   const getLinkClasses = (path) => {
     const isActive = isActivePath(path);
-    return `inline-flex items-center space-x-2 px-1 pt-1 border-b-2 ${
-      isActive
-        ? 'border-transparent text-blue-600'
-        : 'border-transparent hover:text-blue-600 hover:border-blue-600'
+    const baseClasses = isActive
+      ? 'border-transparent text-blue-600'
+      : 'border-transparent hover:text-blue-600';
+
+    return `inline-flex items-center border-b-2 ${baseClasses} ${
+      isMobile ? 'px-2 py-1' : 'px-1 pt-1 space-x-2'
     }`;
   };
 
   return (
-    <div className="fixed top-0 left-0 right-0 bg-white z-30 h-14 px-4 border-b border-gray-200 shadow-sm">
-      <div className="flex items-center h-full">
-        <div className="flex items-center space-x-4 mr-6">
-          <Link
-            href="/"
-            className="flex items-center px-1 pt-1 h-full"
-            prefetch={false}
-          >
-            <Image
-              src={`${BASE_PATH}/skypilot.svg`}
-              alt="SkyPilot Logo"
-              width={80}
-              height={80}
-              priority
-              style={{ width: '80px', height: '80px' }}
-              className="h-12 w-12"
-            />
-          </Link>
-        </div>
+    <>
+      <div className="fixed top-0 left-0 right-0 bg-white z-30 h-14 px-4 border-b border-gray-200 shadow-sm">
+        <div className="flex items-center justify-between h-full">
+          {/* Left side - Logo and mobile hamburger */}
+          <div className="flex items-center space-x-4 mr-4 md:mr-6">
+            {/* Mobile hamburger menu button */}
+            {isMobile && (
+              <button
+                onClick={toggleMobileSidebar}
+                className="mobile-menu-button p-2 rounded-md text-gray-600 hover:text-blue-600 hover:bg-gray-100 transition-colors"
+                aria-label="Toggle mobile menu"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d={
+                      isMobileSidebarOpen
+                        ? 'M6 18L18 6M6 6l12 12'
+                        : 'M4 6h16M4 12h16M4 18h16'
+                    }
+                  />
+                </svg>
+              </button>
+            )}
 
-        {/* Navigation links - now aligned to the left */}
-        <div className="hidden md:flex items-center space-x-6 mr-6">
-          <Link
-            href="/clusters"
-            className={getLinkClasses('/clusters')}
-            prefetch={false}
-          >
-            <ServerIcon className="w-4 h-4" />
-            <span>Clusters</span>
-          </Link>
-
-          <Link
-            href="/jobs"
-            className={getLinkClasses('/jobs')}
-            prefetch={false}
-          >
-            <BriefcaseIcon className="w-4 h-4" />
-            <span>Jobs</span>
-          </Link>
-
-          <div className="inline-flex items-center space-x-2 px-1 pt-1 text-gray-400">
-            <ServiceBellIcon className="w-4 h-4" />
-            <span>Services</span>
-            <span className="text-xs ml-2 px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">
-              Soon
-            </span>
+            <Link
+              href="/"
+              className="flex items-center px-1 pt-1 h-full"
+              prefetch={false}
+            >
+              <div className={`h-20 w-20 flex items-center justify-center`}>
+                <Image
+                  src={`${BASE_PATH}/skypilot.svg`}
+                  alt="SkyPilot Logo"
+                  width={80}
+                  height={80}
+                  priority
+                  className="w-full h-full object-contain"
+                />
+              </div>
+            </Link>
           </div>
-        </div>
 
-        {/* External links - pushed to the right with ml-auto */}
-        <div className="hidden md:flex items-center space-x-2 ml-auto">
-          <div className="flex items-center space-x-1">
-            <CustomTooltip
-              content="Documentation"
-              className="text-sm text-muted-foreground"
-            >
-              <a
-                href="https://skypilot.readthedocs.io/en/latest/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center px-3 py-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
-                title="Docs"
+          {/* Desktop Navigation links */}
+          {!isMobile && (
+            <div className="flex items-center space-x-2 md:space-x-4 mr-6">
+              <Link
+                href="/clusters"
+                className={getLinkClasses('/clusters')}
+                prefetch={false}
               >
-                <span className="mr-1">Docs</span>
-                <ExternalLinkIcon className="w-3.5 h-3.5" />
-              </a>
-            </CustomTooltip>
+                <ServerIcon className="w-4 h-4" />
+                <span>Clusters</span>
+              </Link>
 
-            <div className="border-l border-gray-200 h-6 mx-1"></div>
-
-            <CustomTooltip
-              content="GitHub Repository"
-              className="text-sm text-muted-foreground"
-            >
-              <a
-                href="https://github.com/skypilot-org/skypilot"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-                title="GitHub"
+              <Link
+                href="/jobs"
+                className={getLinkClasses('/jobs')}
+                prefetch={false}
               >
-                <span className="flex items-center justify-center">
-                  <GitHubIcon className="w-5 h-5" />
-                </span>
-              </a>
-            </CustomTooltip>
+                <BriefcaseIcon className="w-4 h-4" />
+                <span>Jobs</span>
+              </Link>
 
-            <CustomTooltip
-              content="Join Slack"
-              className="text-sm text-muted-foreground"
-            >
-              <a
-                href="https://slack.skypilot.co/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-                title="Slack"
+              <Link
+                href="/volumes"
+                className={getLinkClasses('/volumes')}
+                prefetch={false}
               >
-                <span className="flex items-center justify-center">
-                  <SlackIcon className="w-5 h-5" />
-                </span>
-              </a>
-            </CustomTooltip>
+                <VolumeIcon className="w-4 h-4" />
+                <span>Volumes</span>
+              </Link>
 
-            <CustomTooltip
-              content="Leave Feedback"
-              className="text-sm text-muted-foreground"
-            >
-              <a
-                href="https://github.com/skypilot-org/skypilot/issues/new?assignees=&labels=type%3A+enhancement&title="
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-                title="Leave Feedback"
+              <div className="border-l border-gray-200 h-6 mx-1"></div>
+
+              <Link
+                href="/infra"
+                className={getLinkClasses('/infra')}
+                prefetch={false}
               >
-                <span className="flex items-center justify-center">
-                  <CommentFeedbackIcon className="w-5 h-5" />
-                </span>
-              </a>
-            </CustomTooltip>
+                <ChipIcon className="w-4 h-4" />
+                <span>Infra</span>
+              </Link>
+
+              <Link
+                href="/workspaces"
+                className={getLinkClasses('/workspaces')}
+                prefetch={false}
+              >
+                <BookDocIcon className="w-4 h-4" />
+                <span>Workspaces</span>
+              </Link>
+
+              <Link
+                href="/users"
+                className={getLinkClasses('/users')}
+                prefetch={false}
+              >
+                <UsersIcon className="w-4 h-4" />
+                <span>Users</span>
+              </Link>
+            </div>
+          )}
+
+          {/* External links and user profile - only show on desktop, mobile uses sidebar */}
+          <div className="flex items-center space-x-1 ml-auto">
+            {!isMobile && (
+              <>
+                <CustomTooltip
+                  content="Documentation"
+                  className="text-sm text-muted-foreground"
+                >
+                  <a
+                    href="https://skypilot.readthedocs.io/en/latest/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center px-2 py-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
+                    title="Docs"
+                  >
+                    <span className="mr-1">Docs</span>
+                    <ExternalLinkIcon className="w-3.5 h-3.5" />
+                  </a>
+                </CustomTooltip>
+
+                <CustomTooltip
+                  content="GitHub Repository"
+                  className="text-sm text-muted-foreground"
+                >
+                  <a
+                    href="https://github.com/skypilot-org/skypilot"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                    title="GitHub"
+                  >
+                    <GitHubIcon className="w-5 h-5" />
+                  </a>
+                </CustomTooltip>
+
+                <CustomTooltip
+                  content="Join Slack"
+                  className="text-sm text-muted-foreground"
+                >
+                  <a
+                    href="https://slack.skypilot.co/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                    title="Slack"
+                  >
+                    <SlackIcon className="w-5 h-5" />
+                  </a>
+                </CustomTooltip>
+
+                <CustomTooltip
+                  content="Leave Feedback"
+                  className="text-sm text-muted-foreground"
+                >
+                  <a
+                    href="https://github.com/skypilot-org/skypilot/issues/new"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                    title="Leave Feedback"
+                  >
+                    <CommentFeedbackIcon className="w-5 h-5" />
+                  </a>
+                </CustomTooltip>
+
+                <div className="border-l border-gray-200 h-6"></div>
+
+                {/* Config Button */}
+                <CustomTooltip
+                  content="Configuration"
+                  className="text-sm text-muted-foreground"
+                >
+                  <Link
+                    href="/config"
+                    className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
+                      isActivePath('/config')
+                        ? 'text-blue-600 hover:bg-gray-100'
+                        : 'text-gray-600 hover:bg-gray-100'
+                    }`}
+                    title="Configuration"
+                    prefetch={false}
+                  >
+                    <Settings className="w-5 h-5" />
+                  </Link>
+                </CustomTooltip>
+              </>
+            )}
+
+            {/* User Profile Icon and Dropdown */}
+            {userEmail && (
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className="inline-flex items-center justify-center rounded-full transition-colors duration-150 cursor-pointer hover:ring-2 hover:ring-blue-200"
+                  title="User Profile"
+                >
+                  <div
+                    className={`${isMobile ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'} bg-blue-600 text-white rounded-full flex items-center justify-center font-medium hover:bg-blue-700 transition-colors`}
+                  >
+                    {getUserInitial(userEmail)}
+                  </div>
+                </button>
+
+                {isDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200">
+                    {(() => {
+                      let displayName = userEmail;
+                      let emailToDisplay = null;
+                      if (userEmail && userEmail.includes('@')) {
+                        displayName = userEmail.split('@')[0];
+                        emailToDisplay = userEmail;
+                      }
+                      return (
+                        <>
+                          <div className="px-4 pt-2 pb-1 text-sm font-medium text-gray-900">
+                            {displayName}
+                          </div>
+                          {emailToDisplay && (
+                            <div className="px-4 pt-0 pb-1 text-xs text-gray-500">
+                              {emailToDisplay}
+                            </div>
+                          )}
+                          {userRole && (
+                            <div className="px-4 pt-0 pb-2 text-xs">
+                              {userRole === 'admin' ? (
+                                <span className="inline-flex items-center text-blue-600">
+                                  <StarIcon className="w-3 h-3 mr-1" />
+                                  Admin
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center text-gray-600">
+                                  <User className="w-3 h-3 mr-1" />
+                                  User
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                    <div className="border-t border-gray-200 mx-1 my-1"></div>
+                    <Link
+                      href="/users"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
+                      onClick={() => setIsDropdownOpen(false)}
+                      prefetch={false}
+                    >
+                      See all users
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
-    </div>
+
+      {/* Mobile Navigation Sidebar */}
+      {isMobile && (
+        <>
+          {/* Backdrop */}
+          {isMobileSidebarOpen && (
+            <div
+              className="fixed top-14 left-0 right-0 bottom-0 bg-black bg-opacity-50 z-40"
+              onClick={toggleMobileSidebar}
+            />
+          )}
+
+          {/* Mobile Sidebar */}
+          <div
+            ref={mobileNavRef}
+            className={`fixed top-14 left-0 h-[calc(100vh-56px)] w-64 bg-white border-r border-gray-200 shadow-lg z-50 transform transition-transform duration-300 ease-in-out ${
+              isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+            }`}
+          >
+            <nav className="flex-1 overflow-y-auto py-6">
+              <div className="px-4 space-y-1">
+                <Link
+                  href="/clusters"
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                    isActivePath('/clusters')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                  }`}
+                  onClick={toggleMobileSidebar}
+                  prefetch={false}
+                >
+                  <ServerIcon className="w-5 h-5 mr-3" />
+                  Clusters
+                </Link>
+
+                <Link
+                  href="/jobs"
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                    isActivePath('/jobs')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                  }`}
+                  onClick={toggleMobileSidebar}
+                  prefetch={false}
+                >
+                  <BriefcaseIcon className="w-5 h-5 mr-3" />
+                  Jobs
+                </Link>
+
+                <Link
+                  href="/volumes"
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                    isActivePath('/volumes')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                  }`}
+                  onClick={toggleMobileSidebar}
+                  prefetch={false}
+                >
+                  <VolumeIcon className="w-5 h-5 mr-3" />
+                  Volumes
+                </Link>
+
+                <div className="border-t border-gray-200 my-4"></div>
+
+                <Link
+                  href="/infra"
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                    isActivePath('/infra')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                  }`}
+                  onClick={toggleMobileSidebar}
+                  prefetch={false}
+                >
+                  <ChipIcon className="w-5 h-5 mr-3" />
+                  Infra
+                </Link>
+
+                <Link
+                  href="/workspaces"
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                    isActivePath('/workspaces')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                  }`}
+                  onClick={toggleMobileSidebar}
+                  prefetch={false}
+                >
+                  <BookDocIcon className="w-5 h-5 mr-3" />
+                  Workspaces
+                </Link>
+
+                <Link
+                  href="/users"
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                    isActivePath('/users')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                  }`}
+                  onClick={toggleMobileSidebar}
+                  prefetch={false}
+                >
+                  <UsersIcon className="w-5 h-5 mr-3" />
+                  Users
+                </Link>
+
+                <div className="border-t border-gray-200 my-4"></div>
+
+                {/* External links in mobile */}
+                <a
+                  href="https://skypilot.readthedocs.io/en/latest/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-blue-600 rounded-md transition-colors"
+                  onClick={toggleMobileSidebar}
+                >
+                  <ExternalLinkIcon className="w-5 h-5 mr-3" />
+                  Documentation
+                </a>
+
+                <a
+                  href="https://github.com/skypilot-org/skypilot"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-blue-600 rounded-md transition-colors"
+                  onClick={toggleMobileSidebar}
+                >
+                  <GitHubIcon className="w-5 h-5 mr-3" />
+                  GitHub
+                </a>
+
+                <a
+                  href="https://slack.skypilot.co/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-blue-600 rounded-md transition-colors"
+                  onClick={toggleMobileSidebar}
+                >
+                  <SlackIcon className="w-5 h-5 mr-3" />
+                  Slack
+                </a>
+
+                <Link
+                  href="/config"
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                    isActivePath('/config')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                  }`}
+                  onClick={toggleMobileSidebar}
+                  prefetch={false}
+                >
+                  <Settings className="w-5 h-5 mr-3" />
+                  Configuration
+                </Link>
+              </div>
+            </nav>
+          </div>
+        </>
+      )}
+    </>
   );
 }

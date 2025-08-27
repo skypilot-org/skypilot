@@ -5,9 +5,18 @@ the 'command' field in the exec configuration, leaving only the executable name.
 This is useful when moving between different environments where auth plugin
 executables might be installed in different locations.
 
+For Nebius kubeconfigs, it also changes the --profile argument to 'sky' to
+ensure compatibility with SkyPilot's expected profile configuration.
+
 It assumes the target environment has the auth executable available in PATH.
 If not, you'll need to update your environment container to include the auth
 executable in PATH.
+
+When using LOCAL_CREDENTIALS (aka exec auth) with Kubernetes, though, SkyPilot
+will automatically inject a wrapper script for common exec auth providers like
+GKE and EKS. This wrapper script helps to resolve path issues that may arise
+from executables installed on non system-default paths. Thus, the kubeconfig
+file may look different on the sky jobs controller.
 
 Usage:
     python -m sky.utils.kubernetes.exec_kubeconfig_converter
@@ -17,36 +26,7 @@ import os
 
 import yaml
 
-
-def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str):
-    """Strip path information from exec plugin commands in a kubeconfig file.
-
-    Args:
-        kubeconfig_path (str): Path to the input kubeconfig file
-        output_path (str): Path where the modified kubeconfig will be saved
-    """
-    with open(kubeconfig_path, 'r', encoding='utf-8') as file:
-        config = yaml.safe_load(file)
-
-    updated = False
-    for user in config.get('users', []):
-        exec_info = user.get('user', {}).get('exec', {})
-        current_command = exec_info.get('command', '')
-
-        if current_command:
-            # Strip the path and keep only the executable name
-            executable = os.path.basename(current_command)
-            if executable != current_command:
-                exec_info['command'] = executable
-                updated = True
-
-    if updated:
-        with open(output_path, 'w', encoding='utf-8') as file:
-            yaml.safe_dump(config, file)
-        print('Kubeconfig updated with path-less exec auth. '
-              f'Saved to {output_path}')
-    else:
-        print('No updates made. No exec-based auth commands paths found.')
+from sky.provision.kubernetes import utils as kubernetes_utils
 
 
 def main():
@@ -66,7 +46,18 @@ def main():
         help='Output kubeconfig file path (default: %(default)s)')
 
     args = parser.parse_args()
-    strip_auth_plugin_paths(args.input, args.output)
+
+    with open(args.input, 'r', encoding='utf-8') as file:
+        config = yaml.safe_load(file)
+
+    updated = kubernetes_utils.format_kubeconfig_exec_auth(
+        config, args.output, False)
+
+    if updated:
+        print('Kubeconfig updated with path-less exec auth. '
+              f'Saved to {args.output}')
+    else:
+        print('No updates made.')
 
 
 if __name__ == '__main__':

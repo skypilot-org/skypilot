@@ -1,4 +1,4 @@
-name: Dashboard Linting and Formatting
+name: Dashboard Testing and Formatting
 
 on:
   # Trigger the workflow on push or pull request,
@@ -23,3 +23,4 @@ jobs:
         npm --prefix sky/dashboard install
         npm --prefix sky/dashboard run lint
         npm --prefix sky/dashboard run format:check
+        npm --prefix sky/dashboard run build

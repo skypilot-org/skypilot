@@ -19,6 +19,7 @@ export const getStatusStyle = (status) => {
     case 'LAUNCHING':
       return 'bg-blue-100 text-sky-blue';
     case 'RUNNING':
+    case 'IN_USE':
       return 'bg-green-50 text-green-700';
     case 'STOPPED':
       return 'bg-yellow-100 text-yellow-800';
@@ -27,7 +28,7 @@ export const getStatusStyle = (status) => {
 
     // Job specific statuses
     case 'PENDING':
-      return 'bg-yellow-50 text-yellow-700';
+      return 'bg-gray-100 text-gray-800';
     case 'SUCCEEDED':
       return 'bg-blue-50 text-blue-700';
     case 'FAILED':
@@ -51,6 +52,38 @@ export const getStatusStyle = (status) => {
     case 'FAILED_CONTROLLER':
       return 'bg-red-50 text-red-700';
 
+    // Serve specific statuses - ReplicaStatus
+    case 'READY':
+      return 'bg-green-50 text-green-700';
+    case 'PROVISIONING':
+      return 'bg-blue-50 text-blue-700';
+    case 'NOT_READY':
+      return 'bg-yellow-50 text-yellow-700';
+    case 'SHUTTING_DOWN':
+      return 'bg-orange-50 text-orange-700';
+    case 'FAILED_INITIAL_DELAY':
+      return 'bg-red-50 text-red-700';
+    case 'FAILED_PROBING':
+      return 'bg-red-50 text-red-700';
+    case 'FAILED_PROVISION':
+      return 'bg-red-50 text-red-700';
+    case 'FAILED_CLEANUP':
+      return 'bg-red-50 text-red-700';
+    case 'PREEMPTED':
+      return 'bg-purple-50 text-purple-700';
+    case 'UNKNOWN':
+      return 'bg-gray-100 text-gray-800';
+
+    // Serve specific statuses - ServiceStatus
+    case 'CONTROLLER_INIT':
+      return 'bg-blue-50 text-blue-700';
+    case 'REPLICA_INIT':
+      return 'bg-blue-50 text-blue-700';
+    case 'CONTROLLER_FAILED':
+      return 'bg-red-50 text-red-700';
+    case 'NO_REPLICA':
+      return 'bg-purple-50 text-purple-700';
+
     default:
       return 'bg-gray-100 text-gray-800';
   }
@@ -63,6 +96,7 @@ export const getStatusIcon = (status) => {
     case 'STARTING':
       return <CircularProgress size={12} className="w-3 h-3 mr-1" />;
     case 'RUNNING':
+    case 'IN_USE':
       return <FilledCircleIcon className="w-3 h-3 mr-1" />;
     case 'STOPPED':
       return <PauseIcon className="w-3 h-3 mr-1" />;
@@ -80,7 +114,24 @@ export const getStatusIcon = (status) => {
     case 'FAILED_PRECHECKS':
     case 'FAILED_NO_RESOURCE':
     case 'FAILED_CONTROLLER':
+    case 'READY':
+    case 'NOT_READY':
+    case 'CONTROLLER_INIT':
+    case 'REPLICA_INIT':
+    case 'NO_REPLICA':
       return <CircleIcon className="w-3 h-3 mr-1" />;
+    case 'PROVISIONING':
+    case 'SHUTTING_DOWN':
+      return <CircularProgress size={12} className="w-3 h-3 mr-1" />;
+    case 'FAILED_INITIAL_DELAY':
+    case 'FAILED_PROBING':
+    case 'FAILED_PROVISION':
+    case 'FAILED_CLEANUP':
+    case 'CONTROLLER_FAILED':
+    case 'UNKNOWN':
+      return <SquareIcon className="w-3 h-3 mr-1" />;
+    case 'PREEMPTED':
+      return <PauseIcon className="w-3 h-3 mr-1" />;
     default:
       return <FilledCircleIcon className="w-3 h-3 mr-1" />;
   }

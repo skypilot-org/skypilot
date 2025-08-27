@@ -9,11 +9,12 @@ on:
 jobs:
   extract-version:
     runs-on: ubuntu-latest
+    if: startsWith(github.head_ref, 'test_releases/')
     outputs:
       version: ${{ steps.extract_version.outputs.version }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.base_ref }}
 
@@ -25,13 +26,13 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version extracted: $VERSION"
 
-  publish-to-pypi:
+  build-package:
     needs: extract-version
-    if: github.event.pull_request.merged == true
+    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'test_releases/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.base_ref }}
 
@@ -72,52 +73,71 @@ jobs:
           --outdir dist/
           .
 
-      - name: Publish distribution to Test PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
         with:
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
+          name: skypilot-artifacts-skypilot
+          path: dist/
 
-      - name: Publish distribution to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          skip-existing: true
-
-      - name: Validate published package
-        run: |
-          # Wait a moment for package to be available
-          sleep 30
-          # Install skypilot from Test PyPI with fallback to PyPI for dependencies
-          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot
-          # Verify installation
-          sky -v
-          sky -c
-          # Verify version
-          EXPECTED_VERSION="${{ needs.extract-version.outputs.version }}"
-          INSTALLED_VERSION=$(pip show skypilot | grep Version | awk '{print $2}')
-          echo "Expected version: $EXPECTED_VERSION, Installed version: $INSTALLED_VERSION"
-          if [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
-            echo "Version mismatch!"
-            exit 1
-          fi
-          echo "Version verified successfully!"
-
-  trigger-docker-build:
-    needs: [extract-version, publish-to-pypi]
-    uses: ./.github/workflows/docker-build.yaml
+  publish-and-validate-test-pypi:
+    needs: [extract-version, build-package]
+    uses: ./.github/workflows/publish-and-validate.yml
     with:
-      package_name: 'skypilot'
+      package_name: skypilot
+      expected_version: ${{ needs.extract-version.outputs.version }}
+      repository_type: 'test-pypi'
     secrets: inherit
 
-  cleanup-branches:
-    needs: extract-version
-    if: github.event.pull_request.merged == false
+  publish-and-validate-pypi:
+    needs: [extract-version, publish-and-validate-test-pypi]
+    uses: ./.github/workflows/publish-and-validate.yml
+    with:
+      package_name: skypilot
+      expected_version: ${{ needs.extract-version.outputs.version }}
+      repository_type: 'pypi'
+    secrets: inherit
+
+  trigger-helm-release:
+    needs: [publish-and-validate-pypi]
+    uses: ./.github/workflows/helm-docker-release.yaml
+    with:
+      package_name: skypilot
+    secrets: inherit
+
+  create-release:
+    needs: [extract-version, publish-and-validate-pypi]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT_FOR_RELEASE }}
+
+      - name: Create and push tag
+        run: |
+          VERSION="${{ needs.extract-version.outputs.version }}"
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Release v${{ needs.extract-version.outputs.version }}"
+          tag_name: "v${{ needs.extract-version.outputs.version }}"
+          generate_release_notes: true
+          draft: true
+          token: ${{ secrets.GH_PAT_FOR_RELEASE }}
+
+  cleanup-branches:
+    needs: extract-version
+    if: github.event.pull_request.merged == false && startsWith(github.head_ref, 'test_releases/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}

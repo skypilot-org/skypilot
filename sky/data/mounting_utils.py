@@ -39,19 +39,32 @@ _GOOFYS_WRAPPER = ('$(if [ -S /dev/log ] ; then '
 
 
 def get_s3_mount_install_cmd() -> str:
-    """Returns a command to install S3 mount utility goofys."""
+    """Returns command for basic S3 mounting (goofys by default, rclone for
+    ARM64)."""
     # TODO(aylei): maintain our goofys fork under skypilot-org
-    install_cmd = ('ARCH=$(uname -m) && '
-                   'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-                   '  echo "goofys is not supported on $ARCH" && '
-                   f'  exit {exceptions.ARCH_NOT_SUPPORTED_EXIT_CODE}; '
-                   'else '
-                   '  ARCH_SUFFIX="amd64"; '
-                   'fi && '
-                   'sudo wget -nc https://github.com/aylei/goofys/'
-                   'releases/download/0.24.0-aylei-upstream/goofys '
-                   '-O /usr/local/bin/goofys && '
-                   'sudo chmod 755 /usr/local/bin/goofys')
+    install_cmd = (
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        # Use rclone for ARM64 since goofys doesn't support it
+        # Extract core rclone installation logic without redundant ARCH check
+        '  ARCH_SUFFIX="arm" && '
+        f'  (which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || '
+        f'(cd ~ > /dev/null && curl -O https://downloads.rclone.org/'
+        f'{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb '
+        f'&& sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb '
+        f'&& rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb))) || '
+        f'(which rclone > /dev/null || (cd ~ > /dev/null && curl -O '
+        f'https://downloads.rclone.org/{RCLONE_VERSION}/'
+        f'rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm && '
+        f'sudo yum --nogpgcheck install '
+        f'rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y && '
+        f'rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm)); '
+        'else '
+        '  sudo wget -nc https://github.com/aylei/goofys/'
+        'releases/download/0.24.0-aylei-upstream/goofys '
+        '-O /usr/local/bin/goofys && '
+        'sudo chmod 755 /usr/local/bin/goofys; '
+        'fi')
     return install_cmd
 
 
@@ -59,15 +72,30 @@ def get_s3_mount_install_cmd() -> str:
 def get_s3_mount_cmd(bucket_name: str,
                      mount_path: str,
                      _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to mount an S3 bucket using goofys."""
+    """Returns a command to mount an S3 bucket (goofys by default, rclone for
+    ARM64)"""
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
-    mount_cmd = (f'{_GOOFYS_WRAPPER} -o allow_other '
-                 f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                 f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    # Use rclone for ARM64 architectures since goofys doesn't support them
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        '--daemon --allow-other')
+    goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
     return mount_cmd
 
 
@@ -76,17 +104,33 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
                          endpoint_url: str,
                          mount_path: str,
                          _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to install Nebius mount utility goofys."""
+    """Returns a command to mount Nebius bucket (goofys by default, rclone for
+    ARM64)."""
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
-    mount_cmd = (f'AWS_PROFILE={nebius_profile_name} {_GOOFYS_WRAPPER} '
-                 '-o allow_other '
-                 f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                 f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'--endpoint {endpoint_url} '
-                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    # Use rclone for ARM64 architectures since goofys doesn't support them
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'AWS_PROFILE={nebius_profile_name} '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
+    goofys_mount = (f'AWS_PROFILE={nebius_profile_name} {_GOOFYS_WRAPPER} '
+                    '-o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'--endpoint {endpoint_url} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
     return mount_cmd
 
 
@@ -194,9 +238,16 @@ def get_az_mount_cmd(container_name: str,
         bucket_sub_path_arg = ''
     else:
         bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
-    mount_options = '-o allow_other -o default_permissions'
+    mount_options = ['allow_other', 'default_permissions']
+    # Format: -o flag1,flag2
+    fusermount_options = '-o ' + ','.join(
+        mount_options) if mount_options else ''
+    # Format: -o flag1 -o flag2
+    blobfuse2_options = ' '.join(
+        f'-o {opt}' for opt in mount_options) if mount_options else ''
     # TODO(zpoint): clear old cache that has been created in the previous boot.
-    blobfuse2_cmd = ('blobfuse2 --no-symlinks -o umask=022 '
+    # Do not set umask to avoid permission problems for non-root users.
+    blobfuse2_cmd = ('blobfuse2 --no-symlinks '
                      f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
                      f'{bucket_sub_path_arg}'
                      f'--container-name {container_name}')
@@ -205,9 +256,12 @@ def get_az_mount_cmd(container_name: str,
     # blobfuse2 only get the mounted fd.
     # 2. {} is the mount point placeholder that will be replaced with the
     # mounted fd by fusermount-wrapper.
-    wrapped = (f'fusermount-wrapper -m {mount_path} {mount_options} '
-               f'-- {blobfuse2_cmd} -o nonempty {{}}')
-    original = f'{blobfuse2_cmd} {mount_options} {mount_path}'
+    # 3. set --foreground to workaround lock confliction of multiple blobfuse2
+    # daemon processes (#5307) and use -d to daemonsize blobfuse2 in
+    # fusermount-wrapper.
+    wrapped = (f'fusermount-wrapper -d -m {mount_path} {fusermount_options} '
+               f'-- {blobfuse2_cmd} -o nonempty --foreground {{}}')
+    original = f'{blobfuse2_cmd} {blobfuse2_options} {mount_path}'
     # If fusermount-wrapper is available, use it to wrap the blobfuse2 command
     # to avoid requiring root privilege.
     # TODO(aylei): feeling hacky, refactor this.
@@ -226,18 +280,35 @@ def get_r2_mount_cmd(r2_credentials_path: str,
                      bucket_name: str,
                      mount_path: str,
                      _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to install R2 mount utility goofys."""
+    """Returns a command to mount R2 bucket (goofys by default, rclone for
+    ARM64)."""
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
-    mount_cmd = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
-                 f'AWS_PROFILE={r2_profile_name} {_GOOFYS_WRAPPER} '
-                 '-o allow_other '
-                 f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                 f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'--endpoint {endpoint_url} '
-                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    # Use rclone for ARM64 architectures since goofys doesn't support them
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
+        f'AWS_PROFILE={r2_profile_name} '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
+    goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
+                    f'AWS_PROFILE={r2_profile_name} {_GOOFYS_WRAPPER} '
+                    '-o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'--endpoint {endpoint_url} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
     return mount_cmd
 
 

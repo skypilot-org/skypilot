@@ -3,20 +3,14 @@ import copy
 import logging
 import math
 import os
-import typing
 from typing import Any, Dict, Optional, Union
 
-from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
-
-if typing.TYPE_CHECKING:
-    import yaml
-else:
-    yaml = adaptors_common.LazyImport('yaml')
+from sky.utils import yaml_utils
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +29,7 @@ def bootstrap_instances(
     _configure_services(namespace, context, config.provider_config)
 
     networking_mode = network_utils.get_networking_mode(
-        config.provider_config.get('networking_mode'))
+        config.provider_config.get('networking_mode'), context)
     if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         config = _configure_ssh_jump(namespace, context, config)
 
@@ -592,7 +586,7 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     daemonset_path = os.path.join(
         root_dir, 'kubernetes/manifests/fusermount-server-daemonset.yaml')
     with open(daemonset_path, 'r', encoding='utf-8') as file:
-        daemonset = yaml.safe_load(file)
+        daemonset = yaml_utils.safe_load(file)
     kubernetes_utils.merge_custom_metadata(daemonset['metadata'])
     try:
         kubernetes.apps_api(context).create_namespaced_daemon_set(
