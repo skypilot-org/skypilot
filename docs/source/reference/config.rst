@@ -30,7 +30,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
     :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 24
-    :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 168
+    :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
