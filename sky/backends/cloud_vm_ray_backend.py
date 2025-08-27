@@ -621,7 +621,7 @@ class RayCodeGen:
                             placement_group_bundle_index=i)
                     ) \\
                     .remote(
-                        setup_cmd,
+                        setup_cmd + " && echo 'Setup complete'",
                         os.path.expanduser({setup_log_path!r}),
                         env_vars={setup_envs!r},
                         stream_logs=True,

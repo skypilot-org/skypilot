@@ -997,7 +997,8 @@ def cancel(
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool = True,
-              tail: int = 0) -> int:
+              tail: int = 0,
+              setup_spinner: bool = False) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tails the logs of a job.
 
@@ -1030,7 +1031,7 @@ def tail_logs(cluster_name: str,
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     # Although tail_logs returns an int when require_outputs=False (default),
     # we need to check returnval as an int to avoid type checking errors.
-    returnval = backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    returnval = backend.tail_logs(handle, job_id, follow=follow, tail=tail, setup_spinner=setup_spinner)
     assert isinstance(returnval,
                       int), (f'returnval must be an int, but got {returnval}')
     return returnval

@@ -17,6 +17,8 @@ import textwrap
 import threading
 import time
 import re
+import fcntl
+import select
 from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
                     Tuple, Union)
 
@@ -383,7 +385,8 @@ def run_bash_command_with_log_and_return_pid(
 def _follow_job_logs(file,
                      job_id: int,
                      start_streaming: bool,
-                     start_streaming_at: str = '') -> Iterator[str]:
+                     start_streaming_at: str = '',
+                     sleep_sec : Optional[int] = None) -> Iterator[str]:
     """Yield each line from a file as they are written.
 
     `sleep_sec` is the time to sleep after empty reads. """
@@ -463,7 +466,7 @@ def _should_stream_the_whole_tail_lines(head_lines_of_log_file: List[str],
     # lines, we should not stream the whole tail lines.
     return False
 
-def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool, start_streaming_at: str) -> bool:
+def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool, start_streaming_at: str, cluster_name: Optional[str]) -> bool:
     """Watch the setup logs and print logs with a spinner during setup."""
 
     # The logic of this function is complicated by the fact that during 
@@ -480,6 +483,9 @@ def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool, start_s
     def parse_setup_line(line: str) -> Tuple[str, str]:
         # Attempt to match the two patterns. Return all None if failed, but
         # don't error out in case it's just a version change.
+        # Remove all ANSI escape codes.
+        line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line)
+        print(f"Lloyd: parse_setup_line called with line: {line}")
         match = re.match(setup_line_pattern_one, line)
         if match:
             pid = match.group(1)
@@ -500,18 +506,36 @@ def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool, start_s
     def is_setup_complete(line: str) -> bool:
         return "Setup complete" in line
 
-    carry_over_line = None
-    # Step 1: parse until we see the first setup log.
-    # Get output from follow_job_logs
-    for line in _follow_job_logs(log_file,
+    iterator = _follow_job_logs(log_file,
                                 job_id=job_id,
                                 start_streaming=start_streaming,
-                                start_streaming_at=start_streaming_at):
-        if is_setup_line(line):
-            carry_over_line = line
-            break
+                                start_streaming_at=start_streaming_at)
+
+    def get_next_non_blocking() -> Optional[str]:
+        fd = log_file.fileno()
+        ready, _, _ = select.select([fd], [], [], 1.0)  # timeout = 0 means non-blocking
+        if ready:
+            # Call the iterator to get the next line
+            return next(iterator)
         else:
-            print(line, end='', flush=True)
+            return None
+
+    # Step 1: parse until we see the first setup log.
+    # Get output from follow_job_logs
+    line = next(iterator)
+    while not is_setup_line(line):
+        print(line, end='', flush=True)
+        line = next(iterator)
+
+    # for line in _follow_job_logs(log_file,
+    #                             job_id=job_id,
+    #                             start_streaming=start_streaming,
+    #                             start_streaming_at=start_streaming_at):
+    #     if is_setup_line(line):
+    #         carry_over_line = line
+    #         break
+    #     else:
+    #         print(line, end='', flush=True)
     
     # Step 2: parse using a spinner until setup is complete.
     setup_timeout = 3
@@ -536,25 +560,33 @@ def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool, start_s
         for i in range(len(uncompleted_pids)):
             pid = uncompleted_pids[i]
             indent_symbol = ux_utils.INDENT_SYMBOL if i != len(uncompleted_pids) - 1 else ux_utils.INDENT_SYMBOL_LAST
-            str += f"\n{indent_symbol} Worker: {pid} may have stalled, check logs with: sky logs lloyd-test 1 --no-follow | grep pid={pid}"
+            if cluster_name is not None:
+                str += f"\n{indent_symbol} Worker: {pid} may have stalled, check logs with: sky logs {cluster_name} {job_id} --no-follow | grep pid={pid}"
+            else:
+                str += f"\n{indent_symbol} Worker: {pid} may have stalled, check logs with: sky logs {job_id} --no-follow | grep pid={pid}"
         return str
 
+    setup_start_time = time.time()
     with rich_utils.safe_status(
             ux_utils.spinner_message(
             f'Job setup in progress')):
-        if carry_over_line is not None:
-            pid, ip, message = parse_setup_line(carry_over_line)
-            if pid == None or message == None:
+        while True:
+            if line:
+                print(f"Lloyd: line: {line}")
+                pid, _, message = parse_setup_line(line)
+                if pid and message:
+                    update_pids(line)
+                print(line, end='', flush=True)
+                if len(pids) == len(completed_pids) and len(completed_pids) > 0:
+                    break
+            else:
+                print(f"No line")
+            if time.time() - setup_start_time > setup_timeout:
+                rich_utils.force_update_status(
+                    ux_utils.spinner_message(
+                    resolve_str()))
+            line = get_next_non_blocking()
 
-            print(f'Lloyd: pid: {pid}, ip: {ip}, message: {message}')
-            print(line, end='', flush=True)
-        for line in _follow_job_logs(log_file,
-                                    job_id=job_id,
-                                    start_streaming=start_streaming,
-                                    start_streaming_at=start_streaming_at):
-            pid, ip, message = parse_setup_line(line)
-            print(f'Lloyd: pid: {pid}, ip: {ip}, message: {message}')
-            print(line, end='', flush=True)
 
     for line in _follow_job_logs(log_file,
                                 job_id=job_id,
@@ -567,7 +599,8 @@ def tail_logs(job_id: Optional[int],
               managed_job_id: Optional[int] = None,
               follow: bool = True,
               tail: int = 0,
-              setup_spinner: bool = True) -> None:
+              setup_spinner: bool = False,
+              cluster_name: Optional[str] = None) -> None:
     """Tail the logs of a job.
 
     Args:
@@ -646,7 +679,7 @@ def tail_logs(job_id: Optional[int],
             # Now, the cursor is at the end of the last lines
             # if tail > 0
             if setup_spinner:
-                _setup_watcher(log_file, job_id, start_streaming, start_stream_at)
+                _setup_watcher(log_file, job_id, start_streaming, start_stream_at, cluster_name)
             else:
                 for line in _follow_job_logs(log_file,
                                             job_id=job_id,

@@ -1246,7 +1246,9 @@ class JobLibCodeGen:
                   job_id: Optional[int],
                   managed_job_id: Optional[int],
                   follow: bool = True,
-                  tail: int = 0) -> str:
+                  tail: int = 0,
+                  setup_spinner: bool = False,
+                  cluster_name: Optional[str] = None) -> str:
         # pylint: disable=line-too-long
 
         code = [
@@ -1263,7 +1265,7 @@ class JobLibCodeGen:
              f'  log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)'
             ),
             # Add a newline to leave the if indent block above.
-            f'\ntail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}}}',
+            f'\ntail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}, "setup_spinner": {setup_spinner}, "cluster_name": {cluster_name!r}}}',
             f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 1: tail_log_kwargs["tail"] = {tail}',
             f'{_LINUX_NEW_LINE}log_lib.tail_logs(**tail_log_kwargs)',
             # After tailing, check the job status and exit with appropriate code

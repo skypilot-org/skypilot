@@ -828,7 +828,8 @@ def tail_logs(
         tail: int = 0,
         output_stream: Optional['io.TextIOBase'] = None,
         *,  # keyword only separator
-        preload_content: Literal[True] = True) -> int:
+        preload_content: Literal[True] = True,
+        setup_spinner: bool = False) -> int:
     ...
 
 
@@ -839,7 +840,8 @@ def tail_logs(cluster_name: str,
               tail: int = 0,
               output_stream: None = None,
               *,
-              preload_content: Literal[False]) -> Iterator[Optional[str]]:
+              preload_content: Literal[False],
+              setup_spinner: bool = False) -> Iterator[Optional[str]]:
     ...
 
 
@@ -856,7 +858,8 @@ def tail_logs(
     tail: int = 0,
     output_stream: Optional['io.TextIOBase'] = None,
     *,  # keyword only separator
-    preload_content: bool = True
+    preload_content: bool = True,
+    setup_spinner: bool = False
 ) -> Union[int, Iterator[Optional[str]]]:
     """Tails the logs of a job.
 
@@ -903,6 +906,7 @@ def tail_logs(
         job_id=job_id,
         follow=follow,
         tail=tail,
+        setup_spinner=setup_spinner
     )
     response = server_common.make_authenticated_request(
         'POST',
