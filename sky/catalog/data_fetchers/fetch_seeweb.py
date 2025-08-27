@@ -291,16 +291,9 @@ def main() -> None:
     else:
         api_key = get_api_key(args.api_key_path)
 
-    # TODOPR: Before PR, change back to 'seeweb' directory
-    # os.makedirs('seeweb', exist_ok=True)
-    # create_catalog(api_key, 'seeweb/vms.csv')
-    # print('Seeweb Service Catalog saved to seeweb/vms.csv')
-
-    # Temporary: Save to SkyPilot local catalog directory for testing
-    catalog_dir = os.path.expanduser('~/.sky/catalogs/v7/seeweb')
-    os.makedirs(catalog_dir, exist_ok=True)
-    create_catalog(api_key, os.path.join(catalog_dir, 'vms.csv'))
-    print(f'Seeweb Service Catalog saved to {catalog_dir}/vms.csv')
+    os.makedirs('seeweb', exist_ok=True)
+    create_catalog(api_key, 'seeweb/vms.csv')
+    print('Seeweb Service Catalog saved to seeweb/vms.csv')
 
 
 if __name__ == '__main__':

@@ -19,9 +19,6 @@ if typing.TYPE_CHECKING:
 _PULL_FREQUENCY_HOURS = 8
 _df = common.read_catalog('seeweb/vms.csv',
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
-# _df = common.read_catalog('seeweb/vms.csv',
-# pull_frequency_hours=_PULL_FREQUENCY_HOURS)
-# prima della pull request togliere TODOPR
 
 
 def instance_type_exists(instance_type: str) -> bool:
