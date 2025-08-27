@@ -53,7 +53,7 @@ _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24.0
-DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 7 * 24.0
+DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
@@ -832,7 +832,7 @@ async def cluster_event_retention_daemon():
             ('api_server', 'cluster_event_retention_hours'),
             DEFAULT_CLUSTER_EVENT_RETENTION_HOURS)
         debug_retention_hours = skypilot_config.get_nested(
-            ('api_server', 'cluster_event_retention_hours_debug'),
+            ('api_server', 'cluster_debug_event_retention_hours'),
             DEBUG_CLUSTER_EVENT_RETENTION_HOURS)
         try:
             if retention_hours >= 0:

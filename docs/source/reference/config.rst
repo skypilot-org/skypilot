@@ -255,23 +255,23 @@ Example:
   api_server:
     cluster_event_retention_hours: -1 # Disable all cluster event GC
   
-.. _config-yaml-api-server-cluster-event-retention-hours-debug:
+.. _config-yaml-api-server-cluster-debug-event-retention-hours:
 
-``api_server.cluster_event_retention_hours_debug``
+``api_server.cluster_debug_event_retention_hours``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Retention period for cluster events in hours (optional). Set to a negative value to disable cluster event GC.
 
 Cluster event GC will remove debug cluster event entries in `sky status -v`, i.e., the logs and status of the cluster events.
 
-Default: ``168.0`` (7 days).
+Default: ``720.0`` (30 days).
 
 Example:
 
 .. code-block:: yaml
 
   api_server:
-    cluster_event_retention_hours_debug: -1 # Disable all cluster event GC
+    cluster_debug_event_retention_hours: -1 # Disable all cluster event GC
 
 .. _config-yaml-jobs:
 
