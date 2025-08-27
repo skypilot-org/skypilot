@@ -417,16 +417,12 @@ def get_cluster_info(
                     if '@' in ssh_conn_str:
                         head_ssh_user = ssh_conn_str.split('@', 1)[0].strip()
             except (AttributeError, TypeError, IndexError) as e:
-                logger.warning(
-                    f'Failed to extract SSH user from connection '
-                    f'{ssh_connection}: {e}'
-                )
+                logger.warning('Failed to extract SSH user from connection '
+                               f'{ssh_connection}: {e}')
 
             if head_ssh_user is None:
                 head_ssh_user = 'ubuntu'
-                logger.warning(
-                    f'Using ubuntu as fallback.'
-                )
+                logger.warning('Using ubuntu as fallback.')
 
     return common.ClusterInfo(
         instances=instances,
