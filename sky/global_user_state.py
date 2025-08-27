@@ -939,7 +939,8 @@ def remove_cluster(cluster_name: str, terminate: bool,
             # retention daemon handle them.
             session.query(cluster_event_table).filter(
                 cluster_event_table.c.cluster_hash == cluster_hash,
-                cluster_event_table.c.type != ClusterEventType.DEBUG.value).delete()
+                cluster_event_table.c.type !=
+                ClusterEventType.DEBUG.value).delete()
         else:
             handle = get_handle_from_cluster_name(cluster_name)
             if handle is None:
