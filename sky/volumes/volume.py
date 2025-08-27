@@ -131,7 +131,7 @@ class Volume:
 
         valid, err_msg = cloud_obj.is_volume_name_valid(self.name)
         if not valid:
-            raise ValueError(f'{err_msg}')
+            raise ValueError(f'Invalid volume name: {err_msg}')
 
         if not self.resource_name and not self.size:
             raise ValueError('Size is required for new volumes. '
