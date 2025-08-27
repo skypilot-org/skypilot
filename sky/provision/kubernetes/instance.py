@@ -1293,6 +1293,8 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
     last_scheduled_node = None
     insert_new_pod_event = True
     new_event_inserted = False
+    inserted_pod_events = 0
+
     for event in pod_events:
         if event.reason == 'Scheduled':
             pattern = r'Successfully assigned (\S+) to (\S+)'
@@ -1317,6 +1319,11 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                 insert_new_pod_event = False
             else:
                 new_event_inserted = True
+                inserted_pod_events += 1
+
+    logger.debug(f'[pod {pod_name}] processed {len(pod_events)} pod events and '
+                 f'inserted {inserted_pod_events} new pod events '
+                 'previously unseen')
 
     if last_scheduled_node is not None:
         node_field_selector = ('involvedObject.kind=Node,'
@@ -1331,6 +1338,7 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
             # latest event appears first
             reverse=True)
         insert_new_node_event = True
+        inserted_node_events = 0
         for event in node_events:
             if insert_new_node_event:
                 # Try inserting the latest events first. If the event is a
@@ -1349,6 +1357,15 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                     insert_new_node_event = False
                 else:
                     new_event_inserted = True
+                    inserted_node_events += 1
+
+        logger.debug(f'[pod {pod_name}: node {last_scheduled_node}] '
+                    f'processed {len(node_events)} node events and '
+                    f'inserted {inserted_node_events} new node events '
+                    'previously unseen')
+    else:
+        logger.debug(f'[pod {pod_name}] could not determine the node '
+                     'the pod was scheduled to')
 
     if not new_event_inserted:
         # If new event is not inserted, there is no useful information to
