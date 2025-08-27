@@ -32,7 +32,6 @@ SERVE_VERSION = '001'
 SERVE_LOCK_PATH = '~/.sky/locks/.serve_db.lock'
 
 _postgres_engine: Optional[sqlalchemy.engine.Engine] = None
-_sqlite_engine: Optional[sqlalchemy.engine.Engine] = None
 
 
 def get_engine(db_name: str):
@@ -48,9 +47,7 @@ def get_engine(db_name: str):
     else:
         db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
-        if _sqlite_engine is None:
-            _sqlite_engine = sqlalchemy.create_engine('sqlite:///' + db_path)
-        engine = _sqlite_engine
+        engine = sqlalchemy.create_engine('sqlite:///' + db_path)
     return engine
 
 
