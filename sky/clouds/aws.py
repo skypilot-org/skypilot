@@ -933,7 +933,7 @@ class AWS(clouds.Cloud):
         # `aws configure list` as cache key. Different `aws configure list` output
         # can have same aws identity, our assumption is the output would be stable
         # in real world, so the number of cache files would be limited.
-        # TODO(aylei): consider using a more stable cache key and evalute eviction.
+        # TODO(aylei): consider using a more stable cache key and evaluate eviction.
         cache_path = catalog_common.get_catalog_path(
             f'aws/.cache/user-identity-{config_hash}.txt')
         if os.path.exists(cache_path):
