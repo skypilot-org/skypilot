@@ -225,10 +225,10 @@ def tail_logs(service_name: str,
     request_id: server_common.RequestId[None] = server_common.get_request_id(
         response)
     sdk.stream_response(request_id=request_id,
-                               response=response,
-                               output_stream=output_stream,
-                               resumable=True,
-                               get_result=follow)
+                        response=response,
+                        output_stream=output_stream,
+                        resumable=True,
+                        get_result=follow)
 
 
 def sync_down_logs(service_name: str,
