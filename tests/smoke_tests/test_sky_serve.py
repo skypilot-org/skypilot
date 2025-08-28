@@ -338,7 +338,7 @@ def test_skyserve_oci_http():
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
@@ -355,7 +355,7 @@ def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
             's=$(python tests/skyserve/llm/get_response.py --endpoint $endpoint '
             f'--prompt {prompt} --auth_token {auth_token}); '
             'echo "$s"; '
-            f'echo "$s" | grep {expected_output}')
+            f'echo "$s" | grep -E {expected_output}')
 
     with open('tests/skyserve/llm/prompt_output.json', 'r',
               encoding='utf-8') as f:
@@ -728,6 +728,8 @@ def test_skyserve_update(generic_cloud: str):
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
         generic_cloud)
     name = _get_service_name()
+    # Nebius takes longer to start instances.
+    replica_check_timeout_seconds = 120 if generic_cloud == 'nebius' else 60
     test = smoke_tests_utils.Test(
         'test-skyserve-update',
         [
@@ -742,9 +744,9 @@ def test_skyserve_update(generic_cloud: str):
             # Make sure the traffic is not mixed
             'curl $endpoint | grep "Hi, new SkyPilot here"',
             # The latest 2 version should be READY and the older versions should be shutting down
-            (_check_replica_in_status(name, [(2, False, 'READY'),
-                                             (2, False, 'SHUTTING_DOWN')],
-                                      timeout_seconds=60) +
+            (_check_replica_in_status(
+                name, [(2, False, 'READY'), (2, False, 'SHUTTING_DOWN')],
+                timeout_seconds=replica_check_timeout_seconds) +
              _check_service_version(name, "2")),
         ],
         _TEARDOWN_SERVICE.format(name=name),
@@ -766,10 +768,12 @@ def test_skyserve_rolling_update(generic_cloud: str):
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
         generic_cloud)
     name = _get_service_name()
+    # Nebius takes longer to start instances.
+    replica_check_timeout_seconds = 120 if generic_cloud == 'nebius' else 60
     single_new_replica = _check_replica_in_status(
         name, [(2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
                (1, False, 'SHUTTING_DOWN')],
-        timeout_seconds=60)
+        timeout_seconds=replica_check_timeout_seconds)
     with smoke_tests_utils.increase_initial_delay_seconds_for_slow_cloud(
             generic_cloud) as increase_initial_delay_seconds:
         test = smoke_tests_utils.Test(
@@ -835,7 +839,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             f'sky serve update {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
             # sleep to wait for update to be registered.
             'sleep 40',
-            # 2 on-deamnd (ready) + 1 on-demand (provisioning).
+            # 2 on-demand (ready) + 1 on-demand (provisioning).
             (
                 _check_replica_in_status(
                     name, [(2, False, 'READY'),
@@ -849,7 +853,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             f'sky serve update {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/bump_version_before.yaml',
             # sleep to wait for update to be registered.
             'sleep 25',
-            # 2 on-deamnd (ready) + 1 on-demand (shutting down).
+            # 2 on-demand (ready) + 1 on-demand (shutting down).
             _check_replica_in_status(name, [(2, False, 'READY'),
                                             (1, False, 'SHUTTING_DOWN')]),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
