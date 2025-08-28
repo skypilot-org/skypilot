@@ -55,6 +55,7 @@ def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
 
     return decorator
 
+
 def clear_request_level_cache():
     """Clear the request-level cache."""
     for func in _FUNCTIONS_NEED_RELOAD_CACHE:
