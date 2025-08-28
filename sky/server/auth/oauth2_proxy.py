@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import http
 import os
+import traceback
 from typing import Optional
 import urllib
 
@@ -109,7 +110,8 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             try:
                 return await self._authenticate(request, call_next, session)
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                logger.error(f'Error communicating with OAuth2 proxy: {e.with_traceback()}')
+                logger.error(f'Error communicating with OAuth2 proxy: {str(e)}'
+                             f'{traceback.format_exc()}')
                 return fastapi.responses.JSONResponse(
                     status_code=http.HTTPStatus.BAD_GATEWAY,
                     content={'detail': 'oauth2-proxy service unavailable'})
@@ -119,8 +121,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         forwarded_headers = dict(request.headers)
         auth_url = f'{self.proxy_base}/oauth2/auth'
         forwarded_headers['X-Forwarded-Uri'] = str(request.url).rstrip('/')
-        logger.debug(f'authenticate request: {request.url.path}')
-        logger.info(f'authenticate request: {request}')
+        logger.info(f'authenticate request: {request.url}')
 
         async with session.request(
                 method=request.method,
