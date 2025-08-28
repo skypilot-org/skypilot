@@ -3,7 +3,7 @@
 SkyPilot Internal Architecture
 ===============================
 
-SkyPilot State Management
+SkyPilot state management
 -------------------------
 
 All SkyPilot internal data is stored in the ``~/.sky/`` directory of the API server (either your local machine or a remote server):
