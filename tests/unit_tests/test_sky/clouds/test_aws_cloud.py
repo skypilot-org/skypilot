@@ -388,8 +388,7 @@ class TestEfaHelpers:
                                                'eu-central-1') == 0
 
     @mock.patch.object(aws_mod, 'aws')
-    def test_get_max_efa_interfaces_profile_not_found_raises(
-            self, mock_aws):
+    def test_get_max_efa_interfaces_profile_not_found_raises(self, mock_aws):
 
         class DummyExceptions:
 
