@@ -121,7 +121,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         forwarded_headers = dict(request.headers)
         auth_url = f'{self.proxy_base}/oauth2/auth'
         forwarded_headers['X-Forwarded-Uri'] = str(request.url).rstrip('/')
-        logger.info(f'authenticate request: {request.url}')
+        logger.info(f'authenticate request, auth_url: {auth_url}, headers: {forwarded_headers}')
 
         async with session.request(
                 method=request.method,
