@@ -2027,9 +2027,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             'Cluster has no YAML file. Removing the cluster from cache.',
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
-        global_user_state.remove_cluster(cluster_name,
-                                         terminate=True,
-                                         remove_events=True)
+        global_user_state.remove_cluster(cluster_name, terminate=True)
         logger.debug(f'Cluster {cluster_name!r} has no YAML file. '
                      'Removing the cluster from cache.')
         return None
