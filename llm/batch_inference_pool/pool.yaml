@@ -1,0 +1,46 @@
+envs:
+  MODEL_NAME: NousResearch/Meta-Llama-3-8B-Instruct
+
+resources:
+  accelerators: {L4, A10G, L40S, A10, A100, H100}
+
+workdir: .
+
+file_mounts:
+  /output:
+    name: ${EMBEDDINGS_BUCKET_NAME}
+    mode: MOUNT
+
+setup: |
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
+
+  # Install fschat and accelerate for chat completion
+  git clone https://github.com/vllm-project/vllm.git || true
+  uv pip install "vllm>=0.8.3"
+  uv pip install numpy pandas requests tqdm datasets nltk
+  uv pip install torch torchvision aiohttp
+  uv pip install hf_transfer pyarrow
+
+  echo 'Starting vllm api server...'
+  # Use setsid to start vllm in a new session, completely detached from parent,
+  # so that it is not killed by setup completion.
+  setsid bash -c "vllm serve $MODEL_NAME --dtype auto > ./vllm.log 2>&1" > /dev/null 2>&1 &
+  sleep 2  # Give it a moment to start
+  echo "vLLM server started in detached session"
+
+  # Wait for vLLM service to be ready by checking the health endpoint
+  echo "Waiting for vLLM service to be ready..."
+  while ! curl -s http://localhost:8000/health > /dev/null; do
+    sleep 5
+    echo "Still waiting for vLLM service..."
+  done
+  echo "vLLM service is ready!"
+  
+
+
+pool:
+  workers: 2
+
+envs:
+  EMBEDDINGS_BUCKET_NAME: sky-text-embeddings-pool

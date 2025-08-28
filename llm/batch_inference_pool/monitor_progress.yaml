@@ -1,0 +1,29 @@
+name: batch-inference-monitor-progress
+
+workdir: .
+
+resources:
+  cpus: 2
+  memory: 8+
+  infra: aws
+  ports:
+    - 8000
+
+envs:
+  # make sure this is the same as the source in compute_vectors.yaml
+  EMBEDDINGS_BUCKET_NAME: sky-text-embeddings 
+
+file_mounts:
+  /output:
+    name: ${EMBEDDINGS_BUCKET_NAME}
+    # this needs to be the same as the source in compute_vectors.yaml
+    mode: MOUNT
+    store: s3
+
+
+setup: |
+  pip install fastapi uvicorn aiofiles
+  pip install pandas pyarrow plotly
+
+run: |
+  python scripts/monitor_progress.py --metrics-dir /output/metrics 
