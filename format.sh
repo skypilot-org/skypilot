@@ -22,21 +22,13 @@ ROOT="$(git rev-parse --show-toplevel)"
 builtin cd "$ROOT" || exit 1
 
 # Check if the environment used is created with uv
-IS_UV_ENV=false
-if [ -x "$(command -v uv)" ]; then
-  echo "Checking if it's a uv environment"
-  CUR_ENV=$(python -c 'import sys; print(sys.prefix)')
-  # check if pyvenv.cfg exists in the environment
-  if [[ -f "$CUR_ENV/pyvenv.cfg" ]]; then
-    IS_UV_ENV=$(cat $CUR_ENV/pyvenv.cfg |  grep -q -E 'uv = .+' && echo true || echo false)
-  fi
-fi
 PIP_CMD="pip"
-if [[ "$IS_UV_ENV" == true ]]; then
+if [ -x "$(command -v uv)" ]; then
   tput setaf 3
-  echo "This is a uv environment: 'uv pip list' will be used to check the versions of the tools instead of 'pip list'"
+  echo "uv is installed: 'uv pip list' will be used to check the versions of the tools instead of 'pip list'"
   tput sgr0
   PIP_CMD="uv pip"
+
 fi
 
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
