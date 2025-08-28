@@ -6,6 +6,7 @@ resources:
   infra: aws
   instance_type: p4d.24xlarge
   image_id: docker:public.ecr.aws/hpc-cloud/nccl-tests:latest
+  network_tier: best
 
 num_nodes: 2
 

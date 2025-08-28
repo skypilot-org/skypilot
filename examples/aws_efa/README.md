@@ -178,14 +178,12 @@ EFA provides much higher throughput than the traditional TCP transport. Enabling
 
 ## Using EFA on AWS VM
 
-For the instance types listed in the GPU and EFA count mapping table in the [Adding EFA configurations in SkyPilot YAML](#adding-efa-configurations-in-skypilot-yaml) section, the EFA will be enabled automatically when you launch SkyPilot clusters with them.
+For the instance types listed in the GPU and EFA count mapping table in the [Adding EFA configurations in SkyPilot YAML](#adding-efa-configurations-in-skypilot-yaml) section, the EFA can be enabled by setting `resources.network_tier: best` in the task YAML.
 
-> **NOTE:**
-> We can turn off EFA by setting `resources.network_tier: standard` in the task YAML:
-> ```yaml
-> resources:
->   network_tier: standard
-> ```
+```yaml
+resources:
+  network_tier: best
+```
 
 To run the NCCL test with EFA support with AWS VM:
 
@@ -194,3 +192,49 @@ sky launch -c efa efa_vm.yaml
 ```
 
 Check the [`efa_vm.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/efa_vm.yaml) for the complete SkyPilot cluster yaml configurations.
+
+### Benchmark results
+
+We compare the performance with and without EFA using NCCL test reports with the same resources (2x p4d.24xlarge, i.e. 2xA100:8).
+
+The `Speed-up 1 EFA vs 1 ENI` column is calculated by `busbw with 1 EFA Interface (GB/s) / busbw Non-EFA with 1 Network Interface (GB/s)` and the `Speed-up 4 EFA vs 1 ENI` column is calculated by `busbw with 4 EFA Interfaces (GB/s) / busbw Non-EFA with 1 Network Interface (GB/s)`.
+
+| Message Size | busbw with 4 EFA Interfaces (GB/s) | busbw with 1 EFA Interface (GB/s) | busbw Non-EFA with 1 Network Interface (GB/s) | Speed-up 1 EFA vs 1 ENI | Speed-up 4 EFA vs 1 ENI|
+|--------------|-------------|------------|-----------|----------|----------|
+| 8 B          | 0           | 0          | 0         | -        | -        |
+| 16 B         | 0           | 0          | 0         | -        | -        |
+| 32 B         | 0           | 0          | 0         | -        | -        |
+| 64 B         | 0           | 0          | 0         | -        | -        |
+| 128 B        | 0           | 0          | 0         | -        | -        |
+| 256 B        | 0           | 0          | 0         | -        | -        |
+| 512 B        | 0.01        | 0.01       | 0.01      | 1 x      | 1 x      |
+| 1 KB         | 0.01        | 0.01       | 0.02      | 0.5 x    | 0.5 x    |
+| 2 KB         | 0.02        | 0.02       | 0.03      | 0.6 x    | 0.6 x    |
+| 4 KB         | 0.04        | 0.04       | 0.05      | 0.8 x    | 0.8 x    |
+| 8 KB         | 0.09        | 0.08       | 0.08      | 1.0 x    | 1.1 x    |
+| 16 KB        | 0.16        | 0.15       | 0.10      | 1.5 x    | 1.6 x    |
+| 32 KB        | 0.28        | 0.26       | 0.16      | 1.6 x    | 1.7 x    |
+| 64 KB        | 0.54        | 0.50       | 0.29      | 1.7 x    | 1.8 x    |
+| 128 KB       | 1.07        | 0.81       | 0.45      | 1.8 x    | 2.4 x    |
+| 256 KB       | 2.02        | 1.23       | 0.74      | 1.6 x    | 2.7 x    |
+| 512 KB       | 3.28        | 1.70       | 0.85      | 2.0 x    | 3.8 x    |
+| 1 MB         | 4.97        | 2.34       | 1.52      | 1.5 x    | 3.2 x    |
+| 2 MB         | 6.77        | 2.80       | 2.35      | 1.2 x    | 2.9 x    |
+| 4 MB         | 9.28        | 4.96       | 3.79      | 1.3 x    | 2.4 x    |
+| 8 MB         | 10.99       | 8.21       | 5.37      | 1.5 x    | 2.0 x    |
+| 16 MB        | 19.63       | 11.84      | 6.46      | 1.8 x    | 3.0 x    |
+| 32 MB        | 32.62       | 14.93      | 7.27      | 2.0 x    | 4.5 x    |
+| 64 MB        | 46.11       | 17.27      | 6.83      | 2.5 x    | 6.7 x    |
+| 128 MB       | 57.79       | 18.67      | 7.93      | 2.3 x    | 7.3 x    |
+| 256 MB       | 67.20       | 19.59      | 8.03      | 2.4 x    | 8.3 x    |
+| 512 MB       | 72.90       | 19.99      | 8.14      | 2.4 x    | 8.9 x    |
+| 1 GB         | 76.14       | 20.19      | 8.15      | 2.5 x    | 9.3 x    |
+| 2 GB         | 77.90       | 20.31      | 8.20      | 2.5 x    | 9.5 x    |
+
+From the above benchmark results, we can see that:
+
+- EFA brings little benefit for small messages, but gains grow with message size.
+- Bandwidth scales near-linearly with multiple EFAs, reaching ~78 GB/s with 4 interfaces.
+- On p4d.24xlarge (A100×8), 4 EFAs deliver up to ~9.5× higher bandwidth vs a single ENI.
+
+So EFA is critical for scalable, high-throughput training workloads.

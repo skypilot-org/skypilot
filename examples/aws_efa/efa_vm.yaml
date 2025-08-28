@@ -5,6 +5,7 @@ name: nccl-efa-vm
 resources:
   infra: aws
   instance_type: p4d.24xlarge
+  network_tier: best
 
 num_nodes: 2
 

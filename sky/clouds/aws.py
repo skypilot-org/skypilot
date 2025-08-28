@@ -602,7 +602,7 @@ class AWS(clouds.Cloud):
             acc_dict)
 
         network_tier = (resources.network_tier if resources.network_tier
-                        is not None else resources_utils.NetworkTier.BEST)
+                        is not None else resources_utils.NetworkTier.STANDARD)
         if network_tier == resources_utils.NetworkTier.BEST:
             max_efa_interfaces = _get_max_efa_interfaces(
                 resources.instance_type, region_name)
