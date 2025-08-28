@@ -18,8 +18,7 @@ from sky.utils import common_utils
 from sky.utils import locks
 
 _events = []
-_events_lock = threading.Lock()
-
+_events_file_path = os.environ.get('SKYPILOT_TIMELINE_FILE_PATH')
 
 class Event:
     """Record an event.
@@ -30,6 +29,8 @@ class Event:
     """
 
     def __init__(self, name: str, message: Optional[str] = None):
+        if not _events_file_path:
+            return
         self._name = name
         self._message = message
         # See the module doc for the event format.
@@ -46,6 +47,8 @@ class Event:
             self._event['args'] = {'message': self._message}
 
     def begin(self):
+        if not _events_file_path:
+            return
         event_begin = self._event.copy()
         event_begin.update({
             'ph': 'B',
@@ -54,10 +57,11 @@ class Event:
         event_begin['args'] = {'stack': '\n'.join(traceback.format_stack())}
         if self._message is not None:
             event_begin['args']['message'] = self._message
-        with _events_lock:
-            _events.append(event_begin)
+        _events.append(event_begin)
 
     def end(self):
+        if not _events_file_path:
+            return
         event_end = self._event.copy()
         event_end.update({
             'ph': 'E',
@@ -65,8 +69,7 @@ class Event:
         })
         if self._message is not None:
             event_end['args'] = {'message': self._message}
-        with _events_lock:
-            _events.append(event_end)
+        _events.append(event_end)
 
     def __enter__(self):
         self.begin()
@@ -163,30 +166,21 @@ class FileLockEvent:
 
 
 def save_timeline():
-    file_path = os.environ.get('SKYPILOT_TIMELINE_FILE_PATH')
-    global _events
-    if not file_path:
-        with _events_lock:
-            _events = []
+    if not _events_file_path:
         return
-    # Atomically swap out the global events buffer so writers can continue
-    # without blocking while we serialize to disk.
-    with _events_lock:
-        events_to_write = _events
-        _events = []
     json_output = {
         'traceEvents': events_to_write,
         'displayTimeUnit': 'ms',
         'otherData': {
-            'log_dir': os.path.dirname(os.path.abspath(file_path)),
+            'log_dir': os.path.dirname(os.path.abspath(_events_file_path)),
         }
     }
-    os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
-    with open(file_path, 'w', encoding='utf-8') as f:
+    os.makedirs(os.path.dirname(os.path.abspath(_events_file_path)), exist_ok=True)
+    with open(_events_file_path, 'w', encoding='utf-8') as f:
         json.dump(json_output, f)
     # After saving, drop our reference to the old list so it can be GC'd.
     del events_to_write
 
 
-if os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
+if _events_file_path:
     atexit.register(save_timeline)
