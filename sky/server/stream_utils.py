@@ -86,9 +86,11 @@ async def log_streamer(request_id: Optional[str],
                 # Use smaller padding (1024 bytes) to force browser rendering
                 yield f'{waiting_msg}' + ' ' * 4096 + '\n'
             # Sleep shortly to avoid storming the DB and CPU and allow other
-            # coroutines to run. This busy waiting loop is performance critical
-            # for short-running requests, so we do not want to yield too long.
-            await asyncio.sleep(0.1)
+            # coroutines to run.
+            # TODO(aylei): we should use a better mechanism to avoid busy
+            # polling the DB, which can be a bottleneck for high-concurrency
+            # requests.
+            await asyncio.sleep(0.5)
             request_task = await requests_lib.get_request_async(request_id)
             if not follow:
                 break
@@ -179,7 +181,7 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
             # Sleep shortly to avoid storming the DB and CPU, this has
             # little impact on the responsivness here since we are waiting
             # for a new line to come in.
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
             continue
 
         # Refresh the heartbeat time, this is a trivial optimization for
