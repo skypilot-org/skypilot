@@ -53,6 +53,7 @@ from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.utils.kubernetes import ssh_utils
 
 if typing.TYPE_CHECKING:
@@ -2332,7 +2333,7 @@ def _save_config_updates(endpoint: Optional[str] = None,
             config['api_server'][
                 'service_account_token'] = service_account_token
 
-        common_utils.dump_yaml(str(config_path), config)
+        yaml_utils.dump_yaml(str(config_path), config)
         skypilot_config.reload_config()
 
 
@@ -2348,7 +2349,7 @@ def _clear_api_server_config() -> None:
         config = dict(config)
         del config['api_server']
 
-        common_utils.dump_yaml(str(config_path), config, blank=True)
+        yaml_utils.dump_yaml(str(config_path), config, blank=True)
         skypilot_config.reload_config()
 
 
