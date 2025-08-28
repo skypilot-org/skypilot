@@ -53,6 +53,7 @@ from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.utils.kubernetes import ssh_utils
 
 if typing.TYPE_CHECKING:
@@ -100,7 +101,8 @@ def reload_config() -> None:
 def stream_response(request_id: None,
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
-                    resumable: bool = False) -> None:
+                    resumable: bool = False,
+                    get_result: bool = True) -> None:
     ...
 
 
@@ -108,14 +110,16 @@ def stream_response(request_id: None,
 def stream_response(request_id: server_common.RequestId[T],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
-                    resumable: bool = False) -> T:
+                    resumable: bool = False,
+                    get_result: bool = True) -> T:
     ...
 
 
 def stream_response(request_id: Optional[server_common.RequestId[T]],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
-                    resumable: bool = False) -> Optional[T]:
+                    resumable: bool = False,
+                    get_result: bool = True) -> Optional[T]:
     """Streams the response to the console.
 
     Args:
@@ -128,6 +132,9 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
             console.
         resumable: Whether the response is resumable on retry. If True, the
             streaming will start from the previous failure point on retry.
+        get_result: Whether to get the result of the request. This will
+            typically be set to False for `--no-follow` flags as requests may
+            continue to run for long periods of time without further streaming.
     """
 
     retry_context: Optional[rest.RetryContext] = None
@@ -143,7 +150,7 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
                 elif line_count > retry_context.line_processed:
                     print(line, flush=True, end='', file=output_stream)
                     retry_context.line_processed = line_count
-        if request_id is not None:
+        if request_id is not None and get_result:
             return get(request_id)
         else:
             return None
@@ -571,7 +578,7 @@ def launch(
                     idle_minutes=idle_minutes_to_autostop,
                     wait_for=wait_for)
             if resource.autostop_config is not None:
-                # For backward-compatbility, get the final autostop config for
+                # For backward-compatibility, get the final autostop config for
                 # admin policy.
                 # TODO(aylei): remove this after 0.12.0
                 down = resource.autostop_config.down
@@ -942,10 +949,13 @@ def tail_provision_logs(cluster_name: str,
     # to return cleanly after printing the tailed lines. If we provided a
     # non-None request_id here, the get(request_id) in stream_response(
     # would fail since /provision_logs does not create a request record.
+    # By virtue of this, we set get_result to False to block get() from
+    # running.
     stream_response(request_id=None,
                     response=response,
                     output_stream=output_stream,
-                    resumable=(tail == 0))
+                    resumable=(tail == 0),
+                    get_result=False)
     return 0
 
 
@@ -2025,6 +2035,8 @@ def stream_and_get(
     Returns:
         The ``Request Returns`` of the specified request. See the documentation
         of the specific requests above for more details.
+        If follow is False, will always return None. See note on
+        stream_response.
 
     Raises:
         Exception: It raises the same exceptions as the specific requests,
@@ -2056,7 +2068,10 @@ def stream_and_get(
         if request_id is None:
             return None
         return get(request_id)
-    return stream_response(request_id, response, output_stream)
+    return stream_response(request_id,
+                           response,
+                           output_stream,
+                           get_result=follow)
 
 
 @usage_lib.entrypoint
@@ -2332,7 +2347,7 @@ def _save_config_updates(endpoint: Optional[str] = None,
             config['api_server'][
                 'service_account_token'] = service_account_token
 
-        common_utils.dump_yaml(str(config_path), config)
+        yaml_utils.dump_yaml(str(config_path), config)
         skypilot_config.reload_config()
 
 
@@ -2348,7 +2363,7 @@ def _clear_api_server_config() -> None:
         config = dict(config)
         del config['api_server']
 
-        common_utils.dump_yaml(str(config_path), config, blank=True)
+        yaml_utils.dump_yaml(str(config_path), config, blank=True)
         skypilot_config.reload_config()
 
 

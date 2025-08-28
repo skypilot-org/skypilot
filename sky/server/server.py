@@ -1403,6 +1403,9 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
                 raise fastapi.HTTPException(
                     status_code=500, detail=request_task.encode().model_dump())
             return request_task.encode()
+        elif (request_task.status == requests_lib.RequestStatus.RUNNING and
+              daemons.is_daemon_request_id(request_id)):
+            return request_task.encode()
         # yield control to allow other coroutines to run, sleep shortly
         # to avoid storming the DB and CPU in the meantime
         await asyncio.sleep(0.1)
@@ -1491,6 +1494,14 @@ async def stream(
         if log_path == constants.API_SERVER_LOGS:
             resolved_log_path = pathlib.Path(
                 constants.API_SERVER_LOGS).expanduser()
+            if not resolved_log_path.exists():
+                raise fastapi.HTTPException(
+                    status_code=404,
+                    detail='Server log file does not exist. The API server may '
+                    'have been started with `--foreground` - check the '
+                    'stdout of API server process, such as: '
+                    '`kubectl logs -n api-server-namespace '
+                    'api-server-pod-name`')
         else:
             # This should be a log path under ~/sky_logs.
             resolved_logs_directory = pathlib.Path(
@@ -1767,6 +1778,11 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
 @app.get('/api/completion/volume_name')
 async def complete_volume_name(incomplete: str,) -> List[str]:
     return global_user_state.get_volume_names_start_with(incomplete)
+
+
+@app.get('/api/completion/api_request')
+async def complete_api_request(incomplete: str,) -> List[str]:
+    return await requests_lib.get_api_request_ids_start_with(incomplete)
 
 
 @app.get('/dashboard/{full_path:path}')

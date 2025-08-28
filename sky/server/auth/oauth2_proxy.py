@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import http
 import os
+import traceback
 from typing import Optional
 import urllib
 
@@ -109,8 +110,8 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             try:
                 return await self._authenticate(request, call_next, session)
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                logger.error(f'Error communicating with OAuth2 proxy: {e}')
-                # Fail open or closed based on your security requirements
+                logger.error(f'Error communicating with OAuth2 proxy: {e}'
+                             f'{traceback.format_exc()}')
                 return fastapi.responses.JSONResponse(
                     status_code=http.HTTPStatus.BAD_GATEWAY,
                     content={'detail': 'oauth2-proxy service unavailable'})
@@ -120,10 +121,15 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         forwarded_headers = dict(request.headers)
         auth_url = f'{self.proxy_base}/oauth2/auth'
         forwarded_headers['X-Forwarded-Uri'] = str(request.url).rstrip('/')
-        logger.debug(f'authenticate request: {request.url.path}')
+        # Remove content-length and content-type headers and drop request body
+        # to reduce the auth overhead.
+        forwarded_headers.pop('content-length', None)
+        forwarded_headers.pop('content-type', None)
+        logger.debug(f'authenticate request: {auth_url}, '
+                     f'headers: {forwarded_headers}')
 
         async with session.request(
-                method=request.method,
+                method='GET',
                 url=auth_url,
                 headers=forwarded_headers,
                 cookies=request.cookies,

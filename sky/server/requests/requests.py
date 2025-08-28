@@ -624,6 +624,29 @@ def get_request_tasks(
     return requests
 
 
+@init_db_async
+async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
+    """Get a list of API request ids for shell completion."""
+    assert _DB is not None
+    conn = await _DB.async_conn()
+    # Prioritize alive requests (PENDING, RUNNING) over finished ones,
+    # then order by creation time (newest first) within each category.
+    async with conn.execute(
+        f"""SELECT request_id FROM {REQUEST_TABLE}
+                WHERE request_id LIKE ?
+                ORDER BY
+                    CASE
+                        WHEN status IN ('PENDING', 'RUNNING') THEN 0
+                        ELSE 1
+                    END,
+                    created_at DESC
+                LIMIT 1000""", (f'{incomplete}%',)) as cursor:
+        rows = await cursor.fetchall()
+        if rows is None:
+            return []
+    return [row[0] for row in rows]
+
+
 _add_or_update_request_sql = (f'INSERT OR REPLACE INTO {REQUEST_TABLE} '
                               f'({", ".join(REQUEST_COLUMNS)}) VALUES '
                               f'({", ".join(["?"] * len(REQUEST_COLUMNS))})')
