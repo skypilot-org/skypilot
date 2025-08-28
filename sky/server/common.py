@@ -766,11 +766,15 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                                   metrics_port, enable_basic_auth)
 
 
+last_check_time = None
 def check_server_healthy_or_start(func: Callable[P, T]) -> Callable[P, T]:
 
     @functools.wraps(func)
     def wrapper(*args, deploy: bool = False, host: str = '127.0.0.1', **kwargs):
-        check_server_healthy_or_start_fn(deploy, host)
+        global last_check_time
+        if not last_check_time or time.time() - last_check_time > 10:
+            check_server_healthy_or_start_fn(deploy, host)
+            last_check_time = time.time()
         return func(*args, **kwargs)
 
     return cast(Callable[P, T], wrapper)
