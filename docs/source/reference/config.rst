@@ -165,8 +165,9 @@ Below is the configuration syntax and some example values. See detailed explanat
       :ref:`eu-west1 <config-yaml-nebius>`:
         project_id: project-e01xxxxxxxxxxx
         fabric: fabric-5
-      :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
-      :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+    :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
+    :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+    :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.com:443
 
   :ref:`rbac <config-yaml-rbac>`:
