@@ -2186,7 +2186,6 @@ def test_kubernetes_pod_config_pvc():
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
-                # Create PVC
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, f'kubectl create -f - <<EOF\n'
                     f'apiVersion: v1\n'
@@ -2203,15 +2202,14 @@ def test_kubernetes_pod_config_pvc():
                 # Verify PVC was created
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, f'kubectl get pvc {pvc_name} -oyaml'),
-                f'sky launch -y -c {name} --infra kubernetes {task_yaml_path}',
+                f'sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
                 # Write to the volume
                 f'sky exec {name} --infra kubernetes "ls -la /mnt/test-data/ && echo \'Hello\' > /mnt/test-data/hello.txt"',
                 # Down and launch again
                 f'sky down -y {name}',
-                f'sky launch -y -c {name} --infra kubernetes {task_yaml_path}',
+                f'sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
                 # Read the volume from the new pod
                 f'sky exec {name} --infra kubernetes "ls -la /mnt/test-data/ && cat /mnt/test-data/hello.txt"',
-                # Delete PVC
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
                     f'kubectl delete pvc {pvc_name} --ignore-not-found=true --wait=false || true'
@@ -2257,15 +2255,15 @@ def test_kubernetes_pod_config_change_detection():
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
                 # Launch task with original pod_config
-                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {task_yaml_1_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 1"',
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_1_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 1"',
                 # Launch task with modified pod_config - should show warning
                 # Verify the job succeeds despite the warning and check that environment variables are not updated
-                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {task_yaml_2_path} 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Task requires different Kubernetes pod config" && '
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_2_path} 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Task requires different Kubernetes pod config" && '
                 f'echo "$s" | grep "TEST_VAR_1 = 1" && '
                 f'echo "$s" | grep "TEST_VAR_2 = "',
                 # Down and launch again to get the new pod_config
                 f'sky down -y {name}',
-                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {task_yaml_2_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 2" && '
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_2_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 2" && '
                 f'echo "$s" | grep "TEST_VAR_2 = 2"',
             ],
             f'sky down -y {name} && '
