@@ -2367,7 +2367,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             # Some status reason clears after a certain time (e.g. k8s events
             # are only stored for an hour by default), so it is possible that
             # the previous event has a status reason, but now it does not.
-            init_reason_regex = f'^Cluster is abnormal because {init_reason} .*'
+            init_reason_regex = f'^Cluster is abnormal because {init_reason}.*'
         log_message = f'Cluster is abnormal because {init_reason}'
         if status_reason:
             log_message += f' ({status_reason})'
