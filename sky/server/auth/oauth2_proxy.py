@@ -124,7 +124,8 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if not 'api/health' in request.url.path:
             logger.info(f'authenticate request, auth_url: {auth_url}, headers: {forwarded_headers}, method: {request.method}')
         
-        forwarded_headers.pop('content-length')
+        forwarded_headers.pop('content-length', None)
+        forwarded_headers.pop('content-type', None)
 
         async with session.request(
                 method='GET',
