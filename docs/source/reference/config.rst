@@ -167,6 +167,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         fabric: fabric-5
       :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
       :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+    :ref:`domain <config-yaml-nebius-domain>`: api.nebius.com:443
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -1445,6 +1446,20 @@ Example:
 
   nebius:
     tenant_id: tenant-1234567890
+
+.. _config-yaml-nebius-domain:
+
+``nebius.domain``
+~~~~~~~~~~~~~~~~~~~~
+
+Nebius API domain (optional).
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    domain: api.nebius.com:443
 
 
 .. _config-yaml-rbac:
