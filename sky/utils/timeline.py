@@ -18,6 +18,7 @@ from sky.utils import common_utils
 from sky.utils import locks
 
 _events = []
+_events_lock = threading.Lock()
 
 
 class Event:
@@ -53,7 +54,8 @@ class Event:
         event_begin['args'] = {'stack': '\n'.join(traceback.format_stack())}
         if self._message is not None:
             event_begin['args']['message'] = self._message
-        _events.append(event_begin)
+        with _events_lock:
+            _events.append(event_begin)
 
     def end(self):
         event_end = self._event.copy()
@@ -63,7 +65,8 @@ class Event:
         })
         if self._message is not None:
             event_end['args'] = {'message': self._message}
-        _events.append(event_end)
+        with _events_lock:
+            _events.append(event_end)
 
     def __enter__(self):
         self.begin()
@@ -161,10 +164,18 @@ class FileLockEvent:
 
 def save_timeline():
     file_path = os.environ.get('SKYPILOT_TIMELINE_FILE_PATH')
+    global _events
     if not file_path:
+        with _events_lock:
+            _events = []
         return
+    # Atomically swap out the global events buffer so writers can continue
+    # without blocking while we serialize to disk.
+    with _events_lock:
+        events_to_write = _events
+        _events = []
     json_output = {
-        'traceEvents': _events,
+        'traceEvents': events_to_write,
         'displayTimeUnit': 'ms',
         'otherData': {
             'log_dir': os.path.dirname(os.path.abspath(file_path)),
@@ -173,6 +184,8 @@ def save_timeline():
     os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(json_output, f)
+    # After saving, drop our reference to the old list so it can be GC'd.
+    del events_to_write
 
 
 if os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
