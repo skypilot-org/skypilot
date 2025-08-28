@@ -534,7 +534,7 @@ def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool,
             return
 
     # Step 2: parse using a spinner until setup is complete.
-    setup_timeout = 3
+    setup_timeout = 60
     pids = set()
     completed_pids = set()
 
