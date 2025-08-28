@@ -785,6 +785,16 @@ def pytest_config_file_override() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE', None)
 
 
+def services_account_token_configured() -> bool:
+    file_path = pytest_config_file_override()
+    if file_path is not None:
+        with open(file_path, 'r') as f:
+            content = f.read()
+            print(content, file=sys.stderr, flush=True)
+            return 'service_account_token' in content
+    return False
+
+
 def pytest_override_env_config_file(config: Dict[str, str]):
     """Override the environment variable for the test."""
     for key, value in config.items():
