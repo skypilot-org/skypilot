@@ -20,6 +20,7 @@ from sky.utils import locks
 _events = []
 _events_file_path = os.environ.get('SKYPILOT_TIMELINE_FILE_PATH')
 
+
 class Event:
     """Record an event.
 
@@ -169,17 +170,16 @@ def save_timeline():
     if not _events_file_path:
         return
     json_output = {
-        'traceEvents': events_to_write,
+        'traceEvents': _events,
         'displayTimeUnit': 'ms',
         'otherData': {
             'log_dir': os.path.dirname(os.path.abspath(_events_file_path)),
         }
     }
-    os.makedirs(os.path.dirname(os.path.abspath(_events_file_path)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(_events_file_path)),
+                exist_ok=True)
     with open(_events_file_path, 'w', encoding='utf-8') as f:
         json.dump(json_output, f)
-    # After saving, drop our reference to the old list so it can be GC'd.
-    del events_to_write
 
 
 if _events_file_path:
