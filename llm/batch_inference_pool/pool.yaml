@@ -1,5 +1,5 @@
 envs:
-  MODEL_NAME: NousResearch/Meta-Llama-3-8B-Instruct
+  MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
   EMBEDDINGS_BUCKET_NAME: sky-pool-text-embeddings
 
 resources:
@@ -17,7 +17,6 @@ setup: |
   source .venv/bin/activate
 
   # Install fschat and accelerate for chat completion
-  git clone https://github.com/vllm-project/vllm.git || true
   uv pip install "vllm>=0.8.3"
   uv pip install numpy pandas requests tqdm datasets==3.6.0 nltk
   uv pip install torch torchvision aiohttp

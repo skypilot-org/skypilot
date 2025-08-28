@@ -17,9 +17,6 @@ envs:
 run: |
   source .venv/bin/activate
 
-  # Initialize and download the model
-  HF_HUB_ENABLE_HF_TRANSFER=1 hf download --local-dir /tmp/model $MODEL_NAME
-  
   # Create metrics directory for monitoring service
   mkdir -p /output/metrics
   
@@ -41,7 +38,7 @@ run: |
     --chunk-overlap 50 \
     --vllm-endpoint http://localhost:8000 \
     --batch-size 32 \
-    --model-name /tmp/model \
+    --model-name $MODEL_NAME \
     --dataset-name $DATASET_NAME \
     --dataset-config $DATASET_CONFIG
 
