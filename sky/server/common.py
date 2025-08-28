@@ -767,6 +767,8 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
 
 
 last_check_time = None
+
+
 def check_server_healthy_or_start(func: Callable[P, T]) -> Callable[P, T]:
 
     @functools.wraps(func)
