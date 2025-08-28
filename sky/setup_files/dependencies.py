@@ -192,13 +192,17 @@ extras_require: Dict[str, List[str]] = {
         'nebius>=0.2.47',
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
+    'seeweb': ['ecsapi>=0.2.0'],
     'server': server_dependencies,
 }
 
 # Nebius needs python3.10. If python 3.9 [all] will not install nebius
 if sys.version_info < (3, 10):
-    filtered_keys = [k for k in extras_require if k != 'nebius']
-    extras_require['all'] = sum(
-        [v for k, v in extras_require.items() if k != 'nebius'], [])
+    filtered_keys = [
+        k for k in extras_require if k != 'nebius' and k != 'seeweb'
+    ]
+    extras_require['all'] = sum([
+        v for k, v in extras_require.items() if k != 'nebius' and k != 'seeweb'
+    ], [])
 else:
     extras_require['all'] = sum(extras_require.values(), [])

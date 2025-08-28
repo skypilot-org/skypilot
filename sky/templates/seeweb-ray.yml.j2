@@ -1,0 +1,108 @@
+cluster_name: {{ cluster_name_on_cloud }}
+
+max_workers: {{ num_nodes - 1 }}
+upscaling_speed: {{ num_nodes - 1 }}
+idle_timeout_minutes: 5
+
+provider:
+  type: external
+  module: sky.provision.seeweb
+  region: "{{ region }}"
+
+auth:
+  ssh_user: ecuser
+  ssh_private_key: {{ ssh_private_key }}
+
+available_node_types:
+  ray_head_default:
+    resources: {}
+    node_config:
+      plan: {{ instance_type }}
+      image: {{ image_id }}
+      location: {{ region }}
+      {% if seeweb_gpu_config is not none %}
+      gpu: {{ seeweb_gpu_config.gpu }}
+      gpu_label: "{{ seeweb_gpu_config.gpu_label }}"
+      {% endif %}
+      disk: {{ disk_size }}
+
+head_node_type: ray_head_default
+
+file_mounts: {
+  "~/.seeweb_cloud/seeweb_keys": "~/.seeweb_cloud/seeweb_keys",
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{%- endfor %}
+  "~/.ssh/sky-cluster-key": "{{ssh_private_key}}",
+}
+
+rsync_exclude: []
+
+setup_commands:
+  - |
+    touch ~/.bashrc;
+    echo "127.0.0.1 $(hostname)" | sudo tee -a /etc/hosts || true;
+    echo "127.0.0.1 localhost" | sudo tee -a /etc/hosts || true;
+    sudo systemctl stop unattended-upgrades || true;
+    sudo systemctl disable unattended-upgrades || true;
+    sudo apt update && sudo apt install -y patch || sudo yum install -y patch || true;
+    {{ conda_installation_commands }}
+    {{ ray_skypilot_installation_commands }}
+
+head_start_ray_commands:
+  - |
+    retry_ray() {
+      local n=0; local max=30
+      until [ $n -ge $max ]; do
+        export SKYPILOT_NUM_GPUS=0
+        command -v nvidia-smi >/dev/null 2>&1 && \
+          SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
+
+        ray stop || true
+        RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 \
+        ray start --disable-usage-stats --head \
+          --port={{ ray_port }} --dashboard-port={{ ray_dashboard_port }} \
+          --object-manager-port=8076 \
+          --autoscaling-config=~/ray_bootstrap_config.yaml \
+          --num-gpus=$SKYPILOT_NUM_GPUS --temp-dir {{ ray_temp_dir }} && break
+
+        echo "[head] Ray failed to start ($((++n))/$max), retrying in 5s..."
+        sleep 5
+      done
+      [ $n -eq $max ] && { echo "Ray head failed"; exit 1; }
+    }
+    retry_ray
+
+worker_start_ray_commands:
+  - |
+    retry_ray() {
+      local n=0; local max=30
+      until [ $n -ge $max ]; do
+        SKYPILOT_NUM_GPUS=0
+        command -v nvidia-smi >/dev/null 2>&1 && \
+          SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
+
+        ray stop || true
+        RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 \
+        ray start --disable-usage-stats \
+          --address=$RAY_HEAD_IP:{{ ray_port }} \
+          --object-manager-port=8076 \
+          --num-gpus=$SKYPILOT_NUM_GPUS --temp-dir {{ ray_temp_dir }} && break
+
+        echo "[worker] Ray failed to start ($((++n))/$max), retrying in 5s..."
+        sleep 5
+      done
+      [ $n -eq $max ] && { echo "Ray worker failed"; exit 1; }
+    }
+    retry_ray
+
+head_node: {}
+worker_nodes: {}
+
+head_setup_commands: []
+worker_setup_commands: []
+
+cluster_synced_files: []
+file_mounts_sync_continuously: False

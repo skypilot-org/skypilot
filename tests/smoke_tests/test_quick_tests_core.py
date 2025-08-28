@@ -30,6 +30,7 @@ import sky
 
 
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support AWS
+@pytest.mark.no_seeweb  # Seeweb does not support file mounting
 def test_yaml_launch_and_mount(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
