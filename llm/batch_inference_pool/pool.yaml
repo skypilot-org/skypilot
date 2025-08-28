@@ -1,5 +1,6 @@
 envs:
   MODEL_NAME: NousResearch/Meta-Llama-3-8B-Instruct
+  EMBEDDINGS_BUCKET_NAME: sky-pool-text-embeddings
 
 resources:
   accelerators: {L4, A10G, L40S, A10, A100, H100}
@@ -40,7 +41,5 @@ setup: |
 
 
 pool:
-  workers: 2
+  workers: 4
 
-envs:
-  EMBEDDINGS_BUCKET_NAME: sky-text-embeddings-pool
