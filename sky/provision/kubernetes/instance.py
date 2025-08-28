@@ -1466,7 +1466,7 @@ def query_instances(
         reason = None
         if phase in ('Failed', 'Unknown'):
             reason = _get_pod_termination_reason(pod, cluster_name)
-            logger.debug(f'Pod Status Reason(s): {reason}')
+            logger.debug(f'Pod Status ({phase}) Reason(s): {reason}')
         if non_terminated_only and pod_status is None:
             logger.debug(f'Pod {pod.metadata.name} is terminated, but '
                          'query_instances is called with '
