@@ -698,11 +698,6 @@ class Resources:
         return self._cluster_config_overrides
 
     @property
-    def kubernetes_pod_config(self) -> Dict[str, Any]:
-        return self.cluster_config_overrides.get('kubernetes',
-                                                 {}).get('pod_config', {})
-
-    @property
     def docker_login_config(self) -> Optional[docker_utils.DockerLoginConfig]:
         return self._docker_login_config
 

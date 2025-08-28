@@ -2706,7 +2706,7 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
 
 
 def combine_pod_config_fields(
-    cluster_yaml_path: str,
+    cluster_yaml_obj: Dict[str, Any],
     cluster_config_overrides: Dict[str, Any],
     cloud: Optional[clouds.Cloud] = None,
     context: Optional[str] = None,
@@ -2749,9 +2749,6 @@ def combine_pod_config_fields(
                     - name: my-secret
         ```
     """
-    with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
-        yaml_content = f.read()
-    yaml_obj = yaml_utils.safe_load(yaml_content)
     # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
     if isinstance(cloud, clouds.SSH):
@@ -2778,14 +2775,11 @@ def combine_pod_config_fields(
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
     config_utils.merge_k8s_configs(
-        yaml_obj['available_node_types']['ray_head_default']['node_config'],
-        kubernetes_config)
-
-    # Write the updated YAML back to the file
-    yaml_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+        cluster_yaml_obj['available_node_types']['ray_head_default']
+        ['node_config'], kubernetes_config)
 
 
-def combine_metadata_fields(cluster_yaml_path: str,
+def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
                             cluster_config_overrides: Dict[str, Any],
                             context: Optional[str] = None) -> None:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
@@ -2793,11 +2787,6 @@ def combine_metadata_fields(cluster_yaml_path: str,
 
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
-
-    with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
-        yaml_content = f.read()
-    yaml_obj = yaml_utils.safe_load(yaml_content)
-
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
@@ -2819,22 +2808,30 @@ def combine_metadata_fields(cluster_yaml_path: str,
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
         # Service accounts
-        yaml_obj['provider']['autoscaler_service_account']['metadata'],
-        yaml_obj['provider']['autoscaler_role']['metadata'],
-        yaml_obj['provider']['autoscaler_role_binding']['metadata'],
-        yaml_obj['provider']['autoscaler_service_account']['metadata'],
+        cluster_yaml_obj['provider']['autoscaler_service_account']['metadata'],
+        cluster_yaml_obj['provider']['autoscaler_role']['metadata'],
+        cluster_yaml_obj['provider']['autoscaler_role_binding']['metadata'],
+        cluster_yaml_obj['provider']['autoscaler_service_account']['metadata'],
         # Pod spec
-        yaml_obj['available_node_types']['ray_head_default']['node_config']
-        ['metadata'],
+        cluster_yaml_obj['available_node_types']['ray_head_default']
+        ['node_config']['metadata'],
         # Services for pods
-        *[svc['metadata'] for svc in yaml_obj['provider']['services']]
+        *[svc['metadata'] for svc in cluster_yaml_obj['provider']['services']]
     ]
 
     for destination in combination_destinations:
         config_utils.merge_k8s_configs(destination, custom_metadata)
 
-    # Write the updated YAML back to the file
-    yaml_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+
+def combine_pod_config_fields_and_metadata(
+        cluster_yaml_obj: Dict[str, Any],
+        cluster_config_overrides: Dict[str, Any],
+        cloud: Optional[clouds.Cloud] = None,
+        context: Optional[str] = None) -> None:
+    """Combines pod config fields and metadata fields"""
+    combine_pod_config_fields(cluster_yaml_obj, cluster_config_overrides, cloud,
+                              context)
+    combine_metadata_fields(cluster_yaml_obj, cluster_config_overrides, context)
 
 
 def merge_custom_metadata(

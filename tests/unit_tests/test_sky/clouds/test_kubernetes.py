@@ -1,5 +1,6 @@
 """Tests for Kubernetes cloud implementation."""
 
+import copy
 import unittest
 from unittest import mock
 from unittest.mock import patch
@@ -624,11 +625,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertEqual(deploy_vars['k8s_resource_key'], 'nvidia.com/gpu')
         self.assertFalse(deploy_vars['tpu_requested'])  # H100 is GPU, not TPU
 
-    @patch('sky.utils.yaml_utils.safe_load')
-    @patch('sky.utils.yaml_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_merged_with_ipc_lock_capability(
-            self, mock_get_cloud_config_value, mock_dump_yaml, mock_safe_load):
+            self, mock_get_cloud_config_value):
         """Test that user-specified securityContext is correctly merged with IPC_LOCK capability."""
 
         # Create a YAML structure with IPC_LOCK capability set
@@ -671,53 +670,35 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         }
 
         # Set up mocks
-        mock_safe_load.return_value = cluster_yaml_with_ipc_lock
         mock_get_cloud_config_value.return_value = user_pod_config
 
-        # Use a temporary file to avoid file not found error
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', delete=False,
-                                         suffix='.yaml') as tmp_file:
-            tmp_path = tmp_file.name
+        # Call the combine_pod_config_fields function
+        combined_yaml_obj = copy.deepcopy(cluster_yaml_with_ipc_lock)
+        kubernetes_utils.combine_pod_config_fields(combined_yaml_obj, {}, None)
 
-        try:
-            # Call the combine_pod_config_fields function
-            kubernetes_utils.combine_pod_config_fields(tmp_path, {}, None)
+        # Get the modified YAML
+        container = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']['containers'][0]
 
-            # Verify the YAML was loaded and written
-            mock_safe_load.assert_called_once()
-            mock_dump_yaml.assert_called_once()
+        # Verify that both IPC_LOCK and user-specified capabilities are present
+        security_context = container['securityContext']
 
-            # Get the modified YAML
-            modified_yaml = mock_dump_yaml.call_args[0][1]
-            container = modified_yaml['available_node_types'][
-                'ray_head_default']['node_config']['spec']['containers'][0]
+        # Check that runAsUser and runAsGroup from user config are preserved
+        self.assertEqual(security_context['runAsUser'], 1000)
+        self.assertEqual(security_context['runAsGroup'], 1000)
 
-            # Verify that both IPC_LOCK and user-specified capabilities are present
-            security_context = container['securityContext']
+        # Check that capabilities are merged correctly
+        add_capabilities = security_context['capabilities']['add']
+        self.assertIn('IPC_LOCK', add_capabilities)  # From template
+        self.assertIn('SYS_ADMIN', add_capabilities)  # From user config
 
-            # Check that runAsUser and runAsGroup from user config are preserved
-            self.assertEqual(security_context['runAsUser'], 1000)
-            self.assertEqual(security_context['runAsGroup'], 1000)
+        # Check that drop capabilities from user config are preserved
+        drop_capabilities = security_context['capabilities']['drop']
+        self.assertIn('NET_RAW', drop_capabilities)
 
-            # Check that capabilities are merged correctly
-            add_capabilities = security_context['capabilities']['add']
-            self.assertIn('IPC_LOCK', add_capabilities)  # From template
-            self.assertIn('SYS_ADMIN', add_capabilities)  # From user config
-
-            # Check that drop capabilities from user config are preserved
-            drop_capabilities = security_context['capabilities']['drop']
-            self.assertIn('NET_RAW', drop_capabilities)
-        finally:
-            import os
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
-    @patch('sky.utils.yaml_utils.safe_load')
-    @patch('sky.utils.yaml_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_without_ipc_lock_capability(
-            self, mock_get_cloud_config_value, mock_dump_yaml, mock_safe_load):
+            self, mock_get_cloud_config_value):
         """Test that user-specified securityContext works when IPC_LOCK capability is not needed."""
 
         # Create a YAML structure without IPC_LOCK capability
@@ -755,54 +736,38 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         }
 
         # Set up mocks
-        mock_safe_load.return_value = cluster_yaml_without_ipc_lock
         mock_get_cloud_config_value.return_value = user_pod_config
 
-        # Use a temporary file to avoid file not found error
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', delete=False,
-                                         suffix='.yaml') as tmp_file:
-            tmp_path = tmp_file.name
+        # Call the combine_pod_config_fields function
+        combined_yaml_obj = copy.deepcopy(cluster_yaml_without_ipc_lock)
+        kubernetes_utils.combine_pod_config_fields(combined_yaml_obj, {}, None)
 
-        try:
-            # Call the combine_pod_config_fields function
-            kubernetes_utils.combine_pod_config_fields(tmp_path, {}, None)
+        # Get the modified YAML
+        container = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']['containers'][0]
 
-            # Get the modified YAML
-            modified_yaml = mock_dump_yaml.call_args[0][1]
-            container = modified_yaml['available_node_types'][
-                'ray_head_default']['node_config']['spec']['containers'][0]
+        # Verify that only user-specified securityContext is present
+        security_context = container['securityContext']
 
-            # Verify that only user-specified securityContext is present
-            security_context = container['securityContext']
+        # Check that runAsUser from user config is preserved
+        self.assertEqual(security_context['runAsUser'], 1000)
 
-            # Check that runAsUser from user config is preserved
-            self.assertEqual(security_context['runAsUser'], 1000)
+        # Check that only user capabilities are present (no IPC_LOCK)
+        add_capabilities = security_context['capabilities']['add']
+        self.assertIn('SYS_ADMIN', add_capabilities)
+        self.assertNotIn('IPC_LOCK', add_capabilities)
 
-            # Check that only user capabilities are present (no IPC_LOCK)
-            add_capabilities = security_context['capabilities']['add']
-            self.assertIn('SYS_ADMIN', add_capabilities)
-            self.assertNotIn('IPC_LOCK', add_capabilities)
-
-            # Check that drop capabilities from user config are preserved
-            drop_capabilities = security_context['capabilities']['drop']
-            self.assertIn('NET_RAW', drop_capabilities)
-        finally:
-            import os
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+        # Check that drop capabilities from user config are preserved
+        drop_capabilities = security_context['capabilities']['drop']
+        self.assertIn('NET_RAW', drop_capabilities)
 
 
 class TestKubernetesVolumeMerging(unittest.TestCase):
     """Test cases for merging user-specified volume mounts and volumes with pod_config."""
 
-    @patch('sky.utils.yaml_utils.safe_load')
-    @patch('sky.utils.yaml_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_volume_mounts_merged_correctly(self,
-                                                 mock_get_cloud_config_value,
-                                                 mock_dump_yaml,
-                                                 mock_safe_load):
+                                                 mock_get_cloud_config_value):
         """Test that user-specified volume mounts and volumes are correctly merged."""
 
         # Based on kubernetes-ray.yml.j2
@@ -873,96 +838,77 @@ class TestKubernetesVolumeMerging(unittest.TestCase):
             }
         }
 
-        mock_safe_load.return_value = cluster_yaml_with_system_volumes
         mock_get_cloud_config_value.return_value = user_pod_config
 
-        # Use a temporary file to avoid file not found error
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', delete=False,
-                                         suffix='.yaml') as tmp_file:
-            tmp_path = tmp_file.name
+        combined_yaml_obj = copy.deepcopy(cluster_yaml_with_system_volumes)
+        kubernetes_utils.combine_pod_config_fields(combined_yaml_obj, {}, None)
 
-        try:
-            kubernetes_utils.combine_pod_config_fields(tmp_path, {}, None)
-            mock_safe_load.assert_called_once()
-            mock_dump_yaml.assert_called_once()
+        # Get the modified YAML
+        container = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']['containers'][0]
+        pod_spec = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']
 
-            # Get the modified YAML
-            modified_yaml = mock_dump_yaml.call_args[0][1]
-            container = modified_yaml['available_node_types'][
-                'ray_head_default']['node_config']['spec']['containers'][0]
-            pod_spec = modified_yaml['available_node_types'][
-                'ray_head_default']['node_config']['spec']
+        # Verify that both system and user volume mounts are present
+        volume_mounts = container['volumeMounts']
+        self.assertEqual(len(volume_mounts), 4)  # 2 system + 2 user
 
-            # Verify that both system and user volume mounts are present
-            volume_mounts = container['volumeMounts']
-            self.assertEqual(len(volume_mounts), 4)  # 2 system + 2 user
+        # Check system volume mounts are preserved
+        secret_mount = next(
+            (vm for vm in volume_mounts if vm['name'] == 'secret-volume'), None)
+        self.assertIsNotNone(secret_mount)
+        self.assertEqual(secret_mount['mountPath'], '/etc/secret-volume')
+        self.assertTrue(secret_mount['readOnly'])
 
-            # Check system volume mounts are preserved
-            secret_mount = next(
-                (vm for vm in volume_mounts if vm['name'] == 'secret-volume'),
-                None)
-            self.assertIsNotNone(secret_mount)
-            self.assertEqual(secret_mount['mountPath'], '/etc/secret-volume')
-            self.assertTrue(secret_mount['readOnly'])
+        dshm_mount = next((vm for vm in volume_mounts if vm['name'] == 'dshm'),
+                          None)
+        self.assertIsNotNone(dshm_mount)
+        self.assertEqual(dshm_mount['mountPath'], '/dev/shm')
 
-            dshm_mount = next(
-                (vm for vm in volume_mounts if vm['name'] == 'dshm'), None)
-            self.assertIsNotNone(dshm_mount)
-            self.assertEqual(dshm_mount['mountPath'], '/dev/shm')
+        # Check user volume mounts are added
+        data_mount = next(
+            (vm for vm in volume_mounts if vm['name'] == 'data-volume'), None)
+        self.assertIsNotNone(data_mount)
+        self.assertEqual(data_mount['mountPath'], '/data')
+        self.assertFalse(data_mount['readOnly'])
 
-            # Check user volume mounts are added
-            data_mount = next(
-                (vm for vm in volume_mounts if vm['name'] == 'data-volume'),
-                None)
-            self.assertIsNotNone(data_mount)
-            self.assertEqual(data_mount['mountPath'], '/data')
-            self.assertFalse(data_mount['readOnly'])
+        logs_mount = next(
+            (vm for vm in volume_mounts if vm['name'] == 'logs-volume'), None)
+        self.assertIsNotNone(logs_mount)
+        self.assertEqual(logs_mount['mountPath'], '/logs')
+        self.assertFalse(logs_mount['readOnly'])
 
-            logs_mount = next(
-                (vm for vm in volume_mounts if vm['name'] == 'logs-volume'),
-                None)
-            self.assertIsNotNone(logs_mount)
-            self.assertEqual(logs_mount['mountPath'], '/logs')
-            self.assertFalse(logs_mount['readOnly'])
+        # Verify that both system and user volumes are present
+        volumes = pod_spec['volumes']
+        self.assertEqual(len(volumes), 4)  # 2 system + 2 user
 
-            # Verify that both system and user volumes are present
-            volumes = pod_spec['volumes']
-            self.assertEqual(len(volumes), 4)  # 2 system + 2 user
+        # Check system volumes are preserved
+        secret_volume = next(
+            (v for v in volumes if v['name'] == 'secret-volume'), None)
+        self.assertIsNotNone(secret_volume)
+        self.assertIn('secret', secret_volume)
+        self.assertEqual(secret_volume['secret']['secretName'],
+                         kubernetes.Kubernetes.SKY_SSH_KEY_SECRET_NAME)
 
-            # Check system volumes are preserved
-            secret_volume = next(
-                (v for v in volumes if v['name'] == 'secret-volume'), None)
-            self.assertIsNotNone(secret_volume)
-            self.assertIn('secret', secret_volume)
-            self.assertEqual(secret_volume['secret']['secretName'],
-                             kubernetes.Kubernetes.SKY_SSH_KEY_SECRET_NAME)
+        dshm_volume = next((v for v in volumes if v['name'] == 'dshm'), None)
+        self.assertIsNotNone(dshm_volume)
+        self.assertIn('emptyDir', dshm_volume)
+        self.assertEqual(dshm_volume['emptyDir']['medium'], 'Memory')
 
-            dshm_volume = next((v for v in volumes if v['name'] == 'dshm'),
-                               None)
-            self.assertIsNotNone(dshm_volume)
-            self.assertIn('emptyDir', dshm_volume)
-            self.assertEqual(dshm_volume['emptyDir']['medium'], 'Memory')
+        # Check user volumes are added
+        data_volume = next((v for v in volumes if v['name'] == 'data-volume'),
+                           None)
+        self.assertIsNotNone(data_volume)
+        self.assertIn('persistentVolumeClaim', data_volume)
+        self.assertEqual(data_volume['persistentVolumeClaim']['claimName'],
+                         'data-pvc')
 
-            # Check user volumes are added
-            data_volume = next(
-                (v for v in volumes if v['name'] == 'data-volume'), None)
-            self.assertIsNotNone(data_volume)
-            self.assertIn('persistentVolumeClaim', data_volume)
-            self.assertEqual(data_volume['persistentVolumeClaim']['claimName'],
-                             'data-pvc')
-
-            logs_volume = next(
-                (v for v in volumes if v['name'] == 'logs-volume'), None)
-            self.assertIsNotNone(logs_volume)
-            self.assertIn('persistentVolumeClaim', logs_volume)
-            self.assertEqual(logs_volume['persistentVolumeClaim']['claimName'],
-                             'logs-pvc')
-
-        finally:
-            import os
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+        logs_volume = next((v for v in volumes if v['name'] == 'logs-volume'),
+                           None)
+        self.assertIsNotNone(logs_volume)
+        self.assertIn('persistentVolumeClaim', logs_volume)
+        self.assertEqual(logs_volume['persistentVolumeClaim']['claimName'],
+                         'logs-pvc')
 
 
 class TestGKEDWSConfig(unittest.TestCase):
