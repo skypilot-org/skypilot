@@ -18,6 +18,8 @@ setup: |
 
   # Install fschat and accelerate for chat completion
   uv pip install "vllm>=0.8.3"
+  # Has to pin datasets to 3.6.0 because of the following issue, as the Amazon
+  # review dataset is not compatible in later versions.
   uv pip install numpy pandas requests tqdm datasets==3.6.0 nltk
   uv pip install torch torchvision aiohttp
   uv pip install hf_transfer pyarrow
