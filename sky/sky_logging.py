@@ -258,6 +258,7 @@ def generate_tmp_logging_file_path(file_name: str) -> str:
 
     return log_path
 
+
 @contextlib.contextmanager
 def add_debug_log_handler(request_id: str):
     if os.getenv(constants.ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING) != 'true':
