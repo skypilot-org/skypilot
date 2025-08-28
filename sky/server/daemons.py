@@ -71,8 +71,7 @@ class InternalRequestDaemon:
                     self.event_fn()
                 # Clear request level cache after each run to avoid
                 # using too much memory.
-                for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
-                    func.cache_clear()
+                annotations.clear_request_level_cache()
                 timeline.save_timeline()
             except Exception:  # pylint: disable=broad-except
                 # It is OK to fail to run the event, as the event is not
