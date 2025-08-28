@@ -205,6 +205,7 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('ending_status', sqlalchemy.Text),
     sqlalchemy.Column('reason', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('request_id', sqlalchemy.Text),
     sqlalchemy.Column('type', sqlalchemy.Text),
 )
 
@@ -745,6 +746,7 @@ def add_cluster_event(cluster_name: str,
             elif last_event == reason:
                 return
         try:
+            request_id = common_utils.get_current_request_id()
             session.execute(
                 insert_func(cluster_event_table).values(
                     cluster_hash=cluster_hash,
@@ -753,6 +755,7 @@ def add_cluster_event(cluster_name: str,
                     ending_status=new_status.value if new_status else None,
                     reason=reason,
                     transitioned_at=transitioned_at,
+                    request_id=request_id,
                     type=event_type.value,
                 ))
             session.commit()
