@@ -206,6 +206,7 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('reason', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
     sqlalchemy.Column('type', sqlalchemy.Text),
+    sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -745,6 +746,7 @@ def add_cluster_event(cluster_name: str,
             elif last_event == reason:
                 return
         try:
+            request_id = common_utils.get_current_request_id()
             session.execute(
                 insert_func(cluster_event_table).values(
                     cluster_hash=cluster_hash,
@@ -754,6 +756,7 @@ def add_cluster_event(cluster_name: str,
                     reason=reason,
                     transitioned_at=transitioned_at,
                     type=event_type.value,
+                    request_id=request_id,
                 ))
             session.commit()
         except sqlalchemy.exc.IntegrityError as e:
