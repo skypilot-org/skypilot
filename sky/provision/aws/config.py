@@ -666,7 +666,7 @@ def _need_to_update_outbound_rules(
             group_pairs = rule['UserIdGroupPairs']
             for pair in group_pairs:
                 if pair['GroupId'] not in existing_group_ids:
-                    logger.info(f'New group id: {pair["GroupId"]}')
+                    logger.debug(f'New group id: {pair["GroupId"]}')
                     return True  # New group id, we need to add it
     return False  # No need to update
 

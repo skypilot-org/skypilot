@@ -80,6 +80,7 @@ USER_PORTS_SECURITY_GROUP_NAME = 'sky-sg-{}'
 # GPU instance types that support EFA
 # TODO(hailong): Some CPU instance types also support EFA, may need to support
 # all of them later.
+# TODO(hailong): Add the EFA info in catalog.
 _EFA_INSTANCE_TYPE_PREFIXES = [
     'g4dn.',
     'g5.',
@@ -117,6 +118,7 @@ def _is_efa_instance_type(instance_type: str) -> bool:
         for prefix in _EFA_INSTANCE_TYPE_PREFIXES)
 
 
+@annotations.lru_cache(scope='global')
 def _get_efa_image_id(region_name: str) -> Optional[str]:
     """Get the EFA image id for the given region."""
     try:
@@ -139,14 +141,13 @@ def _get_efa_image_id(region_name: str) -> Optional[str]:
                                reverse=True)
         return sorted_images[0]['ImageId']
     except (aws.botocore_exceptions().NoCredentialsError,
-            aws.botocore_exceptions().ProfileNotFound):
-        # Return none here and will fallback to default image
-        return None
-    except aws.botocore_exceptions().ClientError as e:
+            aws.botocore_exceptions().ProfileNotFound,
+            aws.botocore_exceptions().ClientError) as e:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Failed to get EFA image id: {e}') from None
 
 
+@annotations.lru_cache(scope='global')
 def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
     """Get the maximum number of EFA interfaces for the given instance type."""
     if not _is_efa_instance_type(instance_type):
@@ -166,9 +167,8 @@ def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
                 return network_info['EfaInfo']['MaximumEfaInterfaces']
         return 0
     except (aws.botocore_exceptions().NoCredentialsError,
-            aws.botocore_exceptions().ProfileNotFound):
-        return 0
-    except aws.botocore_exceptions().ClientError as e:
+            aws.botocore_exceptions().ProfileNotFound,
+            aws.botocore_exceptions().ClientError) as e:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'Failed to get max EFA interfaces for {instance_type}: {e}'
