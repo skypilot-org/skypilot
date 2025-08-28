@@ -3033,11 +3033,10 @@ def get_clusters(
                     expanded_private_key_path]
             else:
                 with open(expanded_private_key_path, 'r',
-                            encoding='utf-8') as f:
+                          encoding='utf-8') as f:
                     credential['ssh_private_key_content'] = f.read()
-                    cached_private_keys[
-                        expanded_private_key_path] = credential[
-                            'ssh_private_key_content']
+                    cached_private_keys[expanded_private_key_path] = credential[
+                        'ssh_private_key_content']
             record['credentials'] = credential
 
     def _update_records_with_resources(
