@@ -26,6 +26,12 @@ def test_workspace_switching(generic_cloud: str):
         pytest.skip(
             'Skipping workspace switching test when not in Buildkite environment'
         )
+    if smoke_tests_utils.api_server_endpoint_configured_in_env_file():
+        pytest.skip(
+            'This test requires a local API server and needs to restart the server during execution. '
+            'If the API server endpoint is set in the environment file, restarting is not supported, '
+            'so the test will be skipped.')
+
     ws1_name = 'ws-1'
     ws2_name = 'ws-2'
     server_config_content = textwrap.dedent(f"""\

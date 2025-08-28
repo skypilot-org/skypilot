@@ -785,7 +785,16 @@ def pytest_config_file_override() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE', None)
 
 
-def services_account_token_configured() -> bool:
+def api_server_endpoint_configured_in_env_file() -> bool:
+    file_path = pytest_config_file_override()
+    if file_path is not None:
+        with open(file_path, 'r') as f:
+            content = f.read()
+            return 'endpoint' in content
+    return False
+
+
+def services_account_token_configured_in_env_file() -> bool:
     file_path = pytest_config_file_override()
     if file_path is not None:
         with open(file_path, 'r') as f:

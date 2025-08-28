@@ -9,12 +9,9 @@ import textwrap
 import pytest
 from smoke_tests import smoke_tests_utils
 
-from sky import skypilot_config
 
-
-@pytest.mark.no_vast  # Requires GCP
-@pytest.mark.no_fluidstack  # Requires GCP to be enabled
-def test_log_collection_to_gcp(generic_cloud: str):
+@pytest.mark.gcp
+def test_log_collection_to_gcp():
     name = smoke_tests_utils.get_cluster_name()
     # Calculate timestamp 1 hour ago in ISO format
     one_hour_ago = (datetime.now(timezone.utc) -
