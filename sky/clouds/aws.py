@@ -118,7 +118,7 @@ def _is_efa_instance_type(instance_type: str) -> bool:
         for prefix in _EFA_INSTANCE_TYPE_PREFIXES)
 
 
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='global', maxsize=128)
 def _get_efa_image_id(region_name: str) -> Optional[str]:
     """Get the EFA image id for the given region."""
     try:
@@ -147,7 +147,7 @@ def _get_efa_image_id(region_name: str) -> Optional[str]:
             raise ValueError(f'Failed to get EFA image id: {e}') from None
 
 
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='global', maxsize=128)
 def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
     """Get the maximum number of EFA interfaces for the given instance type."""
     if not _is_efa_instance_type(instance_type):
