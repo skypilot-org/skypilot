@@ -109,8 +109,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             try:
                 return await self._authenticate(request, call_next, session)
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                logger.error(f'Error communicating with OAuth2 proxy: {e}')
-                # Fail open or closed based on your security requirements
+                logger.error(f'Error communicating with OAuth2 proxy: {e.with_traceback()}')
                 return fastapi.responses.JSONResponse(
                     status_code=http.HTTPStatus.BAD_GATEWAY,
                     content={'detail': 'oauth2-proxy service unavailable'})
@@ -121,6 +120,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         auth_url = f'{self.proxy_base}/oauth2/auth'
         forwarded_headers['X-Forwarded-Uri'] = str(request.url).rstrip('/')
         logger.debug(f'authenticate request: {request.url.path}')
+        logger.info(f'authenticate request: {request}')
 
         async with session.request(
                 method=request.method,
@@ -148,6 +148,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     request, auth_user)
                 return await call_next(request)
             elif auth_response.status == http.HTTPStatus.UNAUTHORIZED:
+                logger.info(f'authenticate request UNAUTHORIZED: {request}')
                 # For /api/health, we should allow unauthenticated requests to
                 # not break healthz check.
                 # TODO(aylei): remove this to an aggregated login middleware
