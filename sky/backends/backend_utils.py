@@ -3015,23 +3015,28 @@ def get_clusters(
 
         handles = [record['handle'] for record in records_with_handle]
         credentials = ssh_credentials_from_handles(handles)
+        cached_private_keys: Dict[str, str] = {}
         for record, credential in zip(records_with_handle, credentials):
             if not credential:
                 continue
             ssh_private_key_path = credential.get('ssh_private_key', None)
             if ssh_private_key_path is not None:
-                if not os.path.exists(os.path.expanduser(ssh_private_key_path)):
+                expanded_private_key_path = os.path.expanduser(
+                    ssh_private_key_path)
+                if not os.path.exists(expanded_private_key_path):
                     auth.create_ssh_key_files_from_db(ssh_private_key_path)
-                with open(os.path.expanduser(ssh_private_key_path),
-                          'r',
-                          encoding='utf-8') as f:
-                    credential['ssh_private_key_content'] = f.read()
             else:
                 private_key_path, _ = auth.get_or_generate_keys()
-                with open(os.path.expanduser(private_key_path),
-                          'r',
+                expanded_private_key_path = os.path.expanduser(private_key_path)
+            if expanded_private_key_path in cached_private_keys:
+                credential['ssh_private_key_content'] = cached_private_keys[
+                    expanded_private_key_path]
+            else:
+                with open(expanded_private_key_path, 'r',
                           encoding='utf-8') as f:
                     credential['ssh_private_key_content'] = f.read()
+                    cached_private_keys[expanded_private_key_path] = credential[
+                        'ssh_private_key_content']
             record['credentials'] = credential
 
     def _update_records_with_resources(
