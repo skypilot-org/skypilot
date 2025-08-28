@@ -1,13 +1,15 @@
 """Test for sky.utils.timeline."""
 
-from unittest import mock
-import pytest
 import os
+from unittest import mock
+
+import pytest
 
 from sky.utils import timeline
 
 
 def test_save_timeline():
+
     @timeline.event("test_save_timeline")
     def test_save_timeline():
         pass
