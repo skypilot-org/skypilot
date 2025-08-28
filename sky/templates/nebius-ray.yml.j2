@@ -56,10 +56,6 @@ available_node_types:
           filesystem_mount_path: {{ fs.filesystem_mount_path }}
         {%- endfor %}
       UserData: |
-        runcmd:
-          - sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
-          - systemctl restart sshd
-
         {# Two available OS images:
                1. ubuntu24.04-driverless - requires Docker installation
                2. ubuntu24.04-cuda12 - comes with Docker pre-installed
