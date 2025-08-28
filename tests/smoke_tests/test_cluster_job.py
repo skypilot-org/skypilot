@@ -19,6 +19,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_cluster_job.py --generic-cloud aws
 
+import os
 import pathlib
 import re
 import shlex
@@ -2160,3 +2161,117 @@ def test_scp_autodown():
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Kubernetes pod_config ----------
+@pytest.mark.kubernetes
+def test_kubernetes_pod_config_pvc():
+    """Test Kubernetes pod_config with PVC volume mounts."""
+    name = smoke_tests_utils.get_cluster_name()
+    pvc_name = f'{name}-pvc'
+
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_k8s_pod_config_pvc.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    task_yaml_content = template.render(pvc_name=pvc_name)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as f:
+        f.write(task_yaml_content)
+        f.flush()
+        task_yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_config_pvc',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Create PVC
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, f'kubectl create -f - <<EOF\n'
+                    f'apiVersion: v1\n'
+                    f'kind: PersistentVolumeClaim\n'
+                    f'metadata:\n'
+                    f'  name: {pvc_name}\n'
+                    f'spec:\n'
+                    f'  accessModes:\n'
+                    f'    - ReadWriteOnce\n'
+                    f'  resources:\n'
+                    f'    requests:\n'
+                    f'      storage: 1Gi\n'
+                    f'EOF'),
+                # Verify PVC was created
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, f'kubectl get pvc {pvc_name} -oyaml'),
+                f'sky launch -y -c {name} --infra kubernetes {task_yaml_path}',
+                # Write to the volume
+                f'sky exec {name} --infra kubernetes "ls -la /mnt/test-data/ && echo \'Hello\' > /mnt/test-data/hello.txt"',
+                # Down and launch again
+                f'sky down -y {name}',
+                f'sky launch -y -c {name} --infra kubernetes {task_yaml_path}',
+                # Read the volume from the new pod
+                f'sky exec {name} --infra kubernetes "ls -la /mnt/test-data/ && cat /mnt/test-data/hello.txt"',
+                # Delete PVC
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl delete pvc {pvc_name} --ignore-not-found=true --wait=false || true'
+                ),
+            ],
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+        os.unlink(task_yaml_path)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_pod_config_change_detection():
+    """Test that pod_config changes are detected and warning is shown."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    template_str_1 = pathlib.Path(
+        'tests/test_yamls/test_k8s_pod_config_env1.yaml.j2').read_text()
+    template_1 = jinja2.Template(template_str_1)
+    task_yaml_1_content = template_1.render()
+
+    template_str_2 = pathlib.Path(
+        'tests/test_yamls/test_k8s_pod_config_env2.yaml.j2').read_text()
+    template_2 = jinja2.Template(template_str_2)
+    task_yaml_2_content = template_2.render()
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w', delete=False) as f1, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w', delete=False) as f2:
+
+        f1.write(task_yaml_1_content)
+        f1.flush()
+        task_yaml_1_path = f1.name
+
+        f2.write(task_yaml_2_content)
+        f2.flush()
+        task_yaml_2_path = f2.name
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_config_change_detection',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Launch task with original pod_config
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {task_yaml_1_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 1"',
+                # Launch task with modified pod_config - should show warning
+                # Verify the job succeeds despite the warning and check that environment variables are not updated
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {task_yaml_2_path} 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Task requires different Kubernetes pod config" && '
+                f'echo "$s" | grep "TEST_VAR_1 = 1" && '
+                f'echo "$s" | grep "TEST_VAR_2 = "',
+                # Down and launch again to get the new pod_config
+                f'sky down -y {name}',
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {task_yaml_2_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 2" && '
+                f'echo "$s" | grep "TEST_VAR_2 = 2"',
+            ],
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+        os.unlink(task_yaml_1_path)
+        os.unlink(task_yaml_2_path)

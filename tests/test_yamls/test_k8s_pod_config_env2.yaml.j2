@@ -1,0 +1,19 @@
+resources:
+  cpus: 1
+  memory: 1GB
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - env:
+          - name: TEST_VAR_1
+            value: "2"
+          - name: TEST_VAR_2
+            value: "2"
+
+run: |
+  echo "Running with modified pod config"
+  echo "TEST_VAR_1 = $TEST_VAR_1"
+  echo "TEST_VAR_2 = $TEST_VAR_2"

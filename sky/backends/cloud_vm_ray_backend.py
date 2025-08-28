@@ -5141,6 +5141,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Take a random resource in order to get resource info that applies
             # to all resources.
             one_task_resource = list(task.resources)[0]
+
+            # Kubernetes pod config should be the same for all resources.
+            for resource in task.resources:
+                assert (resource.kubernetes_pod_config ==
+                        one_task_resource.kubernetes_pod_config)
+            # Warn users if the Kubernetes pod config is different
+            # from the existing cluster.
+            if (one_task_resource.kubernetes_pod_config !=
+                    handle.launched_resources.kubernetes_pod_config):
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Task requires different Kubernetes '
+                    f'pod config than the existing cluster. The existing '
+                    f'cluster will be used with its current pod config. To use '
+                    f'the new pod config: specify a new cluster name, or down '
+                    f'the existing cluster first: sky down {cluster_name}'
+                    f'{colorama.Style.RESET_ALL}')
+
             # Assume resources share the same ports.
             for resource in task.resources:
                 assert resource.ports == one_task_resource.ports
