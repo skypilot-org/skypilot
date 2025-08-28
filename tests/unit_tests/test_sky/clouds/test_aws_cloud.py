@@ -176,7 +176,7 @@ class TestEfaHelpers:
         mock_aws.client.assert_called_with('ec2', region_name='us-west-2')
 
     @mock.patch.object(aws_mod, 'aws')
-    def test_get_efa_image_id_no_credentials_returns_none(self, mock_aws):
+    def test_get_efa_image_id_no_credentials_raises(self, mock_aws):
 
         class DummyExceptions:
 
@@ -195,7 +195,8 @@ class TestEfaHelpers:
         client.describe_images.side_effect = DummyExceptions.NoCredentialsError(
         )
 
-        assert aws_mod._get_efa_image_id('us-east-1') is None
+        with pytest.raises(ValueError):
+            aws_mod._get_efa_image_id('us-east-1')
 
     @mock.patch.object(aws_mod, 'aws')
     def test_get_efa_image_id_client_error_raises(self, mock_aws):
@@ -244,7 +245,7 @@ class TestEfaHelpers:
         mock_aws.client.assert_called_with('ec2', region_name='us-west-2')
 
     @mock.patch.object(aws_mod, 'aws')
-    def test_get_max_efa_interfaces_no_creds_returns_zero(self, mock_aws):
+    def test_get_max_efa_interfaces_no_creds_raises(self, mock_aws):
 
         class DummyExceptions:
 
@@ -263,8 +264,8 @@ class TestEfaHelpers:
         client.describe_instance_types.side_effect = DummyExceptions.NoCredentialsError(
         )
 
-        result = aws_mod._get_max_efa_interfaces('g6.12xlarge', 'ap-south-1')
-        assert result == 0
+        with pytest.raises(ValueError):
+            aws_mod._get_max_efa_interfaces('g6.12xlarge', 'ap-south-1')
 
     @mock.patch.object(aws_mod, 'aws')
     def test_get_max_efa_interfaces_client_error_raises(self, mock_aws):
@@ -324,7 +325,7 @@ class TestEfaHelpers:
         assert aws_mod._get_efa_image_id('us-west-1') is None
 
     @mock.patch.object(aws_mod, 'aws')
-    def test_get_efa_image_id_profile_not_found_returns_none(self, mock_aws):
+    def test_get_efa_image_id_profile_not_found_raises(self, mock_aws):
 
         class DummyExceptions:
 
@@ -341,7 +342,8 @@ class TestEfaHelpers:
         client = mock.Mock()
         mock_aws.client.return_value = client
         client.describe_images.side_effect = DummyExceptions.ProfileNotFound()
-        assert aws_mod._get_efa_image_id('ap-northeast-1') is None
+        with pytest.raises(ValueError):
+            aws_mod._get_efa_image_id('ap-northeast-1')
 
     @mock.patch.object(aws_mod, 'aws')
     def test_get_max_efa_interfaces_missing_instance_types_returns_zero(
@@ -386,7 +388,7 @@ class TestEfaHelpers:
                                                'eu-central-1') == 0
 
     @mock.patch.object(aws_mod, 'aws')
-    def test_get_max_efa_interfaces_profile_not_found_returns_zero(
+    def test_get_max_efa_interfaces_profile_not_found_raises(
             self, mock_aws):
 
         class DummyExceptions:
@@ -405,5 +407,5 @@ class TestEfaHelpers:
         mock_aws.client.return_value = client
         client.describe_instance_types.side_effect = DummyExceptions.ProfileNotFound(
         )
-        assert aws_mod._get_max_efa_interfaces('g6.12xlarge',
-                                               'ap-northeast-1') == 0
+        with pytest.raises(ValueError):
+            aws_mod._get_max_efa_interfaces('g6.12xlarge', 'ap-northeast-1')
