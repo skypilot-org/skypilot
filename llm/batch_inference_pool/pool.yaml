@@ -19,7 +19,7 @@ setup: |
   # Install fschat and accelerate for chat completion
   git clone https://github.com/vllm-project/vllm.git || true
   uv pip install "vllm>=0.8.3"
-  uv pip install numpy pandas requests tqdm datasets nltk
+  uv pip install numpy pandas requests tqdm datasets==3.6.0 nltk
   uv pip install torch torchvision aiohttp
   uv pip install hf_transfer pyarrow
 
