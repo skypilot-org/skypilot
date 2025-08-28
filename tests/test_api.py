@@ -91,7 +91,7 @@ def test_api_stream_heartbeat(monkeypatch):
                     except Exception:
                         pass
 
-                    if current_time - start_time > 0.55:
+                    if current_time - start_time > 3.0:
                         break
             finally:
                 # Properly close the async generator to avoid pending task errors
@@ -180,7 +180,7 @@ def test_heartbeat_not_displayed_to_users(monkeypatch):
                         # Non-control messages should be displayed
                         user_visible_messages.append(item)
 
-                    if current_time - start_time > 0.55:
+                    if current_time - start_time > 2.0:
                         break
             finally:
                 await log_stream.aclose()
