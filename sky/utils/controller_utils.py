@@ -5,7 +5,7 @@ import enum
 import os
 import tempfile
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set
 import uuid
 
 import colorama
@@ -23,11 +23,14 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import state as managed_job_state
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
+from sky.serve import serve_state
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -35,10 +38,16 @@ from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
+    import psutil
+
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
+else:
+    from sky.adaptors import common as adaptors_common
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -64,7 +73,7 @@ class _ControllerSpec:
     controller_type: str
     name: str
     cluster_name: str
-    in_progress_hint: str
+    in_progress_hint: Callable[[bool], str]
     decline_cancel_hint: str
     _decline_down_when_failed_to_fetch_status_hint: str
     decline_down_for_dirty_controller_hint: str
@@ -94,9 +103,9 @@ class Controllers(enum.Enum):
         controller_type='jobs',
         name='managed jobs controller',
         cluster_name=common.JOB_CONTROLLER_NAME,
-        in_progress_hint=(
-            '* {job_info}To see all managed jobs: '
-            f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
+        in_progress_hint=lambda _:
+        ('* {job_info}To see all managed jobs: '
+         f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the jobs controller\'s jobs is not allowed.\nTo cancel '
             f'managed jobs, use: {colorama.Style.BRIGHT}sky jobs cancel '
@@ -126,8 +135,11 @@ class Controllers(enum.Enum):
         name='serve controller',
         cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
-            f'* To see detailed service status: {colorama.Style.BRIGHT}'
-            f'sky serve status -v{colorama.Style.RESET_ALL}'),
+            lambda pool:
+            (f'* To see detailed pool status: {colorama.Style.BRIGHT}'
+             f'sky jobs pool status -v{colorama.Style.RESET_ALL}') if pool else
+            (f'* To see detailed service status: {colorama.Style.BRIGHT}'
+             f'sky serve status -v{colorama.Style.RESET_ALL}')),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
         _decline_down_when_failed_to_fetch_status_hint=(
@@ -204,6 +216,13 @@ class Controllers(enum.Enum):
             if controller.value.controller_type == controller_type:
                 return controller
         return None
+
+
+def get_controller_for_pool(pool: bool) -> Controllers:
+    """Get the controller type."""
+    if pool:
+        return Controllers.JOBS_CONTROLLER
+    return Controllers.SKY_SERVE_CONTROLLER
 
 
 def high_availability_specified(cluster_name: Optional[str]) -> bool:
@@ -391,10 +410,11 @@ def check_cluster_name_not_controller(
 
 
 # Internal only:
-def download_and_stream_latest_job_log(
+def download_and_stream_job_log(
         backend: 'cloud_vm_ray_backend.CloudVmRayBackend',
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-        local_dir: str) -> Optional[str]:
+        local_dir: str,
+        job_ids: Optional[List[str]] = None) -> Optional[str]:
     """Downloads and streams the latest job log.
 
     This function is only used by jobs controller and sky serve controller.
@@ -412,7 +432,7 @@ def download_and_stream_latest_job_log(
             # multi-node cluster is preempted, and we recover the managed job
             # on the existing cluster, which leads to a larger job_id. Those
             # job_ids all represent the same logical managed job.
-            job_ids=None,
+            job_ids=job_ids,
             local_dir=local_dir)
     except Exception as e:  # pylint: disable=broad-except
         # We want to avoid crashing the controller. sync_down_logs() is pretty
@@ -478,7 +498,7 @@ def shared_controller_vars_to_fill(
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX) as temp_file:
-            common_utils.dump_yaml(temp_file.name, dict(**local_user_config))
+            yaml_utils.dump_yaml(temp_file.name, dict(**local_user_config))
         local_user_config_path = temp_file.name
 
     vars_to_fill: Dict[str, Any] = {
@@ -767,9 +787,9 @@ def replace_skypilot_config_path_in_file_mounts(
             continue
         if local_path.endswith(_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX):
             with tempfile.NamedTemporaryFile('w', delete=False) as f:
-                user_config = common_utils.read_yaml(local_path)
+                user_config = yaml_utils.read_yaml(local_path)
                 config = _setup_proxy_command_on_controller(cloud, user_config)
-                common_utils.dump_yaml(f.name, dict(**config))
+                yaml_utils.dump_yaml(f.name, dict(**config))
                 file_mounts[remote_path] = f.name
                 replaced = True
     if replaced:
@@ -1150,3 +1170,81 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     task.update_storage_mounts(updated_mount_storages)
     if msg:
         logger.info(ux_utils.finishing_message('Uploaded local files/folders.'))
+
+
+# ======================= Resources Management Functions =======================
+
+# Based on testing, assume a running job process uses 350MB memory. We use the
+# same estimation for service controller process.
+JOB_MEMORY_MB = 350
+# Monitoring process for service is 1GB. This is based on an old estimation but
+# we keep it here for now.
+# TODO(tian): Remeasure this.
+SERVE_MONITORING_MEMORY_MB = 1024
+# The ratio of service controller process to job process. We will treat each
+# service as SERVE_PROC_RATIO job processes.
+SERVE_PROC_RATIO = SERVE_MONITORING_MEMORY_MB / JOB_MEMORY_MB
+# Past 2000 simultaneous jobs, we become unstable.
+# See https://github.com/skypilot-org/skypilot/issues/4649.
+MAX_JOB_LIMIT = 2000
+# Number of ongoing launches launches allowed per CPU, for managed jobs.
+JOB_LAUNCHES_PER_CPU = 4
+# Number of ongoing launches launches allowed per CPU, for services. This is
+# also based on an old estimation, but SKyServe indeed spawn a new process
+# for each launch operation, so it should be slightly more resources demanding
+# than managed jobs.
+SERVE_LAUNCHES_PER_CPU = 2
+# The ratio of service launch to job launch. This is inverted as the parallelism
+# is determined by 1 / LAUNCHES_PER_CPU.
+SERVE_LAUNCH_RATIO = JOB_LAUNCHES_PER_CPU / SERVE_LAUNCHES_PER_CPU
+
+# The _RESOURCES_LOCK should be held whenever we are checking the parallelism
+# control or updating the schedule_state of any job or service. Any code that
+# takes this lock must conclude by calling maybe_schedule_next_jobs.
+_RESOURCES_LOCK = '~/.sky/locks/controller_resources.lock'
+
+
+@annotations.lru_cache(scope='global', maxsize=1)
+def get_resources_lock_path() -> str:
+    path = os.path.expanduser(_RESOURCES_LOCK)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
+
+@annotations.lru_cache(scope='request')
+def _get_job_parallelism() -> int:
+    job_memory = JOB_MEMORY_MB * 1024 * 1024
+    job_limit = min(psutil.virtual_memory().total // job_memory, MAX_JOB_LIMIT)
+    return max(job_limit, 1)
+
+
+@annotations.lru_cache(scope='request')
+def _get_launch_parallelism() -> int:
+    cpus = os.cpu_count()
+    return cpus * JOB_LAUNCHES_PER_CPU if cpus is not None else 1
+
+
+def can_provision() -> bool:
+    # We always prioritize terminating over provisioning, to save the cost on
+    # idle resources.
+    if serve_state.total_number_scheduled_to_terminate_replicas() > 0:
+        return False
+    return can_terminate()
+
+
+def can_start_new_process() -> bool:
+    num_procs = (serve_state.get_num_services() * SERVE_PROC_RATIO +
+                 managed_job_state.get_num_alive_jobs())
+    return num_procs < _get_job_parallelism()
+
+
+# We limit the number of terminating replicas to the number of CPUs. This is
+# just a temporary solution to avoid overwhelming the controller. After one job
+# controller PR, we should use API server to handle resources management.
+def can_terminate() -> bool:
+    num_terminating = (
+        serve_state.total_number_provisioning_replicas() * SERVE_LAUNCH_RATIO +
+        # Each terminate process will take roughly the same CPUs as job launch.
+        serve_state.total_number_terminating_replicas() +
+        managed_job_state.get_num_launching_jobs())
+    return num_terminating < _get_launch_parallelism()

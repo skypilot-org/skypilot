@@ -5,7 +5,6 @@ import enum
 import functools
 from http.cookiejar import CookieJar
 from http.cookiejar import MozillaCookieJar
-import json
 import os
 import pathlib
 import re
@@ -16,13 +15,16 @@ import tempfile
 import threading
 import time
 import typing
-from typing import Any, Dict, Literal, Optional, Tuple, Union
+from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
+                    Tuple, TypeVar, Union)
 from urllib import parse
 import uuid
 
 import cachetools
 import colorama
 import filelock
+from passlib import context as passlib_context
+from typing_extensions import ParamSpec
 
 from sky import exceptions
 from sky import sky_logging
@@ -39,14 +41,17 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
+    import aiohttp
     import pydantic
     import requests
 
     from sky import dag as dag_lib
     from sky import models
 else:
+    aiohttp = adaptors_common.LazyImport('aiohttp')
     pydantic = adaptors_common.LazyImport('pydantic')
     requests = adaptors_common.LazyImport('requests')
 
@@ -58,7 +63,7 @@ AVAILABLE_LOCAL_API_SERVER_URLS = [
 
 API_SERVER_CMD = '-m sky.server.server'
 # The client dir on the API server for storing user-specific data, such as file
-# mounts, logs, etc. This dir is empheral and will be cleaned up when the API
+# mounts, logs, etc. This dir is ephemeral and will be cleaned up when the API
 # server is restarted.
 API_SERVER_CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
 RETRY_COUNT_ON_TIMEOUT = 3
@@ -85,12 +90,24 @@ _SERVER_INSTALL_VERSION_MISMATCH_WARNING = (
     'restarting the API server.'
     f'{colorama.Style.RESET_ALL}')
 
-RequestId = str
+T = TypeVar('T')
+P = ParamSpec('P')
+
+
+class RequestId(str, Generic[T]):
+    pass
+
+
 ApiVersion = Optional[str]
 
 logger = sky_logging.init_logger(__name__)
 
 hinted_for_server_install_version_mismatch = False
+
+crypt_ctx = passlib_context.CryptContext([
+    'bcrypt', 'sha256_crypt', 'sha512_crypt', 'des_crypt', 'apr_md5_crypt',
+    'ldap_sha1'
+])
 
 
 class ApiServerStatus(enum.Enum):
@@ -175,24 +192,14 @@ def get_cookies_from_response(
     return cookies
 
 
-def make_authenticated_request(method: str,
-                               path: str,
-                               server_url: Optional[str] = None,
-                               retry: bool = True,
-                               **kwargs) -> 'requests.Response':
-    """Make an authenticated HTTP request to the API server.
-
-    Automatically handles service account token authentication or cookie-based
-    authentication based on what's available.
-
-    Args:
-        method: HTTP method (GET, POST, etc.)
-        path: API path (e.g., '/api/v1/status')
-        server_url: Server URL, defaults to configured server
-        **kwargs: Additional arguments to pass to requests
+def _prepare_authenticated_request_params(
+        path: str,
+        server_url: Optional[str] = None,
+        **kwargs) -> Tuple[str, Dict[str, Any]]:
+    """Prepare common parameters for authenticated requests (sync or async).
 
     Returns:
-        requests.Response object
+        Tuple of (url, updated_kwargs)
     """
     if server_url is None:
         server_url = get_server_url()
@@ -214,12 +221,110 @@ def make_authenticated_request(method: str,
     if not headers.get('Authorization') and 'cookies' not in kwargs:
         kwargs['cookies'] = get_api_cookie_jar()
 
+    return url, kwargs
+
+
+def _convert_requests_cookies_to_aiohttp(
+        cookie_jar: requests.cookies.RequestsCookieJar) -> Dict[str, str]:
+    """Convert requests cookie jar to aiohttp-compatible dict format."""
+    cookies = {}
+    for cookie in cookie_jar:
+        cookies[cookie.name] = cookie.value
+    return cookies  # type: ignore
+
+
+def make_authenticated_request(method: str,
+                               path: str,
+                               server_url: Optional[str] = None,
+                               retry: bool = True,
+                               **kwargs) -> 'requests.Response':
+    """Make an authenticated HTTP request to the API server.
+
+    Automatically handles service account token authentication or cookie-based
+    authentication based on what's available.
+
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        path: API path (e.g., '/api/v1/status')
+        server_url: Server URL, defaults to configured server
+        retry: Whether to retry on transient errors
+        **kwargs: Additional arguments to pass to requests
+
+    Returns:
+        requests.Response object
+    """
+    url, kwargs = _prepare_authenticated_request_params(path, server_url,
+                                                        **kwargs)
+
     # Make the request
     if retry:
         return rest.request(method, url, **kwargs)
     else:
         assert method == 'GET', 'Only GET requests can be done without retry'
         return rest.request_without_retry(method, url, **kwargs)
+
+
+async def make_authenticated_request_async(
+        session: 'aiohttp.ClientSession',
+        method: str,
+        path: str,
+        server_url: Optional[str] = None,
+        retry: bool = True,
+        **kwargs) -> 'aiohttp.ClientResponse':
+    """Make an authenticated async HTTP request to the API server using aiohttp.
+
+    Automatically handles service account token authentication or cookie-based
+    authentication based on what's available.
+
+    Example usage:
+        async with aiohttp.ClientSession() as session:
+            response = await make_authenticated_request_async(
+                session, 'GET', '/api/v1/status')
+            data = await response.json()
+
+    Args:
+        session: aiohttp ClientSession to use for the request
+        method: HTTP method (GET, POST, etc.)
+        path: API path (e.g., '/api/v1/status')
+        server_url: Server URL, defaults to configured server
+        retry: Whether to retry on transient errors
+        **kwargs: Additional arguments to pass to aiohttp
+
+    Returns:
+        aiohttp.ClientResponse object
+
+    Raises:
+        aiohttp.ClientError: For HTTP-related errors
+        exceptions.ServerTemporarilyUnavailableError: When server returns 503
+        exceptions.RequestInterruptedError: When request is interrupted
+    """
+    url, kwargs = _prepare_authenticated_request_params(path, server_url,
+                                                        **kwargs)
+
+    # Convert cookies to aiohttp format if needed
+    if 'cookies' in kwargs and isinstance(kwargs['cookies'],
+                                          requests.cookies.RequestsCookieJar):
+        kwargs['cookies'] = _convert_requests_cookies_to_aiohttp(
+            kwargs['cookies'])
+
+    # Convert params to strings for aiohttp compatibility
+    if 'params' in kwargs and kwargs['params'] is not None:
+        normalized_params = {}
+        for key, value in kwargs['params'].items():
+            if isinstance(value, bool):
+                normalized_params[key] = str(value).lower()
+            elif value is not None:
+                normalized_params[key] = str(value)
+            # Skip None values
+        kwargs['params'] = normalized_params
+
+    # Make the request
+    if retry:
+        return await rest.request_async(session, method, url, **kwargs)
+    else:
+        assert method == 'GET', 'Only GET requests can be done without retry'
+        return await rest.request_without_retry_async(session, method, url,
+                                                      **kwargs)
 
 
 @annotations.lru_cache(scope='global')
@@ -273,7 +378,7 @@ def _handle_non_200_server_status(
                          '') == ApiServerStatus.VERSION_MISMATCH.value):
                 return ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
                                      error=body.get('message', ''))
-        except json.JSONDecodeError:
+        except requests.JSONDecodeError:
             pass
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
@@ -322,13 +427,14 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         # The response is 200, so we can parse the response.
         try:
             result = response.json()
+            server_status = result.get('status')
             api_version = result.get('api_version')
             version = result.get('version')
             version_on_disk = result.get('version_on_disk')
             commit = result.get('commit')
             user = result.get('user')
             basic_auth_enabled = result.get('basic_auth_enabled')
-            server_info = ApiServerInfo(status=ApiServerStatus.HEALTHY,
+            server_info = ApiServerInfo(status=ApiServerStatus(server_status),
                                         api_version=api_version,
                                         version=version,
                                         version_on_disk=version_on_disk,
@@ -363,7 +469,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             # OAuth.
             set_api_cookie_jar(cookies, create_if_not_exists=True)
             return server_info
-        except (json.JSONDecodeError, AttributeError) as e:
+        except (requests.JSONDecodeError, AttributeError) as e:
             # Try to check if we got redirected to a login page.
             for prev_response in response.history:
                 logger.debug(f'Previous response: {prev_response.url}')
@@ -395,7 +501,7 @@ def handle_request_error(response: 'requests.Response') -> None:
                 f'{response.text}')
 
 
-def get_request_id(response: 'requests.Response') -> RequestId:
+def get_request_id(response: 'requests.Response') -> RequestId[T]:
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')
     if request_id is None:
@@ -406,7 +512,7 @@ def get_request_id(response: 'requests.Response') -> RequestId:
                 'Failed to get request ID from SkyPilot API server at '
                 f'{get_server_url()}. Response: {response.status_code} '
                 f'{response.text}')
-    return request_id
+    return RequestId[T](request_id)
 
 
 def _start_api_server(deploy: bool = False,
@@ -462,15 +568,13 @@ def _start_api_server(deploy: bool = False,
         # For spawn mode, copy the environ to avoid polluting the SDK process.
         server_env = os.environ.copy()
         server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-        _set_metrics_env_var(server_env, metrics, deploy)
         # Start the API server process in the background and don't wait for it.
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
-        server_env = os.environ.copy()
-        server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         if enable_basic_auth:
             server_env[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
+        _set_metrics_env_var(server_env, metrics, deploy)
         with open(log_path, 'w', encoding='utf-8') as log_file:
             # Because the log file is opened using a with statement, it may seem
             # that the file will be closed when the with statement is exited
@@ -544,7 +648,7 @@ def _set_metrics_env_var(env: Union[Dict[str, str], os._Environ], metrics: bool,
         deploy: Whether the server is running in deploy mode, which means
             multiple processes might be running.
     """
-    if metrics:
+    if metrics or os.getenv(constants.ENV_VAR_SERVER_METRICS_ENABLED) == 'true':
         env[constants.ENV_VAR_SERVER_METRICS_ENABLED] = 'true'
         if deploy:
             metrics_dir = os.path.join(tempfile.gettempdir(), 'metrics')
@@ -662,14 +766,14 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                                   metrics_port, enable_basic_auth)
 
 
-def check_server_healthy_or_start(func):
+def check_server_healthy_or_start(func: Callable[P, T]) -> Callable[P, T]:
 
     @functools.wraps(func)
     def wrapper(*args, deploy: bool = False, host: str = '127.0.0.1', **kwargs):
         check_server_healthy_or_start_fn(deploy, host)
         return func(*args, **kwargs)
 
-    return wrapper
+    return cast(Callable[P, T], wrapper)
 
 
 def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
@@ -713,7 +817,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
         return str(client_file_mounts_dir /
                    file_mounts_mapping[original_path].lstrip('/'))
 
-    task_configs = common_utils.read_yaml_all(str(client_task_path))
+    task_configs = yaml_utils.read_yaml_all(str(client_task_path))
     for task_config in task_configs:
         if task_config is None:
             continue
@@ -766,7 +870,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     # We can switch to using string, but this is to make it easier to debug, by
     # persisting the translated task yaml file.
     translated_client_task_path = client_dir / f'{task_id}_translated.yaml'
-    common_utils.dump_yaml(str(translated_client_task_path), task_configs)
+    yaml_utils.dump_yaml(str(translated_client_task_path), task_configs)
 
     dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
     return dag
@@ -787,7 +891,8 @@ def request_body_to_params(body: 'pydantic.BaseModel') -> Dict[str, Any]:
 
 def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
-                           using_remote_api_server: bool, user: 'models.User'):
+                           using_remote_api_server: bool, user: 'models.User',
+                           request_id: str) -> None:
     """Reload modules, global variables, and usage message for a new request."""
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
@@ -801,6 +906,7 @@ def reload_for_new_request(client_entrypoint: Optional[str],
         client_command=client_command,
         using_remote_api_server=using_remote_api_server,
         user=user,
+        request_id=request_id,
     )
 
     # Clear cache should be called before reload_logger and usage reset,

@@ -1,0 +1,424 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: oauth2_test
+templates:
+  - templates/api-deployment.yaml
+  - templates/ingress.yaml
+  - templates/NOTES.txt
+  - templates/oauth2-proxy-deployment.yaml
+  - templates/oauth2-proxy-redis.yaml
+  - templates/oauth2-proxy-service.yaml
+  - templates/oauth2-proxy-ingress.yaml
+tests:
+  - it: should not create oauth2 resources when both configs are disabled
+    set:
+      auth.oauth.enabled: false
+      ingress.oauth2-proxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+        template: templates/oauth2-proxy-deployment.yaml
+      - hasDocuments:
+          count: 0
+        template: templates/oauth2-proxy-service.yaml
+      - hasDocuments:
+          count: 0
+        template: templates/oauth2-proxy-redis.yaml
+      - hasDocuments:
+          count: 0
+        template: templates/oauth2-proxy-ingress.yaml
+
+  - it: should create oauth2-proxy resources when legacy config is enabled
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+    asserts:
+      - hasDocuments:
+          count: 1
+        template: templates/oauth2-proxy-deployment.yaml
+      - hasDocuments:
+          count: 1
+        template: templates/oauth2-proxy-service.yaml
+      - hasDocuments:
+          count: 2  # Deployment and Service for Redis
+        template: templates/oauth2-proxy-redis.yaml
+      - hasDocuments:
+          count: 1
+        template: templates/oauth2-proxy-ingress.yaml
+
+  - it: should configure oauth2-proxy deployment with legacy values
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      ingress.oauth2-proxy.email-domain: "example.com"
+      ingress.oauth2-proxy.session-store-type: "redis"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - isKind:
+          of: Deployment
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-oauth2-proxy
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--oidc-issuer-url=https://example.okta.com/oauth2/default"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--email-domain=example.com"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--redis-connection-url=redis://$(SERVICE_NAME)-oauth2-proxy-redis:6379/0"
+      - equal:
+          path: spec.template.spec.containers[0].env[0].name
+          value: OAUTH2_PROXY_CLIENT_ID
+      - equal:
+          path: spec.template.spec.containers[0].env[0].value
+          value: "test-client-id"
+      - equal:
+          path: spec.template.spec.containers[0].env[1].name
+          value: OAUTH2_PROXY_CLIENT_SECRET
+      - equal:
+          path: spec.template.spec.containers[0].env[1].value
+          value: "test-client-secret"
+
+  - it: should configure oauth2-proxy with client credentials from secret (legacy)
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-details-from-secret: "oauth-secret"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.name
+          value: "oauth-secret"
+      - equal:
+          path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.key
+          value: "client-id"
+      - equal:
+          path: spec.template.spec.containers[0].env[1].valueFrom.secretKeyRef.name
+          value: "oauth-secret"
+      - equal:
+          path: spec.template.spec.containers[0].env[1].valueFrom.secretKeyRef.key
+          value: "client-secret"
+
+  - it: should configure oauth2-proxy with external redis (legacy)
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      ingress.oauth2-proxy.redis-url: "redis://external-redis:6379/1"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--redis-connection-url=redis://external-redis:6379/1"
+
+  - it: should not create redis when external redis is configured (legacy)
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      ingress.oauth2-proxy.redis-url: "redis://external-redis:6379/1"
+    template: templates/oauth2-proxy-redis.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should configure cookie session store when specified (legacy)
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      ingress.oauth2-proxy.session-store-type: "cookie"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--redis-connection-url=redis://$(SERVICE_NAME)-oauth2-proxy-redis:6379/0"
+
+  - it: should configure ingress with oauth2-proxy annotations (legacy)
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      ingress.oauth2-proxy.use-https: false
+    template: templates/ingress.yaml
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
+          value: "http://$host/oauth2/start?rd=$escaped_request_uri"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
+          value: "http://$host/oauth2/auth"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
+          value: "X-Auth-Request-Email, X-Skypilot-Auth"
+      - matchRegex:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-snippet"]
+          pattern: 'if \(\$http_authorization ~ "\^Bearer sky_\.\+"'
+
+  - it: should configure ingress with HTTPS oauth2-proxy annotations (legacy)
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      ingress.oauth2-proxy.use-https: true
+    template: templates/ingress.yaml
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
+          value: "https://$host/oauth2/start?rd=$escaped_request_uri"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
+          value: "https://$host/oauth2/auth"
+
+  - it: should create oauth2-proxy ingress (legacy)
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      ingress.host: "api.example.com"
+    template: templates/oauth2-proxy-ingress.yaml
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-oauth2-proxy
+      - equal:
+          path: spec.rules[0].host
+          value: "api.example.com"
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: "/oauth2"
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.name
+          value: RELEASE-NAME-oauth2-proxy
+
+  - it: should create oauth2-proxy resources when new auth config is enabled
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+    asserts:
+      - hasDocuments:
+          count: 1
+        template: templates/oauth2-proxy-deployment.yaml
+      - hasDocuments:
+          count: 1
+        template: templates/oauth2-proxy-service.yaml
+      - hasDocuments:
+          count: 2  # Deployment and Service for Redis
+        template: templates/oauth2-proxy-redis.yaml
+
+  - it: should configure API deployment with oauth environment variables (new auth)
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
+            value: "http://RELEASE-NAME-oauth2-proxy:4180"
+
+  - it: should not create oauth2-proxy ingress when using new auth config
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+    template: templates/oauth2-proxy-ingress.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not add oauth2-proxy annotations to main ingress when using new auth config
+    set:
+      ingress.enabled: true
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+    template: templates/ingress.yaml
+    asserts:
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
+
+  - it: should configure cookie timing settings (new auth)
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.cookie-refresh: 3600
+      auth.oauth.cookie-expire: 7200
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--cookie-refresh=3600"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--cookie-expire=7200"
+
+  - it: should fail when oidc-issuer-url is missing (legacy)
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: "ingress.oauth2-proxy.oidc-issuer-url is required when OAuth2 proxy is enabled"
+
+  - it: should fail when both auth configs are enabled
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+    template: templates/NOTES.txt
+    asserts:
+      - failedTemplate: {}
+
+  - it: should create oauth2-proxy service with correct configuration
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+    template: templates/oauth2-proxy-service.yaml
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-oauth2-proxy
+      - equal:
+          path: spec.ports[0].port
+          value: 4180
+      - equal:
+          path: spec.ports[0].targetPort
+          value: 4180
+      - equal:
+          path: spec.selector.app
+          value: RELEASE-NAME-oauth2-proxy
+
+  - it: should create redis deployment and service when session store is redis
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+    template: templates/oauth2-proxy-redis.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: Deployment
+        documentIndex: 0
+      - isKind:
+          of: Service
+        documentIndex: 1
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-oauth2-proxy-redis
+        documentIndex: 0
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "redis:7-alpine"
+        documentIndex: 0
+
+  - it: should configure oauth2-proxy with redis-secret
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.redis-secret: "redis-credentials"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--redis-connection-url=$(REDIS_URL)"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_URL
+            valueFrom:
+              secretKeyRef:
+                name: "redis-credentials"
+                key: "redis_url"
+
+
+  - it: should not create redis when redis-secret is configured
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.redis-secret: "redis-credentials"
+    template: templates/oauth2-proxy-redis.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+
+  - it: should fail when both redis-url and redis-secret are set
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.redis-url: "redis://external-redis:6379/1"
+      auth.oauth.redis-secret: "redis-credentials"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: "redis-url and redis-secret are mutually exclusive when OAuth2 proxy is enabled"

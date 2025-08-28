@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sky import sky_logging
 from sky.adaptors import runpod
 from sky.provision import docker_utils
-import sky.provision.runpod.api.commands as runpod_commands
+from sky.provision.runpod.api import commands as runpod_commands
 from sky.skylet import constants
 from sky.utils import common_utils
 
@@ -270,18 +270,17 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
            docker_login_config: Optional[Dict[str, str]]) -> str:
     """Launches an instance with the given parameters.
 
-    Converts the instance_type to the RunPod GPU name, finds the specs for the
-    GPU, and launches the instance.
+    For CPU instances, we directly use the instance_type for launching the
+    instance.
+
+    For GPU instances, we convert the instance_type to the RunPod GPU name,
+    and finds the specs for the GPU, before launching the instance.
 
     Returns:
         instance_id: The instance ID.
     """
     name = f'{cluster_name}-{node_type}'
-    gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
-    gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
-    cloud_type = instance_type.split('_')[2]
 
-    gpu_specs = runpod.runpod.get_gpu(gpu_type)
     # TODO(zhwu): keep this align with setups in
     # `provision.kuberunetes.instance.py`
     setup_cmd = (
@@ -329,12 +328,7 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
     params = {
         'name': name,
         'image_name': image_name_formatted,
-        'gpu_type_id': gpu_type,
-        'cloud_type': cloud_type,
         'container_disk_in_gb': disk_size,
-        'min_vcpu_count': 4 * gpu_quantity,
-        'min_memory_in_gb': gpu_specs['memoryInGb'] * gpu_quantity,
-        'gpu_count': gpu_quantity,
         'country_code': region,
         'data_center_id': zone,
         'ports': ports_str,
@@ -343,12 +337,33 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
         'template_id': template_id,
     }
 
+    # GPU instance types start with f'{gpu_count}x',
+    # CPU instance types start with 'cpu'.
+    is_cpu_instance = instance_type.startswith('cpu')
+    if is_cpu_instance:
+        # RunPod CPU instances can be uniquely identified by the instance_id.
+        params.update({
+            'instance_id': instance_type,
+        })
+    else:
+        gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
+        gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
+        cloud_type = instance_type.split('_')[2]
+        gpu_specs = runpod.runpod.get_gpu(gpu_type)
+        params.update({
+            'gpu_type_id': gpu_type,
+            'cloud_type': cloud_type,
+            'min_vcpu_count': 4 * gpu_quantity,
+            'min_memory_in_gb': gpu_specs['memoryInGb'] * gpu_quantity,
+            'gpu_count': gpu_quantity,
+        })
+
     if preemptible is None or not preemptible:
         new_instance = runpod.runpod.create_pod(**params)
     else:
         new_instance = runpod_commands.create_spot_pod(
             bid_per_gpu=bid_per_gpu,
-            **params,
+            **params,  # type: ignore[arg-type]
         )
 
     return new_instance['id']

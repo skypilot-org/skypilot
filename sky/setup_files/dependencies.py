@@ -65,17 +65,35 @@ install_requires = [
     # Required for API server metrics
     'prometheus_client>=0.8.0',
     'passlib',
+    'bcrypt',
     'pyjwt',
     'gitpython',
     'types-paramiko',
     'alembic',
+    'aiohttp',
 ]
+
+# See requirements-dev.txt for the version of grpc and protobuf
+# used to generate the code during development.
+
+# The grpc version at runtime has to be newer than the version
+# used to generate the code.
+GRPC = 'grpcio>=1.63.0'
+# >= 5.26.1 because the runtime version can't be older than the version
+# used to generate the code.
+# < 7.0.0 because code generated for a major version V will be supported by
+# protobuf runtimes of version V and V+1.
+# https://protobuf.dev/support/cross-version-runtime-guarantee
+PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
 
 server_dependencies = [
     'casbin',
     'sqlalchemy_adapter',
     'passlib',
     'pyjwt',
+    'aiohttp',
+    GRPC,
+    PROTOBUF,
 ]
 
 local_ray = [
@@ -87,16 +105,8 @@ local_ray = [
 ]
 
 remote = [
-    # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L251-L252
-    # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard
-    # fails to start when ray start is called (#2054).
-    # Tracking issue: https://github.com/ray-project/ray/issues/30984
-    'grpcio >= 1.32.0, != 1.48.0; python_version < \'3.10\'',
-    'grpcio >= 1.42.0, != 1.48.0; python_version >= \'3.10\'',
-    # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
-    'protobuf >= 3.15.3, != 3.19.5',
+    GRPC,
+    PROTOBUF,
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
@@ -156,8 +166,10 @@ extras_require: Dict[str, List[str]] = {
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
-    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0', 'websockets'],
-    'ssh': ['kubernetes>=20.0.0,!=32.0.0', 'websockets'],
+    'kubernetes': [
+        'kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'
+    ],
+    'ssh': ['kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'],
     'remote': remote,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
@@ -177,7 +189,7 @@ extras_require: Dict[str, List[str]] = {
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
     'nebius': [
-        'nebius>=0.2.37',
+        'nebius>=0.2.47',
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'server': server_dependencies,

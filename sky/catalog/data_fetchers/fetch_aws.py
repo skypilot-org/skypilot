@@ -46,7 +46,7 @@ ALL_REGIONS = [
     'eu-west-1',
     'eu-west-2',
     'eu-south-1',
-    # 'eu-south-2', # no supported AMI
+    'eu-south-2',
     'eu-west-3',
     'eu-north-1',
     'me-south-1',
@@ -78,6 +78,10 @@ PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws
 # the permission to query the offerings of the instance.
 # Ref: https://aws.amazon.com/ec2/instance-types/p4/
 P4DE_REGIONS = ['us-east-1', 'us-west-2']
+# g6f instances have fractional GPUs, but the API returns Count: 1 under
+# GpuInfo. However, the GPU memory is properly scaled. Taking the instance GPU
+# divided by the total memory of an L4 will give us the fraction of the GPU.
+L4_GPU_MEMORY = 22888
 
 regions_enabled: Optional[Set[str]] = None
 
@@ -313,6 +317,16 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 # AWS API is 'NVIDIA', which is incorrect. See #4652.
                 acc_name = 'H200'
                 acc_count = 8
+            if (row['InstanceType'].startswith('g6f') or
+                    row['InstanceType'].startswith('gr6f')):
+                # These instance actually have only fractional GPUs, but the API
+                # returns Count: 1 under GpuInfo. We need to check the GPU
+                # memory to get the actual fraction of the GPU.
+                # See also Standard_NV{vcpu}ads_A10_v5 support on Azure.
+                fraction = row['GpuInfo']['TotalGpuMemoryInMiB'] / L4_GPU_MEMORY
+                acc_count = round(fraction, 3)
+            if row['InstanceType'] == 'p5.4xlarge':
+                acc_count = 1
             return pd.Series({
                 'AcceleratorName': acc_name,
                 'AcceleratorCount': acc_count,

@@ -378,6 +378,7 @@ available_node_types:
         {% if volume_mounts %}
         securityContext:
           fsGroup: 1000
+          fsGroupChangePolicy: OnRootMismatch
         {% endif %}
 
         # Add node selector if GPU/TPUs are requested:
@@ -777,6 +778,15 @@ available_node_types:
                 {{ ray_installation_commands }}
 
                 VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                # Wait for `patch` package to be installed before applying ray patches
+                until dpkg -l | grep -q "^ii  patch "; do
+                  sleep 0.1
+                  echo "Waiting for patch package to be installed..."
+                done
+                # Apply Ray patches for progress bar fix
+                ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && { 
+                  VIRTUAL_ENV=~/skypilot-runtime python -c "from sky.skylet.ray_patches import patch; patch()" || exit 1; 
+                }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
 

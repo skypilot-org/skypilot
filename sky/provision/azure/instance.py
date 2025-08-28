@@ -952,11 +952,13 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
 
 @common_utils.retry
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     assert provider_config is not None, cluster_name_on_cloud
 
     subscription_id = provider_config['subscription_id']
@@ -964,7 +966,8 @@ def query_instances(
     filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     compute_client = azure.get_client('compute', subscription_id)
     nodes = _filter_instances(compute_client, resource_group, filters)
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
 
     def _fetch_and_map_status(node, resource_group: str) -> None:
         compute_client = azure.get_client('compute', subscription_id)
@@ -972,8 +975,8 @@ def query_instances(
 
         if status is None and non_terminated_only:
             return
-        statuses[node.name] = (None if status is None else
-                               status.to_cluster_status())
+        statuses[node.name] = ((None if status is None else
+                                status.to_cluster_status()), None)
 
     with pool.ThreadPool() as p:
         p.starmap(_fetch_and_map_status,

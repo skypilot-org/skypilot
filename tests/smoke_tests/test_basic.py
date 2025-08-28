@@ -36,6 +36,7 @@ from sky import skypilot_config
 from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import common_utils
+from sky.utils import yaml_utils
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
@@ -282,7 +283,7 @@ def test_aws_stale_job_manual_restart():
         'aws_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            f'sky launch -y -c {name} --infra aws/us-east-2 {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -309,6 +310,60 @@ def test_aws_stale_job_manual_restart():
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_vast
+@pytest.mark.aws
+def test_aws_manual_restart_recovery():
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.AWS.max_cluster_name_length())
+    region = 'us-east-2'
+    test = smoke_tests_utils.Test(
+        'test_aws_manual_restart_recovery',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                'aws', name, skip_remote_server_check=True),
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky autostop {name} -y -i 1',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=180),
+            # Restart the cluster manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=(
+                    f'id=`aws ec2 describe-instances --region {region} --filters '
+                    f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+                    f'--query Reservations[].Instances[].InstanceId '
+                    f'--output text` && '
+                    # Wait for the instance to be stopped before restarting.
+                    f'aws ec2 wait instance-stopped --region {region} '
+                    f'--instance-ids $id && '
+                    # Start the instance.
+                    f'aws ec2 start-instances --region {region} '
+                    f'--instance-ids $id && '
+                    # Wait for the instance to be running.
+                    f'aws ec2 wait instance-running --region {region} '
+                    f'--instance-ids $id'),
+                skip_remote_server_check=True),
+            # Status refresh should time out, as the restarted
+            # instance would get a new IP address.
+            # We should see a warning message on how to recover
+            # from this state.
+            f'sky status -r {name} | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            # Recover the cluster.
+            f'sky start -y {name}',
+            # Wait for the cluster to be up.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=300),
+        ],
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -571,7 +626,7 @@ class TestYamlSpecs:
 
     def _check_equivalent(self, yaml_path):
         """Check if the yaml is equivalent after load and dump again."""
-        origin_task_config = common_utils.read_yaml(yaml_path)
+        origin_task_config = yaml_utils.read_yaml(yaml_path)
 
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()
@@ -1198,120 +1253,40 @@ def test_cli_output(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Testing Autodowning ----------
-@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
-@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius does not support autodown
-@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
-@pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
-def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    # See test_autostop() for explanation of autostop_timeout.
-    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+@pytest.mark.aws
+def test_sky_down_with_multiple_sgs():
+    """Test that sky down works with multiple security groups.
+    
+    The goal is to ensure that when we run sky down we get the typical 
+    terminating output with no extra output. If the output changes please
+    update the test.
+    """
+    name_one = smoke_tests_utils.get_cluster_name()
+    vpc_one = "DO_NOT_DELETE"
+    name_two = smoke_tests_utils.get_cluster_name() + '-2'
+    vpc_two = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
+
+    validate_terminating_output = (
+        f'printf "%s" "$s" && echo "\n===Validating terminating output===" && '
+        # Ensure each terminating line is present.
+        f'printf "%s" "$s" | grep "Terminating cluster {name_one}...done" && '
+        f'printf "%s" "$s" | grep "Terminating cluster {name_two}...done" && '
+        # Ensure the last line is present.
+        f'printf "%s" "$s" | grep "Terminating 2 clusters" && '
+        # # Ensure there are only 3 lines.
+        f'echo "$s" | sed "/^$/d" | wc -l | grep 3')
+
     test = smoke_tests_utils.Test(
-        'autostop_with_unhealthy_ray_cluster',
+        'sky_down_with_multiple_sgs',
         [
-            f'sky launch -y -d -c {name} --num-nodes 2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
-            f'sky autostop -y {name} -i 5',
-            # Ensure autostop is set.
-            f'sky status | grep {name} | grep "5m"',
-            # Ensure the job succeeded.
-            f'sky logs {name} 1 --status',
-            # Stop the ray cluster, but leave the node running.
-            # TODO(kevin): Find a better way to replicate the issue
-            f'ssh {name} "skypilot-runtime/bin/ray stop"',
-            # Ensure the cluster is not terminated early, and is in INIT,
-            # because the ray cluster is stopped.
-            'sleep 240',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep INIT',
-            # Ensure the cluster is STOPPED.
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout),
+            # Launch cluster one.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name_one} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} --config aws.vpc_name={vpc_one} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Launch cluster two.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name_two} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} --config aws.vpc_name={vpc_two} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Run sky down and validate the output.
+            f's=$(SKYPILOT_DEBUG=0 sky down -y {name_one} {name_two} 2>&1) && {validate_terminating_output}',
         ],
-        f'sky down -y {name}',
-        timeout=20 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------- Testing Autodowning ----------
-@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
-@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius does not support autodown
-@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
-def test_autodown(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
-    # the VM is terminated.
-    autodown_timeout = 900 if generic_cloud in ('azure', 'kubernetes') else 240
-    total_timeout_minutes = 90 if generic_cloud in ('azure',
-                                                    'kubernetes') else 20
-    check_autostop_set = f's=$(sky status) && echo "$s" && echo "==check autostop set==" && echo "$s" | grep {name} | grep "1m (down)"'
-    test = smoke_tests_utils.Test(
-        'autodown',
-        [
-            f'sky launch -y -d -c {name} --num-nodes 2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
-            f'sky autostop -y {name} --down -i 1',
-            check_autostop_set,
-            # Ensure the cluster is not terminated early.
-            'sleep 40',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
-            # Ensure the cluster is terminated.
-            f'sleep {autodown_timeout}',
-            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --infra {generic_cloud} --num-nodes 2 --down {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
-            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
-            f'sky exec {name} --infra {generic_cloud} tests/test_yamls/minimal.yaml',
-            check_autostop_set,
-            f'sleep {autodown_timeout}',
-            # Ensure the cluster is terminated.
-            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --infra {generic_cloud} --num-nodes 2 --down {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
-            f'sky autostop -y {name} --cancel',
-            f'sleep {autodown_timeout}',
-            # Ensure the cluster is still UP.
-            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && echo "$s" | grep {name} | grep UP',
-        ],
-        f'sky down -y {name}',
-        timeout=total_timeout_minutes * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.scp
-def test_scp_autodown():
-    name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test(
-        'SCP_autodown',
-        [
-            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} tests/test_yamls/minimal.yaml',
-            f'sky autostop -y {name} --down -i 1',
-            # Ensure autostop is set.
-            f'sky status | grep {name} | grep "1m (down)"',
-            # Ensure the cluster is not terminated early.
-            'sleep 45',
-            f'sky status --refresh | grep {name} | grep UP',
-            # Ensure the cluster is terminated.
-            'sleep 200',
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} --down tests/test_yamls/minimal.yaml',
-            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
-            f'sky exec {name} {smoke_tests_utils.SCP_TYPE} tests/test_yamls/minimal.yaml',
-            f'sky status | grep {name} | grep "1m (down)"',
-            'sleep 200',
-            # Ensure the cluster is terminated.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} --down tests/test_yamls/minimal.yaml',
-            f'sky autostop -y {name} --cancel',
-            'sleep 200',
-            # Ensure the cluster is still UP.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
-        ],
-        f'sky down -y {name}',
-        timeout=25 * 60,
+        teardown=f'sky down -y {name_one} {name_two}',
+        timeout=smoke_tests_utils.get_timeout('aws'),
     )
     smoke_tests_utils.run_one_test(test)

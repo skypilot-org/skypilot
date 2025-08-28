@@ -55,6 +55,7 @@ from sky.utils import context_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
+from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -271,9 +272,14 @@ def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
 
 @contextlib.contextmanager
 def override_request_env_and_config(
-        request_body: payloads.RequestBody) -> Generator[None, None, None]:
+        request_body: payloads.RequestBody,
+        request_id: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
+    # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API server
+    # affecting client requests. If set on the client side, it will be
+    # overridden by the request body.
+    os.environ.pop('SKYPILOT_DEBUG', None)
     os.environ.update(request_body.env_vars)
     # Note: may be overridden by AuthProxyMiddleware.
     # TODO(zhwu): we need to make the entire request a context available to the
@@ -292,7 +298,8 @@ def override_request_env_and_config(
         client_entrypoint=request_body.entrypoint,
         client_command=request_body.entrypoint_command,
         using_remote_api_server=request_body.using_remote_api_server,
-        user=user)
+        user=user,
+        request_id=request_id)
     try:
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
@@ -376,12 +383,12 @@ def _request_execution_wrapper(request_id: str,
         # config, as there can be some logs during override that needs to be
         # captured in the log file.
         try:
-            with override_request_env_and_config(request_body), \
+            with override_request_env_and_config(request_body, request_id), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
-                                 f'{common_utils.dump_yaml_str(dict(config))}')
+                                 f'{yaml_utils.dump_yaml_str(dict(config))}')
                 return_value = func(**request_body.to_kwargs())
                 f.flush()
         except KeyboardInterrupt:
@@ -425,9 +432,9 @@ async def execute_request_coroutine(request: api_requests.Request):
     event loop. This is designed for executing tasks that are not CPU
     intensive, e.g. sky logs.
     """
+    context.initialize()
     ctx = context.get()
-    if ctx is None:
-        raise ValueError('Context is not initialized')
+    assert ctx is not None, 'Context is not initialized'
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body

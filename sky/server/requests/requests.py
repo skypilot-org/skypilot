@@ -24,12 +24,11 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
-from sky.utils import common
 from sky.utils import common_utils
-from sky.utils import env_options
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
@@ -307,110 +306,6 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     kill_requests(request_ids)
 
 
-def refresh_cluster_status_event():
-    """Periodically refresh the cluster status."""
-    # pylint: disable=import-outside-toplevel
-    from sky import core
-
-    # Disable logging for periodic refresh to avoid the usage message being
-    # sent multiple times.
-    os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
-
-    while True:
-        logger.info('=== Refreshing cluster status ===')
-        # This periodically refresh will hold the lock for the cluster being
-        # refreshed, but it is OK because other operations will just wait for
-        # the lock and get the just refreshed status without refreshing again.
-        core.status(refresh=common.StatusRefreshMode.FORCE, all_users=True)
-        logger.info(
-            'Status refreshed. Sleeping '
-            f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
-            ' seconds for the next refresh...\n')
-        time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
-
-
-def refresh_volume_status_event():
-    """Periodically refresh the volume status."""
-    # pylint: disable=import-outside-toplevel
-    from sky.volumes.server import core
-
-    # Disable logging for periodic refresh to avoid the usage message being
-    # sent multiple times.
-    os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
-
-    while True:
-        logger.info('=== Refreshing volume status ===')
-        core.volume_refresh()
-        logger.info('Volume status refreshed. Sleeping '
-                    f'{server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS}'
-                    ' seconds for the next refresh...\n')
-        time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
-
-
-def managed_job_status_refresh_event():
-    """Refresh the managed job status for controller consolidation mode."""
-    # pylint: disable=import-outside-toplevel
-    from sky.jobs import utils as managed_job_utils
-    if not managed_job_utils.is_consolidation_mode():
-        return
-    # We run the recovery logic before starting the event loop as those two are
-    # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
-    from sky.utils import controller_utils
-    if controller_utils.high_availability_specified(
-            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name):
-        managed_job_utils.ha_recovery_for_consolidation_mode()
-    # After recovery, we start the event loop.
-    from sky.skylet import events
-    event = events.ManagedJobEvent()
-    while True:
-        time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
-        event.run()
-
-
-@dataclasses.dataclass
-class InternalRequestDaemon:
-    """Internal daemon that runs an event in the background."""
-
-    id: str
-    name: str
-    event_fn: Callable[[], None]
-
-    def run_event(self):
-        """Run the event."""
-        while True:
-            with ux_utils.enable_traceback():
-                try:
-                    self.event_fn()
-                    break
-                except Exception:  # pylint: disable=broad-except
-                    # It is OK to fail to run the event, as the event is not
-                    # critical, but we should log the error.
-                    logger.exception(
-                        f'Error running {self.name} event. '
-                        f'Restarting in '
-                        f'{server_constants.DAEMON_RESTART_INTERVAL_SECONDS} '
-                        'seconds...')
-                    time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
-
-
-# Register the events to run in the background.
-INTERNAL_REQUEST_DAEMONS = [
-    # This status refresh daemon can cause the autostopp'ed/autodown'ed cluster
-    # set to updated status automatically, without showing users the hint of
-    # cluster being stopped or down when `sky status -r` is called.
-    InternalRequestDaemon(id='skypilot-status-refresh-daemon',
-                          name='status',
-                          event_fn=refresh_cluster_status_event),
-    # Volume status refresh daemon to update the volume status periodically.
-    InternalRequestDaemon(id='skypilot-volume-status-refresh-daemon',
-                          name='volume',
-                          event_fn=refresh_volume_status_event),
-    InternalRequestDaemon(id='managed-job-status-refresh-daemon',
-                          name='managed-job-status',
-                          event_fn=managed_job_status_refresh_event),
-]
-
-
 def kill_requests(request_ids: Optional[List[str]] = None,
                   user_id: Optional[str] = None) -> List[str]:
     """Kill a SkyPilot API request and set its status to cancelled.
@@ -441,7 +336,7 @@ def kill_requests(request_ids: Optional[List[str]] = None,
             # Skip internal requests. The internal requests are scheduled with
             # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
             if request_record.request_id in set(
-                    event.id for event in INTERNAL_REQUEST_DAEMONS):
+                    event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
                 continue
             if request_record.status > RequestStatus.RUNNING:
                 logger.debug(f'Request {request_id} already finished')
@@ -668,6 +563,27 @@ def get_request_tasks(
         request = Request.from_row(row)
         requests.append(request)
     return requests
+
+
+@init_db
+def get_api_request_ids_start_with(incomplete: str) -> List[str]:
+    """Get a list of API request ids for shell completion."""
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        # Prioritize alive requests (PENDING, RUNNING) over finished ones,
+        # then order by creation time (newest first) within each category.
+        cursor.execute(
+            f"""SELECT request_id FROM {REQUEST_TABLE}
+                WHERE request_id LIKE ?
+                ORDER BY
+                    CASE
+                        WHEN status IN ('PENDING', 'RUNNING') THEN 0
+                        ELSE 1
+                    END,
+                    created_at DESC
+                LIMIT 1000""", (f'{incomplete}%',))
+        return [row[0] for row in cursor.fetchall()]
 
 
 def _add_or_update_request_no_lock(request: Request):

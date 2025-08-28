@@ -1,10 +1,13 @@
 """Kubernetes instance provisioning."""
 import copy
+import datetime
 import json
+import re
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -24,6 +27,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils.db import db_utils
 
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
@@ -794,15 +798,18 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        'For more details, refer to https://docs.skypilot.co/en/latest/reference/config.html')  # pylint: disable=line-too-long
 
     needs_gpus = False
+    needs_gpus_nvidia = False
     limits = pod_spec['spec']['containers'][0].get('resources',
                                                    {}).get('limits')
     if limits is not None:
         needs_gpus = limits.get(kubernetes_utils.get_gpu_resource_key(context),
                                 0) > 0
+        needs_gpus_nvidia = limits.get(
+            kubernetes_utils.SUPPORTED_GPU_RESOURCE_KEYS['nvidia'], 0) > 0
 
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
-    if nvidia_runtime_exists and needs_gpus:
+    if nvidia_runtime_exists and needs_gpus_nvidia:
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
     logger.debug(f'run_instances: calling create_namespaced_pod '
@@ -1248,18 +1255,195 @@ def get_cluster_info(
         provider_config=provider_config)
 
 
+def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
+    """Get pod termination reason and write to cluster events."""
+    reasons = []
+    latest_timestamp = pod.status.start_time or datetime.datetime.min
+    if pod.status and pod.status.container_statuses:
+        for container_status in pod.status.container_statuses:
+            terminated = container_status.state.terminated
+            if terminated:
+                exit_code = terminated.exit_code
+                reason = terminated.reason
+                if exit_code == 0:
+                    # skip exit 0 (non-failed) just for sanity
+                    logger.debug(f'{pod.metadata.name}/{container_status.name} '
+                                 'had exit code 0. Skipping.')
+                    continue
+                if reason is None:
+                    # just in-case reason is None, have default for debugging
+                    reason = f'exit({exit_code})'
+                reasons.append(reason)
+                if terminated.finished_at > latest_timestamp:
+                    latest_timestamp = terminated.finished_at
+
+            # TODO (kyuds): later, if needed, query `last_state` too.
+
+    if not reasons:
+        return ''
+
+    # Normally we will have a single container per pod for skypilot
+    # but doing this just in-case there are multiple containers.
+    pod_reason = ' | '.join(reasons)
+
+    global_user_state.add_cluster_event(
+        cluster_name,
+        None,
+        f'[kubernetes pod {pod.metadata.name} terminated] {pod_reason}',
+        global_user_state.ClusterEventType.DEBUG,
+        transitioned_at=int(latest_timestamp.timestamp()),
+    )
+    return pod_reason
+
+
+def _get_pod_missing_reason(context: Optional[str], namespace: str,
+                            cluster_name: str, pod_name: str) -> Optional[str]:
+    """Get events for missing pod and write to cluster events."""
+    logger.debug(f'Analyzing events for pod {pod_name}')
+    pod_field_selector = (
+        f'involvedObject.kind=Pod,involvedObject.name={pod_name}')
+    pod_events = kubernetes.core_api(context).list_namespaced_event(
+        namespace,
+        field_selector=pod_field_selector,
+        _request_timeout=kubernetes.API_TIMEOUT).items
+    pod_events = sorted(
+        pod_events,
+        key=lambda event: event.metadata.creation_timestamp,
+        # latest event appears first
+        reverse=True)
+    last_scheduled_node = None
+    insert_new_pod_event = True
+    new_event_inserted = False
+    inserted_pod_events = 0
+
+    for event in pod_events:
+        if event.reason == 'Scheduled':
+            pattern = r'Successfully assigned (\S+) to (\S+)'
+            match = re.search(pattern, event.message)
+            if match:
+                scheduled_node = match.group(2)
+                last_scheduled_node = scheduled_node
+        if insert_new_pod_event:
+            # Try inserting the latest events first. If the event is a
+            # duplicate, it means the event (and any previous events) have
+            # already been inserted - so do not insert further events.
+            try:
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    None, f'[kubernetes pod {pod_name}] '
+                    f'{event.reason} {event.message}',
+                    global_user_state.ClusterEventType.DEBUG,
+                    transitioned_at=int(
+                        event.metadata.creation_timestamp.timestamp()),
+                    expose_duplicate_error=True)
+                logger.debug(f'[pod {pod_name}] encountered new pod event: '
+                             f'{event.metadata.creation_timestamp} '
+                             f'{event.reason} {event.message}')
+            except db_utils.UniqueConstraintViolationError:
+                insert_new_pod_event = False
+            else:
+                new_event_inserted = True
+                inserted_pod_events += 1
+
+    logger.debug(f'[pod {pod_name}] processed {len(pod_events)} pod events and '
+                 f'inserted {inserted_pod_events} new pod events '
+                 'previously unseen')
+
+    if last_scheduled_node is not None:
+        node_field_selector = ('involvedObject.kind=Node,'
+                               f'involvedObject.name={last_scheduled_node}')
+        node_events = kubernetes.core_api(context).list_namespaced_event(
+            namespace,
+            field_selector=node_field_selector,
+            _request_timeout=kubernetes.API_TIMEOUT).items
+        node_events = sorted(
+            node_events,
+            key=lambda event: event.metadata.creation_timestamp,
+            # latest event appears first
+            reverse=True)
+        insert_new_node_event = True
+        inserted_node_events = 0
+        for event in node_events:
+            if insert_new_node_event:
+                # Try inserting the latest events first. If the event is a
+                # duplicate, it means the event (and any previous events) have
+                # already been inserted - so do not insert further events.
+                try:
+                    global_user_state.add_cluster_event(
+                        cluster_name,
+                        None, f'[kubernetes node {last_scheduled_node}] '
+                        f'{event.reason} {event.message}',
+                        global_user_state.ClusterEventType.DEBUG,
+                        transitioned_at=int(
+                            event.metadata.creation_timestamp.timestamp()),
+                        expose_duplicate_error=True)
+                    logger.debug(
+                        f'[pod {pod_name}] encountered new node event: '
+                        f'{event.metadata.creation_timestamp} '
+                        f'{event.reason} {event.message}')
+                except db_utils.UniqueConstraintViolationError:
+                    insert_new_node_event = False
+                else:
+                    new_event_inserted = True
+                    inserted_node_events += 1
+
+        logger.debug(f'[pod {pod_name}: node {last_scheduled_node}] '
+                     f'processed {len(node_events)} node events and '
+                     f'inserted {inserted_node_events} new node events '
+                     'previously unseen')
+    else:
+        logger.debug(f'[pod {pod_name}] could not determine the node '
+                     'the pod was scheduled to')
+
+    if not new_event_inserted:
+        # If new event is not inserted, there is no useful information to
+        # return. Return None.
+        return None
+
+    # Analyze the events for failure
+    failure_reason = None
+    failure_decisiveness = 0
+
+    def _record_failure_reason(reason: str, decisiveness: int):
+        nonlocal failure_reason, failure_decisiveness
+        if decisiveness > failure_decisiveness:
+            failure_reason = reason
+            failure_decisiveness = decisiveness
+
+    cluster_events = global_user_state.get_cluster_events(
+        cluster_name, None, global_user_state.ClusterEventType.DEBUG)
+    for event in cluster_events:
+        if event.startswith('[kubernetes pod'):
+            event = event.split(']')[1].strip()
+        elif event.startswith('[kubernetes node'):
+            event = event.split(']')[1].strip()
+
+        if event.startswith('NodeNotReady '):
+            _record_failure_reason(event[len('NodeNotReady '):], 1)
+        elif event.startswith('TaintManagerEviction '):
+            # usually the event message for TaintManagerEviction is not useful
+            # so we record a more generic message.
+            _record_failure_reason('pod was evicted by taint manager', 2)
+        elif event.startswith('DeletingNode '):
+            _record_failure_reason(event[len('DeletingNode '):], 3)
+    return failure_reason
+
+
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
+    # Mapping from pod phase to skypilot status. These are the only valid pod
+    # phases.
+    # https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,
-        'Failed': None,
+        'Failed': status_lib.ClusterStatus.INIT,
         'Unknown': None,
         'Succeeded': None,
-        'Terminating': None,
     }
 
     assert provider_config is not None
@@ -1298,12 +1482,45 @@ def query_instances(
                 f'status: {common_utils.format_exception(e)}')
 
     # Check if the pods are running or pending
-    cluster_status = {}
+    cluster_status: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                                    Optional[str]]] = {}
     for pod in pods:
-        pod_status = status_map[pod.status.phase]
+        phase = pod.status.phase
+        pod_status = status_map[phase]
+        reason = None
+        if phase in ('Failed', 'Unknown'):
+            reason = _get_pod_termination_reason(pod, cluster_name)
+            logger.debug(f'Pod Status ({phase}) Reason(s): {reason}')
         if non_terminated_only and pod_status is None:
+            logger.debug(f'Pod {pod.metadata.name} is terminated, but '
+                         'query_instances is called with '
+                         f'non_terminated_only=True. Phase: {phase}')
             continue
-        cluster_status[pod.metadata.name] = pod_status
+        pod_name = pod.metadata.name
+        reason = f'{pod_name}: {reason}' if reason is not None else None
+        cluster_status[pod_name] = (pod_status, reason)
+
+    # Find the list of pod names that should be there
+    # from k8s services. Filter duplicates as -ssh service
+    # creates a duplicate entry.
+    target_pod_names = list(
+        set([
+            service['spec']['selector']['component']
+            for service in provider_config.get('services', [])
+        ]))
+
+    for target_pod_name in target_pod_names:
+        if target_pod_name not in cluster_status:
+            # If the pod is not in the cluster_status, it means it's not
+            # running.
+            # Analyze what happened to the pod based on events.
+            reason = _get_pod_missing_reason(context, namespace, cluster_name,
+                                             target_pod_name)
+            reason = (f'{target_pod_name}: {reason}'
+                      if reason is not None else None)
+            if not non_terminated_only:
+                cluster_status[target_pod_name] = (None, reason)
+
     return cluster_status
 
 

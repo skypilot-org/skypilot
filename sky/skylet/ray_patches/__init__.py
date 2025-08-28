@@ -40,15 +40,29 @@ def _run_patch(target_file,
     """Applies a patch if it has not been applied already."""
     # .orig is the original file that is not patched.
     orig_file = os.path.abspath(f'{target_file}-v{version}.orig')
+    # Get diff filename by replacing .patch with .diff
+    diff_file = patch_file.replace('.patch', '.diff')
+
     script = f"""\
     which patch >/dev/null 2>&1 || sudo yum install -y patch || true
-    which patch >/dev/null 2>&1 || (echo "`patch` is not found. Failed to setup ray." && exit 1)
     if [ ! -f {orig_file} ]; then
         echo Create backup file {orig_file}
         cp {target_file} {orig_file}
     fi
-    # It is ok to patch again from the original file.
-    patch {orig_file} -i {patch_file} -o {target_file}
+    if which patch >/dev/null 2>&1; then
+        # System patch command is available, use it
+        # It is ok to patch again from the original file.
+        patch {orig_file} -i {patch_file} -o {target_file}
+    else
+        # System patch command not available, use Python patch library
+        echo "System patch command not available, using Python patch library..."
+        python -m pip install patch
+        # Get target directory
+        target_dir="$(dirname {target_file})"
+        # Execute python patch command
+        echo "Executing python -m patch -d $target_dir {diff_file}"
+        python -m patch -d "$target_dir" "{diff_file}"
+    fi
     """
     subprocess.run(script, shell=True, check=True)
 

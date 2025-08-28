@@ -7,7 +7,6 @@ import contextlib
 import datetime
 import hashlib
 import json
-import logging
 import multiprocessing
 import os
 import pathlib
@@ -17,14 +16,13 @@ import resource
 import shutil
 import sys
 import threading
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple
+from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
 import aiofiles
 import fastapi
 from fastapi.middleware import cors
-from passlib.hash import apr_md5_crypt
 import starlette.middleware.base
 import uvloop
 
@@ -42,14 +40,18 @@ from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import daemons
 from sky.server import metrics
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
+from sky.server.auth import authn
+from sky.server.auth import oauth2_proxy
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -65,7 +67,6 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
-from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest
@@ -79,31 +80,8 @@ else:
 
 P = ParamSpec('P')
 
+_SERVER_USER_HASH_KEY = 'server_user_hash'
 
-def _add_timestamp_prefix_for_server_logs() -> None:
-    server_logger = sky_logging.init_logger('sky.server')
-    # Clear existing handlers first to prevent duplicates
-    server_logger.handlers.clear()
-    # Disable propagation to avoid the root logger of SkyPilot being affected
-    server_logger.propagate = False
-    # Add date prefix to the log message printed by loggers under
-    # server.
-    stream_handler = logging.StreamHandler(sys.stdout)
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        stream_handler.setLevel(logging.DEBUG)
-    else:
-        stream_handler.setLevel(logging.INFO)
-    stream_handler.flush = sys.stdout.flush  # type: ignore
-    stream_handler.setFormatter(sky_logging.FORMATTER)
-    server_logger.addHandler(stream_handler)
-    # Add date prefix to the log message printed by uvicorn.
-    for name in ['uvicorn', 'uvicorn.access']:
-        uvicorn_logger = logging.getLogger(name)
-        uvicorn_logger.handlers.clear()
-        uvicorn_logger.addHandler(stream_handler)
-
-
-_add_timestamp_prefix_for_server_logs()
 logger = sky_logging.init_logger(__name__)
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
@@ -117,41 +95,6 @@ def _basic_auth_401_response(content: str):
         status_code=401,
         headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
         content=content)
-
-
-# TODO(hailong): Remove this function and use request.state.auth_user instead.
-async def _override_user_info_in_request_body(request: fastapi.Request,
-                                              auth_user: Optional[models.User]):
-    if auth_user is None:
-        return
-
-    body = await request.body()
-    if body:
-        try:
-            original_json = await request.json()
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.error(f'Error parsing request JSON: {e}')
-        else:
-            logger.debug(f'Overriding user for {request.state.request_id}: '
-                         f'{auth_user.name}, {auth_user.id}')
-            if 'env_vars' in original_json:
-                if isinstance(original_json.get('env_vars'), dict):
-                    original_json['env_vars'][
-                        constants.USER_ID_ENV_VAR] = auth_user.id
-                    original_json['env_vars'][
-                        constants.USER_ENV_VAR] = auth_user.name
-                else:
-                    logger.warning(
-                        f'"env_vars" in request body is not a dictionary '
-                        f'for request {request.state.request_id}. '
-                        'Skipping user info injection into body.')
-            else:
-                original_json['env_vars'] = {}
-                original_json['env_vars'][
-                    constants.USER_ID_ENV_VAR] = auth_user.id
-                original_json['env_vars'][
-                    constants.USER_ENV_VAR] = auth_user.name
-            request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
 
 
 def _try_set_basic_auth_user(request: fastapi.Request):
@@ -177,7 +120,7 @@ def _try_set_basic_auth_user(request: fastapi.Request):
         username_encoded = username.encode('utf8')
         db_username_encoded = user.name.encode('utf8')
         if (username_encoded == db_username_encoded and
-                apr_md5_crypt.verify(password, user.password)):
+                common.crypt_ctx.verify(password, user.password)):
             request.state.auth_user = user
             break
 
@@ -277,10 +220,10 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             username_encoded = username.encode('utf8')
             db_username_encoded = user.name.encode('utf8')
             if (username_encoded == db_username_encoded and
-                    apr_md5_crypt.verify(password, user.password)):
+                    common.crypt_ctx.verify(password, user.password)):
                 valid_user = True
                 request.state.auth_user = user
-                await _override_user_info_in_request_body(request, user)
+                await authn.override_user_info_in_request_body(request, user)
                 break
         if not valid_user:
             return _basic_auth_401_response('Invalid credentials')
@@ -399,7 +342,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             request.state.auth_user = auth_user
 
             # Override user info in request body for service account requests
-            await _override_user_info_in_request_body(request, auth_user)
+            await authn.override_user_info_in_request_body(request, auth_user)
 
             logger.debug(f'Authenticated service account: {user_id}')
 
@@ -444,7 +387,7 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             request.state.auth_user = auth_user
 
-        await _override_user_info_in_request_body(request, auth_user)
+        await authn.override_user_info_in_request_body(request, auth_user)
         return await call_next(request)
 
 
@@ -482,7 +425,9 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     """FastAPI lifespan context manager."""
     del app  # unused
     # Startup: Run background tasks
-    for event in requests_lib.INTERNAL_REQUEST_DAEMONS:
+    for event in daemons.INTERNAL_REQUEST_DAEMONS:
+        if event.should_skip():
+            continue
         try:
             executor.schedule_request(
                 request_id=event.id,
@@ -624,6 +569,8 @@ app.add_middleware(
 # RBACMiddleware must precede all the auth middleware, so it can access
 # request.state.auth_user.
 app.add_middleware(RBACMiddleware)
+# Authentication based on oauth2-proxy.
+app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # AuthProxyMiddleware should precede BasicAuthMiddleware and
 # BearerTokenMiddleware, since it should be skipped if either of those set the
 # auth user.
@@ -819,8 +766,6 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     ctx.override_envs(validate_body.env_vars)
 
     def validate_dag(dag: dag_utils.dag_lib.Dag):
-        # Resolve the volumes before admin policy and validation.
-        dag.resolve_and_validate_volumes()
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
@@ -829,6 +774,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         with admin_policy_utils.apply_and_use_config_in_current_request(
                 dag,
                 request_options=validate_body.get_request_options()) as dag:
+            dag.resolve_and_validate_volumes()
             # Skip validating workdir and file_mounts, as those need to be
             # validated after the files are uploaded to the SkyPilot API server
             # with `upload_mounts_to_api_server`.
@@ -878,6 +824,15 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         chunk_index: The chunk index, starting from 0.
         total_chunks: The total number of chunks.
     """
+    # Field _body would be set if the request body has been received, fail fast
+    # to surface potential memory issues, i.e. catch the issue in our smoke
+    # test.
+    # pylint: disable=protected-access
+    if hasattr(request, '_body'):
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail='Upload request body should not be received before streaming'
+        )
     # Add the upload id to the cleanup list.
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
@@ -945,8 +900,9 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         zip_file_path.rename(zip_file_path.with_suffix(''))
         missing_chunks = get_missing_chunks(total_chunks)
         if missing_chunks:
-            return payloads.UploadZipFileResponse(status='uploading',
-                                                  missing_chunks=missing_chunks)
+            return payloads.UploadZipFileResponse(
+                status=responses.UploadStatus.UPLOADING.value,
+                missing_chunks=missing_chunks)
         zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
         async with aiofiles.open(zip_file_path, 'wb') as zip_file:
             for chunk in range(total_chunks):
@@ -963,7 +919,8 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     unzip_file(zip_file_path, client_file_mounts_dir)
     if total_chunks > 1:
         shutil.rmtree(chunk_dir)
-    return payloads.UploadZipFileResponse(status='completed')
+    return payloads.UploadZipFileResponse(
+        status=responses.UploadStatus.COMPLETED.value)
 
 
 def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
@@ -1211,10 +1168,6 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
-    # Only initialize the context in logs handler to limit the scope of this
-    # experimental change.
-    # TODO(aylei): init in lifespan() to enable SkyPilot context in all APIs.
-    context.initialize()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
@@ -1224,8 +1177,14 @@ async def logs(
     )
     task = asyncio.create_task(executor.execute_request_coroutine(request_task))
 
-    def cancel_task():
-        task.cancel()
+    async def cancel_task():
+        try:
+            logger.info('Client disconnected for request: '
+                        f'{request.state.request_id}')
+            task.cancel()
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # Cancel the task after the request is done or client disconnects
     background_tasks.add_task(cancel_task)
@@ -1260,7 +1219,8 @@ async def download_logs(
 
 
 @app.post('/download')
-async def download(download_body: payloads.DownloadBody) -> None:
+async def download(download_body: payloads.DownloadBody,
+                   request: fastapi.Request) -> None:
     """Downloads a folder from the cluster to the local machine."""
     folder_paths = [
         pathlib.Path(folder_path) for folder_path in download_body.folder_paths
@@ -1289,7 +1249,16 @@ async def download(download_body: payloads.DownloadBody) -> None:
             str(folder_path.expanduser().resolve())
             for folder_path in folder_paths
         ]
-        storage_utils.zip_files_and_folders(folders, zip_path)
+        # Check for optional query parameter to control zip entry structure
+        relative = request.query_params.get('relative', 'home')
+        if relative == 'items':
+            # Dashboard-friendly: entries relative to selected folders
+            storage_utils.zip_files_and_folders(folders,
+                                                zip_path,
+                                                relative_to_items=True)
+        else:
+            # CLI-friendly (default): entries with full paths for mapping
+            storage_utils.zip_files_and_folders(folders, zip_path)
 
         # Add home path to the response headers, so that the client can replace
         # the remote path in the zip file to the local path.
@@ -1309,6 +1278,46 @@ async def download(download_body: payloads.DownloadBody) -> None:
     except Exception as e:
         raise fastapi.HTTPException(status_code=500,
                                     detail=f'Error creating zip file: {str(e)}')
+
+
+@app.post('/provision_logs')
+async def provision_logs(cluster_body: payloads.ClusterNameBody,
+                         follow: bool = True,
+                         tail: int = 0) -> fastapi.responses.StreamingResponse:
+    """Streams the provision.log for the latest launch request of a cluster."""
+    # Prefer clusters table first, then cluster_history as fallback.
+    log_path_str = global_user_state.get_cluster_provision_log_path(
+        cluster_body.cluster_name)
+    if not log_path_str:
+        log_path_str = global_user_state.get_cluster_history_provision_log_path(
+            cluster_body.cluster_name)
+    if not log_path_str:
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=('Provision log path is not recorded for this cluster. '
+                    'Please relaunch to generate provisioning logs.'))
+
+    log_path = pathlib.Path(log_path_str).expanduser().resolve()
+    if not log_path.exists():
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=f'Provision log path does not exist: {str(log_path)}')
+
+    # Tail semantics: 0 means print all lines. Convert 0 -> None for streamer.
+    effective_tail = None if tail is None or tail <= 0 else tail
+
+    return fastapi.responses.StreamingResponse(
+        content=stream_utils.log_streamer(None,
+                                          log_path,
+                                          tail=effective_tail,
+                                          follow=follow),
+        media_type='text/plain',
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no',
+            'Transfer-Encoding': 'chunked',
+        },
+    )
 
 
 @app.post('/cost_report')
@@ -1393,6 +1402,9 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
             if request_error is not None:
                 raise fastapi.HTTPException(
                     status_code=500, detail=request_task.encode().model_dump())
+            return request_task.encode()
+        elif (request_task.status == requests_lib.RequestStatus.RUNNING and
+              daemons.is_daemon_request_id(request_id)):
             return request_task.encode()
         # yield control to allow other coroutines to run, sleep shortly
         # to avoid storming the DB and CPU in the meantime
@@ -1482,6 +1494,14 @@ async def stream(
         if log_path == constants.API_SERVER_LOGS:
             resolved_log_path = pathlib.Path(
                 constants.API_SERVER_LOGS).expanduser()
+            if not resolved_log_path.exists():
+                raise fastapi.HTTPException(
+                    status_code=404,
+                    detail='Server log file does not exist. The API server may '
+                    'have been started with `--foreground` - check the '
+                    'stdout of API server process, such as: '
+                    '`kubectl logs -n api-server-namespace '
+                    'api-server-pod-name`')
         else:
             # This should be a log path under ~/sky_logs.
             resolved_logs_directory = pathlib.Path(
@@ -1559,34 +1579,66 @@ async def api_status(
         return encoded_request_tasks
 
 
-@app.get('/api/health')
-async def health(request: fastapi.Request) -> Dict[str, Any]:
+@app.get(
+    '/api/health',
+    # response_model_exclude_unset omits unset fields
+    # in the response JSON.
+    response_model_exclude_unset=True)
+async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
     Returns:
-        A dictionary with the following keys:
-        - status: str; The status of the API server.
-        - api_version: str; The API version of the API server.
-        - version: str; The version of SkyPilot used for API server.
-        - version_on_disk: str; The version of the SkyPilot installation on
-          disk, which can be used to warn about restarting the API server
-        - commit: str; The commit hash of SkyPilot used for API server.
+        responses.APIHealthResponse: The health response.
     """
     user = request.state.auth_user
-    logger.info(f'Health endpoint: request.state.auth_user = {user}')
-    return {
-        'status': common.ApiServerStatus.HEALTHY.value,
+    server_status = common.ApiServerStatus.HEALTHY
+    if getattr(request.state, 'anonymous_user', False):
+        # API server authentication is enabled, but the request is not
+        # authenticated. We still have to serve the request because the
+        # /api/health endpoint has two different usage:
+        # 1. For health check from `api start` and external ochestration
+        #    tools (k8s), which does not require authentication and user info.
+        # 2. Return server info to client and hint client to login if required.
+        # Separating these two usage to different APIs will break backward
+        # compatibility for existing ochestration solutions (e.g. helm chart).
+        # So we serve these two usages in a backward compatible manner below.
+        client_version = versions.get_remote_api_version()
+        # - For Client with API version >= 14, we return 200 response with
+        #   status=NEEDS_AUTH, new client will handle the login process.
+        # - For health check from `sky api start`, the client code always uses
+        #   the same API version with the server, thus there is no compatibility
+        #   issue.
+        server_status = common.ApiServerStatus.NEEDS_AUTH
+        if client_version is None:
+            # - For health check from ochestration tools (e.g. k8s), we also
+            #   return 200 with status=NEEDS_AUTH, which passes HTTP probe
+            #   check.
+            # - There is no harm when an malicious client calls /api/health
+            #   without authentication since no sensitive information is
+            #   returned.
+            return responses.APIHealthResponse(
+                status=common.ApiServerStatus.HEALTHY,)
+        # TODO(aylei): remove this after min_compatible_api_version >= 14.
+        if client_version < 14:
+            # For Client with API version < 14, the NEEDS_AUTH status is not
+            # honored. Return 401 to trigger the login process.
+            raise fastapi.HTTPException(status_code=401,
+                                        detail='Authentication required')
+
+    logger.debug(f'Health endpoint: request.state.auth_user = {user}')
+    return responses.APIHealthResponse(
+        status=server_status,
         # Kept for backward compatibility, clients before 0.11.0 will read this
         # field to check compatibility and hint the user to upgrade the CLI.
         # TODO(aylei): remove this field after 0.13.0
-        'api_version': str(server_constants.API_VERSION),
-        'version': sky.__version__,
-        'version_on_disk': common.get_skypilot_version_on_disk(),
-        'commit': sky.__commit__,
-        'user': user.to_dict() if user is not None else None,
-        'basic_auth_enabled': os.environ.get(
-            constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
-    }
+        api_version=str(server_constants.API_VERSION),
+        version=sky.__version__,
+        version_on_disk=common.get_skypilot_version_on_disk(),
+        commit=sky.__commit__,
+        basic_auth_enabled=os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
+                                          'false').lower() == 'true',
+        user=user if user is not None else None,
+    )
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
@@ -1596,7 +1648,10 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
-    cluster_records = core.status(cluster_name, all_users=True)
+    # Run core.status in another thread to avoid blocking the event loop.
+    cluster_records = await context_utils.to_thread(core.status,
+                                                    cluster_name,
+                                                    all_users=True)
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         raise fastapi.HTTPException(
@@ -1725,6 +1780,11 @@ async def complete_volume_name(incomplete: str,) -> List[str]:
     return global_user_state.get_volume_names_start_with(incomplete)
 
 
+@app.get('/api/completion/api_request')
+async def complete_api_request(incomplete: str,) -> List[str]:
+    return requests_lib.get_api_request_ids_start_with(incomplete)
+
+
 @app.get('/dashboard/{full_path:path}')
 async def serve_dashboard(full_path: str):
     """Serves the Next.js dashboard application.
@@ -1764,15 +1824,48 @@ async def root():
     return fastapi.responses.RedirectResponse(url='/dashboard/')
 
 
+def _init_or_restore_server_user_hash():
+    """Restores the server user hash from the global user state db.
+
+    The API server must have a stable user hash across restarts and potential
+    multiple replicas. Thus we persist the user hash in db and restore it on
+    startup. When upgrading from old version, the user hash will be read from
+    the local file (if any) to keep the user hash consistent.
+    """
+
+    def apply_user_hash(user_hash: str) -> None:
+        # For local API server, the user hash in db and local file should be
+        # same so there is no harm to override here.
+        common_utils.set_user_hash_locally(user_hash)
+        # Refresh the server user hash for current process after restore or
+        # initialize the user hash in db, child processes will get the correct
+        # server id from the local cache file.
+        common_lib.refresh_server_id()
+
+    user_hash = global_user_state.get_system_config(_SERVER_USER_HASH_KEY)
+    if user_hash is not None:
+        apply_user_hash(user_hash)
+        return
+
+    # Initial deployment, generate a user hash and save it to the db.
+    user_hash = common_utils.get_user_hash()
+    global_user_state.set_system_config(_SERVER_USER_HASH_KEY, user_hash)
+    apply_user_hash(user_hash)
+
+
 if __name__ == '__main__':
     import uvicorn
 
     from sky.server import uvicorn as skyuvicorn
 
+    skyuvicorn.add_timestamp_prefix_for_server_logs()
+
     # Initialize global user state db
     global_user_state.initialize_and_get_db()
     # Initialize request db
     requests_lib.reset_db_and_logs()
+    # Restore the server user hash
+    _init_or_restore_server_user_hash()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')
@@ -1804,6 +1897,9 @@ if __name__ == '__main__':
             global_tasks.append(background.create_task(metrics_server.serve()))
         global_tasks.append(
             background.create_task(requests_lib.requests_gc_daemon()))
+        global_tasks.append(
+            background.create_task(
+                global_user_state.cluster_event_retention_daemon()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)

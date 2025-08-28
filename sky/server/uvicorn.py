@@ -4,8 +4,10 @@ This module is a wrapper around uvicorn to customize the behavior of the
 server.
 """
 import asyncio
+import logging
 import os
 import signal
+import sys
 import threading
 import time
 from types import FrameType
@@ -16,10 +18,12 @@ import uvicorn
 from uvicorn.supervisors import multiprocess
 
 from sky import sky_logging
+from sky.server import daemons
 from sky.server import state
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
+from sky.utils import env_options
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -44,6 +48,35 @@ _RETRIABLE_REQUEST_NAMES = [
     'sky.jobs.logs',
     'sky.serve.logs',
 ]
+
+
+def add_timestamp_prefix_for_server_logs() -> None:
+    """Configure logging for API server.
+
+    Note: we only do this in the main API server process and uvicorn processes,
+    to avoid affecting executor logs (including in modules like
+    sky.server.requests) that may get sent to the client.
+    """
+    server_logger = sky_logging.init_logger('sky.server')
+    # Clear existing handlers first to prevent duplicates
+    server_logger.handlers.clear()
+    # Disable propagation to avoid the root logger of SkyPilot being affected
+    server_logger.propagate = False
+    # Add date prefix to the log message printed by loggers under
+    # server.
+    stream_handler = logging.StreamHandler(sys.stdout)
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stream_handler.setLevel(logging.DEBUG)
+    else:
+        stream_handler.setLevel(logging.INFO)
+    stream_handler.flush = sys.stdout.flush  # type: ignore
+    stream_handler.setFormatter(sky_logging.FORMATTER)
+    server_logger.addHandler(stream_handler)
+    # Add date prefix to the log message printed by uvicorn.
+    for name in ['uvicorn', 'uvicorn.access']:
+        uvicorn_logger = logging.getLogger(name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.addHandler(stream_handler)
 
 
 class Server(uvicorn.Server):
@@ -120,7 +153,7 @@ class Server(uvicorn.Server):
             # Proactively cancel internal requests and logs requests since
             # they can run for infinite time.
             internal_request_ids = [
-                d.id for d in requests_lib.INTERNAL_REQUEST_DAEMONS
+                d.id for d in daemons.INTERNAL_REQUEST_DAEMONS
             ]
             if time.time() - start_time > _WAIT_REQUESTS_TIMEOUT_SECONDS:
                 logger.warning('Timeout waiting for on-going requests to '
@@ -161,6 +194,7 @@ class Server(uvicorn.Server):
 
     def run(self, *args, **kwargs):
         """Run the server process."""
+        add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()

@@ -8,11 +8,14 @@ import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
 } from '@/components/utils';
-import { RotateCwIcon } from 'lucide-react';
+import { RotateCwIcon, Download } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
-import { streamClusterJobLogs } from '@/data/connectors/clusters';
+import {
+  streamClusterJobLogs,
+  downloadJobLogs,
+} from '@/data/connectors/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
-import { LogFilter, formatLogs } from '@/components/utils';
+import { LogFilter, formatLogs, stripAnsiCodes } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { UserDisplay } from '@/components/elements/UserDisplay';
@@ -81,7 +84,7 @@ export function JobDetailPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [logs, setLogs] = useState([]);
+  const [logs, setLogs] = useState('');
   const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -102,7 +105,7 @@ export function JobDetailPage() {
 
   const handleRefreshLogs = () => {
     setIsRefreshingLogs((prev) => !prev);
-    setLogs([]);
+    setLogs('');
   };
 
   useEffect(() => {
@@ -120,10 +123,65 @@ export function JobDetailPage() {
     streamClusterJobLogs({
       clusterName: cluster,
       jobId: job,
-      onNewLog: (log) => {
+      onNewLog: (chunk) => {
         if (active) {
-          const strippedLog = formatLogs(log);
-          setLogs((prevLogs) => [...prevLogs, strippedLog]);
+          setLogs((prevLogs) => {
+            // Split the chunk into lines
+            const newLines = chunk.split('\n').filter((line) => line.trim());
+
+            let updatedLogs = prevLogs;
+
+            for (const line of newLines) {
+              // Clean the line (remove ANSI codes)
+              const cleanLine = stripAnsiCodes(line);
+
+              // Check if this is a progress bar line
+              const isProgressBar = /\d+%\s*\|/.test(cleanLine);
+
+              if (isProgressBar) {
+                // Extract process identifier from the new line
+                const processMatch = cleanLine.match(/^\(([^)]+)\)/);
+
+                if (processMatch && updatedLogs) {
+                  // Look for the last progress bar from the same process in existing logs
+                  const existingLines = updatedLogs.split('\n');
+                  let replaced = false;
+
+                  // Search from the end for efficiency
+                  for (let i = existingLines.length - 1; i >= 0; i--) {
+                    const existingLine = existingLines[i];
+                    if (/\d+%\s*\|/.test(existingLine)) {
+                      const existingProcessMatch =
+                        existingLine.match(/^\(([^)]+)\)/);
+                      if (
+                        existingProcessMatch &&
+                        existingProcessMatch[1] === processMatch[1]
+                      ) {
+                        // Found a progress bar from the same process, replace it
+                        existingLines[i] = cleanLine;
+                        updatedLogs = existingLines.join('\n');
+                        replaced = true;
+                        break;
+                      }
+                    }
+                  }
+
+                  if (!replaced) {
+                    // No existing progress bar from this process, append
+                    updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
+                  }
+                } else {
+                  // First line or no process match, just append
+                  updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
+                }
+              } else {
+                // Regular log line, just append
+                updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
+              }
+            }
+
+            return updatedLogs;
+          });
         }
       },
       workspace: clusterData?.workspace,
@@ -149,7 +207,7 @@ export function JobDetailPage() {
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     setIsRefreshingLogs((prev) => !prev);
-    setLogs([]);
+    setLogs('');
     try {
       if (refreshData) {
         await refreshData();
@@ -334,20 +392,39 @@ export function JobDetailPage() {
                       logs.)
                     </span>
                   </div>
-                  <Tooltip
-                    content="Refresh logs"
-                    className="text-muted-foreground"
-                  >
-                    <button
-                      onClick={handleRefreshLogs}
-                      disabled={isLoadingLogs}
-                      className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  <div className="flex items-center space-x-3">
+                    <Tooltip
+                      content="Download full logs"
+                      className="text-muted-foreground"
                     >
-                      <RotateCwIcon
-                        className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
-                      />
-                    </button>
-                  </Tooltip>
+                      <button
+                        onClick={() =>
+                          downloadJobLogs({
+                            clusterName: cluster,
+                            jobIds: job ? [job] : null,
+                            workspace: clusterData?.workspace,
+                          })
+                        }
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip
+                      content="Refresh logs"
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={handleRefreshLogs}
+                        disabled={isLoadingLogs}
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <RotateCwIcon
+                          className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                        />
+                      </button>
+                    </Tooltip>
+                  </div>
                 </div>
                 <div className="p-4">
                   {isPending ? (
@@ -363,7 +440,7 @@ export function JobDetailPage() {
                     </div>
                   ) : (
                     <div className="max-h-96 overflow-y-auto">
-                      <LogFilter logs={logs.join('')} />
+                      <LogFilter logs={logs} />
                     </div>
                   )}
                 </div>

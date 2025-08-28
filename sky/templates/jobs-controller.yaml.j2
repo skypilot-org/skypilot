@@ -15,6 +15,12 @@ file_mounts:
   {{controller_file_mount_path}}: {{local_file_mount_path}}
   {%- endfor %}
 
+# NOTE(dev): This needs to be a subset of sky/templates/sky-serve-controller.yaml.j2.
+# It is because we use the --fast flag to submit jobs and no --fast flag to launch pools.
+# So when we launch a new pool, it will install the required dependencies.
+# TODO(tian): Add --fast to launch pools as well, and figure out the dependency installation.
+# Maybe in the --fast implementation, we can store the hash of setup commands that used to be
+# run and don't skip setup phase if the hash is different.
 setup: |
   {{ sky_activate_python_env }}
   # Disable the pip version check to avoid the warning message, which makes the
@@ -57,6 +63,9 @@ run: |
     --job-id $SKYPILOT_INTERNAL_JOB_ID \
     {%- endif %}
     --env-file {{remote_env_file_path}} \
+    {%- if pool is not none %}
+    --pool {{pool}} \
+    {%- endif %}
     --priority {{priority}}
 
 

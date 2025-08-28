@@ -5,10 +5,15 @@ metadata:
   name: {{ .Release.Name }}-grafana-authed
   namespace: {{ .Release.Namespace }}
   annotations:
-    {{- if index .Values.ingress "oauth2-proxy" "enabled" }}
+    {{- if or .Values.auth.oauth.enabled (and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled")) }}
     # OAuth2 Proxy authentication for browser-based access
-    nginx.ingress.kubernetes.io/auth-signin: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/start?rd=$escaped_request_uri
-    nginx.ingress.kubernetes.io/auth-url: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/auth
+    {{- $oauth2 := .Values.auth.oauth -}}
+    {{- if not .Values.auth.oauth.enabled -}}
+    {{- $oauth2 = index .Values.ingress "oauth2-proxy" -}}
+    {{- end }}
+    nginx.ingress.kubernetes.io/auth-signin: {{ if index $oauth2 "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/start?rd=$escaped_request_uri
+    nginx.ingress.kubernetes.io/auth-url: {{ if index $oauth2 "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/auth
+    nginx.ingress.kubernetes.io/auth-response-headers: {{ index .Values.grafana "grafana.ini" "auth.proxy" "header_name" }}
     {{- else }}
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic

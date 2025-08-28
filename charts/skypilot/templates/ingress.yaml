@@ -22,7 +22,8 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-next-upstream: "http_502 non_idempotent"
     nginx.ingress.kubernetes.io/proxy-next-upstream-tries: "3"
     {{- end }}
-    {{- if index .Values.ingress "oauth2-proxy" "enabled" }}
+    {{/* If oauth authentication is enabled on the API server, disable the oauth2-proxy at ingress to avoid conflicts */}}
+    {{- if and (index .Values.ingress "oauth2-proxy" "enabled") (not .Values.auth.oauth.enabled) }}
     # OAuth2 Proxy authentication for browser-based access
     # Bearer token requests bypass OAuth2 proxy and go directly to the application
     nginx.ingress.kubernetes.io/auth-signin: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/start?rd=$escaped_request_uri
@@ -35,7 +36,10 @@ metadata:
         set $x_skypilot_auth_mode "token";
         return 200;
       }
-    {{- else if and (not $enableBasicAuthInAPIServer) (or .Values.ingress.authSecret .Values.ingress.authCredentials) }}
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      # Set X-Skypilot-Auth-Mode header to the value from the auth request.
+      proxy_set_header X-Skypilot-Auth-Mode $x_skypilot_auth_mode;
+    {{- else if and (not .Values.auth.oauth.enabled) (not $enableBasicAuthInAPIServer) (or .Values.ingress.authSecret .Values.ingress.authCredentials) }}
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
     nginx.ingress.kubernetes.io/auth-realm: "SkyPilot API Server"
@@ -48,11 +52,6 @@ metadata:
     nginx.ingress.kubernetes.io/rewrite-target: /$2
     skypilot.co/ingress-path: {{ .Values.ingress.path }}
     {{- end }}
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      {{- if index .Values.ingress "oauth2-proxy" "enabled" }}
-      # Set X-Skypilot-Auth-Mode header to the value from the auth request.
-      proxy_set_header X-Skypilot-Auth-Mode $x_skypilot_auth_mode;
-      {{- end }}
     {{- if .Values.ingress.annotations }}
     {{- toYaml .Values.ingress.annotations | nindent 4 }}
     {{- end }}

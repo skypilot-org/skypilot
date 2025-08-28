@@ -254,7 +254,12 @@ def mock_job_table_no_job(monkeypatch):
 def mock_job_table_one_job(monkeypatch):
     """Mock job table to return one job."""
 
-    def mock_get_job_table(*_, **__):
+    def mock_get_job_table(*args, **__):
+        # The third argument is the cmd.
+        cmd = args[2]
+        # Return no pools for the job table.
+        if 'get_service_status_encoded' in cmd:
+            return 0, message_utils.encode_payload([]), ''
         current_time = time.time()
         job_data = {
             'job_id': '1',
@@ -274,6 +279,10 @@ def mock_job_table_one_job(monkeypatch):
             'task_name': 'test_task',
             'job_duration': 20,
             'priority': constants.DEFAULT_PRIORITY,
+            'pool': None,
+            'current_cluster_name': None,
+            'job_id_on_pool_cluster': None,
+            'pool_hash': None,
         }
         return 0, message_utils.encode_payload([job_data]), ''
 

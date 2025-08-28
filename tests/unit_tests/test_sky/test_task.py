@@ -4,9 +4,10 @@ from unittest import mock
 
 import pytest
 
-import sky
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import task
+from sky.utils import registry
 
 
 def test_validate_workdir():
@@ -92,8 +93,8 @@ def test_to_yaml_config_without_envs():
     assert 'envs' not in yaml_config
     assert 'secrets' not in yaml_config
 
-    # Test with redact_secrets=True (should have no effect when no secrets)
-    yaml_config_redacted = task_obj.to_yaml_config(redact_secrets=True)
+    # Test with use_user_specified_yaml=True (should have no effect when no secrets)
+    yaml_config_redacted = task_obj.to_yaml_config(use_user_specified_yaml=True)
     assert 'envs' not in yaml_config_redacted
     assert 'secrets' not in yaml_config_redacted
     assert yaml_config == yaml_config_redacted
@@ -130,15 +131,15 @@ def test_to_yaml_config_with_secrets_redaction():
         'API_KEY': 'secret-api-key-123',
         'DATABASE_PASSWORD': 'postgresql://user:password@host:5432/db',
         'JWT_SECRET': 'super-secret-jwt',
-        'PORT': 8080,  # Non-string value should be preserved
+        'PORT': 8080,  # Non-string value will also be redacted
         'EMPTY_SECRET': '',
-        'NONE_SECRET': None  # Non-string value should be preserved
+        'NONE_SECRET': None  # Non-string value will also be redacted
     }
 
     task_obj = task.Task(run='echo hello', secrets=secrets)
 
     # Test with redaction enabled (default)
-    yaml_config = task_obj.to_yaml_config(redact_secrets=True)
+    yaml_config = task_obj.to_yaml_config(use_user_specified_yaml=True)
     assert 'secrets' in yaml_config
 
     # String values should be redacted
@@ -147,12 +148,13 @@ def test_to_yaml_config_with_secrets_redaction():
     assert yaml_config['secrets']['JWT_SECRET'] == '<redacted>'
     assert yaml_config['secrets']['EMPTY_SECRET'] == '<redacted>'
 
-    # Non-string values should be preserved
-    assert yaml_config['secrets']['PORT'] == 8080
-    assert yaml_config['secrets']['NONE_SECRET'] is None
+    # All values should be redacted (including non-string values)
+    assert yaml_config['secrets']['PORT'] == '<redacted>'
+    assert yaml_config['secrets']['NONE_SECRET'] == '<redacted>'
 
     # Test with redaction disabled
-    yaml_config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
+    yaml_config_no_redact = task_obj.to_yaml_config(
+        use_user_specified_yaml=False)
     assert yaml_config_no_redact['secrets'] == secrets
 
 
@@ -167,8 +169,9 @@ def test_to_yaml_config_envs_and_secrets():
     task_obj = task.Task(run='echo hello', envs=envs, secrets=secrets)
 
     # Get both configs
-    config_redact_secrets = task_obj.to_yaml_config(redact_secrets=True)
-    config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
+    config_redact_secrets = task_obj.to_yaml_config(
+        use_user_specified_yaml=True)
+    config_no_redact = task_obj.to_yaml_config(use_user_specified_yaml=False)
 
     # Envs should always be preserved (not redacted)
     assert config_redact_secrets['envs'] == envs
@@ -176,11 +179,11 @@ def test_to_yaml_config_envs_and_secrets():
     assert config_redact_secrets['envs']['PUBLIC_VAR'] == 'public-value'
     assert config_redact_secrets['envs']['DEBUG'] == 'true'
 
-    # Secrets should be redacted when redact_secrets=True
+    # Secrets should be redacted when use_user_specified_yaml=True
     assert config_redact_secrets['secrets']['API_KEY'] == '<redacted>'
     assert config_redact_secrets['secrets']['DATABASE_PASSWORD'] == '<redacted>'
 
-    # Secrets should be preserved when redact_secrets=False
+    # Secrets should be preserved when use_user_specified_yaml=False
     assert config_no_redact['secrets'] == secrets
     assert config_no_redact['secrets']['API_KEY'] == 'secret-api-key-123'
     assert config_no_redact['secrets']['DATABASE_PASSWORD'] == 'secret-password'
@@ -191,8 +194,8 @@ def test_to_yaml_config_empty_secrets():
     task_obj = task.Task(run='echo hello', secrets={})
 
     # Empty secrets should not appear in config due to no_empty=True
-    config_redact = task_obj.to_yaml_config(redact_secrets=True)
-    config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
+    config_redact = task_obj.to_yaml_config(use_user_specified_yaml=True)
+    config_no_redact = task_obj.to_yaml_config(use_user_specified_yaml=False)
 
     assert 'secrets' not in config_redact
     assert 'secrets' not in config_no_redact
@@ -209,8 +212,8 @@ def test_to_yaml_config_preserves_other_fields():
     # Set resources using the proper method
     task_obj.set_resources(resources.Resources(memory=4))
 
-    config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
-    config_redacted = task_obj.to_yaml_config(redact_secrets=True)
+    config_no_redact = task_obj.to_yaml_config(use_user_specified_yaml=False)
+    config_redacted = task_obj.to_yaml_config(use_user_specified_yaml=True)
 
     # All non-secret fields should be identical
     for key in config_no_redact:
@@ -535,8 +538,6 @@ def test_from_yaml_config_env_and_secrets_overrides_independent():
 
 def test_docker_login_config_all_in_envs_or_secrets():
     """Test Docker login config when all variables are in envs OR all in secrets."""
-    import sky
-    from sky.skylet import constants
 
     # Test 1: All in envs (should work)
     task_obj1 = task.Task(name='test-docker-all-envs',
@@ -548,7 +549,7 @@ def test_docker_login_config_all_in_envs_or_secrets():
                           })
 
     # Verify Docker config validation passes
-    resources = sky.Resources(image_id='docker:nginx:latest')
+    resources = resources_lib.Resources(image_id='docker:nginx:latest')
     task_obj1.set_resources(resources)  # Should not raise an error
 
     # Test 2: All in secrets (should work)
@@ -560,7 +561,8 @@ def test_docker_login_config_all_in_envs_or_secrets():
                               'SKYPILOT_DOCKER_PASSWORD': 'secret-password'
                           })
 
-    task_obj2.set_resources(sky.Resources(image_id='docker:ubuntu:latest'))
+    task_obj2.set_resources(
+        resources_lib.Resources(image_id='docker:ubuntu:latest'))
 
     # Test 3: Split across envs and secrets should fail
     with pytest.raises(
@@ -574,7 +576,7 @@ def test_docker_login_config_all_in_envs_or_secrets():
                 'SKYPILOT_DOCKER_SERVER': 'registry.com'
             },
             secrets={'SKYPILOT_DOCKER_PASSWORD': 'secret-password'})
-        task_obj3.set_resources(sky.Resources())
+        task_obj3.set_resources(resources_lib.Resources())
 
     # Test 4: Missing variables in envs should fail
     with pytest.raises(
@@ -588,7 +590,7 @@ def test_docker_login_config_all_in_envs_or_secrets():
                 'SKYPILOT_DOCKER_SERVER': 'registry.com'
                 # Missing SKYPILOT_DOCKER_PASSWORD
             })
-        task_obj4.set_resources(sky.Resources())
+        task_obj4.set_resources(resources_lib.Resources())
 
     # Test 5: Missing variables in secrets should fail
     with pytest.raises(
@@ -601,18 +603,16 @@ def test_docker_login_config_all_in_envs_or_secrets():
                 'SKYPILOT_DOCKER_USERNAME': 'user',
                 # Missing SKYPILOT_DOCKER_PASSWORD and SKYPILOT_DOCKER_SERVER
             })
-        task_obj5.set_resources(sky.Resources())
+        task_obj5.set_resources(resources_lib.Resources())
 
 
 def test_docker_login_config_update_methods():
     """Test Docker login config validation when using update_envs and update_secrets."""
-    import sky
-
     # Test 1: Add complete Docker config to envs all at once - should work
     task_obj = task.Task(name='test-docker-update-envs', run='echo hello')
 
     # Set resources first (no Docker config yet)
-    task_obj.set_resources(sky.Resources())
+    task_obj.set_resources(resources_lib.Resources())
 
     # Add all Docker vars to envs at once - should work
     task_obj.update_envs({
@@ -629,7 +629,7 @@ def test_docker_login_config_update_methods():
 
     # Test 2: Add complete Docker config to secrets all at once - should work
     task_obj2 = task.Task(name='test-docker-update-secrets', run='echo hello')
-    task_obj2.set_resources(sky.Resources())
+    task_obj2.set_resources(resources_lib.Resources())
 
     # Add all Docker vars to secrets at once - should work
     task_obj2.update_secrets({
@@ -640,7 +640,7 @@ def test_docker_login_config_update_methods():
 
     # Test 3: Updating incomplete Docker config should fail
     task_obj3 = task.Task(name='test-incomplete', run='echo hello')
-    task_obj3.set_resources(sky.Resources())
+    task_obj3.set_resources(resources_lib.Resources())
 
     # Add only some Docker vars - this should fail
     with pytest.raises(
@@ -655,8 +655,6 @@ def test_docker_login_config_update_methods():
 
 def test_docker_login_config_no_mixed_envs_secrets():
     """Test that Docker variables cannot be mixed between envs and secrets."""
-    import sky
-
     # This should fail because Docker variables are split between envs and secrets
     with pytest.raises(
             ValueError,
@@ -669,7 +667,8 @@ def test_docker_login_config_no_mixed_envs_secrets():
                 'SKYPILOT_DOCKER_SERVER': 'env-registry.com'
             },
             secrets={'SKYPILOT_DOCKER_PASSWORD': 'secret-password'})
-        task_obj.set_resources(sky.Resources(image_id='docker:ubuntu:latest'))
+        task_obj.set_resources(
+            resources_lib.Resources(image_id='docker:ubuntu:latest'))
 
 
 def make_mock_volume_config(name='vol1',
@@ -743,7 +742,7 @@ def test_resolve_volumes_single_success():
         t.resolve_and_validate_volumes()
         # Should override resource topology
         for r in t.resources:
-            assert r.cloud == sky.CLOUD_REGISTRY.from_str('aws')
+            assert r.cloud == registry.CLOUD_REGISTRY.from_str('aws')
             assert r.region == 'us-west1'
             assert r.zone == 'a'
 
@@ -770,7 +769,7 @@ def test_resolve_volumes_dict_volume_success():
         }
         t.resolve_and_validate_volumes()
         for r in t.resources:
-            assert r.cloud == sky.CLOUD_REGISTRY.from_str('aws')
+            assert r.cloud == registry.CLOUD_REGISTRY.from_str('aws')
 
 
 def test_resolve_volumes_topology_conflict_between_volumes():
@@ -815,6 +814,6 @@ def test_resolve_volumes_override_topology():
         }
         t.resolve_and_validate_volumes()
         for r in t.resources:
-            assert r.cloud == sky.CLOUD_REGISTRY.from_str('aws')
+            assert r.cloud == registry.CLOUD_REGISTRY.from_str('aws')
             assert r.region == 'us-west1'
             assert r.zone == 'a'

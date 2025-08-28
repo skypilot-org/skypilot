@@ -10,11 +10,11 @@ from typing import Any, Dict, Generator, List
 
 import fastapi
 import filelock
-from passlib.hash import apr_md5_crypt
 
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import permission
@@ -86,7 +86,7 @@ async def user_create(user_create_body: payloads.UserCreateBody) -> None:
         role = rbac.get_default_role()
 
     # Create user
-    password_hash = apr_md5_crypt.hash(password)
+    password_hash = server_common.crypt_ctx.hash(password)
     user_hash = hashlib.md5(
         username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     with _user_lock(user_hash):
@@ -146,7 +146,7 @@ async def user_update(request: fastapi.Request,
 
     with _user_lock(user_info.id):
         if password:
-            password_hash = apr_md5_crypt.hash(password)
+            password_hash = server_common.crypt_ctx.hash(password)
             global_user_state.add_or_update_user(
                 models.User(id=user_info.id,
                             name=user_info.name,
@@ -271,13 +271,13 @@ async def user_import(
                 creation_errors.append(f'{username}: User already exists')
                 continue
 
-            # Check if password is already hashed (APR1 hash)
-            if password.startswith('$apr1$'):
+            # Check if password is already hashed
+            if server_common.crypt_ctx.identify(password) is not None:
                 # Password is already hashed, use it directly
                 password_hash = password
             else:
                 # Password is plain text, hash it
-                password_hash = apr_md5_crypt.hash(password)
+                password_hash = server_common.crypt_ctx.hash(password)
 
             user_hash = hashlib.md5(
                 username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
@@ -414,7 +414,7 @@ async def get_service_account_tokens(
 
 def _generate_service_account_user_id() -> str:
     """Generate a unique user ID for a service account."""
-    random_suffix = secrets.token_hex(16)  # 16 character hex string
+    random_suffix = secrets.token_hex(8)  # 16 character hex string
     service_account_id = (f'sa-{random_suffix}')
     return service_account_id
 

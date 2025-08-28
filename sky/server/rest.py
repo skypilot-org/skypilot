@@ -1,5 +1,6 @@
 """REST API client of SkyPilot API server"""
 
+import asyncio
 import contextlib
 import contextvars
 import functools
@@ -21,9 +22,11 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 if typing.TYPE_CHECKING:
+    import aiohttp
     import requests
 
 else:
+    aiohttp = adaptors_common.LazyImport('aiohttp')
     requests = adaptors_common.LazyImport('requests')
 
 F = TypeVar('F', bound=Callable[..., Any])
@@ -31,9 +34,26 @@ F = TypeVar('F', bound=Callable[..., Any])
 _RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
 
 _session = requests.Session()
+# Tune connection pool size, otherwise the default max is just 10.
+adapter = requests.adapters.HTTPAdapter(
+    pool_connections=50,
+    pool_maxsize=200,
+    # We handle retries by ourselves in SDK.
+    max_retries=0,
+)
+_session.mount('http://', adapter)
+_session.mount('https://', adapter)
+
 _session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
 _session.headers[constants.VERSION_HEADER] = (
     versions.get_local_readable_version())
+
+# Enumerate error types that might be transient and can be addressed by
+# retrying.
+_transient_errors = [
+    requests.exceptions.RequestException,
+    ConnectionError,
+]
 
 
 class RetryContext:
@@ -44,9 +64,10 @@ class RetryContext:
 
 @contextlib.contextmanager
 def _retry_in_context():
-    token = _RETRY_CONTEXT.set(RetryContext())
+    context = RetryContext()
+    token = _RETRY_CONTEXT.set(context)
     try:
-        yield
+        yield context
     finally:
         _RETRY_CONTEXT.reset(token)
 
@@ -73,38 +94,63 @@ def retry_transient_errors(max_retries: int = 3,
         if isinstance(e, requests.exceptions.HTTPError):
             # Only server error is considered as transient.
             return e.response.status_code >= 500
-        # It is hard to enumerate all other errors that are transient, e.g.
-        # broken pipe, connection refused, etc. Instead, it is safer to assume
-        # all other errors might be transient since we only retry for 3 times
-        # by default. For permanent errors that we do not know now, we can
-        # exclude them here in the future.
-        return True
+        for error in _transient_errors:
+            if isinstance(e, error):
+                return True
+        return False
 
     def decorator(func: F) -> F:
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             backoff = common_utils.Backoff(initial_backoff, max_backoff_factor)
-            with _retry_in_context():
-                for retry_cnt in range(max_retries):
+            consecutive_failed_count = 0
+
+            with _retry_in_context() as context:
+                previous_line_processed = context.line_processed  # should be 0
+
+                def _handle_exception():
+                    # If the function made progress on a retry,
+                    # clears the backoff and resets the failed retry count.
+                    # Otherwise, increments the failed retry count.
+                    nonlocal backoff
+                    nonlocal consecutive_failed_count
+                    nonlocal previous_line_processed
+                    if context.line_processed > previous_line_processed:
+                        backoff = common_utils.Backoff(initial_backoff,
+                                                       max_backoff_factor)
+                        previous_line_processed = context.line_processed
+                        consecutive_failed_count = 0
+                    else:
+                        consecutive_failed_count += 1
+
+                while consecutive_failed_count < max_retries:
                     try:
                         return func(*args, **kwargs)
                     # Occurs when the server proactively interrupts the request
                     # during rolling update, we can retry immediately on the
                     # new replica.
                     except exceptions.RequestInterruptedError:
+                        _handle_exception()
                         logger.debug('Request interrupted. Retry immediately.')
                         continue
                     except Exception as e:  # pylint: disable=broad-except
-                        if retry_cnt >= max_retries - 1:
+                        _handle_exception()
+                        if consecutive_failed_count >= max_retries:
                             # Retries exhausted.
                             raise
                         if not is_transient_error(e):
                             # Permanent error, no need to retry.
                             raise
-                        logger.debug(f'Retry {func.__name__} due to {e}, '
-                                     f'attempt {retry_cnt + 1}/{max_retries}')
-                        time.sleep(backoff.current_backoff())
+                        logger.debug(
+                            f'Retry {func.__name__} due to {e}, '
+                            f'attempt {consecutive_failed_count}/{max_retries}')
+                        # Only sleep if this is not the first retry.
+                        # The idea is that if the function made progress on a
+                        # retry, we should try again immediately to reduce the
+                        # waiting time.
+                        if consecutive_failed_count > 0:
+                            time.sleep(backoff.current_backoff())
 
         return cast(F, wrapper)
 
@@ -204,3 +250,114 @@ def request_without_retry(method, url, **kwargs) -> 'requests.Response':
     if remote_version is not None:
         versions.set_remote_version(remote_version)
     return response
+
+
+# Async versions of the above functions
+
+
+async def request_async(session: 'aiohttp.ClientSession', method: str, url: str,
+                        **kwargs) -> 'aiohttp.ClientResponse':
+    """Send an async request to the API server, retry on server temporarily
+    unavailable."""
+    max_retries = 3
+    initial_backoff = 1.0
+    max_backoff_factor = 5
+
+    backoff = common_utils.Backoff(initial_backoff, max_backoff_factor)
+    last_exception = Exception('Uknown Exception')  # this will be replaced by e
+
+    for retry_count in range(max_retries):
+        try:
+            return await request_without_retry_async(session, method, url,
+                                                     **kwargs)
+        except exceptions.RequestInterruptedError:
+            logger.debug('Request interrupted. Retry immediately.')
+            continue
+        except Exception as e:  # pylint: disable=broad-except
+            last_exception = e
+            if retry_count >= max_retries - 1:
+                # Retries exhausted
+                raise
+
+            # Check if this is a transient error (similar to sync version logic)
+            is_transient = _is_transient_error_async(e)
+            if not is_transient:
+                # Permanent error, no need to retry
+                raise
+
+            logger.debug(f'Retry async request due to {e}, '
+                         f'attempt {retry_count + 1}/{max_retries}')
+            await asyncio.sleep(backoff.current_backoff())
+
+    # This should never be reached, but just in case
+    raise last_exception
+
+
+async def request_without_retry_async(session: 'aiohttp.ClientSession',
+                                      method: str, url: str,
+                                      **kwargs) -> 'aiohttp.ClientResponse':
+    """Send an async request to the API server without retry."""
+    # Add API version headers for compatibility (like sync version does)
+    if 'headers' not in kwargs:
+        kwargs['headers'] = {}
+    kwargs['headers'][constants.API_VERSION_HEADER] = str(constants.API_VERSION)
+    kwargs['headers'][constants.VERSION_HEADER] = (
+        versions.get_local_readable_version())
+
+    try:
+        response = await session.request(method, url, **kwargs)
+
+        # Handle server unavailability (503 status) - same as sync version
+        if response.status == 503:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ServerTemporarilyUnavailableError(
+                    'SkyPilot API server is temporarily unavailable. '
+                    'Please try again later.')
+
+        # Set remote API version and version from headers - same as sync version
+        remote_api_version = response.headers.get(constants.API_VERSION_HEADER)
+        remote_version = response.headers.get(constants.VERSION_HEADER)
+        if remote_api_version is not None:
+            versions.set_remote_api_version(int(remote_api_version))
+        if remote_version is not None:
+            versions.set_remote_version(remote_version)
+
+        return response
+
+    except aiohttp.ClientError as e:
+        # Convert aiohttp errors to appropriate SkyPilot exceptions
+        if isinstance(e, aiohttp.ClientConnectorError):
+            raise exceptions.RequestInterruptedError(
+                f'Connection failed: {e}') from e
+        elif isinstance(e, aiohttp.ClientTimeout):
+            raise exceptions.RequestInterruptedError(
+                f'Request timeout: {e}') from e
+        else:
+            raise
+
+
+def _is_transient_error_async(e: Exception) -> bool:
+    """Check if an exception from async request is transient and should be
+    retried.
+
+    Mirrors the logic from the sync version's is_transient_error().
+    """
+    if isinstance(e, aiohttp.ClientError):
+        # For response errors, check status code if available
+        if isinstance(e, aiohttp.ClientResponseError):
+            # Only server error is considered as transient (same as sync
+            # version)
+            return e.status >= 500
+        # Consider connection errors and timeouts as transient
+        if isinstance(e, (aiohttp.ClientConnectorError, aiohttp.ClientTimeout)):
+            return True
+
+    # Consider server temporarily unavailable as transient
+    if isinstance(e, exceptions.ServerTemporarilyUnavailableError):
+        return True
+
+    # It is hard to enumerate all other errors that are transient, e.g.
+    # broken pipe, connection refused, etc. Instead, it is safer to assume
+    # all other errors might be transient since we only retry for 3 times
+    # by default. (Same comment as in sync version)
+    return True

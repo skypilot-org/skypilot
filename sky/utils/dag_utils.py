@@ -6,9 +6,9 @@ from sky import dag as dag_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.utils import cluster_utils
-from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -117,7 +117,7 @@ def load_chain_dag_from_yaml(
       A chain Dag with 1 or more tasks (an empty entrypoint would create a
       trivial task).
     """
-    configs = common_utils.read_yaml_all(path)
+    configs = yaml_utils.read_yaml_all(path)
     return _load_chain_dag(configs, env_overrides, secret_overrides)
 
 
@@ -143,12 +143,12 @@ def load_chain_dag_from_yaml_str(
       A chain Dag with 1 or more tasks (an empty entrypoint would create a
       trivial task).
     """
-    configs = common_utils.read_yaml_all_str(yaml_str)
+    configs = yaml_utils.read_yaml_all_str(yaml_str)
     return _load_chain_dag(configs, env_overrides, secrets_overrides)
 
 
 def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag,
-                               redact_secrets: bool = False) -> str:
+                               use_user_specified_yaml: bool = False) -> str:
     """Dumps a chain DAG to a YAML string.
 
     Args:
@@ -161,8 +161,10 @@ def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag,
     assert dag.is_chain(), dag
     configs = [{'name': dag.name}]
     for task in dag.tasks:
-        configs.append(task.to_yaml_config(redact_secrets=redact_secrets))
-    return common_utils.dump_yaml_str(configs)
+        configs.append(
+            task.to_yaml_config(
+                use_user_specified_yaml=use_user_specified_yaml))
+    return yaml_utils.dump_yaml_str(configs)
 
 
 def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:

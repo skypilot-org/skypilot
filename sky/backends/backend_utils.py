@@ -13,11 +13,13 @@ import sys
 import tempfile
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
+                    TypeVar, Union)
 import uuid
 
 import colorama
 from packaging import version
+import psutil
 from typing_extensions import Literal
 
 import sky
@@ -36,7 +38,9 @@ from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -56,9 +60,11 @@ from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
+    import grpc
     import requests
     from requests import adapters
     from requests.packages.urllib3.util import retry as retry_lib
@@ -77,6 +83,8 @@ else:
     adapters = adaptors_common.LazyImport('requests.adapters')
     retry_lib = adaptors_common.LazyImport(
         'requests.packages.urllib3.util.retry')
+    # To avoid requiring grpcio to be installed on the client side.
+    grpc = adaptors_common.LazyImport('grpc')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -99,6 +107,9 @@ _LAUNCHED_RESERVED_WORKER_PATTERN = re.compile(
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
+_SSH_CONNECTION_TIMED_OUT_PATTERN = re.compile(r'^ssh:.*timed out$',
+                                               re.IGNORECASE)
+_RAY_CLUSTER_NOT_FOUND_MESSAGE = 'Ray cluster is not found'
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We check network connection by going through _TEST_IP_LIST. We may need to
@@ -119,6 +130,7 @@ CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 _CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
+WORKSPACE_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -229,7 +241,7 @@ def _optimize_file_mounts(tmp_yaml_path: str) -> None:
         subprocess.CalledProcessError: If the file mounts are failed to be
             copied.
     """
-    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
 
     file_mounts = yaml_config.get('file_mounts', {})
     # Remove the file mounts added by the newline.
@@ -313,7 +325,7 @@ def _optimize_file_mounts(tmp_yaml_path: str) -> None:
             shell=True,
             check=True)
 
-    common_utils.dump_yaml(tmp_yaml_path, yaml_config)
+    yaml_utils.dump_yaml(tmp_yaml_path, yaml_config)
 
 
 def path_size_megabytes(path: str) -> int:
@@ -473,8 +485,8 @@ def _replace_yaml_dicts(
                 if key in old_block:
                     _restore_block(value, old_block[key])
 
-    new_config = yaml.safe_load(new_yaml)
-    old_config = yaml.safe_load(old_yaml)
+    new_config = yaml_utils.safe_load(new_yaml)
+    old_config = yaml_utils.safe_load(old_yaml)
     excluded_results = {}
     # Find all key values excluded from restore
     for exclude_restore_key_name_list in restore_key_names_exceptions:
@@ -498,7 +510,7 @@ def _replace_yaml_dicts(
         for key in exclude_restore_key_name[:-1]:
             curr = curr[key]
         curr[exclude_restore_key_name[-1]] = value
-    return common_utils.dump_yaml_str(new_config)
+    return yaml_utils.dump_yaml_str(new_config)
 
 
 def get_expirable_clouds(
@@ -921,8 +933,11 @@ def write_cluster_config(
             cluster_config_overrides=cluster_config_overrides,
             cloud=cloud,
             context=region.name)
-        kubernetes_utils.combine_metadata_fields(tmp_yaml_path, region.name)
-        yaml_obj = common_utils.read_yaml(tmp_yaml_path)
+        kubernetes_utils.combine_metadata_fields(
+            tmp_yaml_path,
+            cluster_config_overrides=cluster_config_overrides,
+            context=region.name)
+        yaml_obj = yaml_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
 
@@ -961,7 +976,7 @@ def write_cluster_config(
     # Read the cluster name from the tmp yaml file, to take the backward
     # compatbility restortion above into account.
     # TODO: remove this after 2 minor releases, 0.10.0.
-    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
     # Make sure to do this before we optimize file mounts. Optimization is
@@ -1007,7 +1022,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
 
     This function's output removes comments included in the jinja2 template.
     """
-    config = common_utils.read_yaml(tmp_yaml_path)
+    config = yaml_utils.read_yaml(tmp_yaml_path)
     # Check the availability of the cloud type.
     if isinstance(cloud, (
             clouds.AWS,
@@ -1039,7 +1054,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_hyperbolic_authentication(config)
     else:
         assert False, cloud
-    common_utils.dump_yaml(tmp_yaml_path, config)
+    yaml_utils.dump_yaml(tmp_yaml_path, config)
 
 
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
@@ -1141,7 +1156,7 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     """
 
     # Load the yaml contents so that we can directly remove keys.
-    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     for key_list in _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH:
         dict_to_remove_from = yaml_config
         found_key = True
@@ -1160,7 +1175,7 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     config_hash = hashlib.sha256()
 
     yaml_hash = hashlib.sha256(
-        common_utils.dump_yaml_str(yaml_config).encode('utf-8'))
+        yaml_utils.dump_yaml_str(yaml_config).encode('utf-8'))
     config_hash.update(yaml_hash.digest())
 
     file_mounts = yaml_config.get('file_mounts', {})
@@ -1767,13 +1782,15 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
-) -> List[status_lib.ClusterStatus]:
-    """Returns the status of the cluster.
+) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
+    """Returns the status of the cluster as a list of tuples corresponding
+    to the node status and an optional reason string for said status.
 
     Raises:
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider.
     """
+    cluster_name = handle.cluster_name
     cluster_name_on_cloud = handle.cluster_name_on_cloud
     cluster_name_in_hint = common_utils.cluster_name_in_hint(
         handle.cluster_name, cluster_name_on_cloud)
@@ -1791,7 +1808,8 @@ def _query_cluster_status_via_cloud_api(
         cloud_name = repr(handle.launched_resources.cloud)
         try:
             node_status_dict = provision_lib.query_instances(
-                cloud_name, cluster_name_on_cloud, provider_config)
+                cloud_name, cluster_name, cluster_name_on_cloud,
+                provider_config)
             logger.debug(f'Querying {cloud_name} cluster '
                          f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
@@ -1807,9 +1825,13 @@ def _query_cluster_status_via_cloud_api(
         region = provider_config.get('region') or provider_config.get(
             'location')
         zone = ray_config['provider'].get('availability_zone')
+        # TODO (kyuds): refactor cloud.query_status api to include reason.
+        # Currently not refactoring as this API is actually supposed to be
+        # deprecated soon.
         node_statuses = cloud.query_status(
             cluster_name_on_cloud,
             tag_filter_for_cluster(cluster_name_on_cloud), region, zone)
+        node_statuses = [(status, None) for status in node_statuses]
     return node_statuses
 
 
@@ -1999,6 +2021,12 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     if handle.cluster_yaml is None:
         # Remove cluster from db since this cluster does not have a config file
         # or any other ongoing requests
+        global_user_state.add_cluster_event(
+            cluster_name,
+            None,
+            'Cluster has no YAML file. Removing the cluster from cache.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
         global_user_state.remove_cluster(cluster_name, terminate=True)
         logger.debug(f'Cluster {cluster_name!r} has no YAML file. '
                      'Removing the cluster from cache.')
@@ -2009,8 +2037,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
 
     node_statuses = _query_cluster_status_via_cloud_api(handle)
 
-    all_nodes_up = (all(
-        status == status_lib.ClusterStatus.UP for status in node_statuses) and
+    all_nodes_up = (all(status[0] == status_lib.ClusterStatus.UP
+                        for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
 
     def get_node_counts_from_ray_status(
@@ -2021,11 +2049,11 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             require_outputs=True,
             separate_stderr=True)
         if rc:
-            raise RuntimeError(
-                f'Refreshing status ({cluster_name!r}): Failed to check '
-                f'ray cluster\'s healthiness with '
-                f'{instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
-                f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
+            raise exceptions.CommandError(
+                rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                f'Failed to check ray cluster\'s healthiness.\n'
+                '-- stdout --\n'
+                f'{output}\n', stderr)
         return (*_count_healthy_nodes_from_ray(output), output, stderr)
 
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
@@ -2056,10 +2084,34 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                 try:
                     ready_head, ready_workers, output, stderr = (
                         get_node_counts_from_ray_status(head_runner))
-                except RuntimeError as e:
+                except exceptions.CommandError as e:
                     logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
                                  f' {i}: {common_utils.format_exception(e)}')
                     if cloud_name != 'kubernetes':
+                        # Non-k8s clusters can be manually restarted and:
+                        # 1. Get new IP addresses, or
+                        # 2. Not have the SkyPilot runtime setup
+                        #
+                        # So we should surface a message to the user to
+                        # help them recover from this inconsistent state.
+                        has_new_ip_addr = (
+                            e.detailed_reason is not None and
+                            _SSH_CONNECTION_TIMED_OUT_PATTERN.search(
+                                e.detailed_reason.strip()) is not None)
+                        runtime_not_setup = (_RAY_CLUSTER_NOT_FOUND_MESSAGE
+                                             in e.error_msg)
+                        if has_new_ip_addr or runtime_not_setup:
+                            yellow = colorama.Fore.YELLOW
+                            bright = colorama.Style.BRIGHT
+                            reset = colorama.Style.RESET_ALL
+                            ux_utils.console_newline()
+                            logger.warning(
+                                f'{yellow}Failed getting cluster status despite all nodes '
+                                f'being up ({cluster_name!r}). '
+                                f'If the cluster was restarted manually, try running: '
+                                f'{reset}{bright}sky start {cluster_name}{reset} '
+                                f'{yellow}to recover from INIT status.{reset}')
+                            return False
                         raise e
                     # We retry for kubernetes because coreweave can have a
                     # transient network issue.
@@ -2115,6 +2167,13 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
         record['status'] = status_lib.ClusterStatus.UP
+        # Add cluster event for instance status check.
+        global_user_state.add_cluster_event(
+            cluster_name,
+            status_lib.ClusterStatus.UP,
+            'All nodes up; SkyPilot runtime healthy.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -2199,9 +2258,19 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     #      regardless of the ray cluster's health.
     #  (2) Otherwise, we will reset the autostop setting, unless the cluster is
     #      autostopping/autodowning.
-    is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or any(
-        status != status_lib.ClusterStatus.STOPPED for status in node_statuses))
+    some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
+    some_nodes_not_stopped = any(status[0] != status_lib.ClusterStatus.STOPPED
+                                 for status in node_statuses)
+    is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
+
     if is_abnormal:
+        status_reason = ', '.join(
+            [status[1] for status in node_statuses if status[1] is not None])
+
+        if some_nodes_terminated:
+            init_reason = 'one or more nodes terminated'
+        elif some_nodes_not_stopped:
+            init_reason = 'some nodes are up and some nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
@@ -2237,10 +2306,17 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                     success = True
                     reset_local_autostop = True
                     try:
-                        backend.set_autostop(handle, -1, stream_logs=False)
-                    except exceptions.CommandError as e:
+                        backend.set_autostop(
+                            handle,
+                            -1,
+                            autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                            stream_logs=False)
+                    except (exceptions.CommandError,
+                            grpc.FutureTimeoutError) as e:
                         success = False
-                        if e.returncode == 255:
+                        if isinstance(e, grpc.FutureTimeoutError) or (
+                                isinstance(e, exceptions.CommandError) and
+                                e.returncode == 255):
                             word = 'autostopped' if noun == 'autostop' else 'autodowned'
                             logger.debug(f'The cluster is likely {word}.')
                             reset_local_autostop = False
@@ -2281,6 +2357,26 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # represent that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
+        init_reason_regex = None
+        if not status_reason:
+            # If there is not a status reason, don't re-add (and overwrite) the
+            # event if there is already an event with the same reason which may
+            # have a status reason.
+            # Some status reason clears after a certain time (e.g. k8s events
+            # are only stored for an hour by default), so it is possible that
+            # the previous event has a status reason, but now it does not.
+            init_reason_regex = f'^Cluster is abnormal because {init_reason}.*'
+        log_message = f'Cluster is abnormal because {init_reason}'
+        if status_reason:
+            log_message += f' ({status_reason})'
+        log_message += '. Transitioned to INIT.'
+        global_user_state.add_cluster_event(
+            cluster_name,
+            status_lib.ClusterStatus.INIT,
+            log_message,
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True,
+            duplicate_regex=init_reason_regex)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -2290,6 +2386,9 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
     backend = backends.CloudVmRayBackend()
+    global_user_state.add_cluster_event(
+        cluster_name, None, 'All nodes terminated, cleaning up the cluster.',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
@@ -2625,7 +2724,9 @@ def is_controller_accessible(
           failed to be connected.
     """
     if (managed_job_utils.is_consolidation_mode() and
-            controller == controller_utils.Controllers.JOBS_CONTROLLER):
+            controller == controller_utils.Controllers.JOBS_CONTROLLER
+       ) or (serve_utils.is_consolidation_mode() and
+             controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER):
         cn = 'local-controller-consolidation'
         return backends.LocalResourcesHandle(
             cluster_name=cn,
@@ -2749,6 +2850,9 @@ def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _include_is_managed: bool = False,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
 
@@ -2769,35 +2873,48 @@ def get_clusters(
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
+        _include_is_managed: Whether to force include clusters created by the
+            controller.
 
     Returns:
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    records = global_user_state.get_clusters()
-    current_user = common_utils.get_current_user()
 
-    # Filter by user if requested
+    exclude_managed_clusters = False
+    if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
+        exclude_managed_clusters = True
+    user_hashes_filter = None
     if not all_users:
-        records = [
-            record for record in records
-            if record['user_hash'] == current_user.id
-        ]
-
+        user_hashes_filter = {common_utils.get_current_user().id}
     accessible_workspaces = workspaces_core.get_workspaces()
 
-    workspace_filtered_records = []
-    for record in records:
-        cluster_workspace = record.get('workspace',
-                                       constants.SKYPILOT_DEFAULT_WORKSPACE)
-        if cluster_workspace in accessible_workspaces:
-            workspace_filtered_records.append(record)
-
-    records = workspace_filtered_records
+    records = global_user_state.get_clusters(
+        exclude_managed_clusters=exclude_managed_clusters,
+        user_hashes_filter=user_hashes_filter,
+        workspaces_filter=accessible_workspaces)
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
+
+    if cluster_names is not None:
+        if isinstance(cluster_names, str):
+            cluster_names = [cluster_names]
+        cluster_names = _get_glob_clusters(cluster_names, silent=True)
+        new_records = []
+        not_exist_cluster_names = []
+        for cluster_name in cluster_names:
+            for record in records:
+                if record['name'] == cluster_name:
+                    new_records.append(record)
+                    break
+            else:
+                not_exist_cluster_names.append(cluster_name)
+        if not_exist_cluster_names:
+            clusters_str = ', '.join(not_exist_cluster_names)
+            logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
+        records = new_records
 
     def _update_record_with_credentials_and_resources_str(
             record: Optional[Dict[str, Any]]) -> None:
@@ -2837,24 +2954,6 @@ def get_clusters(
                       encoding='utf-8') as f:
                 credentials['ssh_private_key_content'] = f.read()
         record['credentials'] = credentials
-
-    if cluster_names is not None:
-        if isinstance(cluster_names, str):
-            cluster_names = [cluster_names]
-        cluster_names = _get_glob_clusters(cluster_names, silent=True)
-        new_records = []
-        not_exist_cluster_names = []
-        for cluster_name in cluster_names:
-            for record in records:
-                if record['name'] == cluster_name:
-                    new_records.append(record)
-                    break
-            else:
-                not_exist_cluster_names.append(cluster_name)
-        if not_exist_cluster_names:
-            clusters_str = ', '.join(not_exist_cluster_names)
-            logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
-        records = new_records
 
     def _update_records_with_resources(
             records: List[Optional[Dict[str, Any]]]) -> None:
@@ -3210,7 +3309,8 @@ def get_endpoints(cluster: str,
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
     cluster_records = get_clusters(refresh=common.StatusRefreshMode.NONE,
-                                   cluster_names=[cluster])
+                                   cluster_names=[cluster],
+                                   _include_is_managed=True)
     if not cluster_records:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
@@ -3300,3 +3400,54 @@ def cluster_status_lock_id(cluster_name: str) -> str:
 def cluster_file_mounts_lock_id(cluster_name: str) -> str:
     """Get the lock ID for cluster file mounts operations."""
     return f'{cluster_name}_file_mounts'
+
+
+def workspace_lock_id(workspace_name: str) -> str:
+    """Get the lock ID for workspace operations."""
+    return f'{workspace_name}_workspace'
+
+
+T = TypeVar('T')
+
+
+def invoke_skylet_with_retries(
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+        func: Callable[..., T]) -> T:
+    """Generic helper for making Skylet gRPC requests.
+
+    This method handles the common pattern of:
+    1. Try the gRPC request
+    2. If SSH tunnel is closed, recreate it and retry
+    """
+    max_attempts = 3
+    backoff = common_utils.Backoff(initial_backoff=0.5)
+    last_exception: Optional[Exception] = None
+
+    for _ in range(max_attempts):
+        try:
+            return func()
+        except grpc.RpcError as e:
+            last_exception = e
+            if e.code() == grpc.StatusCode.INTERNAL:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.SkyletInternalError(e.details())
+            elif e.code() == grpc.StatusCode.UNAVAILABLE:
+                recreate_tunnel = True
+                try:
+                    if handle.skylet_ssh_tunnel is not None:
+                        proc = psutil.Process(handle.skylet_ssh_tunnel.pid)
+                        if proc.is_running(
+                        ) and proc.status() != psutil.STATUS_ZOMBIE:
+                            recreate_tunnel = False
+                except psutil.NoSuchProcess:
+                    pass
+
+                if recreate_tunnel:
+                    handle.open_and_update_skylet_tunnel()
+
+                time.sleep(backoff.current_backoff())
+            else:
+                raise e
+
+    raise RuntimeError(f'Failed to invoke Skylet after {max_attempts} attempts'
+                      ) from last_exception

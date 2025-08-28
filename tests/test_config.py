@@ -14,9 +14,9 @@ from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import annotations
-from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
+from sky.utils import yaml_utils
 
 DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'
@@ -62,10 +62,10 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
             kubernetes:
                 networking: {NODEPORT_MODE_NAME}
                 pod_config:
+                    metadata:
+                        annotations:
+                            my_annotation: my_value
                     spec:
-                        metadata:
-                            annotations:
-                                my_annotation: my_value
                         runtimeClassName: nvidia    # Custom runtimeClassName for GPU pods.
                         imagePullSecrets:
                             - name: my-secret     # Pull images from a private registry using a secret
@@ -333,7 +333,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     # Check that dumping the config to a file with the new None can be reloaded
     new_config2 = skypilot_config.set_nested(('aws', 'ssh_proxy_command'), None)
     new_config_path = tmp_path / 'new_config.yaml'
-    common_utils.dump_yaml(new_config_path, new_config2)
+    yaml_utils.dump_yaml(new_config_path, new_config2)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', new_config_path)
     skypilot_config.reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
@@ -348,7 +348,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     del new_config3['aws']['ssh_proxy_command']
     del new_config3['aws']['use_internal_ips']
     new_config_path = tmp_path / 'new_config3.yaml'
-    common_utils.dump_yaml(new_config_path, new_config3)
+    yaml_utils.dump_yaml(new_config_path, new_config3)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', new_config_path)
     skypilot_config.reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
@@ -411,7 +411,7 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
             tmp_path / (cluster_name + '.yml'))
 
     # Load the cluster YAML
-    cluster_config = common_utils.read_yaml(cluster_yaml)
+    cluster_config = yaml_utils.read_yaml(cluster_yaml)
     head_node_type = cluster_config['head_node_type']
     cluster_pod_config = cluster_config['available_node_types'][head_node_type][
         'node_config']
@@ -468,7 +468,7 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
             tmp_path / (cluster_name + '.yml'))
 
     # Load the cluster YAML
-    cluster_config = common_utils.read_yaml(cluster_yaml)
+    cluster_config = yaml_utils.read_yaml(cluster_yaml)
     assert cluster_config['provider']['vpc_name'] == VPC_NAME
     assert '-v /tmp:/tmp' in cluster_config['docker'][
         'run_options'], cluster_config
@@ -802,7 +802,7 @@ def test_parse_dotlist():
 def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
     """Test override_skypilot_config with disallowed keys."""
     with mock.patch('sky.skypilot_config.logger') as mock_logger:
-        mock_logger.level = INFO
+        mock_logger.getEffectiveLevel.return_value = INFO
         os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
         # Create original config file
         config_path = tmp_path / 'config.yaml'
@@ -956,6 +956,95 @@ def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
     assert len(contexts) == 2
     assert contexts[0] == 'contextA'
     assert contexts[1] == 'contextB'
+
+
+def test_kubernetes_context_configs_mutation(monkeypatch, tmp_path) -> None:
+    """Test that the nested config works when part of the config is mutated."""
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    with open(tmp_path / 'context_configs.yaml', 'w', encoding='utf-8') as f:
+        f.write(f"""\
+        kubernetes:
+            custom_metadata:
+                labels:
+                    global_label: global_value
+            context_configs:
+                contextA:
+                    custom_metadata:
+                        labels:
+                            contextA_label: contextA_value
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'context_configs.yaml')
+    skypilot_config.reload_config()
+
+    # test custom_metadata property
+    context_a_custom_metadata = skypilot_config.get_effective_region_config(
+        cloud='kubernetes', region='contextA', keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value',
+            'contextA_label': 'contextA_value'
+        }
+    }
+
+    # mutate per-context config and check if it's updated
+    context_a_custom_labels = skypilot_config.get_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), {})
+    context_a_custom_labels['contextA_label'] = 'contextA_value_updated'
+    mutated_config = skypilot_config.set_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), context_a_custom_labels)
+
+    context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=mutated_config,
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value',
+            'contextA_label': 'contextA_value_updated'
+        }
+    }
+
+    # mutate global config and check if it's updated
+    global_custom_labels = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'labels'), {})
+    global_custom_labels['global_label'] = 'global_value_updated'
+    mutated_config = skypilot_config.set_nested(
+        ('kubernetes', 'custom_metadata', 'labels'), global_custom_labels)
+    context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=mutated_config,
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value_updated',
+            'contextA_label': 'contextA_value'
+        }
+    }
+
+    # mutate label defined by global config in per-context config
+    context_a_custom_labels = skypilot_config.get_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), {})
+    context_a_custom_labels['global_label'] = 'global_value_contextA_specific'
+    mutated_config = skypilot_config.set_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), context_a_custom_labels)
+    context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=mutated_config,
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value_contextA_specific',
+            'contextA_label': 'contextA_value'
+        }
+    }
 
 
 def test_standardized_region_configs(monkeypatch, tmp_path) -> None:

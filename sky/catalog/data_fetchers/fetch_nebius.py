@@ -22,6 +22,8 @@ TIMEOUT = 10
 PARENT_ID_TEMPLATE = 'project-{}public-images'
 ACCELERATOR_MANUFACTURER = 'NVIDIA'
 
+VRAM = {'L40S': 49152, 'H100': 81920, 'H200': 144384, 'B200': 184320}
+
 
 @dataclass
 class PresetInfo:
@@ -31,17 +33,19 @@ class PresetInfo:
     Attributes:
         region (str): The geographical region where the preset is available.
         fullname (str): The full name of the preset, a combination of platform
-        and preset name.
+            and preset name.
         name (str): The name of the preset.
         platform_name (str): The name of the platform the preset belongs to.
         gpu (int): The number of GPUs in the preset.
         vcpu (int): The number of virtual CPUs in the preset.
         memory_gib (int): The amount of memory in GiB in the preset.
         accelerator_manufacturer (str | None): The manufacturer of the
-        accelerator (e.g., "NVIDIA"), or None if no accelerator.
+            accelerator (e.g., "NVIDIA"), or None if no accelerator.
         accelerator_name (str | None): The name of the accelerator
-        (e.g., "H100"), or None if no accelerator.
+            (e.g., "H100"), or None if no accelerator.
         price_hourly (decimal.Decimal): The hourly price of the preset.
+        spot_price (decimal.Decimal): The spot (preemptible) price
+            of the preset.
     """
 
     region: str
@@ -54,6 +58,7 @@ class PresetInfo:
     accelerator_manufacturer: Optional[str]
     accelerator_name: Optional[str]
     price_hourly: decimal.Decimal
+    spot_price: decimal.Decimal
 
 
 def _format_decimal(value: decimal.Decimal) -> str:
@@ -66,7 +71,7 @@ def _format_decimal(value: decimal.Decimal) -> str:
     Returns:
         str: The formatted string representation of the decimal.
     """
-    formatted_value = f'{value:f}'.rstrip('0').rstrip('.')
+    formatted_value = f'{value:f}'
     integer_part, decimal_part = formatted_value.split(
         '.') if '.' in formatted_value else (formatted_value, '')
     if len(decimal_part) < 2:
@@ -111,20 +116,38 @@ def _estimate_platforms(platforms: List[Any], parent_id: str,
                             preset=preset.name,
                         )),
                 ))
-
             price_request = billing().EstimateBatchRequest(
                 resource_specs=[estimate_spec])
+
+            # Form the specification for the spot price request
+            spot_estimate_spec = billing().ResourceSpec(
+                compute_instance_spec=compute().CreateInstanceRequest(
+                    metadata=nebius_common().ResourceMetadata(
+                        parent_id=parent_id,),
+                    spec=compute().InstanceSpec(
+                        resources=compute().ResourcesSpec(
+                            platform=platform_name,
+                            preset=preset.name,
+                        ),
+                        preemptible=compute().PreemptibleSpec(priority=1),
+                    ),
+                ))
+            spot_price_request = billing().EstimateBatchRequest(
+                resource_specs=[spot_estimate_spec])
+
             # Start future for each preset
             futures.append((
                 platform,
                 preset,
                 calculator_service.estimate_batch(price_request,
                                                   timeout=TIMEOUT),
+                calculator_service.estimate_batch(spot_price_request,
+                                                  timeout=TIMEOUT),
             ))
 
     # wait all futures to complete and collect results
     result = []
-    for platform, preset, future in futures:
+    for platform, preset, future, future_spot in futures:
         platform_name = platform.metadata.name
         result.append(
             PresetInfo(
@@ -141,6 +164,8 @@ def _estimate_platforms(platforms: List[Any], parent_id: str,
                 if platform_name.startswith('gpu-') else '',
                 price_hourly=decimal.Decimal(
                     future.wait().hourly_cost.general.total.cost),
+                spot_price=decimal.Decimal(
+                    future_spot.wait().hourly_cost.general.total.cost),
             ))
 
     return result
@@ -173,17 +198,18 @@ def _write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
                              key=lambda x:
                              (bool(x.gpu), x.region, x.platform_name, x.vcpu)):
             gpu_info = ''
-            if preset.gpu > 0:
+            if preset.gpu > 0 and preset.accelerator_name:
                 gpu_info_dict = {
                     'Gpus': [{
                         'Name': preset.accelerator_name,
                         'Manufacturer': preset.accelerator_manufacturer,
                         'Count': preset.gpu,
                         'MemoryInfo': {
-                            'SizeInMiB': preset.memory_gib * 1024 // preset.gpu
+                            'SizeInMiB': VRAM.get(preset.accelerator_name, 0)
                         },
                     }],
-                    'TotalGpuMemoryInMiB': preset.memory_gib * 1024,
+                    'TotalGpuMemoryInMiB': VRAM.get(preset.accelerator_name, 0)
+                                           * preset.gpu,
                 }
                 gpu_info = json.dumps(gpu_info_dict).replace('"', '\'')
 
@@ -196,7 +222,8 @@ def _write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
                 'Price': _format_decimal(preset.price_hourly),
                 'Region': preset.region,
                 'GpuInfo': gpu_info,
-                'SpotPrice': '',
+                'SpotPrice': _format_decimal(preset.spot_price)
+                             if preset.spot_price else '',
             })
 
 

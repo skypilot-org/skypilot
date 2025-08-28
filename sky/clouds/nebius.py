@@ -52,8 +52,6 @@ class Nebius(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTODOWN:
             ('Autodown not supported. Can\'t delete OS disk.'),
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot is not supported, as Nebius API does not implement spot.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
@@ -107,8 +105,6 @@ class Nebius(clouds.Cloud):
                               zone: Optional[str]) -> List[clouds.Region]:
         assert zone is None, 'Nebius does not support zones.'
         del accelerators, zone  # unused
-        if use_spot:
-            return []
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'nebius')
 
@@ -254,6 +250,7 @@ class Nebius(clouds.Cloud):
             'image_id': image_family,
             # Nebius does not support specific zones.
             'zones': None,
+            'use_spot': resources.use_spot,
             'filesystems': resources_vars_fs,
             'network_tier': resources.network_tier
         }
@@ -339,6 +336,7 @@ class Nebius(clouds.Cloud):
              acc_count,
              use_spot=resources.use_spot,
              cpus=resources.cpus,
+             memory=resources.memory,
              region=resources.region,
              zone=resources.zone,
              clouds='nebius')
@@ -445,7 +443,9 @@ class Nebius(clouds.Cloud):
         del workspace_config  # Unused
         sdk = nebius.sdk()
         profile_client = nebius.iam().ProfileServiceClient(sdk)
-        profile = profile_client.get(nebius.iam().GetProfileRequest()).wait()
+        profile = nebius.sync_call(
+            profile_client.get(nebius.iam().GetProfileRequest(),
+                               timeout=nebius.READ_TIMEOUT))
         if profile.user_profile is not None:
             if profile.user_profile.attributes is None:
                 raise exceptions.CloudUserIdentityError(

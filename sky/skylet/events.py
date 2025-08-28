@@ -7,7 +7,6 @@ import time
 import traceback
 
 import psutil
-import yaml
 
 from sky import clouds
 from sky import sky_logging
@@ -21,9 +20,9 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
-from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 # Seconds of sleep between the processing of skylet events.
 EVENT_CHECKING_INTERVAL_SECONDS = 20
@@ -75,7 +74,16 @@ class ManagedJobEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
+        logger.info('=== Updating managed job status ===')
         managed_job_utils.update_managed_jobs_statuses()
+
+
+class ManagedJobSchedulingEvent(SkyletEvent):
+    """Skylet event for scheduling managed jobs."""
+    EVENT_INTERVAL_SECONDS = 20
+
+    def _run(self):
+        logger.info('=== Scheduling next jobs ===')
         managed_job_scheduler.maybe_schedule_next_jobs()
 
 
@@ -87,8 +95,12 @@ class ServiceUpdateEvent(SkyletEvent):
     """
     EVENT_INTERVAL_SECONDS = 300
 
+    def __init__(self, pool: bool) -> None:
+        super().__init__()
+        self._pool = pool
+
     def _run(self):
-        serve_utils.update_service_status()
+        serve_utils.update_service_status(self._pool)
 
 
 class UsageHeartbeatReportEvent(SkyletEvent):
@@ -128,23 +140,37 @@ class AutostopEvent(SkyletEvent):
             logger.debug('autostop_config not set. Skipped.')
             return
 
-        if (job_lib.is_cluster_idle() and
-                not managed_job_state.get_num_alive_jobs()):
-            idle_minutes = (time.time() -
-                            autostop_lib.get_last_active_time()) // 60
+        ignore_idle_check = (
+            autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE)
+        is_idle = True
+        if not ignore_idle_check:
+            if not job_lib.is_cluster_idle(
+            ) or managed_job_state.get_num_alive_jobs() or (
+                    autostop_config.wait_for
+                    == autostop_lib.AutostopWaitFor.JOBS_AND_SSH and
+                    autostop_lib.has_active_ssh_sessions()):
+                is_idle = False
+
+        if ignore_idle_check or is_idle:
+            minutes_since_last_active = (
+                time.time() - autostop_lib.get_last_active_time()) // 60
             logger.debug(
-                f'Idle minutes: {idle_minutes}, '
-                f'AutoStop config: {autostop_config.autostop_idle_minutes}')
+                f'Minutes since last active: {minutes_since_last_active}, '
+                f'AutoStop idle minutes: '
+                f'{autostop_config.autostop_idle_minutes}, '
+                f'Wait for: {autostop_config.wait_for.value}')
         else:
             autostop_lib.set_last_active_time_to_now()
-            idle_minutes = -1
-            logger.debug(
-                'Not idle. Reset idle minutes.'
-                f'AutoStop config: {autostop_config.autostop_idle_minutes}')
-        if idle_minutes >= autostop_config.autostop_idle_minutes:
+            minutes_since_last_active = -1
+            logger.debug('Not idle. Reset idle minutes. '
+                         f'AutoStop idle minutes: '
+                         f'{autostop_config.autostop_idle_minutes}, '
+                         f'Wait for: {autostop_config.wait_for.value}')
+        if minutes_since_last_active >= autostop_config.autostop_idle_minutes:
             logger.info(
-                f'{idle_minutes} idle minutes reached; threshold: '
-                f'{autostop_config.autostop_idle_minutes} minutes. Stopping.')
+                f'{minutes_since_last_active} minute(s) since last active; '
+                f'threshold: {autostop_config.autostop_idle_minutes} minutes. '
+                f'Stopping.')
             self._stop_cluster(autostop_config)
 
     def _stop_cluster(self, autostop_config):
@@ -154,7 +180,7 @@ class AutostopEvent(SkyletEvent):
 
             config_path = os.path.abspath(
                 os.path.expanduser(cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
-            config = common_utils.read_yaml(config_path)
+            config = yaml_utils.read_yaml(config_path)
             provider_name = cluster_utils.get_provider_name(config)
             cloud = registry.CLOUD_REGISTRY.from_str(provider_name)
             assert cloud is not None, f'Unknown cloud: {provider_name}'
@@ -282,7 +308,7 @@ class AutostopEvent(SkyletEvent):
         else:
             yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: true',
                                              yaml_str)
-        config = yaml.safe_load(yaml_str)
+        config = yaml_utils.safe_load(yaml_str)
         # Set the private key with the existed key on the remote instance.
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
         # NOTE: We must do this, otherwise with ssh_proxy_command still under
@@ -299,5 +325,5 @@ class AutostopEvent(SkyletEvent):
         config['auth'].pop('ssh_proxy_command', None)
         # Empty the file_mounts.
         config['file_mounts'] = {}
-        common_utils.dump_yaml(yaml_path, config)
+        yaml_utils.dump_yaml(yaml_path, config)
         logger.debug('Replaced upscaling speed to 0.')
