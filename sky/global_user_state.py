@@ -205,7 +205,7 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('ending_status', sqlalchemy.Text),
     sqlalchemy.Column('reason', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
-    sqlalchemy.Column('request_id', sqlalchemy.Text),
+    sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('type', sqlalchemy.Text),
 )
 
