@@ -12,27 +12,6 @@ export async function getCloudInfrastructure(
     // Get enabled clouds
     let enabledCloudsList = [];
     try {
-      // If forceRefresh is true, first run sky check to refresh cloud status
-      if (forceRefresh) {
-        console.log('Force refreshing clouds by running sky check...');
-        try {
-          const checkResponse = await apiClient.post('/check', {});
-          const checkId =
-            checkResponse.headers.get('X-Skypilot-Request-ID') ||
-            checkResponse.headers.get('X-Request-ID');
-
-          // Wait for the check to complete
-          const checkResult = await apiClient.get(
-            `/api/get?request_id=${checkId}`
-          );
-          const checkData = await checkResult.json();
-          console.log('Sky check completed:', checkData);
-        } catch (checkError) {
-          console.error('Error running sky check:', checkError);
-          // Continue anyway - we'll still try to get the cached enabled clouds
-        }
-      }
-
       const enabledCloudsResponse = await apiClient.get(`/enabled_clouds`);
 
       const id =
