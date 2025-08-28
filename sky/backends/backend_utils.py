@@ -2058,7 +2058,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                 f'{output}\n', stderr)
         return (*_count_healthy_nodes_from_ray(output), output, stderr)
 
+    ray_status_details: Optional[str] = None
+
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
+        nonlocal ray_status_details
         try:
             # NOTE: fetching the IPs is very slow as it calls into
             # `ray get head-ip/worker-ips`. Using cached IPs is safe because
@@ -2136,19 +2139,25 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                 #   showing up
                 time.sleep(1)
 
+            ray_status_details = (
+                f'{ready_head + ready_workers}/{total_nodes} ready')
             raise RuntimeError(
                 f'Refreshing status ({cluster_name!r}): ray status not showing '
                 f'all nodes ({ready_head + ready_workers}/'
                 f'{total_nodes});\noutput:\n{output}\nstderr:\n{stderr}')
 
         except exceptions.FetchClusterInfoError:
+            ray_status_details = 'failed to get IPs'
             logger.debug(
                 f'Refreshing status ({cluster_name!r}) failed to get IPs.')
         except RuntimeError as e:
+            if ray_status_details is None:
+                ray_status_details = str(e)
             logger.debug(common_utils.format_exception(e))
         except Exception as e:  # pylint: disable=broad-except
             # This can be raised by `external_ssh_ports()`, due to the
             # underlying call to kubernetes API.
+            ray_status_details = str(e)
             logger.debug(f'Refreshing status ({cluster_name!r}) failed: ',
                          exc_info=e)
         return False
@@ -2261,6 +2270,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     #  (2) Otherwise, we will reset the autostop setting, unless the cluster is
     #      autostopping/autodowning.
     some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
+    # If all nodes are up and ray cluster is health, we would have returned
+    # earlier. So if all_nodes_up is True and we are here, it means the ray
+    # cluster must have been unhealthy.
+    ray_cluster_unhealthy = all_nodes_up
     some_nodes_not_stopped = any(status[0] != status_lib.ClusterStatus.STOPPED
                                  for status in node_statuses)
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
@@ -2271,8 +2284,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
 
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
+        elif ray_cluster_unhealthy:
+            init_reason = f'ray cluster is unhealthy ({ray_status_details})'
         elif some_nodes_not_stopped:
-            init_reason = 'some nodes are up and some nodes are stopped'
+            init_reason = 'some but not all nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
