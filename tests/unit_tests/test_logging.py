@@ -14,7 +14,8 @@ def test_add_debug_log_handler_writes_log(tmp_path: Path, monkeypatch):
     debug_dir = tmp_path / 'request_debug'
     monkeypatch.setattr(sky_logging, '_DEBUG_LOG_DIR', str(debug_dir))
     # Also redirect general SKY_LOGS_DIRECTORY to tmp
-    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path / 'sky_logs'))
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY',
+                        str(tmp_path / 'sky_logs'))
 
     request_id = 'req-test-123'
     log_path = debug_dir / f'{request_id}.log'
@@ -40,7 +41,8 @@ def test_add_debug_log_handler_noop_when_disabled(tmp_path: Path, monkeypatch):
     debug_dir = tmp_path / 'request_debug'
     monkeypatch.setattr(sky_logging, '_DEBUG_LOG_DIR', str(debug_dir))
     # Also redirect general SKY_LOGS_DIRECTORY to tmp
-    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path / 'sky_logs'))
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY',
+                        str(tmp_path / 'sky_logs'))
 
     request_id = 'req-disabled-123'
     log_path = debug_dir / f'{request_id}.log'
