@@ -1,4 +1,5 @@
 """ Nebius Cloud. """
+import enum
 import json
 import os
 import typing
@@ -43,6 +44,30 @@ def nebius_profile_in_aws_cred_and_config() -> bool:
 
     return (nebius_profile_exists_in_credentials and
             nebius_profile_exists_in_config)
+
+
+class NebiusIdentityType(enum.Enum):
+    """Nebius identity type.
+
+    The identity type is determined by which credential method is being used.
+    """
+    IAM_TOKEN = 'iam-token'
+
+    SERVICE_ACCOUNT = 'service-account'
+
+    def can_credential_expire(self) -> bool:
+        """Check if the Nebius identity type can expire.
+
+        IAM tokens expire after 12 hours and need to be refreshed manually.
+        Service account credentials are long-lived and don't expire.
+
+        IAM tokens:
+        https://docs.nebius.com/iam/authorization/access-tokens
+        Service account:
+        https://docs.nebius.com/iam/service-accounts/authentication
+        """
+        expirable_types = {NebiusIdentityType.IAM_TOKEN}
+        return self in expirable_types
 
 
 @registry.CLOUD_REGISTRY.register
@@ -475,3 +500,27 @@ class Nebius(clouds.Cloud):
         unknown_profile_type = profile.which_field_in_oneof('profile')
         raise exceptions.CloudUserIdentityError(
             f'Nebius profile is of an unknown type - {unknown_profile_type}')
+
+    @classmethod
+    def _get_identity_type(cls) -> Optional[NebiusIdentityType]:
+        # 1. Workspace credentials file
+        workspace_cred_path = nebius.get_workspace_credentials_path()
+        if workspace_cred_path is not None:
+            return NebiusIdentityType.SERVICE_ACCOUNT
+
+        # 2. IAM token file
+        if nebius.get_iam_token() is not None:
+            return NebiusIdentityType.IAM_TOKEN
+
+        # 3. Default credentials path
+        default_cred_path = nebius.get_default_credentials_path()
+        if os.path.exists(os.path.expanduser(default_cred_path)):
+            return NebiusIdentityType.SERVICE_ACCOUNT
+
+        return None
+
+    @annotations.lru_cache(scope='request', maxsize=1)
+    def can_credential_expire(self) -> bool:
+        identity_type = self._get_identity_type()
+        return (identity_type is not None and
+                identity_type.can_credential_expire())
