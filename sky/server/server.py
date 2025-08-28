@@ -1403,6 +1403,9 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
                 raise fastapi.HTTPException(
                     status_code=500, detail=request_task.encode().model_dump())
             return request_task.encode()
+        elif (request_task.status == requests_lib.RequestStatus.RUNNING and
+              daemons.is_daemon_request_id(request_id)):
+            return request_task.encode()
         # yield control to allow other coroutines to run, sleep shortly
         # to avoid storming the DB and CPU in the meantime
         await asyncio.sleep(0.1)

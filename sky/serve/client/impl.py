@@ -227,7 +227,8 @@ def tail_logs(service_name: str,
     sdk.stream_response(request_id=request_id,
                         response=response,
                         output_stream=output_stream,
-                        resumable=True)
+                        resumable=True,
+                        get_result=follow)
 
 
 def sync_down_logs(service_name: str,
