@@ -1,5 +1,6 @@
 """Kubernetes instance provisioning."""
 import copy
+import datetime
 import json
 import re
 import time
@@ -1254,9 +1255,11 @@ def get_cluster_info(
         provider_config=provider_config)
 
 
-def _get_pod_termination_reason(pod: Any) -> str:
+def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
+    """Get pod termination reason and write to cluster events."""
     reasons = []
-    if pod.status.container_statuses:
+    latest_timestamp = pod.status.start_time or datetime.datetime.min
+    if pod.status and pod.status.container_statuses:
         for container_status in pod.status.container_statuses:
             terminated = container_status.state.terminated
             if terminated:
@@ -1264,20 +1267,38 @@ def _get_pod_termination_reason(pod: Any) -> str:
                 reason = terminated.reason
                 if exit_code == 0:
                     # skip exit 0 (non-failed) just for sanity
+                    logger.debug(f'{pod.metadata.name}/{container_status.name} '
+                                 'had exit code 0. Skipping.')
                     continue
                 if reason is None:
                     # just in-case reason is None, have default for debugging
                     reason = f'exit({exit_code})'
                 reasons.append(reason)
+                if terminated.finished_at > latest_timestamp:
+                    latest_timestamp = terminated.finished_at
+
             # TODO (kyuds): later, if needed, query `last_state` too.
+
+    if not reasons:
+        return ''
 
     # Normally we will have a single container per pod for skypilot
     # but doing this just in-case there are multiple containers.
-    return ' | '.join(reasons)
+    pod_reason = ' | '.join(reasons)
+
+    global_user_state.add_cluster_event(
+        cluster_name,
+        None,
+        f'[kubernetes pod {pod.metadata.name} terminated] {pod_reason}',
+        global_user_state.ClusterEventType.DEBUG,
+        transitioned_at=int(latest_timestamp.timestamp()),
+    )
+    return pod_reason
 
 
 def _get_pod_missing_reason(context: Optional[str], namespace: str,
                             cluster_name: str, pod_name: str) -> Optional[str]:
+    """Get events for missing pod and write to cluster events."""
     logger.debug(f'Analyzing events for pod {pod_name}')
     pod_field_selector = (
         f'involvedObject.kind=Pod,involvedObject.name={pod_name}')
@@ -1414,13 +1435,15 @@ def query_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
+    # Mapping from pod phase to skypilot status. These are the only valid pod
+    # phases.
+    # https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,
         'Failed': status_lib.ClusterStatus.INIT,
         'Unknown': None,
         'Succeeded': None,
-        'Terminating': None,
     }
 
     assert provider_config is not None
@@ -1464,18 +1487,15 @@ def query_instances(
     for pod in pods:
         phase = pod.status.phase
         pod_status = status_map[phase]
+        reason = None
+        if phase in ('Failed', 'Unknown'):
+            reason = _get_pod_termination_reason(pod, cluster_name)
+            logger.debug(f'Pod Status ({phase}) Reason(s): {reason}')
         if non_terminated_only and pod_status is None:
             logger.debug(f'Pod {pod.metadata.name} is terminated, but '
                          'query_instances is called with '
                          f'non_terminated_only=True. Phase: {phase}')
-            if phase == 'Failed':
-                reason_for_debug = _get_pod_termination_reason(pod)
-                logger.debug(f'Termination reason: {reason_for_debug}')
             continue
-        reason = None
-        if phase == 'Failed':
-            reason = _get_pod_termination_reason(pod)
-            logger.debug(f'Pod Status Reason(s): {reason}')
         pod_name = pod.metadata.name
         reason = f'{pod_name}: {reason}' if reason is not None else None
         cluster_status[pod_name] = (pod_status, reason)
