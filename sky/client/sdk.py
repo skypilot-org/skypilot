@@ -852,15 +852,14 @@ def tail_logs(cluster_name: str,
 @annotations.client_api
 @rest.retry_transient_errors()
 def tail_logs(
-    cluster_name: str,
-    job_id: Optional[int],
-    follow: bool,
-    tail: int = 0,
-    output_stream: Optional['io.TextIOBase'] = None,
-    *,  # keyword only separator
-    preload_content: bool = True,
-    setup_spinner: bool = False
-) -> Union[int, Iterator[Optional[str]]]:
+        cluster_name: str,
+        job_id: Optional[int],
+        follow: bool,
+        tail: int = 0,
+        output_stream: Optional['io.TextIOBase'] = None,
+        *,  # keyword only separator
+        preload_content: bool = True,
+        setup_spinner: bool = False) -> Union[int, Iterator[Optional[str]]]:
     """Tails the logs of a job.
 
     Args:
@@ -901,13 +900,11 @@ def tail_logs(
         raise ValueError(
             'output_stream cannot be specified when preload_content is False')
 
-    body = payloads.ClusterJobBody(
-        cluster_name=cluster_name,
-        job_id=job_id,
-        follow=follow,
-        tail=tail,
-        setup_spinner=setup_spinner
-    )
+    body = payloads.ClusterJobBody(cluster_name=cluster_name,
+                                   job_id=job_id,
+                                   follow=follow,
+                                   tail=tail,
+                                   setup_spinner=setup_spinner)
     response = server_common.make_authenticated_request(
         'POST',
         '/logs',

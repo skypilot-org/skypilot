@@ -4892,6 +4892,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             tail: int = 0,
             require_outputs: bool = False,
             stream_logs: bool = True,
+            setup_spinner: bool = False,
             process_stream: bool = False) -> Union[int, Tuple[int, str, str]]:
         """Tail the logs of a job.
 
@@ -4932,10 +4933,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     return last_exit_code
                 raise e
 
+        num_nodes = (handle.launched_nodes
+                     if handle.launched_nodes is not None else 0)
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
                                                follow=follow,
-                                               tail=tail)
+                                               tail=tail,
+                                               setup_spinner=setup_spinner,
+                                               cluster_name=handle.cluster_name,
+                                               num_nodes=num_nodes)
         if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
