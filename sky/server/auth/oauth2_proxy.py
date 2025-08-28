@@ -122,10 +122,12 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         auth_url = f'{self.proxy_base}/oauth2/auth'
         forwarded_headers['X-Forwarded-Uri'] = str(request.url).rstrip('/')
         if not 'api/health' in request.url.path:
-            logger.info(f'authenticate request, auth_url: {auth_url}, headers: {forwarded_headers}')
+            logger.info(f'authenticate request, auth_url: {auth_url}, headers: {forwarded_headers}, method: {request.method}')
+        
+        forwarded_headers.pop('content-length')
 
         async with session.request(
-                method=request.method,
+                method='GET',
                 url=auth_url,
                 headers=forwarded_headers,
                 cookies=request.cookies,
