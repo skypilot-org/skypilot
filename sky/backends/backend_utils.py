@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import copy
 from datetime import datetime
 import enum
 import fnmatch
@@ -932,9 +931,8 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             tmp_yaml_str = f.read()
         cluster_yaml_obj = yaml_utils.safe_load(tmp_yaml_str)
-        combined_yaml_obj = copy.deepcopy(cluster_yaml_obj)
-        kubernetes_utils.combine_pod_config_fields_and_metadata(
-            combined_yaml_obj,
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields_and_metadata(
+            cluster_yaml_obj,
             cluster_config_overrides=cluster_config_overrides,
             cloud=cloud,
             context=region.name)

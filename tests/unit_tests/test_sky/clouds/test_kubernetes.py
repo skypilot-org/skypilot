@@ -673,8 +673,8 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_get_cloud_config_value.return_value = user_pod_config
 
         # Call the combine_pod_config_fields function
-        combined_yaml_obj = copy.deepcopy(cluster_yaml_with_ipc_lock)
-        kubernetes_utils.combine_pod_config_fields(combined_yaml_obj, {}, None)
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
+            cluster_yaml_with_ipc_lock, {}, None)
 
         # Get the modified YAML
         container = combined_yaml_obj['available_node_types'][
@@ -739,8 +739,8 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_get_cloud_config_value.return_value = user_pod_config
 
         # Call the combine_pod_config_fields function
-        combined_yaml_obj = copy.deepcopy(cluster_yaml_without_ipc_lock)
-        kubernetes_utils.combine_pod_config_fields(combined_yaml_obj, {}, None)
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
+            cluster_yaml_without_ipc_lock, {}, None)
 
         # Get the modified YAML
         container = combined_yaml_obj['available_node_types'][
@@ -840,8 +840,8 @@ class TestKubernetesVolumeMerging(unittest.TestCase):
 
         mock_get_cloud_config_value.return_value = user_pod_config
 
-        combined_yaml_obj = copy.deepcopy(cluster_yaml_with_system_volumes)
-        kubernetes_utils.combine_pod_config_fields(combined_yaml_obj, {}, None)
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
+            cluster_yaml_with_system_volumes, {}, None)
 
         # Get the modified YAML
         container = combined_yaml_obj['available_node_types'][

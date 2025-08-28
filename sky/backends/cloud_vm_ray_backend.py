@@ -5193,14 +5193,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 cluster_yaml_str = global_user_state.get_cluster_yaml_str(
                     cluster_name)
                 actual_cluster_yaml_obj = yaml_utils.safe_load(cluster_yaml_str)
-                desired_cluster_yaml_obj = copy.deepcopy(
-                    actual_cluster_yaml_obj)
-                kubernetes_utils.combine_pod_config_fields_and_metadata(
-                    desired_cluster_yaml_obj,
-                    cluster_config_overrides=one_task_resource.
-                    cluster_config_overrides,
-                    cloud=to_provision.cloud,
-                    context=to_provision.region)
+                desired_cluster_yaml_obj = (
+                    kubernetes_utils.combine_pod_config_fields_and_metadata(
+                        actual_cluster_yaml_obj,
+                        cluster_config_overrides=one_task_resource.
+                        cluster_config_overrides,
+                        cloud=to_provision.cloud,
+                        context=to_provision.region))
 
                 def _get_pod_config(yaml_obj: Dict[str, Any]) -> Dict[str, Any]:
                     return (yaml_obj.get('available_node_types',

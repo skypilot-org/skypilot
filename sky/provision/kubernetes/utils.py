@@ -1,4 +1,5 @@
 """Kubernetes utilities for SkyPilot."""
+import copy
 import dataclasses
 import datetime
 import enum
@@ -2710,7 +2711,7 @@ def combine_pod_config_fields(
     cluster_config_overrides: Dict[str, Any],
     cloud: Optional[clouds.Cloud] = None,
     context: Optional[str] = None,
-) -> None:
+) -> Dict[str, Any]:
     """Adds or updates fields in the YAML with fields from the
     ~/.sky/config.yaml's kubernetes.pod_spec dict.
     This can be used to add fields to the YAML that are not supported by
@@ -2749,6 +2750,7 @@ def combine_pod_config_fields(
                     - name: my-secret
         ```
     """
+    cluster_yaml_obj_copy = copy.deepcopy(cluster_yaml_obj)
     # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
     if isinstance(cloud, clouds.SSH):
@@ -2775,18 +2777,20 @@ def combine_pod_config_fields(
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
     config_utils.merge_k8s_configs(
-        cluster_yaml_obj['available_node_types']['ray_head_default']
+        cluster_yaml_obj_copy['available_node_types']['ray_head_default']
         ['node_config'], kubernetes_config)
+    return cluster_yaml_obj_copy
 
 
 def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
                             cluster_config_overrides: Dict[str, Any],
-                            context: Optional[str] = None) -> None:
+                            context: Optional[str] = None) -> Dict[str, Any]:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
     fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
 
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
+    cluster_yaml_obj_copy = copy.deepcopy(cluster_yaml_obj)
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
@@ -2808,30 +2812,42 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
         # Service accounts
-        cluster_yaml_obj['provider']['autoscaler_service_account']['metadata'],
-        cluster_yaml_obj['provider']['autoscaler_role']['metadata'],
-        cluster_yaml_obj['provider']['autoscaler_role_binding']['metadata'],
-        cluster_yaml_obj['provider']['autoscaler_service_account']['metadata'],
+        cluster_yaml_obj_copy['provider']['autoscaler_service_account']
+        ['metadata'],
+        cluster_yaml_obj_copy['provider']['autoscaler_role']['metadata'],
+        cluster_yaml_obj_copy['provider']['autoscaler_role_binding']
+        ['metadata'],
+        cluster_yaml_obj_copy['provider']['autoscaler_service_account']
+        ['metadata'],
         # Pod spec
-        cluster_yaml_obj['available_node_types']['ray_head_default']
+        cluster_yaml_obj_copy['available_node_types']['ray_head_default']
         ['node_config']['metadata'],
         # Services for pods
-        *[svc['metadata'] for svc in cluster_yaml_obj['provider']['services']]
+        *[
+            svc['metadata']
+            for svc in cluster_yaml_obj_copy['provider']['services']
+        ]
     ]
 
     for destination in combination_destinations:
         config_utils.merge_k8s_configs(destination, custom_metadata)
+
+    return cluster_yaml_obj_copy
 
 
 def combine_pod_config_fields_and_metadata(
         cluster_yaml_obj: Dict[str, Any],
         cluster_config_overrides: Dict[str, Any],
         cloud: Optional[clouds.Cloud] = None,
-        context: Optional[str] = None) -> None:
+        context: Optional[str] = None) -> Dict[str, Any]:
     """Combines pod config fields and metadata fields"""
-    combine_pod_config_fields(cluster_yaml_obj, cluster_config_overrides, cloud,
-                              context)
-    combine_metadata_fields(cluster_yaml_obj, cluster_config_overrides, context)
+    combined_yaml_obj = combine_pod_config_fields(cluster_yaml_obj,
+                                                  cluster_config_overrides,
+                                                  cloud, context)
+    combined_yaml_obj = combine_metadata_fields(combined_yaml_obj,
+                                                cluster_config_overrides,
+                                                context)
+    return combined_yaml_obj
 
 
 def merge_custom_metadata(
