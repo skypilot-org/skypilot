@@ -18,7 +18,10 @@ from sky.utils import common_utils
 from sky.utils import locks
 
 _events = []
-_events_file_path = os.environ.get('SKYPILOT_TIMELINE_FILE_PATH')
+
+
+def _get_events_file_path():
+    return os.environ.get('SKYPILOT_TIMELINE_FILE_PATH')
 
 
 class Event:
@@ -30,7 +33,9 @@ class Event:
     """
 
     def __init__(self, name: str, message: Optional[str] = None):
-        if not _events_file_path:
+        self._skipped = False
+        if not _get_events_file_path():
+            self._skipped = True
             return
         self._name = name
         self._message = message
@@ -48,7 +53,7 @@ class Event:
             self._event['args'] = {'message': self._message}
 
     def begin(self):
-        if not _events_file_path:
+        if self._skipped:
             return
         event_begin = self._event.copy()
         event_begin.update({
@@ -61,7 +66,7 @@ class Event:
         _events.append(event_begin)
 
     def end(self):
-        if not _events_file_path:
+        if self._skipped:
             return
         event_end = self._event.copy()
         event_end.update({
@@ -167,20 +172,25 @@ class FileLockEvent:
 
 
 def save_timeline():
-    if not _events_file_path:
+    events_file_path = _get_events_file_path()
+    if not events_file_path:
         return
+    global _events
+    events_to_write = _events
+    _events = []
     json_output = {
-        'traceEvents': _events,
+        'traceEvents': events_to_write,
         'displayTimeUnit': 'ms',
         'otherData': {
-            'log_dir': os.path.dirname(os.path.abspath(_events_file_path)),
+            'log_dir': os.path.dirname(os.path.abspath(events_file_path)),
         }
     }
-    os.makedirs(os.path.dirname(os.path.abspath(_events_file_path)),
+    os.makedirs(os.path.dirname(os.path.abspath(events_file_path)),
                 exist_ok=True)
-    with open(_events_file_path, 'w', encoding='utf-8') as f:
+    with open(events_file_path, 'w', encoding='utf-8') as f:
         json.dump(json_output, f)
+    del events_to_write
 
 
-if _events_file_path:
+if _get_events_file_path():
     atexit.register(save_timeline)
