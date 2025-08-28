@@ -2499,7 +2499,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.stable_internal_external_ips = stable_internal_external_ips
 
     @context_utils.cancellation_guard
-    # @annotations.lru_cache(scope='global') # PROBLEM
     @timeline.event
     def get_command_runners(self,
                             force_cached: bool = False,
@@ -2855,7 +2854,6 @@ class LocalResourcesHandle(CloudVmRayResourceHandle):
         self.is_grpc_enabled = False
 
     @context_utils.cancellation_guard
-    @annotations.lru_cache(scope='global')
     @timeline.event
     def get_command_runners(self,
                             force_cached: bool = False,
