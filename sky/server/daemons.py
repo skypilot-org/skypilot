@@ -4,14 +4,14 @@ import os
 import time
 from typing import Callable
 
-from sky.utils import annotations
 from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
+from sky.utils import annotations
 from sky.utils import common
 from sky.utils import env_options
-from sky.utils import ux_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -69,8 +69,8 @@ class InternalRequestDaemon:
                     sky_logging.reload_logger()
                     level = self.refresh_log_level()
                     self.event_fn()
-                # Clear cache should be called before reload_logger and usage reset,
-                # otherwise, the latest env var will not be used.
+                # Clear request level cache after each run to avoid
+                # using too much memory.
                 for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
                     func.cache_clear()
                 timeline.save_timeline()
