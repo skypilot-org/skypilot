@@ -1082,7 +1082,6 @@ class KarpenterAutoscaler(Autoscaler):
     can_query_backend: bool = False
 
 
-
 class CoreweaveAutoscaler(Autoscaler):
     """CoreWeave autoscaler
     """
