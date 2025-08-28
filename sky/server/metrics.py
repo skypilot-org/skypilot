@@ -76,7 +76,7 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         path = request.url.path
-        logger.info(f'PROM Middleware Request: {request}, {request.url.path}')
+        logger.debug(f'PROM Middleware Request: {request}, {request.url.path}')
         streaming = _is_streaming_api(path)
         if not streaming:
             # Exclude streaming APIs, the duration is not meaningful.
