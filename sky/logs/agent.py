@@ -5,8 +5,8 @@ import shlex
 from typing import Any, Dict
 
 from sky.skylet import constants
-from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import yaml_utils
 
 
 class LoggingAgent(abc.ABC):
@@ -65,7 +65,7 @@ class FluentbitAgent(LoggingAgent):
                 'outputs': [self.fluentbit_output_config(cluster_name)],
             }
         }
-        return common_utils.dump_yaml_str(cfg_dict)
+        return yaml_utils.dump_yaml_str(cfg_dict)
 
     @abc.abstractmethod
     def fluentbit_output_config(

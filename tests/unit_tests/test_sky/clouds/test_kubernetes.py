@@ -625,7 +625,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertFalse(deploy_vars['tpu_requested'])  # H100 is GPU, not TPU
 
     @patch('sky.utils.yaml_utils.safe_load')
-    @patch('sky.utils.common_utils.dump_yaml')
+    @patch('sky.utils.yaml_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_merged_with_ipc_lock_capability(
             self, mock_get_cloud_config_value, mock_dump_yaml, mock_safe_load):
@@ -714,7 +714,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
                 os.unlink(tmp_path)
 
     @patch('sky.utils.yaml_utils.safe_load')
-    @patch('sky.utils.common_utils.dump_yaml')
+    @patch('sky.utils.yaml_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_without_ipc_lock_capability(
             self, mock_get_cloud_config_value, mock_dump_yaml, mock_safe_load):
@@ -797,7 +797,7 @@ class TestKubernetesVolumeMerging(unittest.TestCase):
     """Test cases for merging user-specified volume mounts and volumes with pod_config."""
 
     @patch('sky.utils.yaml_utils.safe_load')
-    @patch('sky.utils.common_utils.dump_yaml')
+    @patch('sky.utils.yaml_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_volume_mounts_merged_correctly(self,
                                                  mock_get_cloud_config_value,

@@ -224,7 +224,7 @@ def tail_logs(service_name: str,
         stream=True)
     request_id: server_common.RequestId[None] = server_common.get_request_id(
         response)
-    return sdk.stream_response(request_id=request_id,
+    sdk.stream_response(request_id=request_id,
                                response=response,
                                output_stream=output_stream,
                                resumable=True,

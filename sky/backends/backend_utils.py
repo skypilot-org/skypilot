@@ -241,7 +241,7 @@ def _optimize_file_mounts(tmp_yaml_path: str) -> None:
         subprocess.CalledProcessError: If the file mounts are failed to be
             copied.
     """
-    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
 
     file_mounts = yaml_config.get('file_mounts', {})
     # Remove the file mounts added by the newline.
@@ -325,7 +325,7 @@ def _optimize_file_mounts(tmp_yaml_path: str) -> None:
             shell=True,
             check=True)
 
-    common_utils.dump_yaml(tmp_yaml_path, yaml_config)
+    yaml_utils.dump_yaml(tmp_yaml_path, yaml_config)
 
 
 def path_size_megabytes(path: str) -> int:
@@ -510,7 +510,7 @@ def _replace_yaml_dicts(
         for key in exclude_restore_key_name[:-1]:
             curr = curr[key]
         curr[exclude_restore_key_name[-1]] = value
-    return common_utils.dump_yaml_str(new_config)
+    return yaml_utils.dump_yaml_str(new_config)
 
 
 def get_expirable_clouds(
@@ -937,7 +937,7 @@ def write_cluster_config(
             tmp_yaml_path,
             cluster_config_overrides=cluster_config_overrides,
             context=region.name)
-        yaml_obj = common_utils.read_yaml(tmp_yaml_path)
+        yaml_obj = yaml_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
 
@@ -976,7 +976,7 @@ def write_cluster_config(
     # Read the cluster name from the tmp yaml file, to take the backward
     # compatbility restortion above into account.
     # TODO: remove this after 2 minor releases, 0.10.0.
-    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
     # Make sure to do this before we optimize file mounts. Optimization is
@@ -1022,7 +1022,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
 
     This function's output removes comments included in the jinja2 template.
     """
-    config = common_utils.read_yaml(tmp_yaml_path)
+    config = yaml_utils.read_yaml(tmp_yaml_path)
     # Check the availability of the cloud type.
     if isinstance(cloud, (
             clouds.AWS,
@@ -1054,7 +1054,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_hyperbolic_authentication(config)
     else:
         assert False, cloud
-    common_utils.dump_yaml(tmp_yaml_path, config)
+    yaml_utils.dump_yaml(tmp_yaml_path, config)
 
 
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
@@ -1156,7 +1156,7 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     """
 
     # Load the yaml contents so that we can directly remove keys.
-    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     for key_list in _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH:
         dict_to_remove_from = yaml_config
         found_key = True
@@ -1175,7 +1175,7 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     config_hash = hashlib.sha256()
 
     yaml_hash = hashlib.sha256(
-        common_utils.dump_yaml_str(yaml_config).encode('utf-8'))
+        yaml_utils.dump_yaml_str(yaml_config).encode('utf-8'))
     config_hash.update(yaml_hash.digest())
 
     file_mounts = yaml_config.get('file_mounts', {})
@@ -2027,9 +2027,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             'Cluster has no YAML file. Removing the cluster from cache.',
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
-        global_user_state.remove_cluster(cluster_name,
-                                         terminate=True,
-                                         remove_events=True)
+        global_user_state.remove_cluster(cluster_name, terminate=True)
         logger.debug(f'Cluster {cluster_name!r} has no YAML file. '
                      'Removing the cluster from cache.')
         return None
@@ -2367,7 +2365,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             # Some status reason clears after a certain time (e.g. k8s events
             # are only stored for an hour by default), so it is possible that
             # the previous event has a status reason, but now it does not.
-            init_reason_regex = f'^Cluster is abnormal because {init_reason} .*'
+            init_reason_regex = f'^Cluster is abnormal because {init_reason}.*'
         log_message = f'Cluster is abnormal because {init_reason}'
         if status_reason:
             log_message += f' ({status_reason})'

@@ -2782,7 +2782,7 @@ def combine_pod_config_fields(
         kubernetes_config)
 
     # Write the updated YAML back to the file
-    common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+    yaml_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 
 
 def combine_metadata_fields(cluster_yaml_path: str,
@@ -2834,7 +2834,7 @@ def combine_metadata_fields(cluster_yaml_path: str,
         config_utils.merge_k8s_configs(destination, custom_metadata)
 
     # Write the updated YAML back to the file
-    common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+    yaml_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 
 
 def merge_custom_metadata(
