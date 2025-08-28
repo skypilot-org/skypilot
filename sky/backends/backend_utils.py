@@ -2436,7 +2436,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             # Some status reason clears after a certain time (e.g. k8s events
             # are only stored for an hour by default), so it is possible that
             # the previous event has a status reason, but now it does not.
-            init_reason_regex = f'^Cluster is abnormal because {init_reason}.*'
+            init_reason_regex = (f'^Cluster is abnormal because '
+                                 f'{re.escape(init_reason)}.*')
         log_message = f'Cluster is abnormal because {init_reason}'
         if status_reason:
             log_message += f' ({status_reason})'
@@ -2456,10 +2457,17 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
+    verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
     global_user_state.add_cluster_event(
-        cluster_name, None, 'All nodes terminated, cleaning up the cluster.',
-        global_user_state.ClusterEventType.STATUS_CHANGE)
+        cluster_name,
+        None,
+        f'All nodes {verb}, cleaning up the cluster.',
+        global_user_state.ClusterEventType.STATUS_CHANGE,
+        # This won't do anything for a terminated cluster, but it's needed for a
+        # stopped cluster.
+        nop_if_duplicate=True,
+    )
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
