@@ -30,6 +30,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
     :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 24
+    :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -252,7 +253,25 @@ Example:
 .. code-block:: yaml
 
   api_server:
-    cluster_event_retention_hours: -1 # Disable cluster event GC
+    cluster_event_retention_hours: -1 # Disable all cluster event GC
+  
+.. _config-yaml-api-server-cluster-debug-event-retention-hours:
+
+``api_server.cluster_debug_event_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for cluster events in hours (optional). Set to a negative value to disable cluster event GC.
+
+Cluster event GC will remove debug cluster event entries in `sky status -v`, i.e., the logs and status of the cluster events.
+
+Default: ``720.0`` (30 days).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    cluster_debug_event_retention_hours: -1 # Disable all cluster event GC
 
 .. _config-yaml-jobs:
 
