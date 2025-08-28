@@ -362,6 +362,7 @@ class ClusterJobBody(RequestBody):
     job_id: Optional[int]
     follow: bool = True
     tail: int = 0
+    setup_spinner: bool = False
 
 
 class ClusterJobsBody(RequestBody):
