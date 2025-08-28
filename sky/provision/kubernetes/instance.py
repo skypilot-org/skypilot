@@ -1,10 +1,10 @@
 """Kubernetes instance provisioning."""
 import copy
+import datetime
 import json
 import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-import datetime
 
 from sky import exceptions
 from sky import global_user_state
