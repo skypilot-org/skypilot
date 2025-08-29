@@ -9,8 +9,9 @@ import subprocess
 import textwrap
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
+import socket
 import urllib.parse
-
+    
 from filelock import FileLock
 
 from sky import clouds
@@ -19,6 +20,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
+from sky.adaptors import coreweave
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
@@ -625,6 +627,7 @@ class Rclone:
         R2 = 'R2'
         AZURE = 'AZURE'
         NEBIUS = 'NEBIUS'
+        COREWEAVE = 'COREWEAVE'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -642,7 +645,8 @@ class Rclone:
                 Rclone.RcloneStores.IBM: 'sky-ibm',
                 Rclone.RcloneStores.R2: 'sky-r2',
                 Rclone.RcloneStores.AZURE: 'sky-azure',
-                Rclone.RcloneStores.NEBIUS: 'sky-nebius'
+                Rclone.RcloneStores.NEBIUS: 'sky-nebius',
+                Rclone.RcloneStores.COREWEAVE: 'sky-coreweave'
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -747,6 +751,26 @@ class Rclone:
                     secret_access_key = {secret_access_key}
                     endpoint = {endpoint_url}
                     acl = private
+                    """)
+            elif self is Rclone.RcloneStores.COREWEAVE:
+                coreweave_session = coreweave.session()
+                coreweave_credentials = coreweave.get_coreweave_credentials(
+                    coreweave_session)
+                # Get endpoint URL from the client
+                client = coreweave.client('s3')
+                endpoint_url = client.meta.endpoint_url
+                access_key_id = coreweave_credentials.access_key
+                secret_access_key = coreweave_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    region = auto
+                    acl = private
+                    force_path_style = false
                     """)
             else:
                 with ux_utils.print_exception_no_traceback():
@@ -908,3 +932,84 @@ def split_oci_path(oci_path: str) -> Tuple[str, str]:
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
+
+
+def create_coreweave_client(region: Optional[str] = None) -> Client:
+    """Create CoreWeave S3 client.
+    Args:
+        region: The region to configure the client for. If None, uses the
+                region from the session configuration.
+    """
+    session = coreweave.session()
+    if region is not None:
+        return session.client('s3', region_name=region)
+    return session.client('s3')
+
+
+def split_coreweave_path(coreweave_path: str) -> Tuple[str, str]:
+    """Split cw://bucket/key into (bucket, key)."""
+    if coreweave_path.startswith('cw://'):
+        path_parts = coreweave_path.replace('cw://', '').split('/', 1)
+    else:
+        path_parts = coreweave_path.split('/', 1)
+    bucket = path_parts[0]
+    key = path_parts[1] if len(path_parts) > 1 else ''
+    return bucket, key
+
+
+def dns_lookup_with_cname_check(endpoint_url: str) -> bool:
+    """Perform DNS lookup with CNAME check to improve head_bucket reliability.
+    
+    Args:
+        endpoint_url: The S3 endpoint URL to check
+        
+    Returns:
+        bool: True if CNAME records are found, False otherwise
+    """
+    # Extract hostname from endpoint URL (e.g., "https://hostname/")
+    parsed_url = urllib.parse.urlparse(endpoint_url)
+    hostname = parsed_url.netloc
+    
+    if not hostname:
+        return False
+    
+    # Retry DNS lookup until we get CNAME records
+    max_retries = 12  # 60 seconds total with 5 second intervals
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            # Perform DNS lookup to check for CNAME records
+            host_info = socket.gethostbyname_ex(hostname)
+            # host_info[1] contains alias names (CNAME records)
+            if host_info[1]:  # If CNAME records exist
+                logger.debug(f'DNS lookup found CNAME records for {hostname}: {host_info[1]} after {retry_count * 5} seconds')
+                return True
+            else:
+                retry_count += 1
+                logger.debug(f'DNS lookup completed for {hostname}, no CNAME records (attempt {retry_count}/{max_retries})')
+                if retry_count < max_retries:
+                    time.sleep(5)
+                    
+        except socket.gaierror as dns_error:
+            retry_count += 1
+            logger.debug(f'DNS lookup failed for {hostname} (attempt {retry_count}/{max_retries}): {dns_error}')
+            if retry_count < max_retries:
+                time.sleep(5)
+    
+    logger.debug(f'No CNAME records found for {hostname} after {max_retries * 5} seconds, proceeding anyway')
+    return False
+
+
+def verify_coreweave_bucket(name: str) -> bool:
+    """Verify CoreWeave bucket exists and is accessible."""
+    coreweave_client = create_coreweave_client()
+    endpoint_url = coreweave_client.meta.endpoint_url
+    
+    # Perform DNS lookup with CNAME check to improve head_bucket reliability
+    if endpoint_url:
+        dns_lookup_with_cname_check(endpoint_url)
+
+    response = coreweave_client.list_buckets()
+    bucket_names = [bucket['Name'] for bucket in response['Buckets']]
+    return name in bucket_names
