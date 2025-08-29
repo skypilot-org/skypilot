@@ -22,6 +22,7 @@ class VolumeAccessMode(enum.Enum):
 class VolumeType(enum.Enum):
     """Volume type."""
     PVC = 'k8s-pvc'
+    RUNPOD_NETWORK_VOLUME = 'runpod-network-volume'
 
 
 class VolumeMount:

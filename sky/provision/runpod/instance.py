@@ -97,6 +97,34 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 bid_per_gpu=config.node_config['BidPerGPU'],
                 docker_login_config=config.provider_config.get(
                     'docker_login_config'),
+                # Network volume mounting (collect all mounts; RunPod uses the first)
+                network_volume_id=(
+                    (lambda vm: (
+                        (global_user_state.get_volume_by_name(vm['VolumeNameOnCloud'])
+                         or {}).get('handle').config.get('network_volume_id')
+                        if (global_user_state.get_volume_by_name(vm['VolumeNameOnCloud'])
+                            and getattr(global_user_state.get_volume_by_name(vm['VolumeNameOnCloud'])['handle'], 'config', None) is not None)
+                        else None
+                    ))(config.node_config.get('VolumeMounts', [])[0])
+                    if config.node_config.get('VolumeMounts') else None
+                ),
+                volume_mount_path=(
+                    config.node_config.get('VolumeMounts', [{}])[0].get('MountPath')
+                    if config.node_config.get('VolumeMounts') else None
+                ),
+                volume_mounts=[
+                    (
+                        (lambda vm: (
+                            (global_user_state.get_volume_by_name(vm['VolumeNameOnCloud'])
+                             or {}).get('handle').config.get('network_volume_id')
+                            if (global_user_state.get_volume_by_name(vm['VolumeNameOnCloud'])
+                                and getattr(global_user_state.get_volume_by_name(vm['VolumeNameOnCloud'])['handle'], 'config', None) is not None)
+                            else None
+                        ))(vm),
+                        vm.get('MountPath')
+                    )
+                    for vm in config.node_config.get('VolumeMounts', [])
+                ] if config.node_config.get('VolumeMounts') else None,
             )
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')

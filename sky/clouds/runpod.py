@@ -44,6 +44,7 @@ class RunPod(clouds.Cloud):
              'RunPod.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
+    _MAX_VOLUME_NAME_LEN_LIMIT = 30
     _regions: List[clouds.Region] = []
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -323,3 +324,15 @@ class RunPod(clouds.Cloud):
         # TODO: use 0.0 for now to allow all images. We should change this to
         # return the docker image size.
         return 0.0
+    
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the volume name is valid for this cloud.
+
+        - must be <= 30 characters
+        """
+        if len(volume_name) > cls._MAX_VOLUME_NAME_LEN_LIMIT:
+            return (False, f'Volume name exceeds the maximum length of '
+                        f'{cls._MAX_VOLUME_NAME_LEN_LIMIT} characters.')
+        return True, None

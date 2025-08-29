@@ -6,7 +6,12 @@ from sky.utils import infra_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.utils import volume as volume_lib
 
+VOLUME_TYPE_TO_CLOUD = {
+    volume_lib.VolumeType.PVC: 'kubernetes',
+    volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME: 'runpod',
+}
 
 class Volume:
     """Volume specification."""
@@ -125,8 +130,15 @@ class Volume:
 
     def _validate_config(self) -> None:
         """Validate the volume config."""
-        assert self.cloud is not None, 'Cloud must be specified'
-        cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
+        cloud_from_type = VOLUME_TYPE_TO_CLOUD.get(volume_lib.VolumeType(self.type))
+        cloud_obj_from_type = registry.CLOUD_REGISTRY.from_str(cloud_from_type)
+        if self.cloud:
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
+            if not cloud_obj.is_same_cloud(cloud_obj_from_type):
+                raise ValueError(f'Invalid cloud {self.cloud} for volume type {self.type}')
+        else:
+            self.cloud=cloud_from_type
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
         assert cloud_obj is not None
 
         valid, err_msg = cloud_obj.is_volume_name_valid(self.name)

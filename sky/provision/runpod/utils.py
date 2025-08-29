@@ -267,7 +267,11 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
            zone: str, disk_size: int, image_name: str,
            ports: Optional[List[int]], public_key: str,
            preemptible: Optional[bool], bid_per_gpu: float,
-           docker_login_config: Optional[Dict[str, str]]) -> str:
+           docker_login_config: Optional[Dict[str, str]],
+           *,
+           network_volume_id: Optional[str] = None,
+           volume_mount_path: Optional[str] = None,
+           volume_mounts: Optional[List[Tuple[str, str]]] = None) -> str:
     """Launches an instance with the given parameters.
 
     For CPU instances, we directly use the instance_type for launching the
@@ -337,6 +341,21 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
         'template_id': template_id,
     }
 
+    # Optional network volume mount(s). RunPod currently supports a single
+    # network volume per pod; if multiple provided, use the first.
+    primary_volume_id = network_volume_id
+    primary_mount_path = volume_mount_path
+    if volume_mounts:
+        if len(volume_mounts) > 1:
+            logger.warning('Multiple VolumeMounts provided; only the first will be used on RunPod.')
+        first_id, first_path = volume_mounts[0]
+        primary_volume_id = first_id or primary_volume_id
+        primary_mount_path = first_path or primary_mount_path
+    if primary_mount_path is not None:
+        params['volume_mount_path'] = primary_mount_path
+    if primary_volume_id is not None:
+        params['network_volume_id'] = primary_volume_id
+
     # GPU instance types start with f'{gpu_count}x',
     # CPU instance types start with 'cpu'.
     is_cpu_instance = instance_type.startswith('cpu')
@@ -402,3 +421,4 @@ def get_ssh_ports(cluster_name) -> List[int]:
         f'Could not find any instances for cluster {cluster_name}.')
 
     return ssh_ports
+
