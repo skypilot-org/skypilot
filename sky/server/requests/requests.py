@@ -13,7 +13,8 @@ import sqlite3
 import threading
 import time
 import traceback
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import (Any, AsyncContextManager, Callable, Dict, Generator, List,
+                    Optional, Tuple)
 
 import colorama
 import filelock
@@ -467,14 +468,25 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
         _add_or_update_request_no_lock(request)
 
 
-@contextlib.asynccontextmanager
-@init_db_async
-async def update_request_async(request_id: str):
-    """Async version of update_request."""
-    request = await _get_request_no_lock_async(request_id)
-    yield request
-    if request is not None:
-        await _add_or_update_request_no_lock_async(request)
+@init_db
+def update_request_async(
+        request_id: str) -> AsyncContextManager[Optional[Request]]:
+    """Async version of update_request.
+
+    Returns an async context manager that yields the request record and
+    persists any in-place updates upon exit.
+    """
+
+    @contextlib.asynccontextmanager
+    async def _cm():
+        request = await _get_request_no_lock_async(request_id)
+        try:
+            yield request
+        finally:
+            if request is not None:
+                await _add_or_update_request_no_lock_async(request)
+
+    return _cm()
 
 
 _get_request_sql = (f'SELECT {", ".join(REQUEST_COLUMNS)} FROM {REQUEST_TABLE} '
