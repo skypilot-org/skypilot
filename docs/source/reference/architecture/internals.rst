@@ -75,14 +75,19 @@ SkyPilot starts its Ray cluster when provisioning nodes:
 
 - On the head node: ``ray start --head`` with port 6380 and custom resource configurations
 - On worker nodes: ``ray start --address`` connecting to the head node's internal IP
-- Ray version is set in ``SKY_REMOTE_RAY_VERSION``
+- Ray version is set to ``2.9.3`` in ``SKY_REMOTE_RAY_VERSION``
 - Runtime environment: ``skypilot-runtime`` conda environment
 
 **Important considerations for users:**
 
 - Never use ``ray.init(address="auto")`` - this connects to SkyPilot's internal cluster
 - Always start user Ray clusters on the default port 6379
-- Never run ``ray stop`` without specifying ports - this may disrupt SkyPilot operations
-- Use ``ray.shutdown()`` in Python or kill specific Ray processes when cleaning up user clusters
+- Never run ``ray stop`` - this may disrupt SkyPilot operations
+- To kill your Ray cluster, use `ray.shutdown() <https://docs.ray.io/en/latest/ray-core/api/doc/ray.shutdown.html>`_ in Python or kill the Ray processes directly:
+
+  .. code-block:: bash
+
+     # Kill specific Ray head process started on port 6379 (user's Ray cluster)
+     pkill -f "ray start --head --port 6379"
 
 For running Ray workloads on SkyPilot, refer to the :ref:`distributed jobs documentation <dist-jobs>`.

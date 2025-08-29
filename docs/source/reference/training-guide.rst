@@ -104,7 +104,6 @@ When running distributed Ray workloads on SkyPilot, see the :ref:`distributed Ra
 
 - Always start your own Ray cluster on a different port (e.g., 6379) since SkyPilot uses Ray internally on port 6380
 - Start Ray head on rank 0, workers on other ranks
-- Use explicit addresses like ``ray.init(address="localhost:6379")`` for predictable behavior
 
 Use ``disk_tier: best``
 ~~~~~~~~~~~~~~~~~~~~~~~

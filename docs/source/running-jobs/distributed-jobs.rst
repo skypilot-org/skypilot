@@ -158,14 +158,11 @@ Executing a distributed Ray program
    - **Avoid:** ``ray.init(address="auto")`` - While it typically connects to your user cluster when available, the behavior can be unpredictable
    - **Never:** Call ``ray stop`` - It may interfere with SkyPilot operations
    
-   **To kill your Ray cluster**, use ``ray.shutdown()`` in Python or kill the Ray processes directly:
+   **To kill your Ray cluster**, use `ray.shutdown() <https://docs.ray.io/en/latest/ray-core/api/doc/ray.shutdown.html>`_ in Python or kill the Ray processes directly:
    
    .. code-block:: bash
-   
-      # Kill all Ray processes started by your application (not SkyPilot's internal Ray)
-      pkill -f "ray start --address" 
-      # Or kill specific Ray head/worker processes
-      pkill -f "ray start --head --port=6379"
+      # Kill specific Ray head process started on port 6379 (user's Ray cluster)
+      pkill -f "ray start --head --port 6379"
 
 To execute a distributed Ray program on many nodes, you can download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `job yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
 
