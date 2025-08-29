@@ -16,7 +16,10 @@ setup: |
   uv venv --python 3.10 --seed
   source .venv/bin/activate
 
-  # Install fschat and accelerate for chat completion
+  # ================================
+  # =    Install Dependencies      =
+  # ================================
+  # Install vllm and dependencies.
   uv pip install "vllm>=0.8.3"
   # Has to pin datasets to 3.6.0 because of the following issue, as the Amazon
   # review dataset is not compatible in later versions.
@@ -24,6 +27,9 @@ setup: |
   uv pip install torch torchvision aiohttp
   uv pip install hf_transfer pyarrow
 
+  # ================================
+  # =      Start vLLM Server       =
+  # ================================
   echo 'Starting vllm api server...'
   # Use setsid to start vllm in a new session, completely detached from parent,
   # so that it is not killed by setup completion.

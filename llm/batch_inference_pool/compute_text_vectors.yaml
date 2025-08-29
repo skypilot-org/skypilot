@@ -7,12 +7,11 @@ resources:
   accelerators: {L4, A10G, L40S, A10, A100, H100}
 
 envs:
-  START_IDX: 0  # Will be overridden by batch launcher script
-  END_IDX: 10000  # Will be overridden by batch launcher script
   MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
   DATASET_NAME: "McAuley-Lab/Amazon-Reviews-2023"
   DATASET_CONFIG: "raw_review_Books"
   WORKER_ID: ''
+  NUM_WORKERS: 10  # Will be overridden by batch launcher script
 
 run: |
   source .venv/bin/activate
@@ -20,20 +19,18 @@ run: |
   # Create metrics directory for monitoring service
   mkdir -p /output/metrics
   
-  # Set worker ID for metrics tracking
-  if [ -z "$WORKER_ID" ]; then
-    export WORKER_ID="worker_$(date +%s)_$(hostname)"
-    echo "Generated worker ID: $WORKER_ID"
-  fi
-  
-  # Process the assigned range of documents
+  # ================================
+  # =    Process Text Documents    =
+  # ================================
   echo "Processing documents from $START_IDX to $END_IDX"
   
   # Process text documents and track token metrics
   python scripts/text_vector_processor.py \
-    --output-path "/output/embeddings_${START_IDX}_${END_IDX}.parquet" \
-    --start-idx $START_IDX \
-    --end-idx $END_IDX \
+    --worker-rank $SKYPILOT_JOB_RANK \
+    --total-workers $NUM_WORKERS \
+    --global-start-idx $GLOBAL_START_IDX \
+    --global-end-idx $GLOBAL_END_IDX \
+    --output-path "/output/embeddings_${GLOBAL_START_IDX}_${GLOBAL_END_IDX}.parquet" \
     --chunk-size 512 \
     --chunk-overlap 50 \
     --vllm-endpoint http://localhost:8000 \
