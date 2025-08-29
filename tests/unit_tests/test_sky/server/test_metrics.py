@@ -95,7 +95,7 @@ def prometheus_middleware():
 
     # Clear metric values before each test
     metrics.SKY_APISERVER_REQUESTS_TOTAL.clear()
-    metrics.sky_apiserver_request_duration_seconds.clear()
+    metrics.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
 
     return middleware
 
@@ -105,7 +105,7 @@ def _get_metric_value_from_registry(metric_name, labels=None):
     registry = CollectorRegistry()
     # Register the actual metrics to the test registry
     registry.register(metrics.SKY_APISERVER_REQUESTS_TOTAL)
-    registry.register(metrics.sky_apiserver_request_duration_seconds)
+    registry.register(metrics.SKY_APISERVER_REQUEST_DURATION_SECONDS)
 
     # Generate the metrics output
     output = generate_latest(registry).decode('utf-8')
@@ -274,4 +274,4 @@ def cleanup_metrics():
     yield
     # Clear all metrics after each test
     metrics.SKY_APISERVER_REQUESTS_TOTAL.clear()
-    metrics.sky_apiserver_request_duration_seconds.clear()
+    metrics.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
