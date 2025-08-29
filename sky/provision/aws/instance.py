@@ -768,13 +768,6 @@ def terminate_instances(
     #  wait for the termination for now, since this is the default behavior
     #  of most cloud implementations (including AWS).
 
-    # TODO(hailong): Delete the placement group if EFA is enabled.
-    # We do not delete the placement group here because it requires to wait
-    # for all the instances to be terminated before deleting the placement
-    # group. This is time consuming, which will make failover or `sky down`
-    # take long time. For example, sky down a cluster with 1 x g6.8xlarge
-    # instance takes about 7-8 minutes.
-
 
 def _maybe_move_to_new_sg(
     instance: Any,

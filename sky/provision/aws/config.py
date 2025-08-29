@@ -89,9 +89,6 @@ def bootstrap_instances(
 
     max_efa_interfaces = config.provider_config.get('max_efa_interfaces', 0)
     enable_efa = max_efa_interfaces > 0
-    if enable_efa:
-        _configure_placement_group(ec2, cluster_name)
-        node_cfg['Placement'] = {'GroupName': cluster_name}
 
     # Cluster workers should be in a security group that permits traffic within
     # the group, and also SSH access from outside.
