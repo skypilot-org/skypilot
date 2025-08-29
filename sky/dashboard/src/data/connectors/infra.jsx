@@ -126,33 +126,37 @@ export async function getInfraData(forceRefresh = false) {
   const { getManagedJobs } = await import('@/data/connectors/jobs');
   const dashboardCache = (await import('@/lib/cache')).default;
 
-  // Use cache to get data instead of calling functions directly
-  const [clustersData, jobsData] = await Promise.all([
-    dashboardCache.get(getClusters),
-    dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
-  ]);
+  const clustersData = await dashboardCache.get(getClusters);
 
   const clusters = clustersData || [];
-  const jobs = jobsData?.jobs || [];
 
-  // Fetch both GPU and cloud data together
-  const [gpuData, cloudData] = await Promise.all([
-    getGPUs(clusters, jobs),
-    getCloudInfrastructure(clusters, jobs, forceRefresh),
+  async function getCloudInfra() {
+    const jobsData = await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
+    const jobs = jobsData?.jobs || [];
+    const cloudData = await getCloudInfrastructure(clusters, jobs, forceRefresh);
+    return {
+      cloudData,
+      jobsData,
+    };
+  }
+
+  const [gpuData, cloudAndJobsData] = await Promise.all([
+    getGPUs(clusters),
+    getCloudInfra(),
   ]);
+
+  const cloudData = cloudAndJobsData.cloudData;
+  const jobsData = cloudAndJobsData.jobsData;
 
   return {
     gpuData,
     cloudData,
+    jobsData,
   };
 }
 
-export async function getGPUs(clusters, jobs) {
-  const clustersAndJobsData = {
-    clusters: clusters || [],
-    jobs: jobs || [],
-  };
-  const gpus = await getKubernetesGPUs(clustersAndJobsData);
+export async function getGPUs(clusters) {
+  const gpus = await getKubernetesGPUs(clusters);
   return gpus;
 }
 
@@ -297,45 +301,10 @@ async function getKubernetesPerNodeGPUs(context) {
   }
 }
 
-export async function getContextClustersAndJobs(clustersAndJobsData) {
+export async function getContextJobs(jobs) {
   try {
-    const clusters = clustersAndJobsData.clusters;
-    const jobs = clustersAndJobsData.jobs;
-
-    // Count clusters and jobs per k8s context/ssh node pool
+    // Count jobs per k8s context/ssh node pool
     const contextStats = {};
-
-    clusters.forEach((cluster) => {
-      let contextKey = null;
-
-      // Check if it's a Kubernetes cluster
-      if (cluster.cloud === 'Kubernetes') {
-        // For Kubernetes clusters, the context name is in cluster.region
-        contextKey = cluster.region;
-        if (contextKey) {
-          contextKey = `kubernetes/${contextKey}`;
-        }
-      }
-      // Check if it's an SSH Node Pool cluster
-      else if (cluster.cloud === 'SSH') {
-        // For SSH clusters, the node pool name is in cluster.region
-        contextKey = cluster.region;
-        if (contextKey) {
-          // Remove 'ssh-' prefix if present for display
-          const poolName = contextKey.startsWith('ssh-')
-            ? contextKey.substring(4)
-            : contextKey;
-          contextKey = `ssh/${poolName}`;
-        }
-      }
-
-      if (contextKey) {
-        if (!contextStats[contextKey]) {
-          contextStats[contextKey] = { clusters: 0, jobs: 0 };
-        }
-        contextStats[contextKey].clusters += 1;
-      }
-    });
 
     // Process jobs
     jobs.forEach((job) => {
@@ -372,12 +341,56 @@ export async function getContextClustersAndJobs(clustersAndJobsData) {
 
     return contextStats;
   } catch (error) {
-    console.error('=== Error in getContextClustersAndJobs ===', error);
+    console.error('=== Error in getContextJobs ===', error);
     return {};
   }
 }
 
-async function getKubernetesGPUs(clustersAndJobsData) {
+export async function getContextClusters(clusters) {
+  try {
+    // Count clusters and jobs per k8s context/ssh node pool
+    const contextStats = {};
+
+    clusters.forEach((cluster) => {
+      let contextKey = null;
+
+      // Check if it's a Kubernetes cluster
+      if (cluster.cloud === 'Kubernetes') {
+        // For Kubernetes clusters, the context name is in cluster.region
+        contextKey = cluster.region;
+        if (contextKey) {
+          contextKey = `kubernetes/${contextKey}`;
+        }
+      }
+      // Check if it's an SSH Node Pool cluster
+      else if (cluster.cloud === 'SSH') {
+        // For SSH clusters, the node pool name is in cluster.region
+        contextKey = cluster.region;
+        if (contextKey) {
+          // Remove 'ssh-' prefix if present for display
+          const poolName = contextKey.startsWith('ssh-')
+            ? contextKey.substring(4)
+            : contextKey;
+          contextKey = `ssh/${poolName}`;
+        }
+      }
+
+      if (contextKey) {
+        if (!contextStats[contextKey]) {
+          contextStats[contextKey] = { clusters: 0, jobs: 0 };
+        }
+        contextStats[contextKey].clusters += 1;
+      }
+    });
+
+    return contextStats;
+  } catch (error) {
+    console.error('=== Error in getContextClusters ===', error);
+    return {};
+  }
+}
+
+async function getKubernetesGPUs(clusters) {
   try {
     // 1. Fetch all context names (Kubernetes + SSH)
     const allAvailableContextNames = await getAllContexts();
@@ -394,7 +407,7 @@ async function getKubernetesGPUs(clustersAndJobsData) {
     }
 
     // 2. Fetch cluster and job counts per context
-    const contextStats = await getContextClustersAndJobs(clustersAndJobsData);
+    const contextStats = await getContextClusters(clusters);
 
     // 3. Fetch GPU availability information
     const contextGPUAvailability = await getKubernetesContextGPUs();
