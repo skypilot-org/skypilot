@@ -1082,6 +1082,14 @@ class KarpenterAutoscaler(Autoscaler):
     can_query_backend: bool = False
 
 
+class CoreweaveAutoscaler(Autoscaler):
+    """CoreWeave autoscaler
+    """
+
+    label_formatter: Any = CoreWeaveLabelFormatter
+    can_query_backend: bool = False
+
+
 class GenericAutoscaler(Autoscaler):
     """Generic autoscaler
     """
@@ -1094,6 +1102,7 @@ class GenericAutoscaler(Autoscaler):
 AUTOSCALER_TYPE_TO_AUTOSCALER = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterAutoscaler,
+    kubernetes_enums.KubernetesAutoscalerType.COREWEAVE: CoreweaveAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.GENERIC: GenericAutoscaler,
 }
 

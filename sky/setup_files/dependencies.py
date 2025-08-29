@@ -73,6 +73,7 @@ install_requires = [
     'alembic',
     'aiohttp',
     'aiosqlite',
+    'anyio',
 ]
 
 # See requirements-dev.txt for the version of grpc and protobuf
@@ -94,6 +95,7 @@ server_dependencies = [
     'passlib',
     'pyjwt',
     'aiohttp',
+    'anyio',
     GRPC,
     PROTOBUF,
     'aiosqlite',

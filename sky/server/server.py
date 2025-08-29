@@ -21,6 +21,7 @@ import uuid
 import zipfile
 
 import aiofiles
+import anyio
 import fastapi
 from fastapi.middleware import cors
 import starlette.middleware.base
@@ -847,7 +848,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     client_file_mounts_dir = (
         common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
         'file_mounts')
-    client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
+    await anyio.Path(client_file_mounts_dir).mkdir(parents=True, exist_ok=True)
 
     # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
     # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
@@ -870,7 +871,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
     else:
         chunk_dir = client_file_mounts_dir / upload_id
-        chunk_dir.mkdir(parents=True, exist_ok=True)
+        await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
         zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
 
     try:
@@ -916,9 +917,9 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
                         await zip_file.write(data)
 
     logger.info(f'Uploaded zip file: {zip_file_path}')
-    unzip_file(zip_file_path, client_file_mounts_dir)
+    await unzip_file(zip_file_path, client_file_mounts_dir)
     if total_chunks > 1:
-        shutil.rmtree(chunk_dir)
+        await context_utils.to_thread(shutil.rmtree, chunk_dir)
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 
@@ -933,61 +934,69 @@ def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
         return False
 
 
-def unzip_file(zip_file_path: pathlib.Path,
-               client_file_mounts_dir: pathlib.Path) -> None:
-    """Unzips a zip file."""
-    try:
-        with zipfile.ZipFile(zip_file_path, 'r') as zipf:
-            for member in zipf.infolist():
-                # Determine the new path
-                original_path = os.path.normpath(member.filename)
-                new_path = client_file_mounts_dir / original_path.lstrip('/')
+async def unzip_file(zip_file_path: pathlib.Path,
+                     client_file_mounts_dir: pathlib.Path) -> None:
+    """Unzips a zip file without blocking the event loop."""
 
-                if (member.external_attr >> 28) == 0xA:
-                    # Symlink. Read the target path and create a symlink.
+    def _do_unzip() -> None:
+        try:
+            with zipfile.ZipFile(zip_file_path, 'r') as zipf:
+                for member in zipf.infolist():
+                    # Determine the new path
+                    original_path = os.path.normpath(member.filename)
+                    new_path = client_file_mounts_dir / original_path.lstrip(
+                        '/')
+
+                    if (member.external_attr >> 28) == 0xA:
+                        # Symlink. Read the target path and create a symlink.
+                        new_path.parent.mkdir(parents=True, exist_ok=True)
+                        target = zipf.read(member).decode()
+                        assert not os.path.isabs(target), target
+                        # Since target is a relative path, we need to check that
+                        # it is under `client_file_mounts_dir` for security.
+                        full_target_path = (new_path.parent / target).resolve()
+                        if not _is_relative_to(full_target_path,
+                                               client_file_mounts_dir):
+                            raise ValueError(
+                                f'Symlink target {target} leads to a '
+                                'file not in userspace. Aborted.')
+
+                        if new_path.exists() or new_path.is_symlink():
+                            new_path.unlink(missing_ok=True)
+                        new_path.symlink_to(
+                            target,
+                            target_is_directory=member.filename.endswith('/'))
+                        continue
+
+                    # Handle directories
+                    if member.filename.endswith('/'):
+                        new_path.mkdir(parents=True, exist_ok=True)
+                        continue
+
+                    # Handle files
                     new_path.parent.mkdir(parents=True, exist_ok=True)
-                    target = zipf.read(member).decode()
-                    assert not os.path.isabs(target), target
-                    # Since target is a relative path, we need to check that it
-                    # is under `client_file_mounts_dir` for security.
-                    full_target_path = (new_path.parent / target).resolve()
-                    if not _is_relative_to(full_target_path,
-                                           client_file_mounts_dir):
-                        raise ValueError(f'Symlink target {target} leads to a '
-                                         'file not in userspace. Aborted.')
+                    with zipf.open(member) as member_file, new_path.open(
+                            'wb') as f:
+                        # Use shutil.copyfileobj to copy files in chunks,
+                        # so it does not load the entire file into memory.
+                        shutil.copyfileobj(member_file, f)
+        except zipfile.BadZipFile as e:
+            logger.error(f'Bad zip file: {zip_file_path}')
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Invalid zip file: {common_utils.format_exception(e)}')
+        except Exception as e:
+            logger.error(f'Error unzipping file: {zip_file_path}')
+            raise fastapi.HTTPException(
+                status_code=500,
+                detail=(f'Error unzipping file: '
+                        f'{common_utils.format_exception(e)}'))
+        finally:
+            # Cleanup the temporary file regardless of
+            # success/failure handling above
+            zip_file_path.unlink(missing_ok=True)
 
-                    if new_path.exists() or new_path.is_symlink():
-                        new_path.unlink(missing_ok=True)
-                    new_path.symlink_to(
-                        target,
-                        target_is_directory=member.filename.endswith('/'))
-                    continue
-
-                # Handle directories
-                if member.filename.endswith('/'):
-                    new_path.mkdir(parents=True, exist_ok=True)
-                    continue
-
-                # Handle files
-                new_path.parent.mkdir(parents=True, exist_ok=True)
-                with zipf.open(member) as member_file, new_path.open('wb') as f:
-                    # Use shutil.copyfileobj to copy files in chunks, so it does
-                    # not load the entire file into memory.
-                    shutil.copyfileobj(member_file, f)
-    except zipfile.BadZipFile as e:
-        logger.error(f'Bad zip file: {zip_file_path}')
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail=f'Invalid zip file: {common_utils.format_exception(e)}')
-    except Exception as e:
-        logger.error(f'Error unzipping file: {zip_file_path}')
-        raise fastapi.HTTPException(
-            status_code=500,
-            detail=(f'Error unzipping file: '
-                    f'{common_utils.format_exception(e)}'))
-
-    # Cleanup the temporary file
-    zip_file_path.unlink()
+    await context_utils.to_thread(_do_unzip)
 
 
 @app.post('/launch')

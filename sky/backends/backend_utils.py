@@ -1409,6 +1409,62 @@ def ssh_credential_from_yaml(
     return credentials
 
 
+def ssh_credentials_from_handles(
+    handles: List['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+) -> List[Dict[str, Any]]:
+    """Returns ssh_user, ssh_private_key and ssh_control name.
+    """
+    non_empty_cluster_yaml_paths = [
+        handle.cluster_yaml
+        for handle in handles
+        if handle.cluster_yaml is not None
+    ]
+    cluster_yaml_dicts = global_user_state.get_cluster_yaml_dict_multiple(
+        non_empty_cluster_yaml_paths)
+    cluster_yaml_dicts_to_index = {
+        cluster_yaml_path: cluster_yaml_dict
+        for cluster_yaml_path, cluster_yaml_dict in zip(
+            non_empty_cluster_yaml_paths, cluster_yaml_dicts)
+    }
+
+    credentials_to_return: List[Dict[str, Any]] = []
+    for handle in handles:
+        if handle.cluster_yaml is None:
+            credentials_to_return.append(dict())
+            continue
+        ssh_user = handle.ssh_user
+        docker_user = handle.docker_user
+        config = cluster_yaml_dicts_to_index[handle.cluster_yaml]
+        auth_section = config['auth']
+        if ssh_user is None:
+            ssh_user = auth_section['ssh_user'].strip()
+        ssh_private_key_path = auth_section.get('ssh_private_key')
+        ssh_control_name = config.get('cluster_name', '__default__')
+        ssh_proxy_command = auth_section.get('ssh_proxy_command')
+
+        # Update the ssh_user placeholder in proxy command, if required
+        if (ssh_proxy_command is not None and
+                constants.SKY_SSH_USER_PLACEHOLDER in ssh_proxy_command):
+            ssh_proxy_command = ssh_proxy_command.replace(
+                constants.SKY_SSH_USER_PLACEHOLDER, ssh_user)
+
+        credentials = {
+            'ssh_user': ssh_user,
+            'ssh_private_key': ssh_private_key_path,
+            'ssh_control_name': ssh_control_name,
+            'ssh_proxy_command': ssh_proxy_command,
+        }
+        if docker_user is not None:
+            credentials['docker_user'] = docker_user
+        ssh_provider_module = config['provider']['module']
+        # If we are running ssh command on kubernetes node.
+        if 'kubernetes' in ssh_provider_module:
+            credentials['disable_control_master'] = True
+        credentials_to_return.append(credentials)
+
+    return credentials_to_return
+
+
 def parallel_data_transfer_to_nodes(
         runners: List[command_runner.CommandRunner],
         source: Optional[str],
@@ -2056,7 +2112,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                 f'{output}\n', stderr)
         return (*_count_healthy_nodes_from_ray(output), output, stderr)
 
+    ray_status_details: Optional[str] = None
+
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
+        nonlocal ray_status_details
         try:
             # NOTE: fetching the IPs is very slow as it calls into
             # `ray get head-ip/worker-ips`. Using cached IPs is safe because
@@ -2134,19 +2193,25 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                 #   showing up
                 time.sleep(1)
 
+            ray_status_details = (
+                f'{ready_head + ready_workers}/{total_nodes} ready')
             raise RuntimeError(
                 f'Refreshing status ({cluster_name!r}): ray status not showing '
                 f'all nodes ({ready_head + ready_workers}/'
                 f'{total_nodes});\noutput:\n{output}\nstderr:\n{stderr}')
 
         except exceptions.FetchClusterInfoError:
+            ray_status_details = 'failed to get IPs'
             logger.debug(
                 f'Refreshing status ({cluster_name!r}) failed to get IPs.')
         except RuntimeError as e:
+            if ray_status_details is None:
+                ray_status_details = str(e)
             logger.debug(common_utils.format_exception(e))
         except Exception as e:  # pylint: disable=broad-except
             # This can be raised by `external_ssh_ports()`, due to the
             # underlying call to kubernetes API.
+            ray_status_details = str(e)
             logger.debug(f'Refreshing status ({cluster_name!r}) failed: ',
                          exc_info=e)
         return False
@@ -2259,6 +2324,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     #  (2) Otherwise, we will reset the autostop setting, unless the cluster is
     #      autostopping/autodowning.
     some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
+    # If all nodes are up and ray cluster is health, we would have returned
+    # earlier. So if all_nodes_up is True and we are here, it means the ray
+    # cluster must have been unhealthy.
+    ray_cluster_unhealthy = all_nodes_up
     some_nodes_not_stopped = any(status[0] != status_lib.ClusterStatus.STOPPED
                                  for status in node_statuses)
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
@@ -2269,8 +2338,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
 
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
+        elif ray_cluster_unhealthy:
+            init_reason = f'ray cluster is unhealthy ({ray_status_details})'
         elif some_nodes_not_stopped:
-            init_reason = 'some nodes are up and some nodes are stopped'
+            init_reason = 'some but not all nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
@@ -2365,7 +2436,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             # Some status reason clears after a certain time (e.g. k8s events
             # are only stored for an hour by default), so it is possible that
             # the previous event has a status reason, but now it does not.
-            init_reason_regex = f'^Cluster is abnormal because {init_reason}.*'
+            init_reason_regex = (f'^Cluster is abnormal because '
+                                 f'{re.escape(init_reason)}.*')
         log_message = f'Cluster is abnormal because {init_reason}'
         if status_reason:
             log_message += f' ({status_reason})'
@@ -2385,10 +2457,17 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
+    verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
     global_user_state.add_cluster_event(
-        cluster_name, None, 'All nodes terminated, cleaning up the cluster.',
-        global_user_state.ClusterEventType.STATUS_CHANGE)
+        cluster_name,
+        None,
+        f'All nodes {verb}, cleaning up the cluster.',
+        global_user_state.ClusterEventType.STATUS_CHANGE,
+        # This won't do anything for a terminated cluster, but it's needed for a
+        # stopped cluster.
+        nop_if_duplicate=True,
+    )
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
@@ -2916,44 +2995,57 @@ def get_clusters(
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
 
-    def _update_record_with_credentials_and_resources_str(
-            record: Optional[Dict[str, Any]]) -> None:
+    def _update_records_with_credentials_and_resources_str(
+            records: List[Optional[Dict[str, Any]]]) -> None:
         """Add the credentials to the record.
 
         This is useful for the client side to setup the ssh config of the
         cluster.
         """
-        if record is None:
-            return
-        handle = record['handle']
-        if handle is None:
-            return
-        record['resources_str'] = resources_utils.get_readable_resources_repr(
-            handle, simplify=True)
-        record[
-            'resources_str_full'] = resources_utils.get_readable_resources_repr(
-                handle, simplify=False)
-        credentials = ssh_credential_from_yaml(handle.cluster_yaml,
-                                               handle.docker_user,
-                                               handle.ssh_user)
+        records_with_handle = []
 
-        if not credentials:
+        # only act on records that have a handle
+        for record in records:
+            if record is None:
+                continue
+            handle = record['handle']
+            if handle is None:
+                continue
+            record[
+                'resources_str'] = resources_utils.get_readable_resources_repr(
+                    handle, simplify=True)
+            record[
+                'resources_str_full'] = resources_utils.get_readable_resources_repr(
+                    handle, simplify=False)
+            records_with_handle.append(record)
+        if len(records_with_handle) == 0:
             return
-        ssh_private_key_path = credentials.get('ssh_private_key', None)
-        if ssh_private_key_path is not None:
-            if not os.path.exists(os.path.expanduser(ssh_private_key_path)):
-                auth.create_ssh_key_files_from_db(ssh_private_key_path)
-            with open(os.path.expanduser(ssh_private_key_path),
-                      'r',
-                      encoding='utf-8') as f:
-                credentials['ssh_private_key_content'] = f.read()
-        else:
-            private_key_path, _ = auth.get_or_generate_keys()
-            with open(os.path.expanduser(private_key_path),
-                      'r',
-                      encoding='utf-8') as f:
-                credentials['ssh_private_key_content'] = f.read()
-        record['credentials'] = credentials
+
+        handles = [record['handle'] for record in records_with_handle]
+        credentials = ssh_credentials_from_handles(handles)
+        cached_private_keys: Dict[str, str] = {}
+        for record, credential in zip(records_with_handle, credentials):
+            if not credential:
+                continue
+            ssh_private_key_path = credential.get('ssh_private_key', None)
+            if ssh_private_key_path is not None:
+                expanded_private_key_path = os.path.expanduser(
+                    ssh_private_key_path)
+                if not os.path.exists(expanded_private_key_path):
+                    auth.create_ssh_key_files_from_db(ssh_private_key_path)
+            else:
+                private_key_path, _ = auth.get_or_generate_keys()
+                expanded_private_key_path = os.path.expanduser(private_key_path)
+            if expanded_private_key_path in cached_private_keys:
+                credential['ssh_private_key_content'] = cached_private_keys[
+                    expanded_private_key_path]
+            else:
+                with open(expanded_private_key_path, 'r',
+                          encoding='utf-8') as f:
+                    credential['ssh_private_key_content'] = f.read()
+                    cached_private_keys[expanded_private_key_path] = credential[
+                        'ssh_private_key_content']
+            record['credentials'] = credential
 
     def _update_records_with_resources(
             records: List[Optional[Dict[str, Any]]]) -> None:
@@ -2980,9 +3072,7 @@ def get_clusters(
                 if handle.launched_resources.accelerators else None)
 
     # Add auth_config to the records
-    for record in records:
-        _update_record_with_credentials_and_resources_str(record)
-
+    _update_records_with_credentials_and_resources_str(records)
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
         _update_records_with_resources(records)
@@ -3022,7 +3112,7 @@ def get_clusters(
                 cluster_name,
                 force_refresh_statuses=force_refresh_statuses,
                 acquire_per_cluster_status_lock=True)
-            _update_record_with_credentials_and_resources_str(record)
+            _update_records_with_credentials_and_resources_str([record])
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:

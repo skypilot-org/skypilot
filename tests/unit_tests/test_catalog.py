@@ -62,8 +62,7 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
         pd.testing.assert_frame_equal(df._df, pd.read_csv(abs_catalog_path))
 
         # Clear the cache.
-        for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
-            func.cache_clear()
+        annotations.clear_request_level_cache()
 
         # Now update_if_stale_func should be called and should trigger a new fetch.
         df.head()

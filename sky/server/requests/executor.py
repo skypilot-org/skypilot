@@ -383,7 +383,8 @@ def _request_execution_wrapper(request_id: str,
         # config, as there can be some logs during override that needs to be
         # captured in the log file.
         try:
-            with override_request_env_and_config(request_body, request_id), \
+            with sky_logging.add_debug_log_handler(request_id), \
+                override_request_env_and_config(request_body, request_id), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
