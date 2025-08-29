@@ -765,8 +765,9 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
 
 
 def is_remote_server_test() -> bool:
-    return os.environ.get('PYTEST_SKYPILOT_REMOTE_SERVER_TEST',
-                          None) is not None
+    return os.environ.get(
+        'PYTEST_SKYPILOT_REMOTE_SERVER_TEST',
+        None) is not None or api_server_endpoint_configured_in_env_file()
 
 
 def pytest_controller_cloud() -> Optional[str]:
