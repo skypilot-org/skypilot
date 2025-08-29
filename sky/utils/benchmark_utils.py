@@ -1,4 +1,4 @@
-"""Utilit functions for benchmarking."""
+"""Utility functions for benchmarking."""
 
 import functools
 import logging
