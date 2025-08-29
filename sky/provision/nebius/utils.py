@@ -14,6 +14,8 @@ logger = sky_logging.init_logger(__name__)
 
 POLL_INTERVAL = 5
 
+_MAX_OPERATIONS_TO_FETCH = 1000
+
 
 def retry(func):
     """Decorator to retry a function."""
@@ -321,11 +323,43 @@ def launch(cluster_name_on_cloud: str,
                 parent_id=project_id,
                 name=instance_name,
             )))
+        instance_id = instance.metadata.id
         if instance.status.state.name == 'STARTING':
-            instance_id = instance.metadata.id
             break
+
+        # All Instances initially have state=STOPPED and reconciling=True,
+        # so we need to wait until reconciling is False.
+        if instance.status.state.name == 'STOPPED' and \
+                not instance.status.reconciling:
+            next_token = ''
+            total_operations = 0
+            while True:
+                operations_response = nebius.sync_call(
+                    service.list_operations_by_parent(
+                        nebius.compute().ListOperationsByParentRequest(
+                            parent_id=project_id,
+                            page_size=100,
+                            page_token=next_token,
+                        )))
+                total_operations += len(operations_response.operations)
+                for operation in operations_response.operations:
+                    # Find the most recent operation for the instance.
+                    if operation.resource_id == instance_id:
+                        error_msg = operation.description
+                        if operation.status:
+                            error_msg += f' {operation.status.message}'
+                        raise RuntimeError(error_msg)
+                # If we've fetched too many operations, or there are no more
+                # operations to fetch, just raise a generic error.
+                if total_operations > _MAX_OPERATIONS_TO_FETCH or \
+                        not operations_response.next_page_token:
+                    raise RuntimeError(
+                        f'Instance {instance_name} failed to start.')
+                next_token = operations_response.next_page_token
         time.sleep(POLL_INTERVAL)
-        logger.debug(f'Waiting for instance {instance_name} start running.')
+        logger.debug(f'Waiting for instance {instance_name} to start running. '
+                     f'State: {instance.status.state.name}, '
+                     f'Reconciling: {instance.status.reconciling}')
         retry_count += 1
 
     if retry_count == nebius.MAX_RETRIES_TO_INSTANCE_READY:

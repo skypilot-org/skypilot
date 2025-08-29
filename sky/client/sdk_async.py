@@ -144,7 +144,8 @@ async def get(request_id: str) -> Any:
 async def stream_response_async(request_id: Optional[str],
                                 response: 'aiohttp.ClientResponse',
                                 output_stream: Optional['io.TextIOBase'] = None,
-                                resumable: bool = False) -> Any:
+                                resumable: bool = False,
+                                get_result: bool = True) -> Any:
     """Async version of stream_response that streams the response to the
     console.
 
@@ -155,6 +156,9 @@ async def stream_response_async(request_id: Optional[str],
             console.
         resumable: Whether the response is resumable on retry. If True, the
             streaming will start from the previous failure point on retry.
+
+    Returns:
+        Result of request_id if given. Will only return if get_result is True.
     """
 
     retry_context: Optional[rest.RetryContext] = None
@@ -170,7 +174,7 @@ async def stream_response_async(request_id: Optional[str],
                 elif line_count > retry_context.line_processed:
                     print(line, flush=True, end='', file=output_stream)
                     retry_context.line_processed = line_count
-        if request_id is not None:
+        if request_id is not None and get_result:
             return await get(request_id)
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')

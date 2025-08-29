@@ -37,6 +37,7 @@ from sky.utils import env_options
 from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     from sky.serve import service_spec
@@ -79,7 +80,7 @@ def launch_cluster(replica_id: int,
                     f'{cluster_name} with resources override: '
                     f'{resources_override}')
     try:
-        config = common_utils.read_yaml(
+        config = yaml_utils.read_yaml(
             os.path.expanduser(service_task_yaml_path))
         task = task_lib.Task.from_yaml_config(config)
         if resources_override is not None:
@@ -1397,7 +1398,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         # the latest version. This can significantly improve the speed
         # for updating an existing service with only config changes to the
         # service specs, e.g. scale down the service.
-        new_config = common_utils.read_yaml(
+        new_config = yaml_utils.read_yaml(
             os.path.expanduser(service_task_yaml_path))
         # Always create new replicas and scale down old ones when file_mounts
         # are not empty.
@@ -1414,7 +1415,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 old_service_task_yaml_path = (
                     serve_utils.generate_task_yaml_file_name(
                         self._service_name, info.version))
-                old_config = common_utils.read_yaml(
+                old_config = yaml_utils.read_yaml(
                     os.path.expanduser(old_service_task_yaml_path))
                 for key in ['service', 'pool', '_user_specified_yaml']:
                     old_config.pop(key, None)

@@ -36,6 +36,7 @@ from sky import skypilot_config
 from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import common_utils
+from sky.utils import yaml_utils
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
@@ -625,7 +626,7 @@ class TestYamlSpecs:
 
     def _check_equivalent(self, yaml_path):
         """Check if the yaml is equivalent after load and dump again."""
-        origin_task_config = common_utils.read_yaml(yaml_path)
+        origin_task_config = yaml_utils.read_yaml(yaml_path)
 
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()

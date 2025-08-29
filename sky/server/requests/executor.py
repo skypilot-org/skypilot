@@ -55,6 +55,7 @@ from sky.utils import context_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
+from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -382,12 +383,13 @@ def _request_execution_wrapper(request_id: str,
         # config, as there can be some logs during override that needs to be
         # captured in the log file.
         try:
-            with override_request_env_and_config(request_body, request_id), \
+            with sky_logging.add_debug_log_handler(request_id), \
+                override_request_env_and_config(request_body, request_id), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
-                                 f'{common_utils.dump_yaml_str(dict(config))}')
+                                 f'{yaml_utils.dump_yaml_str(dict(config))}')
                 return_value = func(**request_body.to_kwargs())
                 f.flush()
         except KeyboardInterrupt:

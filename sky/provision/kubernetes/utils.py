@@ -1082,6 +1082,14 @@ class KarpenterAutoscaler(Autoscaler):
     can_query_backend: bool = False
 
 
+class CoreweaveAutoscaler(Autoscaler):
+    """CoreWeave autoscaler
+    """
+
+    label_formatter: Any = CoreWeaveLabelFormatter
+    can_query_backend: bool = False
+
+
 class GenericAutoscaler(Autoscaler):
     """Generic autoscaler
     """
@@ -1094,6 +1102,7 @@ class GenericAutoscaler(Autoscaler):
 AUTOSCALER_TYPE_TO_AUTOSCALER = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterAutoscaler,
+    kubernetes_enums.KubernetesAutoscalerType.COREWEAVE: CoreweaveAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.GENERIC: GenericAutoscaler,
 }
 
@@ -2782,7 +2791,7 @@ def combine_pod_config_fields(
         kubernetes_config)
 
     # Write the updated YAML back to the file
-    common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+    yaml_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 
 
 def combine_metadata_fields(cluster_yaml_path: str,
@@ -2834,7 +2843,7 @@ def combine_metadata_fields(cluster_yaml_path: str,
         config_utils.merge_k8s_configs(destination, custom_metadata)
 
     # Write the updated YAML back to the file
-    common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+    yaml_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 
 
 def merge_custom_metadata(

@@ -53,6 +53,7 @@ _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24.0
+DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
@@ -205,6 +206,7 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('reason', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
     sqlalchemy.Column('type', sqlalchemy.Text),
+    sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -595,7 +597,7 @@ def add_or_update_cluster(cluster_name: str,
         if (is_launch and not cluster_row or
                 cluster_row.status != status_lib.ClusterStatus.UP.value):
             conditional_values.update({
-                'last_creation_yaml': common_utils.dump_yaml_str(task_config)
+                'last_creation_yaml': yaml_utils.dump_yaml_str(task_config)
                                       if task_config else None,
                 'last_creation_command': last_use,
             })
@@ -744,6 +746,7 @@ def add_cluster_event(cluster_name: str,
             elif last_event == reason:
                 return
         try:
+            request_id = common_utils.get_current_request_id()
             session.execute(
                 insert_func(cluster_event_table).values(
                     cluster_hash=cluster_hash,
@@ -753,6 +756,7 @@ def add_cluster_event(cluster_name: str,
                     reason=reason,
                     transitioned_at=transitioned_at,
                     type=event_type.value,
+                    request_id=request_id,
                 ))
             session.commit()
         except sqlalchemy.exc.IntegrityError as e:
@@ -807,12 +811,15 @@ def _get_last_cluster_event_multiple(
     return {row.cluster_hash: row.reason for row in rows}
 
 
-def cleanup_cluster_events_with_retention(retention_hours: float) -> None:
+def cleanup_cluster_events_with_retention(retention_hours: float,
+                                          event_type: ClusterEventType) -> None:
     assert _SQLALCHEMY_ENGINE is not None
+    # Once for events with type STATUS_CHANGE.
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(cluster_event_table).filter(
-            cluster_event_table.c.transitioned_at < time.time() -
-            retention_hours * 3600)
+            cluster_event_table.c.transitioned_at <
+            time.time() - retention_hours * 3600,
+            cluster_event_table.c.type == event_type.value)
         logger.debug(f'Deleting {query.count()} cluster events.')
         query.delete()
         session.commit()
@@ -827,9 +834,20 @@ async def cluster_event_retention_daemon():
         retention_hours = skypilot_config.get_nested(
             ('api_server', 'cluster_event_retention_hours'),
             DEFAULT_CLUSTER_EVENT_RETENTION_HOURS)
+        debug_retention_hours = skypilot_config.get_nested(
+            ('api_server', 'cluster_debug_event_retention_hours'),
+            DEBUG_CLUSTER_EVENT_RETENTION_HOURS)
         try:
             if retention_hours >= 0:
-                cleanup_cluster_events_with_retention(retention_hours)
+                logger.debug('Cleaning up cluster events with retention '
+                             f'{retention_hours} hours.')
+                cleanup_cluster_events_with_retention(
+                    retention_hours, ClusterEventType.STATUS_CHANGE)
+            if debug_retention_hours >= 0:
+                logger.debug('Cleaning up debug cluster events with retention '
+                             f'{debug_retention_hours} hours.')
+                cleanup_cluster_events_with_retention(debug_retention_hours,
+                                                      ClusterEventType.DEBUG)
         except asyncio.CancelledError:
             logger.info('Cluster event retention daemon cancelled')
             break
@@ -837,8 +855,9 @@ async def cluster_event_retention_daemon():
             logger.error(f'Error running cluster event retention daemon: {e}')
 
         # Run daemon at most once every hour to avoid too frequent cleanup.
-        sleep_amount = max(retention_hours * 3600,
-                           MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS)
+        sleep_amount = max(
+            min(retention_hours * 3600, debug_retention_hours * 3600),
+            MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS)
         await asyncio.sleep(sleep_amount)
 
 
@@ -904,8 +923,7 @@ def update_last_use(cluster_name: str):
 
 
 @_init_db
-def remove_cluster(cluster_name: str, terminate: bool,
-                   remove_events: bool) -> None:
+def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
@@ -933,9 +951,6 @@ def remove_cluster(cluster_name: str, terminate: bool,
 
         if terminate:
             session.query(cluster_table).filter_by(name=cluster_name).delete()
-        if remove_events:
-            session.query(cluster_event_table).filter_by(
-                cluster_hash=cluster_hash).delete()
         else:
             handle = get_handle_from_cluster_name(cluster_name)
             if handle is None:
@@ -2070,17 +2085,49 @@ def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
         row = session.query(cluster_yaml_table).filter_by(
             cluster_name=cluster_name).first()
     if row is None:
-        # If the cluster yaml is not in the database, check if it exists
-        # on the local file system and migrate it to the database.
-        # TODO(syang): remove this check once we have a way to migrate the
-        # cluster from file to database. Remove on v0.12.0.
-        if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):
-            with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
-                yaml_str = f.read()
-            set_cluster_yaml(cluster_name, yaml_str)
-            return yaml_str
-        return None
+        return _set_cluster_yaml_from_file(cluster_yaml_path, cluster_name)
     return row.yaml
+
+
+def get_cluster_yaml_str_multiple(cluster_yaml_paths: List[str]) -> List[str]:
+    """Get the cluster yaml from the database or the local file system.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    cluster_names_to_yaml_paths = {}
+    for cluster_yaml_path in cluster_yaml_paths:
+        cluster_name, _ = os.path.splitext(os.path.basename(cluster_yaml_path))
+        cluster_names_to_yaml_paths[cluster_name] = cluster_yaml_path
+
+    cluster_names = list(cluster_names_to_yaml_paths.keys())
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(cluster_yaml_table).filter(
+            cluster_yaml_table.c.cluster_name.in_(cluster_names)).all()
+    row_cluster_names_to_yaml = {row.cluster_name: row.yaml for row in rows}
+
+    yaml_strs = []
+    for cluster_name in cluster_names:
+        if cluster_name in row_cluster_names_to_yaml:
+            yaml_strs.append(row_cluster_names_to_yaml[cluster_name])
+        else:
+            yaml_str = _set_cluster_yaml_from_file(
+                cluster_names_to_yaml_paths[cluster_name], cluster_name)
+            yaml_strs.append(yaml_str)
+    return yaml_strs
+
+
+def _set_cluster_yaml_from_file(cluster_yaml_path: str,
+                                cluster_name: str) -> Optional[str]:
+    """Set the cluster yaml in the database from a file."""
+    # If the cluster yaml is not in the database, check if it exists
+    # on the local file system and migrate it to the database.
+    # TODO(syang): remove this check once we have a way to migrate the
+    # cluster from file to database. Remove on v0.12.0.
+    if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):
+        with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
+            yaml_str = f.read()
+        set_cluster_yaml(cluster_name, yaml_str)
+        return yaml_str
+    return None
 
 
 def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
@@ -2092,6 +2139,19 @@ def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
     if yaml_str is None:
         raise ValueError(f'Cluster yaml {cluster_yaml_path} not found.')
     return yaml_utils.safe_load(yaml_str)
+
+
+def get_cluster_yaml_dict_multiple(
+        cluster_yaml_paths: List[str]) -> List[Dict[str, Any]]:
+    """Get the cluster yaml as a dictionary from the database."""
+    yaml_strs = get_cluster_yaml_str_multiple(cluster_yaml_paths)
+    yaml_dicts = []
+    for idx, yaml_str in enumerate(yaml_strs):
+        if yaml_str is None:
+            raise ValueError(
+                f'Cluster yaml {cluster_yaml_paths[idx]} not found.')
+        yaml_dicts.append(yaml_utils.safe_load(yaml_str))
+    return yaml_dicts
 
 
 @_init_db

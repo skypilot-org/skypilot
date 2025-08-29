@@ -39,6 +39,7 @@ from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import yaml_utils
 
 
 # ---------- Testing managed job ----------
@@ -786,13 +787,13 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
         timeout *= 2
     name = smoke_tests_utils.get_cluster_name()
     yaml_path = 'tests/test_yamls/test_managed_jobs_retry.yaml'
-    yaml_config = common_utils.read_yaml_all(yaml_path)
+    yaml_config = yaml_utils.read_yaml_all(yaml_path)
     for task_config in yaml_config:
         task_config['resources'] = task_config.get('resources', {})
         task_config['resources']['cloud'] = generic_cloud
 
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as yaml_file:
-        common_utils.dump_yaml(yaml_file.name, yaml_config)
+        yaml_utils.dump_yaml(yaml_file.name, yaml_config)
         yaml_path = yaml_file.name
         with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
             test = smoke_tests_utils.Test(

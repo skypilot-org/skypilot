@@ -594,10 +594,7 @@ def down(cluster_name: str, purge: bool = False) -> None:
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
-    backend.teardown(handle,
-                     terminate=True,
-                     purge=purge,
-                     explicitly_requested=True)
+    backend.teardown(handle, terminate=True, purge=purge)
 
 
 @usage_lib.entrypoint
