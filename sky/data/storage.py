@@ -80,6 +80,7 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'It may have been deleted externally.')
 
 _STORAGE_LOG_FILE_NAME = 'storage_sync.log'
+_EXCLUDED_FILES_LIMIT = 1000
 
 
 def get_cached_enabled_storage_cloud_names_or_refresh(
@@ -1875,6 +1876,16 @@ class S3CompatibleStore(AbstractStore):
                     processed_excludes.append(f'{excluded_path.rstrip("/")}/*')
                 else:
                     processed_excludes.append(excluded_path)
+
+            if len(processed_excludes) > _EXCLUDED_FILES_LIMIT:
+                with ux_utils.print_exception_no_traceback():
+                    error_msg = (
+                        f'Cannot upload to {self.config.store_type} storage: '
+                        f'Too many exclude patterns matched '
+                        f'({len(processed_excludes):,}) in .skyignore file.\n'
+                        f'This would cause "Argument list too long" error\n'
+                        f'Reduce patterns in .skyignore file\n')
+                    raise exceptions.StorageUploadError(error_msg)
 
             excludes = ' '.join([
                 f'--exclude {shlex.quote(file_name)}'
