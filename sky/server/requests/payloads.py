@@ -71,7 +71,9 @@ EXTERNAL_LOCAL_ENV_VARS = [
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
-        if env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
+        if (env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX) and
+                not env_var.startswith(
+                    constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)):
             env_vars[env_var] = os.environ[env_var]
         if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]

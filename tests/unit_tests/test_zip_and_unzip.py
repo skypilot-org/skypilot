@@ -1,3 +1,4 @@
+import asyncio
 import io
 import os
 import pathlib
@@ -57,7 +58,7 @@ def test_unzip_file(skyignore_dir, tmp_path):
         temp_dir_path = pathlib.Path(temp_dir)
 
         # Call server.unzip_file
-        server.unzip_file(zip_path, temp_dir_path)
+        asyncio.run(server.unzip_file(zip_path, temp_dir_path))
 
         # Verify the zip file was deleted
         assert not zip_path.exists()

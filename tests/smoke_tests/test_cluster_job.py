@@ -53,7 +53,10 @@ from sky.utils import resources_utils
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
-    accelerator = accelerator.get(generic_cloud, 'T4')
+    if generic_cloud == 'kubernetes':
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    else:
+        accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'job_queue',
@@ -477,7 +480,10 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
-    accelerator = accelerator.get(generic_cloud, 'T4')
+    if generic_cloud == 'kubernetes':
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    else:
+        accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'huggingface_glue_imdb_app',
@@ -642,6 +648,22 @@ def test_multi_node_failure(generic_cloud: str):
             f'sky exec {name} tests/test_yamls/failed_worker_run.yaml || [ $? -eq 100 ]',
             f'sky logs {name} 2 --status | grep FAILED',  # Ensure the job failed.
             f'sky logs {name} 2 | grep "My hostname:" | wc -l | grep 2',  # Ensure there 2 of the hosts printed their hostname.
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- EFA. ----------
+@pytest.mark.aws
+def test_efa():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'efa',
+        [
+            f'sky launch -y -c {name} --infra aws/ap-northeast-1 --gpus L4:1 --instance-type g6.8xlarge examples/aws_efa/efa_vm.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 1 | grep "Selected provider is efa, fabric is efa"',  # Ensure efa is enabled.
         ],
         f'sky down -y {name}',
     )
@@ -1423,7 +1445,10 @@ def test_cancel_azure():
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
-    accelerator = accelerator.get(generic_cloud, 'T4')
+    if generic_cloud == 'kubernetes':
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    else:
+        accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'cancel-pytorch',
@@ -1919,6 +1944,7 @@ def test_long_setup_run_script(generic_cloud: str):
 @pytest.mark.kubernetes
 @pytest.mark.resource_heavy
 def test_min_gpt_kubernetes():
+    accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     name = smoke_tests_utils.get_cluster_name()
     original_yaml_path = 'examples/distributed-pytorch/train.yaml'
 
@@ -1929,8 +1955,8 @@ def test_min_gpt_kubernetes():
     modified_content = content.replace('main.py',
                                        'main.py trainer_config.max_epochs=1')
 
-    modified_content = re.sub(r'accelerators:\s*[^\n]+', 'accelerators: T4',
-                              modified_content)
+    modified_content = re.sub(r'accelerators:\s*[^\n]+',
+                              f'accelerators: {accelerator}', modified_content)
 
     # Create a temporary YAML file with the modified content
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:

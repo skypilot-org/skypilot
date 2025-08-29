@@ -77,6 +77,103 @@ DEFAULT_SECURITY_GROUP_NAME = f'sky-sg-{common_utils.user_and_hostname_hash()}'
 # Security group to use when user specified ports in their resources.
 USER_PORTS_SECURITY_GROUP_NAME = 'sky-sg-{}'
 
+# GPU instance types that support EFA
+# TODO(hailong): Some CPU instance types also support EFA, may need to support
+# all of them later.
+# TODO(hailong): Add the EFA info in catalog.
+_EFA_INSTANCE_TYPE_PREFIXES = [
+    'g4dn.',
+    'g5.',
+    'g6.',
+    'gr6.',
+    'g6e.',
+    'p4d.',
+    'p4de.',
+    'p5.',
+    'p5e.',
+    'p5en.',
+    'p6-b200.',
+]
+
+# Docker run options for EFA.
+# Refer to https://github.com/ofiwg/libfabric/issues/6437 for updating
+# memlock ulimit
+_EFA_DOCKER_RUN_OPTIONS = [
+    '--cap-add=IPC_LOCK',
+    '--device=/dev/infiniband',
+    '--ulimit memlock=-1:-1',
+]
+
+# AWS EFA image name.
+# Refer to https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-base-gpu-ami-ubuntu-22-04.html for latest version. # pylint: disable=line-too-long
+# TODO(hailong): may need to update the version later.
+_EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
+' (Ubuntu 22.04) 20250808'
+
+
+def _is_efa_instance_type(instance_type: str) -> bool:
+    """Check if the instance type is in EFA supported instance family."""
+    return any(
+        instance_type.startswith(prefix)
+        for prefix in _EFA_INSTANCE_TYPE_PREFIXES)
+
+
+@annotations.lru_cache(scope='global', maxsize=128)
+def _get_efa_image_id(region_name: str) -> Optional[str]:
+    """Get the EFA image id for the given region."""
+    try:
+        client = aws.client('ec2', region_name=region_name)
+        response = client.describe_images(Filters=[{
+            'Name': 'name',
+            'Values': [_EFA_IMAGE_NAME]
+        }])
+        if 'Images' not in response:
+            return None
+        if len(response['Images']) == 0:
+            return None
+        available_images = [
+            img for img in response['Images'] if img['State'] == 'available'
+        ]
+        if len(available_images) == 0:
+            return None
+        sorted_images = sorted(available_images,
+                               key=lambda x: x['CreationDate'],
+                               reverse=True)
+        return sorted_images[0]['ImageId']
+    except (aws.botocore_exceptions().NoCredentialsError,
+            aws.botocore_exceptions().ProfileNotFound,
+            aws.botocore_exceptions().ClientError) as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to get EFA image id: {e}') from None
+
+
+@annotations.lru_cache(scope='global', maxsize=128)
+def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
+    """Get the maximum number of EFA interfaces for the given instance type."""
+    if not _is_efa_instance_type(instance_type):
+        return 0
+    try:
+        client = aws.client('ec2', region_name=region_name)
+        response = client.describe_instance_types(
+            InstanceTypes=[instance_type],
+            Filters=[{
+                'Name': 'network-info.efa-supported',
+                'Values': ['true']
+            }])
+        if 'InstanceTypes' in response and len(response['InstanceTypes']) > 0:
+            network_info = response['InstanceTypes'][0]['NetworkInfo']
+            if ('EfaInfo' in network_info and
+                    'MaximumEfaInterfaces' in network_info['EfaInfo']):
+                return network_info['EfaInfo']['MaximumEfaInterfaces']
+        return 0
+    except (aws.botocore_exceptions().NoCredentialsError,
+            aws.botocore_exceptions().ProfileNotFound,
+            aws.botocore_exceptions().ClientError) as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Failed to get max EFA interfaces for {instance_type}: {e}'
+            ) from None
+
 
 class AWSIdentityType(enum.Enum):
     """AWS identity type.
@@ -295,8 +392,13 @@ class AWS(clouds.Cloud):
         image_id: Optional[Dict[Optional[str], str]],
         region_name: str,
         instance_type: str,
+        enable_efa: bool,
     ) -> str:
         if image_id is None:
+            if enable_efa:
+                efa_image_id = _get_efa_image_id(region_name)
+                if efa_image_id:
+                    return efa_image_id
             return cls._get_default_ami(region_name, instance_type)
         if None in image_id:
             image_id_str = image_id[None]
@@ -499,12 +601,25 @@ class AWS(clouds.Cloud):
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
+        network_tier = (resources.network_tier if resources.network_tier
+                        is not None else resources_utils.NetworkTier.STANDARD)
+        if network_tier == resources_utils.NetworkTier.BEST:
+            max_efa_interfaces = _get_max_efa_interfaces(
+                resources.instance_type, region_name)
+            enable_efa = max_efa_interfaces > 0
+        else:
+            max_efa_interfaces = 0
+            enable_efa = False
+
+        docker_run_options = []
         if resources.extract_docker_image() is not None:
             image_id_to_use = None
+            if enable_efa:
+                docker_run_options = _EFA_DOCKER_RUN_OPTIONS
         else:
             image_id_to_use = resources.image_id
         image_id = self._get_image_id(image_id_to_use, region_name,
-                                      resources.instance_type)
+                                      resources.instance_type, enable_efa)
 
         root_device_name = self.get_image_root_device_name(
             image_id, region_name)
@@ -563,6 +678,8 @@ class AWS(clouds.Cloud):
             'security_group': security_group,
             'security_group_managed_by_skypilot':
                 str(security_group != user_security_group).lower(),
+            'max_efa_interfaces': max_efa_interfaces,
+            'docker_run_options': docker_run_options,
             **AWS._get_disk_specs(resources.disk_tier)
         }
 

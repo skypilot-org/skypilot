@@ -1262,6 +1262,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1354,6 +1355,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1400,6 +1402,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1430,6 +1433,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1679,6 +1683,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
     def test_copy_mount_existing_storage(self,
                                          tmp_copy_mnt_existing_storage_obj):
         # Creates a bucket with no source in MOUNT mode (empty bucket), and

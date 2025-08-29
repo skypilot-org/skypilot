@@ -383,7 +383,8 @@ def _request_execution_wrapper(request_id: str,
         # config, as there can be some logs during override that needs to be
         # captured in the log file.
         try:
-            with override_request_env_and_config(request_body, request_id), \
+            with sky_logging.add_debug_log_handler(request_id), \
+                override_request_env_and_config(request_body, request_id), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
@@ -452,7 +453,7 @@ async def execute_request_coroutine(request: api_requests.Request):
                                                   **request_body.to_kwargs())
 
     async def poll_task(request_id: str) -> bool:
-        request = api_requests.get_request(request_id)
+        request = await api_requests.get_request_async(request_id)
         if request is None:
             raise RuntimeError('Request not found')
 
