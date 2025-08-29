@@ -24,11 +24,13 @@ def log_execution_time(func: Optional[Callable] = None,
         precision: Number of decimal places (default: 4).
 
     Usage:
-        @log_execution_time
+        from sky.utils import benchmark_utils
+
+        @benchmark_utils.log_execution_time
         def my_function():
             pass
 
-        @log_execution_time(name='my_module.my_function2')
+        @benchmark_utils.log_execution_time(name='my_module.my_function2')
         def my_function2():
             pass
     """
