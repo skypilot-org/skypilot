@@ -2033,7 +2033,7 @@ def test_remote_server_api_login():
     if not smoke_tests_utils.is_remote_server_test():
         pytest.skip('This test is only for remote server')
 
-    endpoint = docker_utils.get_api_server_endpoint_inside_docker()
+    endpoint = smoke_tests_utils.get_api_server_url()
     config_path = skypilot_config._GLOBAL_CONFIG_PATH
     backup_path = f'{config_path}.backup_for_test_remote_server_api_login'
 
