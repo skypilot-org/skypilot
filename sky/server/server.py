@@ -435,6 +435,12 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
         if lag > lag_threshold:
             if fail_fast:
                 logger.fatal(f'Loop lag detected: {lag}s, fail fast.')
+                logger.info('=====API server logs:======')
+                resolved_log_path = pathlib.Path(
+                    constants.API_SERVER_LOGS).expanduser()
+                with open(resolved_log_path, 'r', encoding='utf-8') as f:
+                    for line in f.readlines():
+                        logger.info(line)
                 sys.exit(1)
             else:
                 logger.warning(f'Loop lag detected: {lag}s')
