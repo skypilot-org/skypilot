@@ -464,7 +464,10 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             # can safely ignore the error if the task is already scheduled.
             logger.debug(f'Request {event.id} already exists.')
     asyncio.create_task(cleanup_upload_ids())
-    asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
+    if metrics.METRICS_ENABLED:
+        # Start monitoring the event loop lag in each server worker
+        # event loop (process).
+        asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
     yield
     # Shutdown: Add any cleanup code here if needed
 
