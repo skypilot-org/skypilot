@@ -17,7 +17,7 @@ from sky.skylet import constants
 
 # Whether the metrics are enabled, cannot be changed at runtime.
 METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
-                                  'false').lower() == 'true'
+                                 'false').lower() == 'true'
 
 logger = sky_logging.init_logger(__name__)
 
@@ -51,14 +51,14 @@ SKY_APISERVER_REQUEST_EXECUTION_DURATION_SECONDS = prom.Histogram(
 SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_code_duration_seconds',
     'Time spent processing code',
-    ['name'],
+    ['name', 'group'],
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
              float('inf')),
 )
 
 SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
-    "sky_apiserver_event_loop_lag_seconds",
-    "Scheduling delay of the server event loop",
+    'sky_apiserver_event_loop_lag_seconds',
+    'Scheduling delay of the server event loop',
     ['pid'],
     buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5,
              float('inf')),

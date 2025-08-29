@@ -41,13 +41,13 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as api_requests
 from sky.server.requests.queues import local_queue
 from sky.server.requests.queues import mp_queue
-from sky.server import metrics as metrics_lib
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -457,7 +457,7 @@ async def execute_request_coroutine(request: api_requests.Request):
                                                   **request_body.to_kwargs())
 
     async def poll_task(request_id: str) -> bool:
-        request = api_requests.get_request(request_id)
+        request = await api_requests.get_request_async(request_id)
         if request is None:
             raise RuntimeError('Request not found')
 
