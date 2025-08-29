@@ -98,7 +98,7 @@ class TestPVCVolumeTable:
         result = table.format()
 
         # For empty volumes, the table returns an empty string
-        assert result == ''
+        assert result == 'Kubernetes PVCs:\n'
 
     def test_pvc_volume_table_null_values(self):
         """Test PVCVolumeTable with null/None values."""

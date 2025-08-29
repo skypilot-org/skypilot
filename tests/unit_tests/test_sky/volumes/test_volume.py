@@ -206,6 +206,8 @@ class TestVolume:
         assert volume.size == '100Gi'
         assert volume.resource_name == 'existing-pvc'
         assert volume.config == {'access_mode': 'ReadWriteMany'}
+        # Should be PVC subclass
+        assert type(volume).__name__ in ('PVCVolume',)
 
     def test_volume_to_dict(self):
         """Test Volume.to_dict method."""
@@ -316,18 +318,15 @@ class TestVolume:
                 'size': '100Gi'
                 # Missing type
             },
-            {
-                'name': 'test-volume',
-                'type': 'k8s-pvc',
-                'size': '100Gi'
-                # Missing infra
-            },
         ]
 
-        for config in invalid_configs:
-            volume = volume_lib.Volume.from_dict(config)
-            with pytest.raises(exceptions.InvalidSkyPilotConfigError):
-                volume.normalize_config()
+        # Missing name (valid type) -> schema validation error during normalize
+        volume = volume_lib.Volume.from_dict(invalid_configs[0])
+        with pytest.raises(exceptions.InvalidSkyPilotConfigError):
+            volume.normalize_config()
+        # Missing type -> factory should raise immediately
+        with pytest.raises(ValueError):
+            _ = volume_lib.Volume.from_dict(invalid_configs[1])
 
     def test_volume_schema_validation_invalid_type(self, monkeypatch):
         """Test volume schema validation with invalid type."""
@@ -359,9 +358,8 @@ class TestVolume:
         ]
 
         for config in invalid_configs:
-            volume = volume_lib.Volume.from_dict(config)
-            with pytest.raises(exceptions.InvalidSkyPilotConfigError):
-                volume.normalize_config()
+            with pytest.raises(ValueError):
+                _ = volume_lib.Volume.from_dict(config)
 
     def test_volume_schema_validation_invalid_size_pattern(self, monkeypatch):
         """Test volume schema validation with invalid size pattern."""
@@ -488,10 +486,13 @@ class TestVolume:
             },
         ]
 
-        for config in invalid_configs:
-            volume = volume_lib.Volume.from_dict(config)
-            with pytest.raises(exceptions.InvalidSkyPilotConfigError):
-                volume.normalize_config()
+        # Case 1: wrong-cased type should fail at factory
+        with pytest.raises(ValueError):
+            _ = volume_lib.Volume.from_dict(invalid_configs[0])
+        # Case 2: wrong-cased access_mode should fail during normalize
+        volume = volume_lib.Volume.from_dict(invalid_configs[1])
+        with pytest.raises(exceptions.InvalidSkyPilotConfigError):
+            volume.normalize_config()
 
     def test_volume_schema_validation_access_modes(self, monkeypatch):
         """Test volume schema validation with different access modes."""
@@ -528,7 +529,7 @@ class TestVolume:
         """Test Volume._validate_config with valid labels."""
         # Mock infra_utils.InfraInfo.from_str
         mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.cloud = None
         mock_infra_info.region = None
         mock_infra_info.zone = None
         monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
@@ -536,7 +537,7 @@ class TestVolume:
 
         volume = volume_lib.Volume(name='test',
                                    type='k8s-pvc',
-                                   infra='k8s',
+                                   infra=None,
                                    size='100Gi',
                                    labels={
                                        'app': 'myapp',
@@ -549,6 +550,28 @@ class TestVolume:
         volume.normalize_config()
         # Should not raise any exception
         volume._validate_config()
+
+    def test_validate_config_with_invalid_cloud(self, monkeypatch):
+        """Test Volume._validate_config with invalid label key."""
+        # Mock infra_utils.InfraInfo.from_str
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'kubernetes'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+
+        volume = volume_lib.Volume(
+            name='test',
+            type='k8s-pvc',
+            infra='runpod',
+            size='100Gi',
+        )
+
+        volume.cloud = 'runpod'
+        with pytest.raises(ValueError) as exc_info:
+            volume._validate_config()
+        assert 'Invalid cloud' in str(exc_info.value)
 
     def test_validate_config_with_invalid_label_key(self, monkeypatch):
         """Test Volume._validate_config with invalid label key."""
@@ -643,3 +666,88 @@ class TestVolume:
         volume.normalize_config()
         # Should not raise any exception
         volume._validate_config()
+
+    def test_from_dict_type_override(self):
+        """Volume.from_dict accepts volume_type to override dict type."""
+        cfg = {
+            'name': 'v1',
+            'type': 'k8s-pvc',
+            'infra': 'runpod',
+            'size': '100'
+        }
+        vol = volume_lib.Volume.from_dict(cfg,
+                                          volume_type='runpod-network-volume')
+        assert vol.type == 'runpod-network-volume'
+        assert type(vol).__name__ in ('RunpodNetworkVolume',)
+
+    def test_runpod_volume_validate_success(self, monkeypatch):
+        """RunPod volume requires zone and min size; success case."""
+        # Mock InfraInfo to resolve to runpod with a zone
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'runpod'
+        mock_infra_info.region = None
+        mock_infra_info.zone = 'iad-1'
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+        # Bypass provider-specific zone validation
+        monkeypatch.setattr('sky.clouds.runpod.RunPod.validate_region_zone',
+                            lambda self, r, z: (r, z),
+                            raising=True)
+
+        cfg = {
+            'name': 'rpv',
+            'type': 'runpod-network-volume',
+            'infra': 'runpod/iad-1',
+            'size': '100'  # in GB
+        }
+        vol = volume_lib.Volume.from_dict(cfg)
+        # normalize fills cloud/region/zone and adjusts size if needed
+        vol.normalize_config()
+        # Should be subclass and not raise
+        assert type(vol).__name__ in ('RunpodNetworkVolume',)
+
+    def test_runpod_volume_missing_zone_raises(self, monkeypatch):
+        """RunPod volume must have zone (DataCenterId) set."""
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'runpod'
+        mock_infra_info.region = None
+        mock_infra_info.zone = None
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+        # Bypass provider-specific zone validation (not providing zone)
+        monkeypatch.setattr('sky.clouds.runpod.RunPod.validate_region_zone',
+                            lambda self, r, z: (r, z),
+                            raising=True)
+
+        cfg = {
+            'name': 'rpv',
+            'type': 'runpod-network-volume',
+            'infra': 'runpod',
+            'size': '100'
+        }
+        vol = volume_lib.Volume.from_dict(cfg)
+        with pytest.raises(ValueError):
+            vol.normalize_config()
+
+    def test_runpod_volume_min_size_enforced(self, monkeypatch):
+        from sky.utils import volume as utils_volume
+        mock_infra_info = MagicMock()
+        mock_infra_info.cloud = 'runpod'
+        mock_infra_info.region = None
+        mock_infra_info.zone = 'iad-1'
+        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                            lambda x: mock_infra_info)
+        monkeypatch.setattr('sky.clouds.runpod.RunPod.validate_region_zone',
+                            lambda self, r, z: (r, z),
+                            raising=True)
+
+        min_size = utils_volume.MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB
+        cfg = {
+            'name': 'rpv',
+            'type': 'runpod-network-volume',
+            'infra': 'runpod/iad-1',
+            'size': str(max(1, min_size - 1))
+        }
+        vol = volume_lib.Volume.from_dict(cfg)
+        with pytest.raises(ValueError):
+            vol.normalize_config()
