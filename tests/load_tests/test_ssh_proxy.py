@@ -102,6 +102,9 @@ class SSHClient:
                     logger.error(f'Error reading command output: {e}')
                     return time.time() - start_time, False, str(e)
 
+        except BrokenPipeError:
+            # The connection has been closed, just break
+            raise
         except Exception as e:
             logger.error(f'Error executing command {command}: {e}')
             return 0.0, False, str(e)
