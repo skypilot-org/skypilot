@@ -32,7 +32,7 @@ from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
-from sky.skylet import job_lib
+from sky.skylet import autostop_lib, job_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common
@@ -381,6 +381,7 @@ async def launch(
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     backend: Optional[backends.Backend] = None,
@@ -398,11 +399,23 @@ async def launch(
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a cluster or task."""
     request_id = await context_utils.to_thread(
-        sdk.launch, task, cluster_name, retry_until_up,
-        idle_minutes_to_autostop, dryrun, down, backend, optimize_target,
-        no_setup, clone_disk_from, fast, _need_confirmation,
-        _is_launched_by_jobs_controller, _is_launched_by_sky_serve_controller,
-        _disable_controller_check)
+        sdk.launch,
+        task=task,
+        cluster_name=cluster_name,
+        retry_until_up=retry_until_up,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        wait_for=wait_for,
+        dryrun=dryrun,
+        down=down,
+        backend=backend,
+        optimize_target=optimize_target,
+        no_setup=no_setup,
+        clone_disk_from=clone_disk_from,
+        fast=fast,
+        _need_confirmation=_need_confirmation,
+        _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
+        _is_launched_by_sky_serve_controller=_is_launched_by_sky_serve_controller,
+        _disable_controller_check=_disable_controller_check)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:

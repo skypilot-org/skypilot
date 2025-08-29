@@ -28,6 +28,8 @@ logger = sky_logging.init_logger(__name__)
 async def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
+    pool: Optional[str] = None,
+    num_jobs: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -35,8 +37,13 @@ async def launch(
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
-    request_id = await context_utils.to_thread(sdk.launch, task, name,
-                                               _need_confirmation)
+    request_id = await context_utils.to_thread(
+        sdk.launch, 
+        task=task,
+        name=name,
+        pool=pool,
+        num_jobs=num_jobs,
+        _need_confirmation=_need_confirmation)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
@@ -79,19 +86,23 @@ async def cancel(
 
 
 @usage_lib.entrypoint
-async def tail_logs(cluster_name: str,
-                    job_id: Optional[int],
-                    follow: bool,
+async def tail_logs(name: Optional[str] = None,
+                    job_id: Optional[int] = None,
+                    follow: bool = True,
+                    controller: bool = False,
+                    refresh: bool = False,
                     tail: int = 0,
                     output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
     return await context_utils.to_thread(
         sdk.tail_logs,
-        cluster_name,
-        job_id,
-        follow,
-        tail,
-        output_stream,
+        name=name,
+        job_id=job_id,
+        follow=follow,
+        controller=controller,
+        refresh=refresh,
+        tail=tail,
+        output_stream=output_stream,
     )
 
 
