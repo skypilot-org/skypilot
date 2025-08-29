@@ -410,7 +410,7 @@ def override_sky_config(
         override_sky_config_dict.update(config_dict)
 
     if is_remote_server_test():
-        endpoint = docker_utils.get_api_server_endpoint_inside_docker()
+        endpoint = get_api_server_url()
         override_sky_config_dict.set_nested(('api_server', 'endpoint'),
                                             endpoint)
         # For test that use SDK, not subprocess, the python process already
@@ -814,7 +814,12 @@ def pytest_override_env_config_file(config: Dict[str, str]):
 def get_api_server_url() -> str:
     """Get the API server URL in the test environment."""
     if is_remote_server_test():
-        return docker_utils.get_api_server_endpoint_inside_docker()
+        if api_server_endpoint_configured_in_env_file():
+            config_file = pytest_config_file_override()
+            config = skypilot_config.parse_and_validate_config_file(config_file)
+            return config.get_nested(('api_server', 'endpoint'), 'UNKNOWN')
+        else:
+            return docker_utils.get_api_server_endpoint_inside_docker()
     return server_common.get_server_url()
 
 
@@ -919,3 +924,22 @@ def server_side_is_consolidation_mode() -> bool:
 def is_in_buildkite_env() -> bool:
     """Check if the test is running in the Buildkite environment."""
     return env_options.Options.RUNNING_IN_BUILDKITE.get()
+
+
+def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
+    """Get the available GPUs for K8s."""
+    if is_remote_server_test():
+        prefix = ''
+        env_file = pytest_config_file_override()
+        if env_file is not None:
+            prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
+        command = f'{prefix} sky show-gpus --infra kubernetes | grep -A1 "^GPU" | tail -1 | awk "{{print \$1}}"'
+        Test.echo_without_prefix(command)
+        result = subprocess_utils.run(command,
+                                      shell=True,
+                                      check=True,
+                                      capture_output=True,
+                                      text=True)
+        gpu_name = result.stdout.strip()
+        return gpu_name
+    return default_gpu

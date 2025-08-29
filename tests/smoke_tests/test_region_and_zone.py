@@ -273,7 +273,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # created in the centralus region when getting the storage account. We
     # should set the cluster to be launched in the same region.
     region_str = f'/centralus' if generic_cloud == 'azure' else ''
-    if smoke_tests_utils.api_server_endpoint_configured_in_env_file():
+    if smoke_tests_utils.is_remote_server_test():
         # Assume only AWS is used for storage when using a remote API server.
         # TODO: Find a better way to decide which cloud to use for storage
         # when using a remote API server.
