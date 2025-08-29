@@ -1046,6 +1046,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def launch(
     entrypoint: Tuple[str, ...],
     cluster: Optional[str],
@@ -1236,6 +1237,7 @@ def launch(
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # pylint: disable=redefined-builtin
 def exec(
     cluster: Optional[str],
@@ -2065,6 +2067,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
               help='Show clusters from the last N days. Default is 30 days. '
               'If set to 0, show all clusters.')
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
@@ -2155,6 +2158,7 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
@@ -2236,6 +2240,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 @click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
@@ -2363,6 +2368,7 @@ def logs(
 @_add_click_options(flags.COMMON_OPTIONS)
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def cancel(
     cluster: str,
     all: bool,  # pylint: disable=redefined-builtin
@@ -2489,6 +2495,7 @@ def cancel(
 @flags.yes_option()
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def stop(
     clusters: List[str],
     all: bool,  # pylint: disable=redefined-builtin
@@ -2566,6 +2573,7 @@ def stop(
 @flags.yes_option()
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def autostop(
     clusters: List[str],
     all: bool,  # pylint: disable=redefined-builtin
@@ -2698,6 +2706,7 @@ def autostop(
           'upgrading the SkyPilot runtime on the cluster.'))
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # pylint: disable=redefined-builtin
 def start(
     clusters: List[str],
@@ -2907,6 +2916,7 @@ def start(
           'related resources.'))
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def down(
     clusters: List[str],
     all: bool,  # pylint: disable=redefined-builtin
@@ -3375,6 +3385,7 @@ def _down_or_stop_clusters(
     type=str,
     help='The workspace to check. If None, all workspaces will be checked.')
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # pylint: disable=redefined-outer-name
 def check(infra_list: Tuple[str],
           verbose: bool,
@@ -3441,6 +3452,7 @@ def check(infra_list: Tuple[str],
     'all regions and clouds.')
 @catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def show_gpus(
         accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
@@ -4104,6 +4116,7 @@ def storage_ls(verbose: bool):
               help='Skip confirmation prompt.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
@@ -4198,6 +4211,7 @@ def volumes():
               help='Skip confirmation prompt.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def volumes_apply(
         entrypoint: Optional[Tuple[str, ...]],
         name: Optional[str],
@@ -4269,6 +4283,7 @@ def volumes_apply(
               required=False,
               help='Show all information in full.')
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def volumes_ls(verbose: bool):
     """List volumes managed by SkyPilot."""
     request_id = volumes_sdk.ls()
@@ -4299,6 +4314,7 @@ def volumes_ls(verbose: bool):
               help='Skip confirmation prompt.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
     """Delete volumes.
 
@@ -4398,6 +4414,7 @@ def jobs():
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def jobs_launch(
     entrypoint: Tuple[str, ...],
     name: Optional[str],
@@ -4579,6 +4596,7 @@ def jobs_launch(
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # pylint: disable=redefined-builtin
 def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
                all_users: bool, all: bool):
@@ -4676,6 +4694,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 @flags.yes_option()
 @flags.all_users_option('Cancel all managed jobs from all users.')
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # pylint: disable=redefined-builtin
 def jobs_cancel(
     name: Optional[str],
@@ -4774,6 +4793,7 @@ def jobs_cancel(
               help='Download logs for all jobs shown in the queue.')
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool, refresh: bool, sync_down: bool):
     """Tail or sync down the log of a managed job."""
@@ -4807,6 +4827,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def jobs_dashboard():
     """Opens a dashboard for managed jobs."""
     sdk.dashboard(starting_page='jobs')
@@ -4848,6 +4869,7 @@ def pool():
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def jobs_pool_apply(
     pool_yaml: Tuple[str, ...],
     pool: Optional[str],  # pylint: disable=redefined-outer-name
@@ -4935,6 +4957,7 @@ def jobs_pool_apply(
 @flags.verbose_option()
 @click.argument('pool_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # pylint: disable=redefined-builtin
 def jobs_pool_status(verbose: bool, pool_names: List[str]):
     """Show statuses of cluster pools.
@@ -4971,6 +4994,7 @@ def jobs_pool_status(verbose: bool, pool_names: List[str]):
 @flags.yes_option()
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # pylint: disable=redefined-builtin
 def jobs_pool_down(
     pool_names: List[str],
@@ -5160,6 +5184,7 @@ def _handle_serve_logs(
 @click.argument('pool_name', required=True, type=str)
 @click.argument('worker_ids', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # TODO(tian): Add default argument for this CLI if none of the flags are
 # specified.
 def jobs_pool_logs(
@@ -5210,6 +5235,7 @@ def jobs_pool_logs(
 @cli.command(cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def dashboard() -> None:
     """Starts the dashboard for skypilot."""
     sdk.dashboard()
@@ -5369,6 +5395,7 @@ def _generate_task_with_service(
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def serve_up(
     service_yaml: Tuple[str, ...],
     service_name: Optional[str],
@@ -5491,6 +5518,7 @@ def serve_up(
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def serve_update(
         service_name: str, service_yaml: Tuple[str,
                                                ...], workdir: Optional[str],
@@ -5583,6 +5611,7 @@ def serve_update(
               help='Show service endpoint.')
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # pylint: disable=redefined-builtin
 def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
     """Show statuses of SkyServe services.
@@ -5710,6 +5739,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
               help='Tear down a given replica')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # pylint: disable=redefined-builtin
 def serve_down(
     service_names: List[str],
@@ -5833,6 +5863,7 @@ def serve_down(
 @click.argument('service_name', required=True, type=str)
 @click.argument('replica_ids', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # TODO(tian): Add default argument for this CLI if none of the flags are
 # specified.
 def serve_logs(
@@ -5922,6 +5953,7 @@ def local():
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
              cleanup: bool, context_name: Optional[str],
              password: Optional[str], async_call: bool):
@@ -5978,6 +6010,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 def local_down(async_call: bool):
     """Deletes a local cluster."""
     request_id = sdk.local_down()
