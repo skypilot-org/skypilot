@@ -332,8 +332,8 @@ class JobsController:
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
                         all_users=True,
-                        _include_is_managed=True,
-                        fetch_cluster_credentials=False)
+                        include_credentials=False,
+                        _include_is_managed=True)
                     if clusters:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')

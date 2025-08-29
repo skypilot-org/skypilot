@@ -2929,7 +2929,7 @@ def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
-    fetch_cluster_credentials: bool = True,
+    include_credentials: bool = True,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -2948,8 +2948,8 @@ def get_clusters(
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
-        fetch_cluster_credentials: If True, include cluster ssh credentials
-            in the return value.
+        include_credentials: If True, include cluster ssh credentials in the
+            return value.
         _include_is_managed: Whether to force include clusters created by the
             controller.
 
@@ -3072,7 +3072,7 @@ def get_clusters(
 
     # Add auth_config to the records
     _update_records_with_resources_str(records)
-    if fetch_cluster_credentials:
+    if include_credentials:
         _update_records_with_credentials(records)
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
@@ -3114,7 +3114,7 @@ def get_clusters(
                 force_refresh_statuses=force_refresh_statuses,
                 acquire_per_cluster_status_lock=True)
             _update_records_with_resources_str([record])
-            if fetch_cluster_credentials:
+            if include_credentials:
                 _update_records_with_credentials([record])
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
@@ -3402,8 +3402,8 @@ def get_endpoints(cluster: str,
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
     cluster_records = get_clusters(refresh=common.StatusRefreshMode.NONE,
                                    cluster_names=[cluster],
-                                   _include_is_managed=True,
-                                   fetch_cluster_credentials=False)
+                                   include_credentials=False,
+                                   _include_is_managed=True)
     if not cluster_records:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(

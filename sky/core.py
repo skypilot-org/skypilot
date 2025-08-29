@@ -96,7 +96,7 @@ def status(
     cluster_names: Optional[Union[str, List[str]]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-    fetch_cluster_credentials: bool = True,
+    include_credentials: bool = True,
 ) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
@@ -164,7 +164,7 @@ def status(
             provided, all clusters will be queried.
         refresh: whether to query the latest cluster statuses from the cloud
             provider(s).
-        fetch_cluster_credentials: whether to fetch ssh credentials for cluster
+        include_credentials: whether to fetch ssh credentials for cluster
             (credentials field in responses.StatusResponse)
 
     Returns:
@@ -176,7 +176,7 @@ def status(
         refresh=refresh,
         cluster_names=cluster_names,
         all_users=all_users,
-        fetch_cluster_credentials=fetch_cluster_credentials)
+        include_credentials=include_credentials)
     return [
         responses.StatusResponse.model_validate(cluster) for cluster in clusters
     ]
