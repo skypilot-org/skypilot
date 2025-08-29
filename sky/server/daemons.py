@@ -7,8 +7,10 @@ from typing import Callable
 from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
+from sky.utils import annotations
 from sky.utils import common
 from sky.utils import env_options
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -67,6 +69,10 @@ class InternalRequestDaemon:
                     sky_logging.reload_logger()
                     level = self.refresh_log_level()
                     self.event_fn()
+                # Clear request level cache after each run to avoid
+                # using too much memory.
+                annotations.clear_request_level_cache()
+                timeline.save_timeline()
             except Exception:  # pylint: disable=broad-except
                 # It is OK to fail to run the event, as the event is not
                 # critical, but we should log the error.

@@ -127,15 +127,52 @@ To use more than one cloud, combine the pip extras:
           pip install -e ".[kubernetes,aws,gcp]"
 
 
-Installing via ``uv`` is also supported:
+Installing via ``uv``
+~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: shell
+SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast Python package installer:
 
-  uv venv --seed --python 3.10
-  uv pip install "skypilot[kubernetes,aws,gcp]"
-  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-  uv pip install --prerelease allow azure-cli
-  uv pip install "skypilot[all]"
+.. tab-set::
+
+    .. tab-item:: uv venv
+        :sync: uv-venv-tab
+
+        .. code-block:: shell
+
+          # Create a virtual environment with pip pre-installed (required for SkyPilot)
+          uv venv --seed --python 3.10
+          source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+          
+          # Install SkyPilot with your chosen cloud providers
+          uv pip install "skypilot[kubernetes,aws,gcp]"
+          
+          # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+          uv pip install --prerelease allow azure-cli
+          uv pip install "skypilot[azure]"
+
+        .. note::
+          
+          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment. 
+          SkyPilot needs ``pip`` to build wheels for remote cluster setup.
+
+    .. tab-item:: uv tool
+        :sync: uv-tool-tab
+
+        .. code-block:: shell
+
+          # Install as a globally available tool with pip included
+          uv tool install --with pip "skypilot[aws,gcp]"
+          
+          # Or with all cloud providers
+          uv tool install --with pip "skypilot[all]"
+          
+          # Now you can use sky directly
+          sky check
+
+        .. note::
+          
+          The ``--with pip`` flag is **required** when using ``uv tool install``. 
+          Without it, SkyPilot will fail when building wheels for remote clusters.
 
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.

@@ -978,3 +978,23 @@ spec:
 '''
 
         self._check_pod_config(comprehensive_pod_config, True)
+
+
+def test_coreweave_autoscaler():
+    """Test that CoreweaveAutoscaler is properly configured."""
+    from sky.provision.kubernetes.utils import AUTOSCALER_TYPE_TO_AUTOSCALER
+    from sky.provision.kubernetes.utils import CoreweaveAutoscaler
+    from sky.provision.kubernetes.utils import CoreWeaveLabelFormatter
+    from sky.utils import kubernetes_enums
+
+    # Test that COREWEAVE autoscaler type is mapped correctly
+    autoscaler_class = AUTOSCALER_TYPE_TO_AUTOSCALER.get(
+        kubernetes_enums.KubernetesAutoscalerType.COREWEAVE)
+    assert autoscaler_class is not None
+    assert autoscaler_class == CoreweaveAutoscaler
+
+    # Test that CoreweaveAutoscaler uses the correct label formatter
+    assert CoreweaveAutoscaler.label_formatter == CoreWeaveLabelFormatter
+
+    # Test that CoreweaveAutoscaler cannot query backend (like other simple autoscalers)
+    assert CoreweaveAutoscaler.can_query_backend == False

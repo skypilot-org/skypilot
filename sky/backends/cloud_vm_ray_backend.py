@@ -65,6 +65,7 @@ from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import directory_utils
 from sky.utils import env_options
+from sky.utils import lock_events
 from sky.utils import locks
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -2498,7 +2499,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.stable_internal_external_ips = stable_internal_external_ips
 
     @context_utils.cancellation_guard
-    @annotations.lru_cache(scope='global')
+    # we expect different request to be acting on different clusters
+    # (= different handles) so we have no real expectation of cache hit
+    # across requests.
+    # Do not change this cache to global scope
+    # without understanding https://github.com/skypilot-org/skypilot/pull/6908
+    @annotations.lru_cache(scope='request', maxsize=10)
     @timeline.event
     def get_command_runners(self,
                             force_cached: bool = False,
@@ -2854,7 +2860,12 @@ class LocalResourcesHandle(CloudVmRayResourceHandle):
         self.is_grpc_enabled = False
 
     @context_utils.cancellation_guard
-    @annotations.lru_cache(scope='global')
+    # we expect different request to be acting on different clusters
+    # (= different handles) so we have no real expectation of cache hit
+    # across requests.
+    # Do not change this cache to global scope
+    # without understanding https://github.com/skypilot-org/skypilot/pull/6908
+    @annotations.lru_cache(scope='request', maxsize=10)
     @timeline.event
     def get_command_runners(self,
                             force_cached: bool = False,
@@ -3112,7 +3123,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
     ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
-        with timeline.DistributedLockEvent(lock_id, _CLUSTER_LOCK_TIMEOUT):
+        with lock_events.DistributedLockEvent(lock_id, _CLUSTER_LOCK_TIMEOUT):
+            # Reset spinner message to remove any mention of being blocked
+            # by other requests.
+            rich_utils.force_update_status(
+                ux_utils.spinner_message('Launching'))
+
             # Try to launch the exiting cluster first. If no existing
             # cluster, this function will create a to_provision_config
             # with required resources.
