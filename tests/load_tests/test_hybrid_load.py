@@ -105,3 +105,7 @@ async def hybrid_load(exit: asyncio.Event):
     finally:
         exit.set()
         logger.info('Hybrid load ended')
+
+
+if __name__ == '__main__':
+    asyncio.run(hybrid_load(asyncio.Event()))
