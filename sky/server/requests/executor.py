@@ -41,6 +41,7 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -373,6 +374,7 @@ def _request_execution_wrapper(request_id: str,
         request_task.status = api_requests.RequestStatus.RUNNING
         func = request_task.entrypoint
         request_body = request_task.request_body
+        request_name = request_task.name
 
     # Append to the log file instead of overwriting it since there might be
     # logs from previous retries.
@@ -390,7 +392,9 @@ def _request_execution_wrapper(request_id: str,
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
                                  f'{yaml_utils.dump_yaml_str(dict(config))}')
-                return_value = func(**request_body.to_kwargs())
+                with metrics_lib.time_it(name=request_name,
+                                         group='request_execution'):
+                    return_value = func(**request_body.to_kwargs())
                 f.flush()
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
