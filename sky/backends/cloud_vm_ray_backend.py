@@ -3124,6 +3124,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         skip_unnecessary_provisioning: bool = False,
     ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
         with lock_events.DistributedLockEvent(lock_id, _CLUSTER_LOCK_TIMEOUT):
+            # Reset spinner message to remove any mention of being blocked
+            # by other requests.
+            rich_utils.force_update_status(
+                ux_utils.spinner_message('Launching'))
+
             # Try to launch the exiting cluster first. If no existing
             # cluster, this function will create a to_provision_config
             # with required resources.
