@@ -121,7 +121,7 @@ def run_single_api_request(idx, fn, kind):
 
 def test_launch_requests(num_requests, cloud, is_async=True):
     print(f"Testing {num_requests} launch requests")
-    cmd = f'sky launch --cloud={cloud} --cpus=2 -y --dryrun'
+    cmd = f'sky launch --cloud={cloud} --cpus=2 -y'
     if is_async:
         cmd += ' --async'
     run_concurrent_requests(num_requests, cmd)
