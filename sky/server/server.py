@@ -943,20 +943,22 @@ async def unzip_file(zip_file_path: pathlib.Path,
                 for member in zipf.infolist():
                     # Determine the new path
                     original_path = os.path.normpath(member.filename)
-                    new_path = client_file_mounts_dir / original_path.lstrip('/')
+                    new_path = client_file_mounts_dir / original_path.lstrip(
+                        '/')
 
                     if (member.external_attr >> 28) == 0xA:
                         # Symlink. Read the target path and create a symlink.
                         new_path.parent.mkdir(parents=True, exist_ok=True)
                         target = zipf.read(member).decode()
                         assert not os.path.isabs(target), target
-                        # Since target is a relative path, we need to check that it
-                        # is under `client_file_mounts_dir` for security.
+                        # Since target is a relative path, we need to check that
+                        # it is under `client_file_mounts_dir` for security.
                         full_target_path = (new_path.parent / target).resolve()
                         if not _is_relative_to(full_target_path,
                                                client_file_mounts_dir):
                             raise ValueError(
-                                f'Symlink target {target} leads to a file not in userspace. Aborted.')
+                                f'Symlink target {target} leads to a '
+                                'file not in userspace. Aborted.')
 
                         if new_path.exists() or new_path.is_symlink():
                             new_path.unlink(missing_ok=True)
@@ -972,9 +974,10 @@ async def unzip_file(zip_file_path: pathlib.Path,
 
                     # Handle files
                     new_path.parent.mkdir(parents=True, exist_ok=True)
-                    with zipf.open(member) as member_file, new_path.open('wb') as f:
-                        # Use shutil.copyfileobj to copy files in chunks, so it does
-                        # not load the entire file into memory.
+                    with zipf.open(member) as member_file, new_path.open(
+                            'wb') as f:
+                        # Use shutil.copyfileobj to copy files in chunks,
+                        # so it does not load the entire file into memory.
                         shutil.copyfileobj(member_file, f)
         except zipfile.BadZipFile as e:
             logger.error(f'Bad zip file: {zip_file_path}')
@@ -988,7 +991,8 @@ async def unzip_file(zip_file_path: pathlib.Path,
                 detail=(f'Error unzipping file: '
                         f'{common_utils.format_exception(e)}'))
         finally:
-            # Cleanup the temporary file regardless of success/failure handling above
+            # Cleanup the temporary file regardless of
+            # success/failure handling above
             zip_file_path.unlink(missing_ok=True)
 
     await context_utils.to_thread(_do_unzip)
