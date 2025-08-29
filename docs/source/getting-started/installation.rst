@@ -581,7 +581,7 @@ In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instr
 
 
 Prime Intellect
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 
 `Prime Intellect <https://primeintellect.ai/>`__ makes it easy to find global compute resources and train state-of-the-art models through distributed training across clusters. To configure Prime Intellect access, install and configure `Prime Intellect CLI <https://docs.primeintellect.ai/cli-reference/introduction>`__:
