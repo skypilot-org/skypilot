@@ -1730,6 +1730,7 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
 @flags.all_users_option('Show all clusters, including those not owned by the '
                         'current user.')
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start_cli
 # pylint: disable=redefined-builtin
 def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
