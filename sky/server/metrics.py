@@ -35,7 +35,7 @@ SKY_APISERVER_REQUEST_DURATION_SECONDS = prom.Histogram(
     'Time spent processing API server requests',
     ['path', 'method', 'status'],
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
-             float('inf')),
+             60.0, 120.0, float('inf')),
 )
 
 # Time spent processing requests in executor.
@@ -53,15 +53,15 @@ SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
     'Time spent processing code',
     ['name', 'group'],
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
-             float('inf')),
+             60.0, 120.0, float('inf')),
 )
 
 SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
     'sky_apiserver_event_loop_lag_seconds',
     'Scheduling delay of the server event loop',
     ['pid'],
-    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5,
-             float('inf')),
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 20.0,
+             60.0, float('inf')),
 )
 
 metrics_app = fastapi.FastAPI()
