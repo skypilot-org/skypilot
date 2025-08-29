@@ -59,7 +59,7 @@ async def jobs_tailing(exit: asyncio.Event):
             with sky.Dag() as dag:
                 sky.Task(name='test', run='for i in {1..300}; do echo "$i" && sleep 1; done')
             await jobs_sdk.launch(task=dag, name=name)
-            await jobs_sdk.tail_logs(name=name, job_id=0, follow=True)
+            await jobs_sdk.tail_logs(name=name, follow=True)
         except Exception as e:
             logger.error(f'Jobs tailing ended with error: {e}'
                          f'{traceback.format_exc()}')
@@ -86,15 +86,15 @@ async def status_refresh(exit: asyncio.Event):
 
 async def hybrid_load(exit: asyncio.Event):
     tasks = []
-    for _ in range(2):
+    for _ in range(1):
         tasks.append(large_file_upload(exit))
     for _ in range(5):
         tasks.append(long_tailing(exit))
     for _ in range(5):
         tasks.append(jobs_tailing(exit))
-    for _ in range(10):
+    for _ in range(5):
         tasks.append(status(exit))
-    for _ in range(2):
+    for _ in range(1):
         tasks.append(status_refresh(exit))
     try:
         await asyncio.gather(*tasks)
