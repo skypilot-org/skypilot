@@ -552,8 +552,10 @@ grafana:
     enableAuthedIngress: true
     path: "/grafana"
     ingressClassName: nginx
-    # @schema type: [string, null]
-    hosts: null
+    # @schema type: [array]; item: string
+    # If you set hosts to null, the Grafana Helm chart will use its default value ([chart-example.local]).
+    # To match all hosts, set hosts to an empty array ([]).
+    hosts: []
   grafana.ini:
     server:
       domain: localhost
