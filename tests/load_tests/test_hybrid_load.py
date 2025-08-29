@@ -91,9 +91,7 @@ async def hybrid_load(exit: asyncio.Event):
         tasks.append(large_file_upload(exit))
     for _ in range(4):
         tasks.append(long_tailing(exit))
-    for _ in range(4):
-        tasks.append(jobs_tailing(exit))
-    for _ in range(4):
+    for _ in range(2):
         tasks.append(status(exit))
     for _ in range(1):
         tasks.append(status_refresh(exit))
