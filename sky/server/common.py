@@ -768,7 +768,9 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
 
 cli_checked = False
 
+
 def check_server_healthy_or_start_cli(func: Callable[P, T]) -> Callable[P, T]:
+
     @functools.wraps(func)
     def wrapper(*args, deploy: bool = False, host: str = '127.0.0.1', **kwargs):
         global cli_checked
