@@ -17,7 +17,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.11.
+          # SkyPilot requires 3.7 <= python <= 3.13.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -33,10 +33,14 @@ Install SkyPilot using pip:
           pip install "skypilot[fluidstack]"
           pip install "skypilot[paperspace]"
           pip install "skypilot[cudo]"
+          # IBM is only supported for Python <= 3.11
           pip install "skypilot[ibm]"
+          # SCP is only supported for Python <= 3.11
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
+          # Nebius is only supported for Python >= 3.10
           pip install "skypilot[nebius]"
+
           pip install "skypilot[all]"
 
 
