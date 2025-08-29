@@ -59,7 +59,7 @@ async def jobs_tailing(exit: asyncio.Event):
             with sky.Dag() as dag:
                 sky.Task(name='test', run='for i in {1..300}; do echo "$i" && sleep 1; done')
             await jobs_sdk.launch(task=dag, name=name)
-            await jobs_sdk.tail_logs(cluster_name=name, job_id=0, follow=True)
+            await jobs_sdk.tail_logs(name=name, job_id=0, follow=True)
         except Exception as e:
             logger.error(f'Jobs tailing ended with error: {e}'
                          f'{traceback.format_exc()}')

@@ -86,19 +86,23 @@ async def cancel(
 
 
 @usage_lib.entrypoint
-async def tail_logs(cluster_name: str,
+async def tail_logs(name: str,
                     job_id: Optional[int],
                     follow: bool,
+                    controller: bool = False,
+                    refresh: bool = False,
                     tail: int = 0,
                     output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
     return await context_utils.to_thread(
         sdk.tail_logs,
-        cluster_name,
-        job_id,
-        follow,
-        tail,
-        output_stream,
+        name=name,
+        job_id=job_id,
+        follow=follow,
+        controller=controller,
+        refresh=refresh,
+        tail=tail,
+        output_stream=output_stream,
     )
 
 
