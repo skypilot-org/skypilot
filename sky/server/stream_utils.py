@@ -22,7 +22,6 @@ logger = sky_logging.init_logger(__name__)
 _BUFFER_SIZE = 8 * 1024  # 8KB
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
-_REFRESH_INTERVAL = 1
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -91,7 +90,7 @@ async def log_streamer(request_id: Optional[str],
             # TODO(aylei): we should use a better mechanism to avoid busy
             # polling the DB, which can be a bottleneck for high-concurrency
             # requests.
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.1)
             request_task = await requests_lib.get_request_async(request_id)
             if not follow:
                 break
@@ -139,7 +138,6 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
             buffer_bytes = 0
             last_flush_time = asyncio.get_event_loop().time()
 
-    last_refresh_time = asyncio.get_event_loop().time()
     while True:
         # Sleep 0 to yield control to allow other coroutines to run,
         # while keeps the loop tight to make log stream responsive.
@@ -154,10 +152,7 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
 
         line: Optional[bytes] = await f.readline()
         if not line:
-            if (request_id is not None and
-                    current_time - last_refresh_time >= _REFRESH_INTERVAL):
-                # Refresh the request status from DB every _REFRESH_INTERVAL
-                last_refresh_time = current_time
+            if request_id is not None:
                 request_task = await requests_lib.get_request_async(request_id)
                 if request_task.status > requests_lib.RequestStatus.RUNNING:
                     if (request_task.status ==
