@@ -1,6 +1,7 @@
 """Volume types and access modes."""
 from typing import Any, Dict, Optional
 
+from sky import clouds
 from sky.utils import common_utils
 from sky.utils import infra_utils
 from sky.utils import registry
@@ -9,9 +10,10 @@ from sky.utils import schemas
 from sky.utils import volume as volume_lib
 
 VOLUME_TYPE_TO_CLOUD = {
-    volume_lib.VolumeType.PVC: 'kubernetes',
-    volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME: 'runpod',
+    volume_lib.VolumeType.PVC: clouds.Kubernetes(),
+    volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME: clouds.RunPod(),
 }
+
 
 class Volume:
     """Volume specification."""
@@ -48,15 +50,39 @@ class Volume:
         self.zone: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> 'Volume':
-        """Create a Volume instance from a dictionary."""
-        return cls(name=config_dict.get('name'),
-                   type=config_dict.get('type'),
-                   infra=config_dict.get('infra'),
-                   size=config_dict.get('size'),
-                   labels=config_dict.get('labels'),
-                   resource_name=config_dict.get('resource_name'),
-                   config=config_dict.get('config', {}))
+    def from_dict(cls,
+                  config_dict: Dict[str, Any],
+                  volume_type: Optional[str] = None) -> 'Volume':
+        """Create a Volume subclass instance from a dictionary via factory."""
+        vol_type_val = volume_type or config_dict.get('type')
+        try:
+            vt = (volume_lib.VolumeType(vol_type_val)
+                  if vol_type_val is not None else None)
+        except Exception:  # pylint: disable=broad-except
+            vt = None
+
+        if vt is None:
+            raise ValueError(f'Invalid volume type: {vol_type_val}')
+
+        if vt == volume_lib.VolumeType.PVC:
+            return PVCVolume(name=config_dict.get('name'),
+                             type=vol_type_val,
+                             infra=config_dict.get('infra'),
+                             size=config_dict.get('size'),
+                             labels=config_dict.get('labels'),
+                             resource_name=config_dict.get('resource_name'),
+                             config=config_dict.get('config', {}))
+        if vt == volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME:
+            return RunpodNetworkVolume(
+                name=config_dict.get('name'),
+                type=vol_type_val,
+                infra=config_dict.get('infra'),
+                size=config_dict.get('size'),
+                labels=config_dict.get('labels'),
+                resource_name=config_dict.get('resource_name'),
+                config=config_dict.get('config', {}))
+
+        raise ValueError(f'Invalid volume type: {vol_type_val}')
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the Volume to a dictionary."""
@@ -130,16 +156,21 @@ class Volume:
 
     def _validate_config(self) -> None:
         """Validate the volume config."""
-        cloud_from_type = VOLUME_TYPE_TO_CLOUD.get(volume_lib.VolumeType(self.type))
-        cloud_obj_from_type = registry.CLOUD_REGISTRY.from_str(cloud_from_type)
+        cloud_obj_from_type = VOLUME_TYPE_TO_CLOUD.get(
+            volume_lib.VolumeType(self.type))
         if self.cloud:
             cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
+            assert cloud_obj is not None
             if not cloud_obj.is_same_cloud(cloud_obj_from_type):
-                raise ValueError(f'Invalid cloud {self.cloud} for volume type {self.type}')
+                raise ValueError(
+                    f'Invalid cloud {self.cloud} for volume type {self.type}')
         else:
-            self.cloud=cloud_from_type
-            cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
-        assert cloud_obj is not None
+            self.cloud = str(cloud_obj_from_type)
+            cloud_obj = cloud_obj_from_type
+            assert cloud_obj is not None
+
+        self.region, self.zone = cloud_obj.validate_region_zone(
+            self.region, self.zone)
 
         valid, err_msg = cloud_obj.is_volume_name_valid(self.name)
         if not valid:
@@ -154,3 +185,41 @@ class Volume:
                 valid, err_msg = cloud_obj.is_label_valid(key, value)
                 if not valid:
                     raise ValueError(f'{err_msg}')
+
+        # Extra, type-specific validations
+        self._validate_config_extra()
+
+    # Hook methods for subclasses
+    def _validate_config_extra(self) -> None:
+        """Additional type-specific validation.
+
+        Subclasses can override to enforce stricter rules.
+        """
+        return
+
+
+class PVCVolume(Volume):
+    """Kubernetes PVC-backed volume."""
+    pass
+
+
+class RunpodNetworkVolume(Volume):
+    """RunPod Network Volume."""
+
+    def _validate_config_extra(self) -> None:
+        if self.size is not None:
+            try:
+                size_int = int(self.size)
+                if size_int < volume_lib.MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB:
+                    raise ValueError(
+                        f'RunPod network volume size must be at least '
+                        f'{volume_lib.MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB}GB.')
+            except Exception as e:  # pylint: disable=broad-except
+                raise ValueError(f'Invalid volume size {self.size!r}: '
+                                 f'{e}') from e
+        if not self.zone:
+            raise ValueError(
+                'RunPod DataCenterId is required to create a network '
+                'volume. Set the zone in the infra field.')
+
+        return

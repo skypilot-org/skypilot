@@ -77,7 +77,7 @@ async def volume_apply(request: fastapi.Request,
             raise fastapi.HTTPException(
                 status_code=400, detail=f'Invalid access mode: {access_mode}')
     elif volume_type == volume.VolumeType.RUNPOD_NETWORK_VOLUME.value:
-        if not cloud.is_same_cloud(clouds.Runpod()):
+        if not cloud.is_same_cloud(clouds.RunPod()):
             raise fastapi.HTTPException(
                 status_code=400,
                 detail='Runpod network volume is only supported on Runpod')

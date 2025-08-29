@@ -140,38 +140,3 @@ def generate_spot_pod_deployment_mutation(
       }}
     }}
     """
-
-def generate_net_volume_deployment_mutation(
-    name: str,
-    volume_in_gb: int,
-    volume_mount_path: str,
-    volume_key: str,
-) -> str:
-    input_fields = []
-
-    # Required fields
-    input_fields.append(f'name: "{name}"')
-    input_fields.append(f'volumeInGb: {volume_in_gb}')
-
-    # Optional fields
-    if volume_mount_path:
-        input_fields.append(f'volumeMountPath: "{volume_mount_path}"')
-    if volume_key:
-        input_fields.append(f'volumeKey: "{volume_key}"')
-
-    input_string = ', '.join(input_fields)
-    return f"""
-    mutation {{
-      networkVolumeCreate(
-        input: {{
-          {input_string}
-        }}
-      ) {{
-        id
-        name
-        dataCenterId
-        volumeInGb
-      }}
-    }}
-    """
-        

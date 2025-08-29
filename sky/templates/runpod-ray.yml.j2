@@ -44,6 +44,7 @@ available_node_types:
       VolumeMounts:
       {%- for vm in volume_mounts %}
         - VolumeNameOnCloud: {{ vm.volume_name_on_cloud }}
+          VolumeIdOnCloud: {{ vm.volume_id_on_cloud }}
           MountPath: {{ vm.path }}
       {%- endfor %}
       {%- endif %}

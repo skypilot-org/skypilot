@@ -19,7 +19,7 @@ Example:
 from typing import List, Optional
 
 from sky.adaptors import runpod
-from sky.provision.runpod.api.pods import generate_net_volume_deployment_mutation, generate_spot_pod_deployment_mutation
+from sky.provision.runpod.api.pods import generate_spot_pod_deployment_mutation
 
 _INTERRUPTABLE_POD_FIELD: str = 'podRentInterruptable'
 _RESPONSE_DATA_FIELD: str = 'data'
@@ -113,21 +113,6 @@ def create_spot_pod(
         min_upload=min_upload,
         cuda_version=cuda_version,
         template_id=template_id,
-        volume_key=volume_key,
-    )
-    response = runpod.runpod.api.graphql.run_graphql_query(mutation)
-    return response[_RESPONSE_DATA_FIELD][_INTERRUPTABLE_POD_FIELD]
-
-def create_net_volume(
-    name: str,
-    volume_in_gb: int,
-    volume_mount_path: str,
-    volume_key: str,
-) -> dict:
-    mutation = generate_net_volume_deployment_mutation(
-        name=name,
-        volume_in_gb=volume_in_gb,
-        volume_mount_path=volume_mount_path,
         volume_key=volume_key,
     )
     response = runpod.runpod.api.graphql.run_graphql_query(mutation)

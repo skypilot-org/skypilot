@@ -10,6 +10,8 @@ from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import status_lib
 
+MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB = 10
+
 
 class VolumeAccessMode(enum.Enum):
     """Volume access mode."""
