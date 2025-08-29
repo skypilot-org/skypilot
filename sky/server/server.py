@@ -68,6 +68,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
+from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest
@@ -421,6 +422,28 @@ async def cleanup_upload_ids():
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
+async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
+                           lag_threshold: float,
+                           fail_fast: bool = False,
+                           interval: float = 0.1) -> None:
+    target = loop.time() + interval
+
+    def tick():
+        nonlocal target
+        now = loop.time()
+        lag = max(0.0, now - target)
+        if lag > lag_threshold:
+            if fail_fast:
+                logger.fatal(f'Loop lag detected: {lag}s, fail fast.')
+                sys.exit(1)
+            else:
+                logger.warning(f'Loop lag detected: {lag}s')
+        target = now + interval
+        loop.call_at(target, tick)
+
+    loop.call_at(target, tick)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
@@ -446,6 +469,13 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             # can safely ignore the error if the task is already scheduled.
             logger.debug(f'Request {event.id} already exists.')
     asyncio.create_task(cleanup_upload_ids())
+    lag_threshold = perf_utils.get_loop_lag_threshold()
+    if lag_threshold is not None:
+        # Fail fast to surface the issue in test.
+        asyncio.create_task(
+            loop_lag_monitor(asyncio.get_event_loop(),
+                             lag_threshold,
+                             fail_fast=True))
     yield
     # Shutdown: Add any cleanup code here if needed
 
@@ -535,6 +565,17 @@ class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             server_constants.API_VERSION)
         response.headers[server_constants.VERSION_HEADER] = \
             versions.get_local_readable_version()
+        return response
+
+
+class AnnotateTaskMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to annotate the task with the request path."""
+
+    async def dispatch(self, request, call_next):
+        task = asyncio.current_task()
+        if task is not None:
+            task.set_name(f'{task.get_name()};path:{request.url.path}')
+        response = await call_next(request)
         return response
 
 
