@@ -94,7 +94,7 @@ def prometheus_middleware():
     middleware = metrics.PrometheusMiddleware(app=MagicMock())
 
     # Clear metric values before each test
-    metrics.sky_apiserver_requests_total.clear()
+    metrics.SKY_APISERVER_REQUESTS_TOTAL.clear()
     metrics.sky_apiserver_request_duration_seconds.clear()
 
     return middleware
@@ -104,7 +104,7 @@ def _get_metric_value_from_registry(metric_name, labels=None):
     """Helper function to get metric value from the prometheus registry."""
     registry = CollectorRegistry()
     # Register the actual metrics to the test registry
-    registry.register(metrics.sky_apiserver_requests_total)
+    registry.register(metrics.SKY_APISERVER_REQUESTS_TOTAL)
     registry.register(metrics.sky_apiserver_request_duration_seconds)
 
     # Generate the metrics output
@@ -273,5 +273,5 @@ def cleanup_metrics():
     """Clean up metrics after each test to avoid interference."""
     yield
     # Clear all metrics after each test
-    metrics.sky_apiserver_requests_total.clear()
+    metrics.SKY_APISERVER_REQUESTS_TOTAL.clear()
     metrics.sky_apiserver_request_duration_seconds.clear()

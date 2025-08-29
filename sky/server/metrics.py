@@ -1,5 +1,7 @@
 """Instrumentation for the API server."""
 
+import contextlib
+import functools
 import os
 import time
 
@@ -11,11 +13,16 @@ import starlette.middleware.base
 import uvicorn
 
 from sky import sky_logging
+from sky.skylet import constants
+
+# Whether the metrics are enabled, cannot be changed at runtime.
+METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
+                                  'false').lower() == 'true'
 
 logger = sky_logging.init_logger(__name__)
 
 # Total number of API server requests, grouped by path, method, and status.
-sky_apiserver_requests_total = prom.Counter(
+SKY_APISERVER_REQUESTS_TOTAL = prom.Counter(
     'sky_apiserver_requests_total',
     'Total number of API server requests',
     ['path', 'method', 'status'],
@@ -23,11 +30,37 @@ sky_apiserver_requests_total = prom.Counter(
 
 # Time spent processing API server requests, grouped by path, method, and
 # status.
-sky_apiserver_request_duration_seconds = prom.Histogram(
+SKY_APISERVER_REQUEST_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_request_duration_seconds',
     'Time spent processing API server requests',
     ['path', 'method', 'status'],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
+             float('inf')),
+)
+
+# Time spent processing requests in executor.
+SKY_APISERVER_REQUEST_EXECUTION_DURATION_SECONDS = prom.Histogram(
+    'sky_apiserver_request_execution_duration_seconds',
+    'Time spent executing requests in executor',
+    ['request', 'worker'],
+    buckets=(0.5, 1, 2.5, 5.0, 10.0, 15.0, 25.0, 40.0, 60.0, 90.0, 120.0, 180.0,
+             float('inf')),
+)
+
+# Time spent processing a piece of code, refer to time_it().
+SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
+    'sky_apiserver_code_duration_seconds',
+    'Time spent processing code',
+    ['name'],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
+             float('inf')),
+)
+
+SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
+    "sky_apiserver_event_loop_lag_seconds",
+    "Scheduling delay of the server event loop",
+    ['pid'],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5,
              float('inf')),
 )
 
@@ -76,7 +109,7 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         path = request.url.path
-        logger.info(f'PROM Middleware Request: {request}, {request.url.path}')
+        logger.debug(f'PROM Middleware Request: {request}, {request.url.path}')
         streaming = _is_streaming_api(path)
         if not streaming:
             # Exclude streaming APIs, the duration is not meaningful.
@@ -92,13 +125,56 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             status_code_group = '5xx'
             raise
         finally:
-            sky_apiserver_requests_total.labels(path=path,
+            SKY_APISERVER_REQUESTS_TOTAL.labels(path=path,
                                                 method=method,
                                                 status=status_code_group).inc()
             if not streaming:
                 duration = time.time() - start_time
-                sky_apiserver_request_duration_seconds.labels(
+                SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
                     path=path, method=method,
                     status=status_code_group).observe(duration)
 
         return response
+
+
+@contextlib.contextmanager
+def time_it(name: str, group: str = 'default'):
+    """Context manager to measure and record code execution duration."""
+    if not METRICS_ENABLED:
+        yield
+    else:
+        start_time = time.time()
+        try:
+            yield
+        finally:
+            duration = time.time() - start_time
+            SKY_APISERVER_CODE_DURATION_SECONDS.labels(
+                name=name, group=group).observe(duration)
+
+
+def time_me(func):
+    """Measure the duration of decorated function."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        if not METRICS_ENABLED:
+            return func(*args, **kwargs)
+        name = f'{func.__module__}/{func.__name__}'
+        with time_it(name, group='function'):
+            return func(*args, **kwargs)
+
+    return wrapper
+
+
+def time_me_async(func):
+    """Measure the duration of decorated async function."""
+
+    @functools.wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        if not METRICS_ENABLED:
+            return await func(*args, **kwargs)
+        name = f'{func.__module__}/{func.__name__}'
+        with time_it(name, group='function'):
+            return await func(*args, **kwargs)
+
+    return async_wrapper

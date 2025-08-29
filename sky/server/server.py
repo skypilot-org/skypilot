@@ -423,8 +423,6 @@ async def cleanup_upload_ids():
 
 
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
-                           lag_threshold: float,
-                           fail_fast: bool = False,
                            interval: float = 0.1) -> None:
     target = loop.time() + interval
 
@@ -432,18 +430,6 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
         nonlocal target
         now = loop.time()
         lag = max(0.0, now - target)
-        if lag > lag_threshold:
-            if fail_fast:
-                logger.fatal(f'Loop lag detected: {lag}s, fail fast.')
-                logger.info('=====API server logs:======')
-                resolved_log_path = pathlib.Path(
-                    constants.API_SERVER_LOGS).expanduser()
-                with open(resolved_log_path, 'r', encoding='utf-8') as f:
-                    for line in f.readlines():
-                        logger.info(line)
-                sys.exit(1)
-            else:
-                logger.warning(f'Loop lag detected: {lag}s')
         target = now + interval
         loop.call_at(target, tick)
 
@@ -475,13 +461,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             # can safely ignore the error if the task is already scheduled.
             logger.debug(f'Request {event.id} already exists.')
     asyncio.create_task(cleanup_upload_ids())
-    lag_threshold = perf_utils.get_loop_lag_threshold()
-    if lag_threshold is not None:
-        # Fail fast to surface the issue in test.
-        asyncio.create_task(
-            loop_lag_monitor(asyncio.get_event_loop(),
-                             lag_threshold,
-                             fail_fast=True))
+    asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
     yield
     # Shutdown: Add any cleanup code here if needed
 
