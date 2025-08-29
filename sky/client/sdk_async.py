@@ -577,7 +577,7 @@ async def status(
     all_users: bool = False,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
     *,
-    include_credentials: bool = True,
+    include_credentials: bool = False,
 ) -> List[Dict[str, Any]]:
     """Async version of status() that gets cluster statuses."""
     request_id = await context_utils.to_thread(

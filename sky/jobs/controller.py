@@ -332,7 +332,6 @@ class JobsController:
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
                         all_users=True,
-                        include_credentials=False,
                         _include_is_managed=True)
                     if clusters:
                         assert len(clusters) == 1, (clusters, cluster_name)

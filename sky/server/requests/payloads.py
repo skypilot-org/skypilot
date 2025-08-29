@@ -309,7 +309,7 @@ class StatusBody(RequestBody):
     cluster_names: Optional[List[str]] = None
     refresh: common_lib.StatusRefreshMode = common_lib.StatusRefreshMode.NONE
     all_users: bool = True
-    include_credentials: bool = True
+    include_credentials: bool = False
 
 
 class StartBody(RequestBody):

@@ -1427,7 +1427,7 @@ def status(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     *,
-    include_credentials: bool = True,
+    include_credentials: bool = False,
 ) -> server_common.RequestId[List[responses.StatusResponse]]:
     """Gets cluster statuses.
 
@@ -1477,7 +1477,7 @@ def status(
         all_users: whether to include all users' clusters. By default, only
             the current user's clusters are included.
         include_credentials: whether to include cluster ssh credentials in the
-            response (default: True).
+            response (default: False).
 
     Returns:
         The request ID of the status request.

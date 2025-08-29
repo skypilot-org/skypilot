@@ -143,7 +143,10 @@ def _get_cluster_records_and_set_ssh_config(
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
     if clusters is not None:
         all_users = True
-    request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
+    request_id = sdk.status(clusters,
+                            refresh=refresh,
+                            all_users=all_users,
+                            include_credentials=True)
     cluster_records = sdk.stream_and_get(request_id)
     # Update the SSH config for all clusters
     for record in cluster_records:

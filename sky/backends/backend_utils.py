@@ -2929,7 +2929,7 @@ def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
-    include_credentials: bool = True,
+    include_credentials: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -3402,7 +3402,6 @@ def get_endpoints(cluster: str,
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
     cluster_records = get_clusters(refresh=common.StatusRefreshMode.NONE,
                                    cluster_names=[cluster],
-                                   include_credentials=False,
                                    _include_is_managed=True)
     if not cluster_records:
         with ux_utils.print_exception_no_traceback():
