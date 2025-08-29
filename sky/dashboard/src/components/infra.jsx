@@ -69,7 +69,7 @@ export function InfrastructureSection({
   handleContextClick,
   contextStats = {},
   jobsData = {},
-  isJobsDataLoading = True,
+  isJobsDataLoading = true,
   isSSH = false, // To differentiate between SSH and Kubernetes
   actionButton = null, // Optional action button for the header
 }) {
@@ -1636,7 +1636,6 @@ export function GPUs() {
       setSshAndKubeJobsData(await getContextJobs(jobs));
       setSshAndKubeJobsDataLoading(false);
       const cloudData = await getCloudInfrastructure(clusters, jobs, forceRefresh);
-
       // Set cloud data with defensive checks
       if (cloudData) {
         setCloudInfraData(cloudData.clouds || []);

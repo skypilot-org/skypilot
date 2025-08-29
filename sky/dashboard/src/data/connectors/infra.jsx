@@ -348,7 +348,7 @@ export async function getContextJobs(jobs) {
 
 export async function getContextClusters(clusters) {
   try {
-    // Count clusters and jobs per k8s context/ssh node pool
+    // Count clusters per k8s context/ssh node pool
     const contextStats = {};
 
     clusters.forEach((cluster) => {
@@ -406,60 +406,67 @@ async function getKubernetesGPUs(clusters) {
       };
     }
 
-    // 2. Fetch cluster and job counts per context
+    // 2. Fetch cluster counts per context
     const contextStats = await getContextClusters(clusters);
-
-    // 3. Fetch GPU availability information
-    const contextGPUAvailability = await getKubernetesContextGPUs();
-    const gpuAvailabilityMap = new Map();
-    if (contextGPUAvailability) {
-      contextGPUAvailability.forEach((cg) => {
-        gpuAvailabilityMap.set(cg[0], cg[1]); // cg[0] is context, cg[1] is gpusInCtx
-      });
-    }
 
     const allGPUsSummary = {};
     const perContextGPUsData = {};
     const perNodeGPUs_dict = {};
 
-    // 4. Iterate through all_available_context_names and fetch node info for each
+    // Get all of the node info for all contexts in parallel and put them
+    // in a dictionary keyed by context name. 
+    const contextNodeInfoList = await Promise.all(
+      allAvailableContextNames.map(context => getKubernetesPerNodeGPUs(context))
+    );
+    const contextToNodeInfo = {};
+    for (let i = 0; i < allAvailableContextNames.length; i++) {
+      contextToNodeInfo[allAvailableContextNames[i]] = contextNodeInfoList[i];
+    }
+
+    // 3: Populate the gpuToData map for each context.
     for (const context of allAvailableContextNames) {
-      if (!perContextGPUsData[context]) {
-        perContextGPUsData[context] = [];
-      }
-
-      // Get GPU details from the availability map if present
-      const gpusInCtx = gpuAvailabilityMap.get(context);
-      if (gpusInCtx && gpusInCtx.length > 0) {
-        for (const gpu of gpusInCtx) {
-          const gpuName = gpu[0];
-          const gpuRequestableQtyPerNode = gpu[1].join(', ');
-          const gpuTotal = gpu[2];
-          const gpuFree = gpu[3];
-
+      const nodeInfoForContext = contextToNodeInfo[context] || {};
+      if (nodeInfoForContext && Object.keys(nodeInfoForContext).length > 0) {
+        const gpuToData = {};
+        for (const nodeName in nodeInfoForContext) {
+          const nodeData = nodeInfoForContext[nodeName];
+          const gpuName = nodeData['accelerator_type'];
+          const totalCount = nodeData['total']['accelerator_count'];
+          const freeCount = nodeData['free']['accelerators_available'];
+          if (totalCount > 0) {
+            if (!gpuToData[gpuName]) {
+              gpuToData[gpuName] = {
+                gpu_name: gpuName,
+                gpu_requestable_qty_per_node: 0,
+                gpu_total: 0,
+                gpu_free: 0,
+                context: context,
+              };
+            }
+            gpuToData[gpuName].gpu_total += totalCount;
+            gpuToData[gpuName].gpu_free += freeCount;
+            gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
+          }
+        }
+        perContextGPUsData[context] = Object.values(gpuToData);
+        for (const gpuName in gpuToData) {
           if (gpuName in allGPUsSummary) {
-            allGPUsSummary[gpuName].gpu_total += gpuTotal;
-            allGPUsSummary[gpuName].gpu_free += gpuFree;
-          } else {
-            allGPUsSummary[gpuName] = {
-              gpu_total: gpuTotal,
-              gpu_free: gpuFree,
+            allGPUsSummary[gpuName].gpu_total += gpuToData[gpuName].gpu_total;
+            allGPUsSummary[gpuName].gpu_free += gpuToData[gpuName].gpu_free;
+        } else {
+          allGPUsSummary[gpuName] = {
+            gpu_total: gpuToData[gpuName].gpu_total,
+            gpu_free: gpuToData[gpuName].gpu_free,
               gpu_name: gpuName,
             };
           }
-
-          perContextGPUsData[context].push({
-            gpu_name: gpuName,
-            gpu_requestable_qty_per_node: gpuRequestableQtyPerNode,
-            gpu_total: gpuTotal,
-            gpu_free: gpuFree,
-            context: context,
-          });
         }
       }
+    }
 
-      // Fetch node information for the current context
-      const nodeInfoForContext = await getKubernetesPerNodeGPUs(context);
+    // 4: Populate the perNodeGPUs_dict map for each context.
+    for (const context of allAvailableContextNames) {
+      const nodeInfoForContext = contextToNodeInfo[context];
       if (nodeInfoForContext && Object.keys(nodeInfoForContext).length > 0) {
         for (const nodeName in nodeInfoForContext) {
           const nodeData = nodeInfoForContext[nodeName];
