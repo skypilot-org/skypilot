@@ -120,6 +120,19 @@
             "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
+          },
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "amd_gpu_gfx_activity{hostname=~\"$node\", gpu_id=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+            "range": true,
+            "refId": "B"
           }
         ],
         "title": "GPU Utilization",
@@ -223,6 +236,19 @@
             "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
+          },
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "amd_gpu_used_vram{hostname=~\"$node\", gpu_id=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+            "range": true,
+            "refId": "B"
           }
         ],
         "title": "GPU Memory Utilization",
@@ -326,6 +352,19 @@
             "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
+          },
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "amd_gpu_junction_temperature{hostname=~\"$node\", gpu_id=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+            "range": true,
+            "refId": "B"
           }
         ],
         "title": "GPU Temperature",
@@ -429,6 +468,19 @@
             "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
+          },
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "amd_gpu_average_package_power{hostname=~\"$node\", gpu_id=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+            "range": true,
+            "refId": "B"
           }
         ],
         "title": "GPU Power Usage",
@@ -475,14 +527,14 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "definition": "label_values(DCGM_FI_DEV_GPU_UTIL, node)",
+          "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"_node\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"_node\", \"$1\", \"hostname\", \"(.*)\"))",
           "includeAll": true,
           "multi": true,
           "name": "node",
           "options": [],
-          "query": "label_values(DCGM_FI_DEV_GPU_UTIL, node)",
+          "query": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"_node\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"_node\", \"$1\", \"hostname\", \"(.*)\"))",
           "refresh": 1,
-          "regex": "",
+          "regex": "/_node=\"([^\"]+)\"/",
           "type": "query"
         },
         {
@@ -495,14 +547,14 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "definition": "label_values(DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}, gpu)",
+          "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}, \"gpu\", \"$1\", \"gpu\", \"(.*)\") or label_replace(amd_gpu_gfx_activity{hostname=~\"$node\"}, \"gpu\", \"$1\", \"gpu_id\", \"(.*)\"))",
           "includeAll": true,
           "multi": true,
           "name": "gpu",
           "options": [],
-          "query": "label_values(DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}, gpu)",
+          "query": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}, \"gpu\", \"$1\", \"gpu\", \"(.*)\") or label_replace(amd_gpu_gfx_activity{hostname=~\"$node\"}, \"gpu\", \"$1\", \"gpu_id\", \"(.*)\"))",
           "refresh": 1,
-          "regex": "",
+          "regex": "/gpu=\"([^\"]+)/",
           "sort": 1,
           "type": "query"
         }

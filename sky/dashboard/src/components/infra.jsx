@@ -382,7 +382,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
       const query =
         'query=' +
         encodeURIComponent(
-          `group by (node) (DCGM_FI_DEV_GPU_TEMP{cluster=~"${clusterParam}"})`
+          `group by (node) (DCGM_FI_DEV_GPU_TEMP{cluster=~"${clusterParam}"} or label_replace(amd_gpu_gfx_activity{cluster=~"${clusterParam}"}, "node", "$1", "hostname", "(.*)"))`
         );
 
       const endpoint = `/api/datasources/proxy/1/api/v1/query?${query}`;
@@ -712,6 +712,51 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         title="GPU Power Consumption"
                         className="rounded"
                         key={`gpu-power-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* GPU Temperature */}
+                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                    <div className="p-2">
+                      <iframe
+                        src={buildGrafanaUrlForContext('12')}
+                        width="100%"
+                        height="400"
+                        frameBorder="0"
+                        title="GPU Temperature"
+                        className="rounded"
+                        key={`gpu-temp-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* CPU Usage Percentage */}
+                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                    <div className="p-2">
+                      <iframe
+                        src={buildGrafanaUrlForContext('22')}
+                        width="100%"
+                        height="400"
+                        frameBorder="0"
+                        title="CPU Usage Percentage"
+                        className="rounded"
+                        key={`cpu-usage-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Memory Usage Percentage */}
+                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                    <div className="p-2">
+                      <iframe
+                        src={buildGrafanaUrlForContext('21')}
+                        width="100%"
+                        height="400"
+                        frameBorder="0"
+                        title="Memory Usage Percentage"
+                        className="rounded"
+                        key={`memory-usage-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
                       />
                     </div>
                   </div>

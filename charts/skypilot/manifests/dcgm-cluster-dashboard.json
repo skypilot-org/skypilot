@@ -90,6 +90,18 @@
           "legendFormat": "",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "avg(avg by (hostname, gpu_id, cluster) (amd_gpu_junction_temperature{hostname=~\"$host\", gpu_id=~\"$gpu\", cluster=~\"$cluster\"}))",
+          "interval": "",
+          "legendFormat": "",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "GPU Avgerage Temperature",
@@ -163,6 +175,19 @@
           "legendFormat": "",
           "range": false,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(avg by (hostname, gpu_id, cluster) (amd_gpu_average_package_power{hostname=~\"$host\", gpu_id=~\"$gpu\", cluster=~\"$cluster\"}))",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "range": false,
+          "refId": "B"
         }
       ],
       "title": "GPU Power Total",
@@ -277,6 +302,33 @@
           "legendFormat": "Last 24h",
           "range": true,
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "sum(rate(amd_gpu_energy_consumed{hostname=~\"$host\", gpu_id=~\"$gpu\", cluster=~\"$cluster\"}[1h])) / 3600000",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "Last 1h",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(amd_gpu_energy_consumed{hostname=~\"$host\", gpu_id=~\"$gpu\", cluster=~\"$cluster\"}[24h])) / 3600000",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Last 24h",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "GPU Energy Draw Total",
@@ -381,6 +433,17 @@
           "legendFormat": "{{node}} - GPU {{gpu}}",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "avg by (hostname, gpu_id, cluster) (amd_gpu_average_package_power{hostname=~\"$host\", gpu_id=~\"$gpu\", cluster=~\"$cluster\"})",
+          "interval": "",
+          "legendFormat": "{{hostname}} - GPU {{gpu_id}}",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "GPU Power Usage",
@@ -485,6 +548,17 @@
           "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "avg by (hostname, gpu_id, cluster) (amd_gpu_used_vram{hostname=~\"$host\", gpu_id=~\"$gpu\", cluster=~\"$cluster\"})",
+          "interval": "",
+          "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "GPU Memory Utilization",
@@ -591,6 +665,17 @@
           "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "avg by (hostname, gpu_id, cluster) (amd_gpu_used_vram{hostname=~\"$host\", gpu_id=~\"$gpu\", cluster=~\"$cluster\"}) / avg by (hostname, gpu_id, cluster) (amd_gpu_total_vram{hostname=~\"$host\", gpu_id=~\"$gpu\", cluster=~\"$cluster\"})",
+          "interval": "",
+          "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "GPU Memory Used Percentage",
@@ -697,6 +782,17 @@
           "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "avg by (hostname, gpu_id, cluster) (amd_gpu_gfx_activity{hostname=~\"$host\", gpu_id=~\"$gpu\", cluster=~\"$cluster\"})",
+          "interval": "",
+          "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "GPU Utilization",
@@ -803,6 +899,17 @@
           "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "",
+          "interval": "",
+          "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "Tensor Core Utilization",
@@ -907,6 +1014,17 @@
           "interval": "",
           "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "avg by (hostname, gpu_id, cluster) (amd_gpu_junction_temperature{hostname=~\"$host\", gpu_id=~\"$gpu\", cluster=~\"$cluster\"})",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+          "refId": "B"
         }
       ],
       "title": "GPU Temperature",
@@ -1013,9 +1131,232 @@
           "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "avg by (hostname, gpu_id, cluster) (amd_gpu_clock{hostname=~\"$host\", gpu_id=~\"$gpu\", cluster=~\"$cluster\"})",
+          "format": "time_series",
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "GPU SM Clocks",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 21,
+      "options": {
+        "dataLinks": [],
+        "legend": {
+          "calcs": [
+            "mean",
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "sortBy": "Last *",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (node) ((1 - (node_memory_MemAvailable_bytes{node=~\"$host\"} / node_memory_MemTotal_bytes{node=~\"$host\"})))",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Memory Usage Percentage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "id": 22,
+      "options": {
+        "dataLinks": [],
+        "legend": {
+          "calcs": [
+            "mean",
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "sortBy": "Last *",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(1 - avg by (node) (rate(node_cpu_seconds_total{mode=\"idle\", node=~\"$host\"}[2m])))",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "CPU Usage Percentage",
       "type": "timeseries"
     }
   ],
@@ -1048,19 +1389,19 @@
             "$__all"
           ]
         },
-        "definition": "label_values(DCGM_FI_DEV_GPU_TEMP,node)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"host\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"host\", \"$1\", \"hostname\", \"(.*)\"))",
         "includeAll": true,
         "label": "Host",
         "multi": true,
         "name": "host",
         "options": [],
-        "query": {
-          "qryType": 1,
-          "query": "label_values(DCGM_FI_DEV_GPU_TEMP,node)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
-        },
+        "query": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"host\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"host\", \"$1\", \"hostname\", \"(.*)\"))",
         "refresh": 1,
-        "regex": "",
+        "regex": "/host=\"([^\"]+)\"/",
         "type": "query"
       },
       {
@@ -1076,15 +1417,15 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(DCGM_FI_DEV_GPU_TEMP, gpu)",
+        "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL{node=~\"$host\"}, \"gpu\", \"$1\", \"gpu\", \"(.*)\") or label_replace(amd_gpu_gfx_activity{hostname=~\"$host\"}, \"gpu\", \"$1\", \"gpu_id\", \"(.*)\"))",
         "includeAll": true,
         "label": "GPU ID",
         "multi": true,
         "name": "gpu",
         "options": [],
-        "query": "label_values(DCGM_FI_DEV_GPU_TEMP, gpu)",
+        "query": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL{node=~\"$host\"}, \"gpu\", \"$1\", \"gpu\", \"(.*)\") or label_replace(amd_gpu_gfx_activity{hostname=~\"$host\"}, \"gpu\", \"$1\", \"gpu_id\", \"(.*)\"))",
         "refresh": 1,
-        "regex": "",
+        "regex": "/gpu=\"([^\"]+)/",
         "sort": 3,
         "type": "query"
       },
@@ -1105,7 +1446,7 @@
             "value": ".*"
           }
         ],
-                  "query": ".*",
+        "query": ".*",
         "refresh": 0,
         "regex": "",
         "skipUrlSync": false,
