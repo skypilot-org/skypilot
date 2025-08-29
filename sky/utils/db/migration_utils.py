@@ -4,7 +4,7 @@ import contextlib
 import logging
 import os
 import pathlib
-from typing import Dict
+from typing import Dict, Optional
 
 from alembic import command as alembic_command
 from alembic.config import Config
@@ -35,14 +35,17 @@ _postgres_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
 _sqlite_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
 
 
-def get_engine(db_name: str):
+def get_engine(db_name: str,
+               pg_pool_class: Optional[sqlalchemy.pool.Pool] = None):
     conn_string = None
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
+        if pg_pool_class is None:
+            pg_pool_class = sqlalchemy.NullPool
         if conn_string not in _postgres_engine_cache:
             _postgres_engine_cache[conn_string] = sqlalchemy.create_engine(
-                conn_string, poolclass=sqlalchemy.NullPool)
+                conn_string, poolclass=pg_pool_class)
         engine = _postgres_engine_cache[conn_string]
     else:
         db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
