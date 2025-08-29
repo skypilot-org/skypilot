@@ -3402,7 +3402,8 @@ def get_endpoints(cluster: str,
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
     cluster_records = get_clusters(refresh=common.StatusRefreshMode.NONE,
                                    cluster_names=[cluster],
-                                   _include_is_managed=True)
+                                   _include_is_managed=True,
+                                   fetch_cluster_credentials=False)
     if not cluster_records:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
