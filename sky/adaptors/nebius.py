@@ -86,7 +86,7 @@ def _get_default_credentials_path() -> str:
     return '~/.nebius/credentials.json'
 
 
-def api_domain() -> str:
+def api_domain() -> Optional[str]:
     domain_in_ws_config = skypilot_config.get_workspace_cloud('nebius').get(
         'domain', None)
     if domain_in_ws_config is not None:
@@ -99,13 +99,7 @@ def api_domain() -> str:
         with open(os.path.expanduser(domain_path()), encoding='utf-8') as file:
             return file.read().strip()
     except FileNotFoundError:
-        return _get_default_api_domain()
-
-
-def _get_default_api_domain() -> str:
-    # pylint: disable=import-outside-toplevel
-    from nebius.base import constants
-    return constants.DOMAIN
+        return None
 
 
 DEFAULT_REGION = 'eu-north1'
