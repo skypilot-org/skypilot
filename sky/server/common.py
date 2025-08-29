@@ -557,8 +557,6 @@ def _start_api_server(deploy: bool = False,
         if foreground:
             # Replaces the current process with the API server
             os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-            # TODO(aylei): remove this after testing
-            os.environ['PYTHONASYNCIODEBUG'] = '1'
             _set_metrics_env_var(os.environ, metrics, deploy)
             if enable_basic_auth:
                 os.environ[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
@@ -570,8 +568,6 @@ def _start_api_server(deploy: bool = False,
         # For spawn mode, copy the environ to avoid polluting the SDK process.
         server_env = os.environ.copy()
         server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-        # TODO(aylei): remove this after testing
-        server_env['PYTHONASYNCIODEBUG'] = '1'
         # Start the API server process in the background and don't wait for it.
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
