@@ -116,45 +116,6 @@ export async function getCloudInfrastructure(
   }
 }
 
-/**
- * Main function to get all infrastructure data.
- * Uses cached data from clusters and jobs to avoid redundant API calls.
- */
-export async function getInfraData(forceRefresh = false) {
-  // Import here to avoid circular dependencies
-  const { getClusters } = await import('@/data/connectors/clusters');
-  const { getManagedJobs } = await import('@/data/connectors/jobs');
-  const dashboardCache = (await import('@/lib/cache')).default;
-
-  const clustersData = await dashboardCache.get(getClusters);
-
-  const clusters = clustersData || [];
-
-  async function getCloudInfra() {
-    const jobsData = await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
-    const jobs = jobsData?.jobs || [];
-    const cloudData = await getCloudInfrastructure(clusters, jobs, forceRefresh);
-    return {
-      cloudData,
-      jobsData,
-    };
-  }
-
-  const [gpuData, cloudAndJobsData] = await Promise.all([
-    getGPUs(clusters),
-    getCloudInfra(),
-  ]);
-
-  const cloudData = cloudAndJobsData.cloudData;
-  const jobsData = cloudAndJobsData.jobsData;
-
-  return {
-    gpuData,
-    cloudData,
-    jobsData,
-  };
-}
-
 export async function getGPUs(clusters) {
   const gpus = await getKubernetesGPUs(clusters);
   return gpus;
@@ -414,9 +375,11 @@ async function getKubernetesGPUs(clusters) {
     const perNodeGPUs_dict = {};
 
     // Get all of the node info for all contexts in parallel and put them
-    // in a dictionary keyed by context name. 
+    // in a dictionary keyed by context name.
     const contextNodeInfoList = await Promise.all(
-      allAvailableContextNames.map(context => getKubernetesPerNodeGPUs(context))
+      allAvailableContextNames.map((context) =>
+        getKubernetesPerNodeGPUs(context)
+      )
     );
     const contextToNodeInfo = {};
     for (let i = 0; i < allAvailableContextNames.length; i++) {
@@ -453,10 +416,10 @@ async function getKubernetesGPUs(clusters) {
           if (gpuName in allGPUsSummary) {
             allGPUsSummary[gpuName].gpu_total += gpuToData[gpuName].gpu_total;
             allGPUsSummary[gpuName].gpu_free += gpuToData[gpuName].gpu_free;
-        } else {
-          allGPUsSummary[gpuName] = {
-            gpu_total: gpuToData[gpuName].gpu_total,
-            gpu_free: gpuToData[gpuName].gpu_free,
+          } else {
+            allGPUsSummary[gpuName] = {
+              gpu_total: gpuToData[gpuName].gpu_total,
+              gpu_free: gpuToData[gpuName].gpu_free,
               gpu_name: gpuName,
             };
           }

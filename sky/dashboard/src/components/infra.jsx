@@ -22,7 +22,11 @@ import {
   buildGrafanaUrl,
   openGrafana,
 } from '@/utils/grafana';
-import { getGPUs, getCloudInfrastructure, getInfraData, getContextJobs } from '@/data/connectors/infra';
+import {
+  getGPUs,
+  getCloudInfrastructure,
+  getContextJobs,
+} from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import {
@@ -176,11 +180,20 @@ export function InfrastructureSection({
                       };
 
                       // Check if contextStats data is available for this context
-                      const hasContextStats = Object.keys(contextStats).length > 0 && contextStats[contextStatsKey] || isDataLoaded;
-                      
+                      const hasContextStats =
+                        (Object.keys(contextStats).length > 0 &&
+                          contextStats[contextStatsKey]) ||
+                        isDataLoaded;
+
                       // Check if GPU/Node data is available for this context
-                      const hasGpuData = groupedPerContextGPUs && Object.keys(groupedPerContextGPUs).length > 0 || isDataLoaded;
-                      const hasNodeData = groupedPerNodeGPUs && Object.keys(groupedPerNodeGPUs).length > 0 || isDataLoaded;
+                      const hasGpuData =
+                        (groupedPerContextGPUs &&
+                          Object.keys(groupedPerContextGPUs).length > 0) ||
+                        isDataLoaded;
+                      const hasNodeData =
+                        (groupedPerNodeGPUs &&
+                          Object.keys(groupedPerNodeGPUs).length > 0) ||
+                        isDataLoaded;
 
                       // Format GPU types based on context type
                       const gpuTypes = (() => {
@@ -232,12 +245,11 @@ export function InfrastructureSection({
                             )}
                           </td>
                           <td className="p-3">
-                            {
-                            !isJobsDataLoading ? (
+                            {!isJobsDataLoading ? (
                               jobsData[contextStatsKey]?.jobs || 0 > 0 ? (
-                              <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                                {jobsData[contextStatsKey]?.jobs}
-                              </span>
+                                <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                                  {jobsData[contextStatsKey]?.jobs}
+                                </span>
                               ) : (
                                 <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                   0
@@ -247,8 +259,7 @@ export function InfrastructureSection({
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 <CircularProgress size={12} />
                               </span>
-                            )
-                            }
+                            )}
                           </td>
                           <td className="p-3">
                             {!hasNodeData ? (
@@ -1423,10 +1434,13 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
         <tbody className="bg-white divide-y divide-gray-200">
           {pools.map((pool) => {
             // Check if this pool has complete data loaded
-            const hasCompleteData = pool.clusters !== undefined && pool.jobs !== undefined && 
-                                   pool.nodes !== undefined && pool.gpuTypes !== undefined && 
-                                   pool.totalGPUs !== undefined;
-            
+            const hasCompleteData =
+              pool.clusters !== undefined &&
+              pool.jobs !== undefined &&
+              pool.nodes !== undefined &&
+              pool.gpuTypes !== undefined &&
+              pool.totalGPUs !== undefined;
+
             return (
               <tr
                 key={pool.name}
@@ -1531,7 +1545,8 @@ export function GPUs() {
   const [editingPool, setEditingPool] = useState(null);
   const [sshLoading, setSshLoading] = useState(false);
 
-  const [sshAndKubeJobsDataLoading, setSshAndKubeJobsDataLoading] = useState(true);
+  const [sshAndKubeJobsDataLoading, setSshAndKubeJobsDataLoading] =
+    useState(true);
   const [sshAndKubeJobsData, setSshAndKubeJobsData] = useState({});
 
   // Selected context for subpage view
@@ -1550,14 +1565,19 @@ export function GPUs() {
       try {
         const clustersData = await dashboardCache.get(getClusters);
         const clusters = clustersData || [];
-      
+
+        async function fetchKubeAndSshData() {
+          await fetchKubernetesData(clusters);
+          // Fetch SSH Node Pools after Kubernetes data is loaded
+          // because it relies on it for gpu info.
+          await fetchSSHNodePools();
+        }
+
         // Fetch all data in parallel
         await Promise.all([
-          fetchKubernetesData(clusters),
+          fetchKubeAndSshData(),
           fetchCloudData(clusters, forceRefresh),
-          fetchSSHNodePools(),
         ]);
-
       } catch (error) {
         console.error('Error in fetchData:', error);
         // On error, we should still mark data as loaded but with empty values
@@ -1637,11 +1657,17 @@ export function GPUs() {
 
   const fetchCloudData = async (clusters, forceRefresh) => {
     try {
-      const jobsData = await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
+      const jobsData = await dashboardCache.get(getManagedJobs, [
+        { allUsers: true },
+      ]);
       const jobs = jobsData?.jobs || [];
       setSshAndKubeJobsData(await getContextJobs(jobs));
       setSshAndKubeJobsDataLoading(false);
-      const cloudData = await getCloudInfrastructure(clusters, jobs, forceRefresh);
+      const cloudData = await getCloudInfrastructure(
+        clusters,
+        jobs,
+        forceRefresh
+      );
 
       // Set cloud data with defensive checks
       if (cloudData) {
@@ -1665,7 +1691,7 @@ export function GPUs() {
       setSshAndKubeJobsData({});
       setSshAndKubeJobsDataLoading(false);
     }
-  }
+  };
 
   // SSH Node Pool data fetching
   const fetchSSHNodePools = async () => {
@@ -1788,7 +1814,6 @@ export function GPUs() {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
-    dashboardCache.invalidate(getInfraData);
 
     if (refreshDataRef.current) {
       refreshDataRef.current({
@@ -2019,8 +2044,11 @@ export function GPUs() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {cloudInfraData.map((cloud) => {
                     // Check if cloud data is complete
-                    const hasCompleteData = cloudDataLoaded && cloud.clusters !== undefined && cloud.jobs !== undefined;
-                    
+                    const hasCompleteData =
+                      cloudDataLoaded &&
+                      cloud.clusters !== undefined &&
+                      cloud.jobs !== undefined;
+
                     return (
                       <tr key={cloud.name} className="hover:bg-gray-50">
                         <td className="p-3 font-medium text-gray-700">
