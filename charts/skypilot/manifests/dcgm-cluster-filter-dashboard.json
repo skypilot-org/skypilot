@@ -527,14 +527,14 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"_node\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"_node\", \"$1\", \"hostname\", \"(.*)\"))",
+          "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"node\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"node\", \"$1\", \"hostname\", \"(.*)\"))",
           "includeAll": true,
           "multi": true,
           "name": "node",
           "options": [],
-          "query": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"_node\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"_node\", \"$1\", \"hostname\", \"(.*)\"))",
+          "query": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"node\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"node\", \"$1\", \"hostname\", \"(.*)\"))",
           "refresh": 1,
-          "regex": "/_node=\"([^\"]+)\"/",
+          "regex": "/node=\"([^\"]+)\"/",
           "type": "query"
         },
         {
