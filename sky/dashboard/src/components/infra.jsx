@@ -176,11 +176,11 @@ export function InfrastructureSection({
                       };
 
                       // Check if contextStats data is available for this context
-                      const hasContextStats = Object.keys(contextStats).length > 0 && contextStats[contextStatsKey];
+                      const hasContextStats = Object.keys(contextStats).length > 0 && contextStats[contextStatsKey] || isDataLoaded;
                       
                       // Check if GPU/Node data is available for this context
-                      const hasGpuData = groupedPerContextGPUs && Object.keys(groupedPerContextGPUs).length > 0;
-                      const hasNodeData = groupedPerNodeGPUs && Object.keys(groupedPerNodeGPUs).length > 0;
+                      const hasGpuData = groupedPerContextGPUs && Object.keys(groupedPerContextGPUs).length > 0 || isDataLoaded;
+                      const hasNodeData = groupedPerNodeGPUs && Object.keys(groupedPerNodeGPUs).length > 0 || isDataLoaded;
 
                       // Format GPU types based on context type
                       const gpuTypes = (() => {
@@ -234,9 +234,15 @@ export function InfrastructureSection({
                           <td className="p-3">
                             {
                             !isJobsDataLoading ? (
+                              jobsData[contextStatsKey]?.jobs || 0 > 0 ? (
                               <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                                {jobsData[contextStatsKey]?.jobs || 0}
+                                {jobsData[contextStatsKey]?.jobs}
                               </span>
+                              ) : (
+                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                  0
+                                </span>
+                              )
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 <CircularProgress size={12} />
