@@ -28,6 +28,8 @@ logger = sky_logging.init_logger(__name__)
 async def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
+    pool: Optional[str] = None,
+    num_jobs: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -35,8 +37,13 @@ async def launch(
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
-    request_id = await context_utils.to_thread(sdk.launch, task, name,
-                                               _need_confirmation)
+    request_id = await context_utils.to_thread(
+        sdk.launch, 
+        task=task,
+        name=name,
+        pool=pool,
+        num_jobs=num_jobs,
+        _need_confirmation=_need_confirmation)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
