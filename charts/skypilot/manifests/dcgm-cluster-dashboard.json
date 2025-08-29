@@ -1251,7 +1251,7 @@
           "refId": "A"
         }
       ],
-      "title": "Memory Usage Percentage",
+      "title": "Memory Utilization",
       "type": "timeseries"
     },
     {
@@ -1356,7 +1356,7 @@
           "refId": "A"
         }
       ],
-      "title": "CPU Usage Percentage",
+      "title": "CPU Utilization",
       "type": "timeseries"
     }
   ],

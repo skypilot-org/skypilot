@@ -731,7 +731,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                     </div>
                   </div>
 
-                  {/* CPU Usage Percentage */}
+                  {/* CPU Utilization */}
                   <div className="bg-white rounded-md border border-gray-200 shadow-sm">
                     <div className="p-2">
                       <iframe
@@ -739,14 +739,14 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         width="100%"
                         height="400"
                         frameBorder="0"
-                        title="CPU Usage Percentage"
+                        title="CPU Utilization"
                         className="rounded"
-                        key={`cpu-usage-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`cpu-util-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
                       />
                     </div>
                   </div>
 
-                  {/* Memory Usage Percentage */}
+                  {/* Memory Utilization */}
                   <div className="bg-white rounded-md border border-gray-200 shadow-sm">
                     <div className="p-2">
                       <iframe
@@ -754,9 +754,9 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         width="100%"
                         height="400"
                         frameBorder="0"
-                        title="Memory Usage Percentage"
+                        title="Memory Utilization"
                         className="rounded"
-                        key={`memory-usage-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`memory-util-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
                       />
                     </div>
                   </div>
