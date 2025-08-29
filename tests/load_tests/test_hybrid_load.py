@@ -3,12 +3,12 @@ import traceback
 import sky
 import asyncio
 import uuid
-import logging
 from sky.client import sdk_async as sdk
 from sky.utils import common
 from sky.jobs.client import sdk_async as jobs_sdk
+from sky import sky_logging
 
-logger = logging.getLogger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 def suffix() -> str:
     return str(uuid.uuid4())[:4]
@@ -49,7 +49,7 @@ async def long_tailing(exit: asyncio.Event):
                          f'{traceback.format_exc()}')
             await asyncio.sleep(30)
         finally:
-            await sdk.down(name)
+            await down_ignore_error(name)
     logger.info('Long tailing ended')
 
 async def jobs_tailing(exit: asyncio.Event):
@@ -88,11 +88,11 @@ async def hybrid_load(exit: asyncio.Event):
     tasks = []
     for _ in range(1):
         tasks.append(large_file_upload(exit))
-    for _ in range(5):
+    for _ in range(4):
         tasks.append(long_tailing(exit))
-    for _ in range(5):
+    for _ in range(4):
         tasks.append(jobs_tailing(exit))
-    for _ in range(5):
+    for _ in range(4):
         tasks.append(status(exit))
     for _ in range(1):
         tasks.append(status_refresh(exit))

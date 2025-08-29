@@ -86,9 +86,9 @@ async def cancel(
 
 
 @usage_lib.entrypoint
-async def tail_logs(name: str,
-                    job_id: Optional[int],
-                    follow: bool,
+async def tail_logs(name: Optional[str] = None,
+                    job_id: Optional[int] = None,
+                    follow: bool = True,
                     controller: bool = False,
                     refresh: bool = False,
                     tail: int = 0,
