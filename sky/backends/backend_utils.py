@@ -3161,6 +3161,7 @@ def get_clusters(
         cluster_str = ', '.join(name for name in remaining_clusters)
         logger.warning(f'{yellow}Cluster{plural} terminated on '
                        f'the cloud: {reset}{bright}{cluster_str}{reset}')
+
     if failed_clusters:
         plural = 's' if len(failed_clusters) > 1 else ''
         logger.warning(f'{yellow}Failed to refresh status for '
