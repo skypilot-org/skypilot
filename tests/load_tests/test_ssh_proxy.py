@@ -189,28 +189,29 @@ def print_statistics(all_results: List[Tuple[float, bool]], parallelism: int):
     failed_commands = total_commands - successful_commands
     success_rate = (successful_commands / total_commands) * 100
 
-    logger.info("\n" + "=" * 60)
-    logger.info("BENCHMARK RESULTS")
-    logger.info("=" * 60)
-    logger.info(f"Total commands executed: {total_commands}")
-    logger.info(f"Successful commands: {successful_commands}")
-    logger.info(f"Failed commands: {failed_commands}")
-    logger.info(f"Success rate: {success_rate:.2f}%")
-    logger.info(f"Parallelism: {parallelism}")
-    logger.info()
+    with open('results.txt', 'a', encoding='utf-8') as f:
+        f.write("\n" + "=" * 60)
+        f.write("BENCHMARK RESULTS")
+        f.write("=" * 60)
+        f.write(f"Total commands executed: {total_commands}")
+        f.write(f"Successful commands: {successful_commands}")
+        f.write(f"Failed commands: {failed_commands}")
+        f.write(f"Success rate: {success_rate:.2f}%")
+        f.write(f"Parallelism: {parallelism}")
+        f.write()
 
     if latencies:
-        logger.info("LATENCY STATISTICS (successful commands only):")
-        logger.info(f"  Minimum: {min(latencies):.4f}s")
-        logger.info(f"  Maximum: {max(latencies):.4f}s")
-        logger.info(f"  Mean: {statistics.mean(latencies):.4f}s")
-        logger.info(f"  Median: {statistics.median(latencies):.4f}s")
+        f.write("LATENCY STATISTICS (successful commands only):")
+        f.write(f"  Minimum: {min(latencies):.4f}s")
+        f.write(f"  Maximum: {max(latencies):.4f}s")
+        f.write(f"  Mean: {statistics.mean(latencies):.4f}s")
+        f.write(f"  Median: {statistics.median(latencies):.4f}s")
         if len(latencies) > 1:
-            logger.info(f"  Std Dev: {statistics.stdev(latencies):.4f}s")
+            f.write(f"  Std Dev: {statistics.stdev(latencies):.4f}s")
     else:
-        logger.info("No successful commands to calculate latency statistics.")
+        f.write("No successful commands to calculate latency statistics.")
 
-    logger.info("=" * 60)
+    f.write("=" * 60)
 
 
 def main():
