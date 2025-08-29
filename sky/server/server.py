@@ -21,6 +21,7 @@ import uuid
 import zipfile
 
 import aiofiles
+import anyio
 import fastapi
 from fastapi.middleware import cors
 import starlette.middleware.base
@@ -847,7 +848,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     client_file_mounts_dir = (
         common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
         'file_mounts')
-    client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
+    await anyio.Path(client_file_mounts_dir).mkdir(parents=True, exist_ok=True)
 
     # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
     # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
@@ -870,7 +871,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
     else:
         chunk_dir = client_file_mounts_dir / upload_id
-        chunk_dir.mkdir(parents=True, exist_ok=True)
+        await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
         zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
 
     try:
@@ -918,7 +919,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     logger.info(f'Uploaded zip file: {zip_file_path}')
     await unzip_file(zip_file_path, client_file_mounts_dir)
     if total_chunks > 1:
-        shutil.rmtree(chunk_dir)
+        await context_utils.to_thread(shutil.rmtree, chunk_dir)
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 
