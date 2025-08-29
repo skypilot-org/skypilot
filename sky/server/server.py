@@ -68,6 +68,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
+from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest
@@ -426,11 +427,15 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
     target = loop.time() + interval
 
     pid = str(os.getpid())
+    lag_threshold = perf_utils.get_loop_lag_threshold()
 
     def tick():
         nonlocal target
         now = loop.time()
         lag = max(0.0, now - target)
+        if lag_threshold is not None and lag > lag_threshold:
+            logger.warning(f'Event loop lag {lag} seconds exceeds threshold '
+                           f'{lag_threshold} seconds.')
         metrics.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.labels(
             pid=pid).observe(lag)
         target = now + interval
@@ -560,17 +565,6 @@ class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return response
 
 
-class AnnotateTaskMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to annotate the task with the request path."""
-
-    async def dispatch(self, request, call_next):
-        task = asyncio.current_task()
-        if task is not None:
-            task.set_name(f'{task.get_name()};path:{request.url.path}')
-        response = await call_next(request)
-        return response
-
-
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 # Middleware wraps in the order defined here. E.g., given
 #   app.add_middleware(Middleware1)
@@ -620,7 +614,6 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
-app.add_middleware(AnnotateTaskMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 app.include_router(users_rest.router, prefix='/users', tags=['users'])

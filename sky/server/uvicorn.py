@@ -202,6 +202,8 @@ class Server(uvicorn.Server):
         lag_threshold = perf_utils.get_loop_lag_threshold()
         if lag_threshold is not None:
             event_loop = asyncio.get_event_loop()
+            # Same as set PYTHONASYNCIODEBUG=1, but with custom threshold.
+            event_loop.set_debug(True)
             event_loop.slow_callback_duration = lag_threshold
         with self.capture_signals():
             asyncio.run(self.serve(*args, **kwargs))

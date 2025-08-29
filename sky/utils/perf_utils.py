@@ -19,5 +19,4 @@ def get_loop_lag_threshold() -> Optional[float]:
                 f'Invalid value for {constants.ENV_VAR_LOOP_LAG_THRESHOLD_MS}:'
                 f' {lag_threshold}')
             return None
-    # TODO(aylei): revert this test change
-    return 1.0
+    return None
