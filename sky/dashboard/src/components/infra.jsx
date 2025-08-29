@@ -1636,6 +1636,7 @@ export function GPUs() {
       setSshAndKubeJobsData(await getContextJobs(jobs));
       setSshAndKubeJobsDataLoading(false);
       const cloudData = await getCloudInfrastructure(clusters, jobs, forceRefresh);
+
       // Set cloud data with defensive checks
       if (cloudData) {
         setCloudInfraData(cloudData.clouds || []);
