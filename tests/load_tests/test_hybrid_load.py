@@ -82,6 +82,7 @@ async def status_refresh(exit: asyncio.Event):
         except Exception as e:
             logger.error(f'Status refresh ended with error: {e}'
                          f'{traceback.format_exc()}')
+
     logger.info('Status refresh ended')
 
 async def hybrid_load(exit: asyncio.Event):

@@ -189,28 +189,28 @@ def print_statistics(all_results: List[Tuple[float, bool]], parallelism: int):
     failed_commands = total_commands - successful_commands
     success_rate = (successful_commands / total_commands) * 100
 
-    print("\n" + "=" * 60)
-    print("BENCHMARK RESULTS")
-    print("=" * 60)
-    print(f"Total commands executed: {total_commands}")
-    print(f"Successful commands: {successful_commands}")
-    print(f"Failed commands: {failed_commands}")
-    print(f"Success rate: {success_rate:.2f}%")
-    print(f"Parallelism: {parallelism}")
-    print()
+    logger.info("\n" + "=" * 60)
+    logger.info("BENCHMARK RESULTS")
+    logger.info("=" * 60)
+    logger.info(f"Total commands executed: {total_commands}")
+    logger.info(f"Successful commands: {successful_commands}")
+    logger.info(f"Failed commands: {failed_commands}")
+    logger.info(f"Success rate: {success_rate:.2f}%")
+    logger.info(f"Parallelism: {parallelism}")
+    logger.info()
 
     if latencies:
-        print("LATENCY STATISTICS (successful commands only):")
-        print(f"  Minimum: {min(latencies):.4f}s")
-        print(f"  Maximum: {max(latencies):.4f}s")
-        print(f"  Mean: {statistics.mean(latencies):.4f}s")
-        print(f"  Median: {statistics.median(latencies):.4f}s")
+        logger.info("LATENCY STATISTICS (successful commands only):")
+        logger.info(f"  Minimum: {min(latencies):.4f}s")
+        logger.info(f"  Maximum: {max(latencies):.4f}s")
+        logger.info(f"  Mean: {statistics.mean(latencies):.4f}s")
+        logger.info(f"  Median: {statistics.median(latencies):.4f}s")
         if len(latencies) > 1:
-            print(f"  Std Dev: {statistics.stdev(latencies):.4f}s")
+            logger.info(f"  Std Dev: {statistics.stdev(latencies):.4f}s")
     else:
-        print("No successful commands to calculate latency statistics.")
+        logger.info("No successful commands to calculate latency statistics.")
 
-    print("=" * 60)
+    logger.info("=" * 60)
 
 
 def main():
