@@ -652,14 +652,16 @@ def _set_metrics_env_var(env: Union[Dict[str, str], os._Environ], metrics: bool,
         deploy: Whether the server is running in deploy mode, which means
             multiple processes might be running.
     """
+    del deploy
     if metrics or os.getenv(constants.ENV_VAR_SERVER_METRICS_ENABLED) == 'true':
         env[constants.ENV_VAR_SERVER_METRICS_ENABLED] = 'true'
-        if deploy:
-            metrics_dir = os.path.join(tempfile.gettempdir(), 'metrics')
-            shutil.rmtree(metrics_dir, ignore_errors=True)
-            os.makedirs(metrics_dir, exist_ok=True)
-            # Refer to https://prometheus.github.io/client_python/multiprocess/
-            env['PROMETHEUS_MULTIPROC_DIR'] = metrics_dir
+        # Always set the metrics dir since we need to collect metrics from
+        # subprocesses like the executor.
+        metrics_dir = os.path.join(tempfile.gettempdir(), 'metrics')
+        shutil.rmtree(metrics_dir, ignore_errors=True)
+        os.makedirs(metrics_dir, exist_ok=True)
+        # Refer to https://prometheus.github.io/client_python/multiprocess/
+        env['PROMETHEUS_MULTIPROC_DIR'] = metrics_dir
 
 
 def check_server_healthy(

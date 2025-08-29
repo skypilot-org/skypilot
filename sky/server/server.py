@@ -425,14 +425,14 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
                            interval: float = 0.1) -> None:
     target = loop.time() + interval
 
-    pid = os.getpid()
+    pid = str(os.getpid())
 
     def tick():
         nonlocal target
         now = loop.time()
         lag = max(0.0, now - target)
         metrics.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.labels(
-            pid=pid()).observe(lag)
+            pid=pid).observe(lag)
         target = now + interval
         loop.call_at(target, tick)
 
