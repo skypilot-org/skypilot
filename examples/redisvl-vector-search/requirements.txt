@@ -1,0 +1,14 @@
+redisvl>=0.8.1
+redis>=6.4.0
+skypilot-nightly[aws,gcp]>=1.0.0.dev20250814
+fastapi>=0.116.1
+uvicorn>=0.35.0
+pydantic>=2.11.7
+streamlit>=1.48.1
+torch>=2.2.2
+transformers>=4.55.0
+numpy==1.26.0
+sentence-transformers>=5.1.0
+pandas>=2.3.1
+tqdm>=4.67.1
+requests>=2.32.4

@@ -1,0 +1,64 @@
+name: embeddings-job
+
+resources:
+  any_of:
+    - infra: gcp
+    - infra: aws
+  infra: gcp
+  accelerators:
+    # Ordered by pricing (cheapest to most expensive)
+    T4: 1
+    L4: 1
+    A10G: 1
+    V100: 1
+  memory: 16+
+  any_of:
+    - use_spot: true
+    - use_spot: false
+
+num_nodes: 1
+
+envs:
+  # These env vars are required but should be passed in at launch time
+  JOB_START_IDX: ''
+  JOB_END_IDX: ''
+  BATCH_SIZE: 10240
+  REDIS_HOST: ''
+  REDIS_PORT: ''
+  REDIS_USER: ''
+  REDIS_PASSWORD: ''
+
+workdir: .
+
+setup: |
+  uv pip install -r requirements.txt
+  sudo apt install unzip -y
+  # Download and unzip the dataset if not already present
+  if [ ! -f /data/dblp-v10.csv ]; then
+    echo "Downloading research papers dataset..."
+    mkdir -p data
+    curl -L -o data/research-papers-dataset.zip https://www.kaggle.com/api/v1/datasets/download/nechbamohammed/research-papers-dataset
+    echo "Unzipping dataset..."
+    
+    unzip -j data/research-papers-dataset.zip -d data/
+    rm data/research-papers-dataset.zip
+    echo "Dataset ready at data/dblp-v10.csv"
+  else
+    echo "Dataset already exists at data/dblp-v10.csv"
+  fi
+
+run: |
+  echo "Processing papers: Records ${JOB_START_IDX}-${JOB_END_IDX}"
+  
+  python compute_embeddings.py \
+    --input-file data/dblp-v10.csv \
+    --schema-file config/redis_schema_papers.yaml \
+    --start-idx ${JOB_START_IDX} \
+    --end-idx ${JOB_END_IDX} \
+    --batch-size ${BATCH_SIZE} \
+    --redis-host ${REDIS_HOST} \
+    --redis-port ${REDIS_PORT} \
+    --redis-user ${REDIS_USER} \
+    --redis-password ${REDIS_PASSWORD}
+  
+  echo "Job completed: Records ${JOB_START_IDX}-${JOB_END_IDX}"
