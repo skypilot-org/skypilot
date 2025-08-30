@@ -2790,7 +2790,7 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
 
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
-    cluster_yaml_obj_copy = copy.deepcopy(cluster_yaml_obj)
+    merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
