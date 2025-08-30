@@ -11,7 +11,7 @@ resources:
 
 envs:
   # make sure this is the same as the source in compute_vectors.yaml
-  EMBEDDINGS_BUCKET_NAME: sky-text-embeddings 
+  EMBEDDINGS_BUCKET_NAME: sky-pool-text-embeddings
 
 file_mounts:
   /output:
