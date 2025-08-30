@@ -1488,11 +1488,12 @@ async def stream(
     if request_id is not None:
         request_task = await requests_lib.get_request_async(request_id)
         if request_task is None:
-            print(f'No task with request ID {request_id}')
+            logger.error(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
         log_path_to_stream = request_task.log_path
         if not log_path_to_stream.exists():
+            logger.error(f'Log file {log_path_to_stream} does not exist')
             # The log file might be deleted by the request GC daemon but the
             # request task is still in the database.
             raise fastapi.HTTPException(
@@ -1870,11 +1871,11 @@ if __name__ == '__main__':
     skyuvicorn.add_timestamp_prefix_for_server_logs()
 
     # Initialize global user state db
-    global_user_state.initialize_and_get_db()
+    # global_user_state.initialize_and_get_db()
     # Initialize request db
-    requests_lib.reset_db_and_logs()
+    # requests_lib.reset_db_and_logs()
     # Restore the server user hash
-    _init_or_restore_server_user_hash()
+    # _init_or_restore_server_user_hash()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')

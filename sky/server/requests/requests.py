@@ -16,6 +16,7 @@ import traceback
 from typing import (Any, AsyncContextManager, Callable, Dict, Generator, List,
                     Optional, Tuple)
 
+import aiosqlite
 import colorama
 import filelock
 
@@ -508,7 +509,7 @@ def _get_request_no_lock(request_id: str) -> Optional[Request]:
 async def _get_request_no_lock_async(request_id: str) -> Optional[Request]:
     """Async version of _get_request_no_lock."""
     assert _DB is not None
-    conn = await _DB.async_conn()
+    conn: aiosqlite.Connection = await _DB.async_conn()
     async with conn.execute(_get_request_sql, (request_id + '%',)) as cursor:
         row = await cursor.fetchone()
         if row is None:
@@ -670,6 +671,7 @@ def _add_or_update_request_no_lock(request: Request):
     with _DB.conn:
         cursor = _DB.conn.cursor()
         cursor.execute(_add_or_update_request_sql, request.to_row())
+        _DB.conn.commit()
 
 
 async def _add_or_update_request_no_lock_async(request: Request):

@@ -292,5 +292,8 @@ class SQLiteConn(threading.local):
         if self._async_conn is None:
             async with self._async_conn_lock:
                 if self._async_conn is None:
-                    self._async_conn = await aiosqlite.connect(self.db_path)
+                    import logging
+                    aiosqlite.core.LOG.setLevel(logging.DEBUG)
+                    self._async_conn = await aiosqlite.connect(self.db_path, timeout=_DB_TIMEOUT_S)
+                    await self._async_conn.execute('PRAGMA journal_mode = WAL')
         return self._async_conn
