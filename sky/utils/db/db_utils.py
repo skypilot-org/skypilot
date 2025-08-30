@@ -287,7 +287,7 @@ class SQLiteConn(threading.local):
         self.cursor = self.conn.cursor()
         create_table(self.cursor, self.conn)
         self._async_conn: Optional[aiosqlite.Connection] = None
-        self._async_conn_lock = asyncio.Lock()
+        self._async_conn_lock: Optional[asyncio.Lock] = None
 
     async def _get_async_conn(self) -> aiosqlite.Connection:
         """Get the shared aiosqlite connection for current thread.
@@ -309,6 +309,12 @@ class SQLiteConn(threading.local):
         read-after-write consistency. When you are adding new async operations
         to SQLiteConn, make sure the txn pattern does not cause this issue.
         """
+        # Python 3.8 binds current event loop to asyncio.Lock(), which requires
+        # a loop available in current thread. Lazy-init the lock to avoid this
+        # dependency. The correctness is guranteed since SQLiteConn is
+        # thread-local so there is no race condition between check and init.
+        if self._async_conn_lock is None:
+            self._async_conn_lock = asyncio.Lock()
         if self._async_conn is None:
             async with self._async_conn_lock:
                 if self._async_conn is None:
