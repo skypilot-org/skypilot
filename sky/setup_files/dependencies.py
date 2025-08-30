@@ -8,8 +8,12 @@ This file is imported by setup.py, so:
 import sys
 from typing import Dict, List
 
+clouds_with_ray = ['ibm', 'docker', 'scp']
+
 install_requires = [
     'wheel<0.46.0',  # https://github.com/skypilot-org/skypilot/issues/5153
+    'setuptools',  # TODO: match version to pyproject.toml once #5153 is fixed
+    'pip',
     'cachetools',
     # NOTE: ray requires click>=7.0.
     # click 8.2.0 has a bug in parsing the command line arguments:
@@ -148,7 +152,7 @@ extras_require: Dict[str, List[str]] = {
         'azure-storage-blob>=12.23.1',
         'msgraph-sdk',
         'msrestazure',
-    ] + local_ray,
+    ],
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances. Reference:
     # https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
@@ -169,7 +173,7 @@ extras_require: Dict[str, List[str]] = {
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
     'scp': local_ray,
-    'oci': ['oci'] + local_ray,
+    'oci': ['oci'],
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
     'kubernetes': [
         'kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'
@@ -200,10 +204,21 @@ extras_require: Dict[str, List[str]] = {
     'server': server_dependencies,
 }
 
-# Nebius needs python3.10. If python 3.9 [all] will not install nebius
+# Calculate which clouds should be included in the [all] installation.
+clouds_for_all = set(extras_require)
+clouds_for_all.remove('remote')
+
 if sys.version_info < (3, 10):
-    filtered_keys = [k for k in extras_require if k != 'nebius']
-    extras_require['all'] = sum(
-        [v for k, v in extras_require.items() if k != 'nebius'], [])
-else:
-    extras_require['all'] = sum(extras_require.values(), [])
+    # Nebius needs python3.10. If python 3.9 [all] will not install nebius
+    clouds_for_all.remove('nebius')
+
+if sys.version_info >= (3, 12):
+    # The version of ray we use does not work with >= 3.12, so avoid clouds
+    # that require ray.
+    clouds_for_all -= set(clouds_with_ray)
+    # vast requires setuptools==51.1.1 which will not work with python >= 3.12
+    # TODO: Remove once https://github.com/vast-ai/vast-sdk/pull/6 is released
+    clouds_for_all.remove('vast')
+
+extras_require['all'] = list(
+    set().union(*[extras_require[cloud] for cloud in clouds_for_all]))
