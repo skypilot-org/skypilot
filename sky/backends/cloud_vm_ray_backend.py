@@ -5213,7 +5213,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{colorama.Fore.YELLOW}WARNING: Kubernetes pod config mismatch detected. Task requires different '
                         f'pod config than the existing cluster. The existing '
                         f'cluster will be used with its current pod config.'
-                        f'To apply use your task's new pod config:\n'
+                        f'To apply use your task\'s new pod config:\n'
                         f'  • Use a new cluster'
                         f'  • Or restart this cluster: sky down {cluster_name}; sky launch -c {cluster_name} ...'
                         f'{colorama.Style.RESET_ALL}')

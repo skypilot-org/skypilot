@@ -2750,7 +2750,7 @@ def combine_pod_config_fields(
                     - name: my-secret
         ```
     """
-    cluster_yaml_obj_copy = copy.deepcopy(cluster_yaml_obj)
+    merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
     if isinstance(cloud, clouds.SSH):
@@ -2777,9 +2777,9 @@ def combine_pod_config_fields(
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
     config_utils.merge_k8s_configs(
-        cluster_yaml_obj_copy['available_node_types']['ray_head_default']
+        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
         ['node_config'], kubernetes_config)
-    return cluster_yaml_obj_copy
+    return merged_cluster_yaml_obj
 
 
 def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
@@ -2812,27 +2812,27 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
         # Service accounts
-        cluster_yaml_obj_copy['provider']['autoscaler_service_account']
+        merged_cluster_yaml_obj['provider']['autoscaler_service_account']
         ['metadata'],
-        cluster_yaml_obj_copy['provider']['autoscaler_role']['metadata'],
-        cluster_yaml_obj_copy['provider']['autoscaler_role_binding']
+        merged_cluster_yaml_obj['provider']['autoscaler_role']['metadata'],
+        merged_cluster_yaml_obj['provider']['autoscaler_role_binding']
         ['metadata'],
-        cluster_yaml_obj_copy['provider']['autoscaler_service_account']
+        merged_cluster_yaml_obj['provider']['autoscaler_service_account']
         ['metadata'],
         # Pod spec
-        cluster_yaml_obj_copy['available_node_types']['ray_head_default']
+        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
         ['node_config']['metadata'],
         # Services for pods
         *[
             svc['metadata']
-            for svc in cluster_yaml_obj_copy['provider']['services']
+            for svc in merged_cluster_yaml_obj['provider']['services']
         ]
     ]
 
     for destination in combination_destinations:
         config_utils.merge_k8s_configs(destination, custom_metadata)
 
-    return cluster_yaml_obj_copy
+    return merged_cluster_yaml_obj
 
 
 def combine_pod_config_fields_and_metadata(
