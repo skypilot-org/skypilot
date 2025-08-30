@@ -2245,15 +2245,15 @@ class KubernetesInstanceType:
         return self.name
 
 
-def construct_ssh_jump_command(
-        private_key_path: str,
-        ssh_jump_ip: str,
-        ssh_jump_port: Optional[int] = None,
-        ssh_jump_user: str = 'sky',
-        proxy_cmd_path: Optional[str] = None,
-        proxy_cmd_target_pod: Optional[str] = None,
-        current_kube_context: Optional[str] = None,
-        current_kube_namespace: Optional[str] = None) -> str:
+def construct_ssh_jump_command(private_key_path: str,
+                               ssh_jump_ip: str,
+                               ssh_jump_port: Optional[int] = None,
+                               ssh_jump_user: str = 'sky',
+                               proxy_cmd_path: Optional[str] = None,
+                               proxy_cmd_target_pod: Optional[str] = None,
+                               current_kube_context: Optional[str] = None,
+                               current_kube_namespace: Optional[str] = None,
+                               target_kind: str = 'pod') -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
@@ -2270,10 +2270,23 @@ def construct_ssh_jump_command(
             current_kube_context is not None) else ''
         kube_namespace_flag = f'-n {current_kube_namespace} ' if (
             current_kube_namespace is not None) else ''
+        if target_kind == 'deployment':
+            # For HA services, we port-forward to the deployment, not a pod.
+            # The deployment name is <cluster-name>-deployment.
+            # proxy_cmd_target_pod is the cluster name with -head suffix,
+            # so we remove it.
+            assert proxy_cmd_target_pod is not None, (
+                'proxy_cmd_target_pod must be provided for deployment')
+            # TODO(andyl): use removesuffix instead of re.sub in the future.
+            cluster_name = re.sub(r'-head$', '', proxy_cmd_target_pod)
+            proxy_cmd_target = f'deployment/{cluster_name}-deployment'
+        else:
+            proxy_cmd_target = f'pod/{proxy_cmd_target_pod}'
+
         ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
                                    f'{kube_context_flag}'
                                    f'{kube_namespace_flag}'
-                                   f'{proxy_cmd_target_pod}\'')
+                                   f'{proxy_cmd_target}\'')
     return ssh_jump_proxy_command
 
 
@@ -2283,6 +2296,7 @@ def get_ssh_proxy_command(
     private_key_path: str,
     context: Optional[str],
     namespace: str,
+    target_kind: str,
 ) -> str:
     """Generates the SSH proxy command to connect to the pod.
 
@@ -2337,7 +2351,10 @@ def get_ssh_proxy_command(
         assert namespace is not None, 'Namespace must be provided for NodePort'
         ssh_jump_port = get_port(k8s_ssh_target, namespace, context)
         ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
+            private_key_path,
+            ssh_jump_ip,
+            ssh_jump_port=ssh_jump_port,
+            target_kind=target_kind)
     else:
         ssh_jump_proxy_command_path = create_proxy_command_script()
         ssh_jump_proxy_command = construct_ssh_jump_command(
@@ -2350,7 +2367,8 @@ def get_ssh_proxy_command(
             # command to make sure SSH still works when the current
             # context/namespace is changed by the user.
             current_kube_context=context,
-            current_kube_namespace=namespace)
+            current_kube_namespace=namespace,
+            target_kind=target_kind)
     return ssh_jump_proxy_command
 
 
@@ -3029,7 +3047,7 @@ def get_spot_label(
     return None, None
 
 
-def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
+def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: str) -> Any:
     """Converts a dictionary to a Kubernetes object.
 
     Useful for comparing two Kubernetes objects. Adapted from
