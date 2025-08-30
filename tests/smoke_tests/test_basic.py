@@ -805,8 +805,10 @@ def test_kubernetes_context_failover(unreachable_context):
       # Set the namespace to test-namespace
       kubectl config set-context kind-skypilot --namespace=test-namespace --context kind-skypilot
     """
-    if smoke_tests_utils.api_server_endpoint_configured_in_env_file():
-        pytest.skip('Skipping test because this depends on Kind clusters.')
+    if smoke_tests_utils.non_docker_remote_api_server():
+        pytest.skip('Skipping test because the Kubernetes configs and '
+                    'credentials are located on the remote API server '
+                    'and not the machine where the test is running')
 
     # Get context that is not kind-skypilot
     contexts = subprocess.check_output('kubectl config get-contexts -o name',

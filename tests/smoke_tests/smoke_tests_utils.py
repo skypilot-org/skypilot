@@ -18,6 +18,7 @@ import requests
 from smoke_tests.docker import docker_utils
 
 import sky
+from sky import clouds
 from sky import serve
 from sky import skypilot_config
 from sky.client import sdk
@@ -32,6 +33,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
+from sky.utils import registry
 from sky.utils import subprocess_utils
 from sky.utils import yaml_utils
 
@@ -823,6 +825,12 @@ def get_api_server_url() -> str:
     return server_common.get_server_url()
 
 
+def non_docker_remote_api_server() -> bool:
+    if is_remote_server_test():
+        return 'host.docker.internal' not in get_api_server_url()
+    return False
+
+
 def get_dashboard_cluster_status_request_id() -> str:
     """Get the status of the cluster from the dashboard."""
     body = payloads.StatusBody(all_users=True,)
@@ -943,3 +951,33 @@ def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
         gpu_name = result.stdout.strip()
         return gpu_name
     return default_gpu
+
+
+def get_enabled_cloud_storages(
+        default_storage_cloud: clouds.AWS) -> List[clouds.Cloud]:
+    """Get the enabled cloud storages."""
+    if is_remote_server_test():
+        prefix = ''
+        env_file = pytest_config_file_override()
+        if env_file is not None:
+            prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
+        command = f'{prefix} sky check | grep enabled | grep storage | awk "{{print \\$2}}"'
+        Test.echo_without_prefix(command)
+        result = subprocess_utils.run(command,
+                                      shell=True,
+                                      check=True,
+                                      capture_output=True,
+                                      text=True)
+        cloud_names = result.stdout.strip().split('\n')
+        enabled_clouds = []
+        for cloud_name in cloud_names:
+            if cloud_name:
+                cloud_name = cloud_name.rstrip(':')
+                try:
+                    cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
+                    if cloud_obj is not None:
+                        enabled_clouds.append(cloud_obj)
+                except ValueError:
+                    pass
+        return enabled_clouds
+    return [default_storage_cloud]
