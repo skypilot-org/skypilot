@@ -98,7 +98,7 @@ class Precondition(abc.ABC):
                 return False
 
             # Check if the request has been cancelled
-            request = await api_requests.get_request_async(self.request_id)
+            request = api_requests.get_request(self.request_id)
             if request is None:
                 logger.error(f'Request {self.request_id} not found')
                 return False
@@ -112,8 +112,7 @@ class Precondition(abc.ABC):
                     return True
                 if status_msg is not None and status_msg != last_status_msg:
                     # Update the status message if it has changed.
-                    async with api_requests.update_request_async(
-                            self.request_id) as req:
+                    with api_requests.update_request(self.request_id) as req:
                         assert req is not None, self.request_id
                         req.status_msg = status_msg
                     last_status_msg = status_msg

@@ -14,7 +14,7 @@ class TestPrecondition(unittest.TestCase):
     def setUp(self):
         self.request_id = 'test-request'
 
-    @mock.patch('sky.server.requests.requests.get_request_async')
+    @mock.patch('sky.server.requests.requests.get_request')
     async def test_precondition_timeout(self, mock_get_request):
         """Test Precondition timeout behavior."""
 
@@ -34,7 +34,7 @@ class TestPrecondition(unittest.TestCase):
         self.assertIsInstance(api_requests.set_request_failed.call_args[0][1],
                               exceptions.RequestCancelled)
 
-    @mock.patch('sky.server.requests.requests.get_request_async')
+    @mock.patch('sky.server.requests.requests.get_request')
     async def test_precondition_cancelled(self, mock_get_request):
         """Test Precondition cancellation behavior."""
 
@@ -51,7 +51,7 @@ class TestPrecondition(unittest.TestCase):
 
         self.assertFalse(result)
 
-    @mock.patch('sky.server.requests.requests.get_request_async')
+    @mock.patch('sky.server.requests.requests.get_request')
     async def test_precondition_check_exception(self, mock_get_request):
         """Test Precondition behavior when check raises exception."""
 
