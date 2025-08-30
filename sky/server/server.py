@@ -1254,20 +1254,25 @@ async def download(download_body: payloads.DownloadBody,
         logs_dir_on_api_server).expanduser().resolve() / zip_filename
 
     try:
-        folders = [
-            str(folder_path.expanduser().resolve())
-            for folder_path in folder_paths
-        ]
-        # Check for optional query parameter to control zip entry structure
-        relative = request.query_params.get('relative', 'home')
-        if relative == 'items':
-            # Dashboard-friendly: entries relative to selected folders
-            storage_utils.zip_files_and_folders(folders,
-                                                zip_path,
-                                                relative_to_items=True)
-        else:
-            # CLI-friendly (default): entries with full paths for mapping
-            storage_utils.zip_files_and_folders(folders, zip_path)
+
+        def _zip_files_and_folders(folder_paths, zip_path):
+            folders = [
+                str(folder_path.expanduser().resolve())
+                for folder_path in folder_paths
+            ]
+            # Check for optional query parameter to control zip entry structure
+            relative = request.query_params.get('relative', 'home')
+            if relative == 'items':
+                # Dashboard-friendly: entries relative to selected folders
+                storage_utils.zip_files_and_folders(folders,
+                                                    zip_path,
+                                                    relative_to_items=True)
+            else:
+                # CLI-friendly (default): entries with full paths for mapping
+                storage_utils.zip_files_and_folders(folders, zip_path)
+
+        await context_utils.to_thread(_zip_files_and_folders, folder_paths,
+                                      zip_path)
 
         # Add home path to the response headers, so that the client can replace
         # the remote path in the zip file to the local path.
