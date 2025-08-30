@@ -427,6 +427,16 @@ def override_sky_config(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
         )
+        if services_account_token_configured_in_env_file():
+            config_file = pytest_config_file_override()
+            config = skypilot_config.parse_and_validate_config_file(config_file)
+            service_account_token = config.get_nested(
+                ('api_server', 'service_account_token'), 'UNKNOWN')
+            override_sky_config_dict.set_nested(
+                ('api_server', 'service_account_token'), service_account_token)
+            echo(
+                f'Overriding service account token {service_account_token[:4]}...'
+            )
     if pytest_controller_cloud():
         cloud = pytest_controller_cloud()
         override_sky_config_dict.set_nested(
