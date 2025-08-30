@@ -434,6 +434,8 @@ def override_sky_config(
                 ('api_server', 'service_account_token'), 'UNKNOWN')
             override_sky_config_dict.set_nested(
                 ('api_server', 'service_account_token'), service_account_token)
+            env_dict[
+                constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR] = service_account_token
             echo(
                 f'Overriding service account token {service_account_token[:4]}...'
             )
