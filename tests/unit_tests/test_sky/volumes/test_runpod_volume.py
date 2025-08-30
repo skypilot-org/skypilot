@@ -317,6 +317,119 @@ class TestRunPodProvisionVolume:
         with pytest.raises(RuntimeError):
             _ = runpod_prov._rest_request('GET', '/fail')
 
+    def test_rest_request_retries_then_success_5xx(self, monkeypatch):
+
+        class _SDK:
+            api_key = 'k'
+
+        monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
+
+        class SeqReq:
+            calls = 0
+            seq = [
+                TestRunPodProvisionVolume._Resp(status_code=500, text='err1'),
+                TestRunPodProvisionVolume._Resp(status_code=500, text='err2'),
+                TestRunPodProvisionVolume._Resp(status_code=200,
+                                                text='{"ok":true}',
+                                                json_obj={'ok': True}),
+            ]
+
+            @staticmethod
+            def request(method, url, headers=None, json=None, timeout=30):
+                SeqReq.calls += 1
+                return SeqReq.seq[min(SeqReq.calls - 1, len(SeqReq.seq) - 1)]
+
+        monkeypatch.setattr(runpod_prov, 'requests', SeqReq)
+        out = runpod_prov._rest_request('GET', '/retry')
+        assert out == {'ok': True}
+        assert SeqReq.calls == 3
+
+    def test_rest_request_network_error_then_success(self, monkeypatch):
+
+        class _SDK:
+            api_key = 'k'
+
+        monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
+
+        class NetSeqReq:
+            calls = 0
+
+            @staticmethod
+            def request(method, url, headers=None, json=None, timeout=30):
+                NetSeqReq.calls += 1
+                if NetSeqReq.calls < 2:
+                    raise RuntimeError('net')
+                return TestRunPodProvisionVolume._Resp(status_code=200,
+                                                       text='{"v":1}',
+                                                       json_obj={'v': 1})
+
+        monkeypatch.setattr(runpod_prov, 'requests', NetSeqReq)
+        out = runpod_prov._rest_request('GET', '/net')
+        assert out == {'v': 1}
+        assert NetSeqReq.calls == 2
+
+    def test_rest_request_network_error_exhaustion(self, monkeypatch):
+
+        class _SDK:
+            api_key = 'k'
+
+        monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
+
+        class AlwaysNetErr:
+            calls = 0
+
+            @staticmethod
+            def request(method, url, headers=None, json=None, timeout=30):
+                AlwaysNetErr.calls += 1
+                raise RuntimeError('net')
+
+        monkeypatch.setattr(runpod_prov, 'requests', AlwaysNetErr)
+        with pytest.raises(RuntimeError):
+            _ = runpod_prov._rest_request('GET', '/net-exhaust')
+        assert AlwaysNetErr.calls == runpod_prov._MAX_RETRIES
+
+    def test_rest_request_retry_exhaustion_5xx(self, monkeypatch):
+
+        class _SDK:
+            api_key = 'k'
+
+        monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
+
+        class Always500:
+            calls = 0
+
+            @staticmethod
+            def request(method, url, headers=None, json=None, timeout=30):
+                Always500.calls += 1
+                return TestRunPodProvisionVolume._Resp(status_code=500,
+                                                       text='boom')
+
+        monkeypatch.setattr(runpod_prov, 'requests', Always500)
+        with pytest.raises(RuntimeError):
+            _ = runpod_prov._rest_request('GET', '/exhaust')
+        assert Always500.calls == runpod_prov._MAX_RETRIES
+
+    def test_rest_request_non_retryable_4xx_single_attempt(self, monkeypatch):
+
+        class _SDK:
+            api_key = 'k'
+
+        monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
+
+        class Always400:
+            calls = 0
+
+            @staticmethod
+            def request(method, url, headers=None, json=None, timeout=30):
+                Always400.calls += 1
+                return TestRunPodProvisionVolume._Resp(status_code=400,
+                                                       text='bad')
+
+        monkeypatch.setattr(runpod_prov, 'requests', Always400)
+        with pytest.raises(RuntimeError):
+            _ = runpod_prov._rest_request('GET', '/bad')
+        assert Always400.calls == 1
+
     def test_list_volumes_variants(self, monkeypatch):
 
         class _SDK:

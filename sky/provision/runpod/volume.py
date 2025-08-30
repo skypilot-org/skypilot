@@ -1,5 +1,6 @@
 """RunPod network volume provisioning."""
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import global_user_state
@@ -16,6 +17,8 @@ logger = sky_logging.init_logger(__name__)
 requests = adaptors_common.LazyImport('requests')
 
 _REST_BASE = 'https://rest.runpod.io/v1'
+_MAX_RETRIES = 3
+_TIMEOUT = 10
 
 
 def _get_api_key() -> str:
@@ -38,15 +41,41 @@ def _rest_request(method: str,
         'Authorization': f'Bearer {_get_api_key()}',
         'Content-Type': 'application/json',
     }
-    resp = requests.request(method, url, headers=headers, json=json, timeout=30)
-    if resp.status_code >= 400:
-        raise RuntimeError(f'RunPod REST error {resp.status_code}: {resp.text}')
-    if resp.text:
+    attempt = 0
+    while True:
+        attempt += 1
         try:
-            return resp.json()
-        except Exception:  # pylint: disable=broad-except
-            return resp.text
-    return None
+            resp = requests.request(method,
+                                    url,
+                                    headers=headers,
+                                    json=json,
+                                    timeout=_TIMEOUT)
+        except Exception as e:  # pylint: disable=broad-except
+            # Retry on transient network errors
+            if attempt >= _MAX_RETRIES:
+                raise RuntimeError(f'RunPod REST network error: {e}') from e
+            time.sleep(1)
+            continue
+
+        # Retry on 5xx and 429
+        if resp.status_code >= 500 or resp.status_code == 429:
+            if attempt >= _MAX_RETRIES:
+                raise RuntimeError(
+                    f'RunPod REST error {resp.status_code}: {resp.text}')
+            time.sleep(1)
+            continue
+
+        if resp.status_code >= 400:
+            # Non-retryable client error
+            raise RuntimeError(
+                f'RunPod REST error {resp.status_code}: {resp.text}')
+
+        if resp.text:
+            try:
+                return resp.json()
+            except Exception:  # pylint: disable=broad-except
+                return resp.text
+        return None
 
 
 def _list_volumes() -> List[Dict[str, Any]]:
