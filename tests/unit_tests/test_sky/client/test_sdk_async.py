@@ -188,7 +188,7 @@ async def test_status(mock_stream_and_get, mock_to_thread, mock_sdk_functions):
         ['test-cluster'],
         common_utils.StatusRefreshMode.FORCE,
         True,
-        include_credentials=False)
+        _include_credentials=False)
     # The function should be called with request_id and the default StreamConfig parameters
     # Based on the error: stream_and_get('test-request-id', None, None, True, None)
     mock_stream_and_get.assert_called_once_with('test-request-id', None, None,
