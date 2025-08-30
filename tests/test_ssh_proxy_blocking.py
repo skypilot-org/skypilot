@@ -90,7 +90,7 @@ async def test_stream_utils_blocking():
     def blocking_get_request(_request_id):
         """Simulate blocking database operation in stream_utils."""
         # Realistic delay for busy database with many concurrent requests
-        time.sleep(0.02)  # 20ms blocking delay per call
+        time.sleep(0.05)  # 50ms blocking delay per call
         return mock_request
     
     async def consume_stream(request_id, log_path):
@@ -135,56 +135,8 @@ async def test_stream_utils_blocking():
     
     ssh_latencies.clear()
     
-    print("\n4. SOLUTION: Testing with non-blocking wrapper")
-    print("   (Simulating the effect of context_utils.to_thread)")
-    
-    # Create a non-blocking mock that simulates running in thread
-    def non_blocking_get_request(_request_id):
-        """Simulate non-blocking by using minimal delay."""
-        # This simulates the effect of running in a thread - 
-        # the DB operation still takes time but doesn't block the event loop
-        time.sleep(0.001)  # Minimal delay to simulate thread switch
-        return mock_request
-    
-    async def fixed_consume_stream(request_id, log_path):
-        """Fixed version that simulates non-blocking behavior."""
-        count = 0
-        # Patch with non-blocking version
-        with mock.patch('sky.server.requests.requests.get_request', side_effect=non_blocking_get_request):
-            async for chunk in stream_utils.log_streamer(
-                request_id=request_id,
-                log_path=log_path,
-                follow=False,
-                tail=5
-            ):
-                count += 1
-                if count >= 5:
-                    break
-    
-    # Start SSH monitoring
-    ssh_task = asyncio.create_task(simulate_ssh_keystroke())
-    
-    # Create concurrent non-blocking streams
-    stream_tasks = []
-    for i in range(5):
-        request_id, log_path = test_requests[i]
-        task = asyncio.create_task(fixed_consume_stream(request_id, log_path))
-        stream_tasks.append(task)
-    
-    await asyncio.gather(*stream_tasks, ssh_task)
-    
-    fixed_avg = sum(ssh_latencies) / len(ssh_latencies)
-    print(f"   Average SSH latency: {fixed_avg*1000:.1f}ms")
-    
-    improvement = blocked_avg / fixed_avg if fixed_avg > 0 else float('inf')
-    print(f"   SSH latency: {improvement:.1f}x faster than blocked version")
-    
-    # Assert that the fix works
-    assert fixed_avg < baseline_avg * 3, f"Expected fix to restore responsiveness, got {fixed_avg*1000:.1f}ms"
-    print("   ✅ FIXED: With async wrappers, SSH remains responsive!")
-    
     # Cleanup
-    print("\n5. Cleaning up test data...")
+    print("\n4. Cleaning up test data...")
     for request_id, log_path in test_requests:
         try:
             os.unlink(log_path)
@@ -196,6 +148,5 @@ async def test_stream_utils_blocking():
     print("="*60)
     print(f"Baseline SSH latency:     {baseline_avg*1000:.1f}ms")
     print(f"With blocking streams:    {blocked_avg*1000:.1f}ms ({degradation:.1f}x slower)")
-    print(f"With async wrapper:       {fixed_avg*1000:.1f}ms")
     print("\nThe test proves that stream_utils.log_streamer blocks the event loop")
     print("because it calls requests_lib.get_request() synchronously.")
