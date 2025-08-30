@@ -2929,6 +2929,7 @@ def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
+    include_credentials: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -2941,17 +2942,14 @@ def get_clusters(
     of the clusters.
 
     Args:
-        include_controller: Whether to include controllers, e.g. jobs controller
-            or sky serve controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
-        cloud_filter: Sets which clouds to filer through from the global user
-            state. Supports three values, 'all' for all clouds, 'public' for
-            public clouds only, and 'local' for only local clouds.
         cluster_names: If provided, only return records for the given cluster
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
+        include_credentials: If True, include cluster ssh credentials in the
+            return value.
         _include_is_managed: Whether to force include clusters created by the
             controller.
 
@@ -2995,29 +2993,34 @@ def get_clusters(
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
 
-    def _update_records_with_credentials_and_resources_str(
+    def _get_records_with_handle(
+            records: List[Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Filter for records that have a handle"""
+        return [
+            record for record in records
+            if record is not None and record['handle'] is not None
+        ]
+
+    def _update_records_with_resources_str(
             records: List[Optional[Dict[str, Any]]]) -> None:
-        """Add the credentials to the record.
-
-        This is useful for the client side to setup the ssh config of the
-        cluster.
-        """
-        records_with_handle = []
-
-        # only act on records that have a handle
-        for record in records:
-            if record is None:
-                continue
+        """Add resource str to record"""
+        for record in _get_records_with_handle(records):
             handle = record['handle']
-            if handle is None:
-                continue
             record[
                 'resources_str'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=True)
             record[
                 'resources_str_full'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=False)
-            records_with_handle.append(record)
+
+    def _update_records_with_credentials(
+            records: List[Optional[Dict[str, Any]]]) -> None:
+        """Add the credentials to the record.
+
+        This is useful for the client side to setup the ssh config of the
+        cluster.
+        """
+        records_with_handle = _get_records_with_handle(records)
         if len(records_with_handle) == 0:
             return
 
@@ -3050,12 +3053,8 @@ def get_clusters(
     def _update_records_with_resources(
             records: List[Optional[Dict[str, Any]]]) -> None:
         """Add the resources to the record."""
-        for record in records:
-            if record is None:
-                continue
+        for record in _get_records_with_handle(records):
             handle = record['handle']
-            if handle is None:
-                continue
             record['nodes'] = handle.launched_nodes
             if handle.launched_resources is None:
                 continue
@@ -3072,7 +3071,9 @@ def get_clusters(
                 if handle.launched_resources.accelerators else None)
 
     # Add auth_config to the records
-    _update_records_with_credentials_and_resources_str(records)
+    _update_records_with_resources_str(records)
+    if include_credentials:
+        _update_records_with_credentials(records)
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
         _update_records_with_resources(records)
@@ -3112,7 +3113,9 @@ def get_clusters(
                 cluster_name,
                 force_refresh_statuses=force_refresh_statuses,
                 acquire_per_cluster_status_lock=True)
-            _update_records_with_credentials_and_resources_str([record])
+            _update_records_with_resources_str([record])
+            if include_credentials:
+                _update_records_with_credentials([record])
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
