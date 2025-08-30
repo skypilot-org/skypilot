@@ -161,6 +161,7 @@ Executing a distributed Ray program
    **To kill your Ray cluster**, use `ray.shutdown() <https://docs.ray.io/en/latest/ray-core/api/doc/ray.shutdown.html>`_ in Python or kill the Ray processes directly:
    
    .. code-block:: bash
+
       # Kill specific Ray head process started on port 6379 (user's Ray cluster)
       pkill -f "ray start --head --port 6379"
 
