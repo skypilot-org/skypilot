@@ -2284,15 +2284,9 @@ def test_kubernetes_pod_config_change_detection():
                 f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_1_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 1"',
                 # Launch task with modified pod_config - should show warning
                 # Verify the job succeeds despite the warning and check that environment variables are not updated
-                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_2_path} 2>&1); echo "$s"; echo; echo; '
-                f'echo "=== DEBUG: Looking for warning message ==="; echo "$s" | grep "Task requires different Kubernetes pod config" && '
-                f'echo "=== DEBUG: Looking for TEST_VAR_1 = 1 ==="; echo "$s" | grep "TEST_VAR_1 = 1" && '
-                f'echo "=== DEBUG: Looking for TEST_VAR_2 = (showing exact match) ==="; echo "$s" | grep "TEST_VAR_2" | cat -A && '
-                f'echo "=== DEBUG: Testing different patterns ==="; '
-                f'echo "$s" | grep "TEST_VAR_2 =" && echo "Pattern 1 matched" || echo "Pattern 1 failed"; '
-                f'echo "$s" | grep "TEST_VAR_2 =$" && echo "Pattern 2 matched" || echo "Pattern 2 failed"; '
-                f'echo "$s" | grep "TEST_VAR_2 = $" && echo "Pattern 3 matched" || echo "Pattern 3 failed"; '
-                f'echo "$s" | grep "TEST_VAR_2"',
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_2_path} 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Task requires different pod config" && '
+                f'echo "$s" | grep "TEST_VAR_1 = 1" && '
+                f'echo "$s" | grep "TEST_VAR_2 ="',
                 # Down and launch again to get the new pod_config
                 f'sky down -y {name}',
                 f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_2_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 2" && '
