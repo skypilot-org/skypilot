@@ -34,13 +34,12 @@ The preloader manages these functions across all pages:
 **Dynamic Functions (with arguments):**
 
 - `getEnabledClouds(workspaceName)` - Used by: workspaces
-- `getInfraData` - Special composite function for infra page (GPU + Cloud data)
 
 **Page Requirements:**
 
 - **Clusters**: getClusters, getWorkspaces
 - **Jobs**: getManagedJobs, getClusters, getWorkspaces
-- **Infra**: getClusters, getManagedJobs, getInfraData (composite: GPU + Cloud data)
+- **Infra**: getClusters, getManagedJobs
 - **Workspaces**: getWorkspaces, getClusters, getManagedJobs, getEnabledClouds
 - **Users**: getUsers, getClusters, getManagedJobs
 - **Volumes**: getVolumes
