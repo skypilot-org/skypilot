@@ -1397,7 +1397,7 @@ async def local_down(request: fastapi.Request) -> None:
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     while True:
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}', flush=True)
             raise fastapi.HTTPException(
@@ -1486,13 +1486,14 @@ async def stream(
 
     # Original plain text streaming logic
     if request_id is not None:
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
         if request_task is None:
-            print(f'No task with request ID {request_id}')
+            logger.error(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
         log_path_to_stream = request_task.log_path
         if not log_path_to_stream.exists():
+            logger.error(f'Log file {log_path_to_stream} does not exist')
             # The log file might be deleted by the request GC daemon but the
             # request task is still in the database.
             raise fastapi.HTTPException(
@@ -1581,7 +1582,7 @@ async def api_status(
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
-            request_task = requests_lib.get_request(request_id)
+            request_task = await requests_lib.get_request_async(request_id)
             if request_task is None:
                 continue
             encoded_request_tasks.append(request_task.readable_encode())
@@ -1654,13 +1655,33 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
 async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                                    cluster_name: str) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
+    # Run the entire websocket proxy operation in a separate thread with
+    # its own event loop to avoid blocking the main FastAPI event loop.
+    await context_utils.to_thread(_ssh_proxy_worker,
+                                  websocket, cluster_name)
+
+
+def _ssh_proxy_worker(websocket: fastapi.WebSocket,
+                                       cluster_name: str) -> None:
+    """Synchronous wrapper to run the kubernetes pod SSH proxy in a new event
+    loop within a separate thread."""
+    # Create a new event loop for this thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(
+            _pipe_ssh_proxy(websocket, cluster_name))
+    finally:
+        loop.close()
+
+
+async def _pipe_ssh_proxy(websocket: fastapi.WebSocket,
+                          cluster_name: str) -> None:
+    """Maintain the pipe between kubectl port-forward and the websocket."""
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
-
-    # Run core.status in another thread to avoid blocking the event loop.
-    cluster_records = await context_utils.to_thread(core.status,
-                                                    cluster_name,
-                                                    all_users=True)
+    # Get cluster status
+    cluster_records = core.status(cluster_name, all_users=True)
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         raise fastapi.HTTPException(
@@ -1681,7 +1702,6 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT)
     logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
-
     # Wait for port-forward to be ready and get the local port
     local_port = None
     assert proc.stdout is not None
@@ -1726,6 +1746,11 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
     finally:
         proc.terminate()
+
+async def _pipe_ssh_proxy(cluster_name: str,
+                          websocket: fastapi.WebSocket,
+                          proc: asyncio.subprocess.Process) -> None:
+    """Maintain the pipe between kubectl port-forward and the websocket."""
 
 
 @app.get('/all_contexts')
@@ -1791,7 +1816,7 @@ async def complete_volume_name(incomplete: str,) -> List[str]:
 
 @app.get('/api/completion/api_request')
 async def complete_api_request(incomplete: str,) -> List[str]:
-    return requests_lib.get_api_request_ids_start_with(incomplete)
+    return await requests_lib.get_api_request_ids_start_with(incomplete)
 
 
 @app.get('/dashboard/{full_path:path}')
@@ -1870,11 +1895,11 @@ if __name__ == '__main__':
     skyuvicorn.add_timestamp_prefix_for_server_logs()
 
     # Initialize global user state db
-    global_user_state.initialize_and_get_db()
+    # global_user_state.initialize_and_get_db()
     # Initialize request db
-    requests_lib.reset_db_and_logs()
+    # requests_lib.reset_db_and_logs()
     # Restore the server user hash
-    _init_or_restore_server_user_hash()
+    # _init_or_restore_server_user_hash()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')
