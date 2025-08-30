@@ -5210,11 +5210,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         actual_cluster_yaml_obj):
                     # pylint: disable=line-too-long
                     logger.warning(
-                        f'{colorama.Fore.YELLOW}Task requires different Kubernetes '
+                        f'{colorama.Fore.YELLOW}WARNING: Kubernetes pod config mismatch detected. Task requires different '
                         f'pod config than the existing cluster. The existing '
-                        f'cluster will be used with its current pod config. To use '
-                        f'the new pod config: specify a new cluster name, or down '
-                        f'the existing cluster first: sky down {cluster_name}'
+                        f'cluster will be used with its current pod config.'
+                        f'To apply use your task's new pod config:\n'
+                        f'  • Use a new cluster'
+                        f'  • Or restart this cluster: sky down {cluster_name}; sky launch -c {cluster_name} ...'
                         f'{colorama.Style.RESET_ALL}')
 
             return RetryingVmProvisioner.ToProvisionConfig(
