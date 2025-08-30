@@ -16,6 +16,7 @@ import resource
 import shutil
 import sys
 import threading
+import time
 from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
@@ -88,6 +89,43 @@ logger = sky_logging.init_logger(__name__)
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
 # need to be detached from the main requests queue. Otherwise, the streaming
 # response will block other requests from being processed.
+
+# Dedicated event loop for kubernetes_pod_ssh_proxy endpoint
+_k8s_ssh_proxy_loop: Optional[asyncio.AbstractEventLoop] = None
+_k8s_ssh_proxy_thread: Optional[threading.Thread] = None
+_k8s_ssh_proxy_active_connections = 0
+_k8s_ssh_proxy_lock = threading.Lock()
+# Threshold for fallback to main loop (configurable via env var)
+_k8s_ssh_proxy_dedicated_loop_threshold = int(
+    os.environ.get('SKYPILOT_K8S_SSH_PROXY_DEDICATED_THRESHOLD', '100'))
+
+
+def _init_k8s_ssh_proxy_loop():
+    """Initialize the dedicated event loop for kubernetes_pod_ssh_proxy."""
+    global _k8s_ssh_proxy_loop, _k8s_ssh_proxy_thread
+    
+    def run_loop():
+        global _k8s_ssh_proxy_loop
+        _k8s_ssh_proxy_loop = uvloop.new_event_loop()
+        asyncio.set_event_loop(_k8s_ssh_proxy_loop)
+        _k8s_ssh_proxy_loop.run_forever()
+    
+    _k8s_ssh_proxy_thread = threading.Thread(target=run_loop, daemon=True, 
+                                             name='k8s-ssh-proxy-loop')
+    _k8s_ssh_proxy_thread.start()
+    
+    # Wait for the loop to be initialized
+    while _k8s_ssh_proxy_loop is None:
+        time.sleep(0.01)
+
+
+async def _run_on_k8s_ssh_proxy_loop(coro):
+    """Run a coroutine on the dedicated kubernetes_pod_ssh_proxy event loop."""
+    if _k8s_ssh_proxy_loop is None:
+        _init_k8s_ssh_proxy_loop()
+    
+    future = asyncio.run_coroutine_threadsafe(coro, _k8s_ssh_proxy_loop)
+    return await asyncio.wrap_future(future)
 
 
 def _basic_auth_401_response(content: str):
@@ -446,8 +484,17 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             # can safely ignore the error if the task is already scheduled.
             logger.debug(f'Request {event.id} already exists.')
     asyncio.create_task(cleanup_upload_ids())
+    
+    # Initialize the dedicated event loop for kubernetes_pod_ssh_proxy
+    _init_k8s_ssh_proxy_loop()
+    logger.info('Initialized dedicated event loop for kubernetes_pod_ssh_proxy')
+    
     yield
     # Shutdown: Add any cleanup code here if needed
+    global _k8s_ssh_proxy_loop
+    if _k8s_ssh_proxy_loop is not None:
+        _k8s_ssh_proxy_loop.call_soon_threadsafe(_k8s_ssh_proxy_loop.stop)
+        logger.info('Stopped dedicated event loop for kubernetes_pod_ssh_proxy')
 
 
 # Add a new middleware class to handle /internal/dashboard prefix
@@ -1650,82 +1697,146 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     )
 
 
+async def _kubernetes_pod_ssh_proxy_impl(websocket: fastapi.WebSocket,
+                                         cluster_name: str,
+                                         on_dedicated_loop: bool) -> None:
+    """Internal implementation of kubernetes_pod_ssh_proxy.
+    
+    Args:
+        websocket: The WebSocket connection
+        cluster_name: Name of the Kubernetes cluster
+        on_dedicated_loop: Whether this is running on the dedicated loop
+    """
+    global _k8s_ssh_proxy_active_connections
+    
+    # Track connection if on dedicated loop
+    if on_dedicated_loop:
+        with _k8s_ssh_proxy_lock:
+            _k8s_ssh_proxy_active_connections += 1
+    
+    loop_type = "dedicated" if on_dedicated_loop else "main"
+    logger.info(f'WebSocket connection accepted for cluster: {cluster_name} '
+                f'on {loop_type} event loop (active: {_k8s_ssh_proxy_active_connections})')
+    
+    # Update Prometheus metrics
+    metrics.sky_k8s_ssh_proxy_connections.labels(event_loop=loop_type).inc()
+    metrics.sky_k8s_ssh_proxy_connections_total.labels(
+        event_loop=loop_type, cluster_name=cluster_name).inc()
+    
+    start_time = time.time()
+    try:
+        # Run core.status in another thread to avoid blocking the event loop.
+        cluster_records = await context_utils.to_thread(core.status,
+                                                        cluster_name,
+                                                        all_users=True)
+        cluster_record = cluster_records[0]
+        if cluster_record['status'] != status_lib.ClusterStatus.UP:
+            raise fastapi.HTTPException(
+                status_code=400, detail=f'Cluster {cluster_name} is not running')
+
+        handle = cluster_record['handle']
+        assert handle is not None, 'Cluster handle is None'
+        if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Cluster {cluster_name} is not a Kubernetes cluster'
+                'Use ssh to connect to the cluster instead.')
+
+        kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
+            port_forward=[(None, 22)])
+        proc = await asyncio.create_subprocess_exec(
+            *kubectl_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT)
+        logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
+
+        # Wait for port-forward to be ready and get the local port
+        local_port = None
+        assert proc.stdout is not None
+        while True:
+            stdout_line = await proc.stdout.readline()
+            if stdout_line:
+                decoded_line = stdout_line.decode()
+                logger.info(f'kubectl port-forward stdout: {decoded_line}')
+                if 'Forwarding from 127.0.0.1' in decoded_line:
+                    port_str = decoded_line.split(':')[-1]
+                    local_port = int(port_str.replace(' -> ', ':').split(':')[0])
+                    break
+            else:
+                await websocket.close()
+                return
+
+        logger.info(f'Starting port-forward to local port: {local_port}')
+        try:
+            # Connect to the local port
+            reader, writer = await asyncio.open_connection('127.0.0.1', local_port)
+
+            async def websocket_to_ssh():
+                try:
+                    async for message in websocket.iter_bytes():
+                        writer.write(message)
+                        await writer.drain()
+                except fastapi.WebSocketDisconnect:
+                    pass
+                writer.close()
+
+            async def ssh_to_websocket():
+                try:
+                    while True:
+                        data = await reader.read(1024)
+                        if not data:
+                            break
+                        await websocket.send_bytes(data)
+                except Exception:  # pylint: disable=broad-except
+                    pass
+                await websocket.close()
+
+            await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
+        finally:
+            proc.terminate()
+    finally:
+        # Decrement connection count if on dedicated loop
+        if on_dedicated_loop:
+            with _k8s_ssh_proxy_lock:
+                _k8s_ssh_proxy_active_connections -= 1
+            logger.info(f'Closed connection to {cluster_name} on {loop_type} loop '
+                       f'(remaining: {_k8s_ssh_proxy_active_connections})')
+        
+        # Update Prometheus metrics
+        metrics.sky_k8s_ssh_proxy_connections.labels(event_loop=loop_type).dec()
+        # Record connection duration
+        duration = time.time() - start_time
+        metrics.sky_k8s_ssh_proxy_connection_duration_seconds.labels(
+            event_loop=loop_type, cluster_name=cluster_name).observe(duration)
+
+
 @app.websocket('/kubernetes-pod-ssh-proxy')
 async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                                    cluster_name: str) -> None:
-    """Proxies SSH to the Kubernetes pod with websocket."""
+    """Proxies SSH to the Kubernetes pod with websocket.
+    
+    Uses a dedicated event loop for better isolation, but falls back to
+    the main loop when the dedicated loop has too many connections.
+    """
+    # Accept the websocket on the main loop first
     await websocket.accept()
-    logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
-
-    # Run core.status in another thread to avoid blocking the event loop.
-    cluster_records = await context_utils.to_thread(core.status,
-                                                    cluster_name,
-                                                    all_users=True)
-    cluster_record = cluster_records[0]
-    if cluster_record['status'] != status_lib.ClusterStatus.UP:
-        raise fastapi.HTTPException(
-            status_code=400, detail=f'Cluster {cluster_name} is not running')
-
-    handle = cluster_record['handle']
-    assert handle is not None, 'Cluster handle is None'
-    if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail=f'Cluster {cluster_name} is not a Kubernetes cluster'
-            'Use ssh to connect to the cluster instead.')
-
-    kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
-        port_forward=[(None, 22)])
-    proc = await asyncio.create_subprocess_exec(
-        *kubectl_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT)
-    logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
-
-    # Wait for port-forward to be ready and get the local port
-    local_port = None
-    assert proc.stdout is not None
-    while True:
-        stdout_line = await proc.stdout.readline()
-        if stdout_line:
-            decoded_line = stdout_line.decode()
-            logger.info(f'kubectl port-forward stdout: {decoded_line}')
-            if 'Forwarding from 127.0.0.1' in decoded_line:
-                port_str = decoded_line.split(':')[-1]
-                local_port = int(port_str.replace(' -> ', ':').split(':')[0])
-                break
-        else:
-            await websocket.close()
-            return
-
-    logger.info(f'Starting port-forward to local port: {local_port}')
-    try:
-        # Connect to the local port
-        reader, writer = await asyncio.open_connection('127.0.0.1', local_port)
-
-        async def websocket_to_ssh():
-            try:
-                async for message in websocket.iter_bytes():
-                    writer.write(message)
-                    await writer.drain()
-            except fastapi.WebSocketDisconnect:
-                pass
-            writer.close()
-
-        async def ssh_to_websocket():
-            try:
-                while True:
-                    data = await reader.read(1024)
-                    if not data:
-                        break
-                    await websocket.send_bytes(data)
-            except Exception:  # pylint: disable=broad-except
-                pass
-            await websocket.close()
-
-        await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
-    finally:
-        proc.terminate()
+    
+    # Decide which loop to use based on current load
+    use_dedicated_loop = False
+    with _k8s_ssh_proxy_lock:
+        if _k8s_ssh_proxy_active_connections < _k8s_ssh_proxy_dedicated_loop_threshold:
+            use_dedicated_loop = True
+    
+    if use_dedicated_loop:
+        # Run on the dedicated event loop for better isolation
+        await _run_on_k8s_ssh_proxy_loop(
+            _kubernetes_pod_ssh_proxy_impl(websocket, cluster_name, True)
+        )
+    else:
+        # Fallback to main loop when dedicated loop is busy
+        logger.info(f'Using main event loop for {cluster_name} due to high load '
+                   f'(threshold: {_k8s_ssh_proxy_dedicated_loop_threshold})')
+        await _kubernetes_pod_ssh_proxy_impl(websocket, cluster_name, False)
 
 
 @app.get('/all_contexts')
