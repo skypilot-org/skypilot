@@ -177,6 +177,7 @@ class TestFormatVolumeTable:
             'launched_at': 1234567890,
             'last_attached_at': 1234567891,
             'status': 'READY',
+            'usedby_pods': ['p1'],
             'last_use': 'sky volumes apply'
         }]
 
@@ -185,6 +186,7 @@ class TestFormatVolumeTable:
         assert isinstance(result, str)
         assert 'test-volume-1' in result
         assert 'k8s-pvc' in result
+        assert 'p1' in result
 
     def test_format_volume_table_unknown_volume_type(self, monkeypatch):
         """Test format_volume_table with unknown volume type."""
@@ -231,6 +233,8 @@ class TestFormatVolumeTable:
             'last_attached_at': 1234567891,
             'status': 'READY',
             'last_use': 'sky volumes apply',
+            'usedby_pods': ['p1'],
+            'usedby_clusters': ['c1'],
             'name_on_cloud': 'test-volume-1-abc123'
         }]
 
@@ -241,6 +245,7 @@ class TestFormatVolumeTable:
         assert 'test-volume-1-abc123' in result
         assert 'gp2' in result
         assert 'ReadWriteOnce' in result
+        assert 'c1' in result
 
 
 class TestVolumeTableABC:
@@ -274,3 +279,85 @@ class TestVolumeTableABC:
         assert isinstance(table, utils.VolumeTable)
         assert hasattr(table, 'format')
         assert callable(table.format)
+
+
+class TestRunPodVolumeTable:
+
+    def test_runpod_volume_table_basic(self):
+        from sky.volumes import utils as vutils
+        volumes = [{
+            'name': 'rpv-1',
+            'type': 'runpod-network-volume',
+            'cloud': 'runpod',
+            'region': 'us',
+            'zone': 'iad-1',
+            'size': '100',
+            'user_name': 'u',
+            'workspace': 'w',
+            'launched_at': 0,
+            'last_attached_at': None,
+            'status': 'READY',
+            'usedby_clusters': ['c1', 'c2']
+        }]
+        table = vutils.RunPodVolumeTable(volumes, show_all=False)
+        out = table.format()
+        assert 'RunPod Network Volumes:' in out
+        assert 'rpv-1' in out
+        assert 'runpod/us/iad-1' in out
+        assert '100Gi' in out
+        assert 'c1, c2'[:vutils.constants.USED_BY_TRUNC_LENGTH] in out
+
+    def test_runpod_volume_table_show_all(self):
+        from sky.volumes import utils as vutils
+        volumes = [{
+            'name': 'rpv-2',
+            'type': 'runpod-network-volume',
+            'cloud': 'runpod',
+            'region': None,
+            'zone': 'iad-1',
+            'size': '50',
+            'user_name': 'u',
+            'workspace': 'w',
+            'launched_at': 0,
+            'last_attached_at': 1234567890,
+            'status': 'READY',
+            'usedby_pods': ['p1'],
+            'name_on_cloud': 'vol-abc'
+        }]
+        table = vutils.RunPodVolumeTable(volumes, show_all=True)
+        out = table.format()
+        assert 'RunPod Network Volumes:' in out
+        assert 'rpv-2' in out
+        assert '/iad-1' in out
+        assert 'vol-abc' in out
+        assert 'p1' in out
+
+    def test_get_infra_str(self):
+        from sky.volumes.utils import _get_infra_str
+        assert _get_infra_str(None, None, None) == ''
+        assert _get_infra_str('runpod', None, None) == 'runpod'
+        assert _get_infra_str('runpod', 'us', None) == 'runpod/us'
+        assert _get_infra_str('runpod', 'us', 'iad-1') == 'runpod/us/iad-1'
+
+    def test_format_volume_table_mixed_types_and_separator(self):
+        from sky.volumes import utils as vutils
+        volumes = [{
+            'name': 'p1',
+            'type': 'k8s-pvc',
+            'cloud': 'kubernetes',
+            'region': 'ctx',
+            'zone': None,
+            'size': '10'
+        }, {
+            'name': 'r1',
+            'type': 'runpod-network-volume',
+            'cloud': 'runpod',
+            'region': 'us',
+            'zone': 'iad-1',
+            'size': '20'
+        }]
+        out = vutils.format_volume_table(volumes, show_all=False)
+        # Both headers present and separated by blank line
+        assert 'Kubernetes PVCs:' in out
+        assert 'RunPod Network Volumes:' in out
+        assert '\n\n' in out

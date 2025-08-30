@@ -93,7 +93,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         network_volume_id = volume_mount.get('VolumeIdOnCloud')
         volume_mount_path = volume_mount.get('MountPath')
         if network_volume_id is None or volume_mount_path is None:
-            raise ValueError(
+            raise RuntimeError(
                 'Network volume ID and mount path must be specified.')
     for _ in range(to_start_count):
         node_type = 'head' if head_instance_id is None else 'worker'

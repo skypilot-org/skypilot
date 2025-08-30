@@ -322,11 +322,13 @@ class TestVolume:
 
         # Missing name (valid type) -> schema validation error during normalize
         volume = volume_lib.Volume.from_dict(invalid_configs[0])
-        with pytest.raises(exceptions.InvalidSkyPilotConfigError):
+        with pytest.raises(exceptions.InvalidSkyPilotConfigError) as exc_info:
             volume.normalize_config()
+        assert 'Invalid volumes config' in str(exc_info.value)
         # Missing type -> factory should raise immediately
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as exc_info:
             _ = volume_lib.Volume.from_dict(invalid_configs[1])
+        assert 'Invalid volume type' in str(exc_info.value)
 
     def test_volume_schema_validation_invalid_type(self, monkeypatch):
         """Test volume schema validation with invalid type."""
@@ -358,8 +360,9 @@ class TestVolume:
         ]
 
         for config in invalid_configs:
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError) as exc_info:
                 _ = volume_lib.Volume.from_dict(config)
+        assert 'Invalid volume type' in str(exc_info.value)
 
     def test_volume_schema_validation_invalid_size_pattern(self, monkeypatch):
         """Test volume schema validation with invalid size pattern."""
@@ -487,8 +490,9 @@ class TestVolume:
         ]
 
         # Case 1: wrong-cased type should fail at factory
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as exc_info:
             _ = volume_lib.Volume.from_dict(invalid_configs[0])
+        assert 'Invalid volume type' in str(exc_info.value)
         # Case 2: wrong-cased access_mode should fail during normalize
         volume = volume_lib.Volume.from_dict(invalid_configs[1])
         with pytest.raises(exceptions.InvalidSkyPilotConfigError):
@@ -726,8 +730,10 @@ class TestVolume:
             'size': '100'
         }
         vol = volume_lib.Volume.from_dict(cfg)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as exc_info:
             vol.normalize_config()
+        assert 'RunPod DataCenterId is required to create a network volume' in str(
+            exc_info.value)
 
     def test_runpod_volume_min_size_enforced(self, monkeypatch):
         from sky.utils import volume as utils_volume
@@ -749,5 +755,7 @@ class TestVolume:
             'size': str(max(1, min_size - 1))
         }
         vol = volume_lib.Volume.from_dict(cfg)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as exc_info:
             vol.normalize_config()
+        assert 'RunPod network volume size must be at least' in str(
+            exc_info.value)

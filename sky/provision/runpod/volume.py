@@ -7,6 +7,7 @@ from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import runpod
+from sky.utils import common_utils
 from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -176,15 +177,17 @@ def get_volume_usedby(
     # Map pod names back to SkyPilot cluster names using heuristics.
     clusters = global_user_state.get_clusters()
     cluster_names: List[str] = []
+    user_hash = common_utils.get_user_hash()
     for pod_name in usedby_pod_names:
         matched = None
         for c in clusters:
             display = c.get('name')
             if not display:
                 continue
-            # Heuristic: RunPod pod name is often f"{cluster}-{role}"
+            # Heuristic: RunPod pod name is f"{cluster}-{user_hash}-{xxx}"
             # This can be wrong.
-            if pod_name.startswith(display + '-') or pod_name == display:
+            cluster_prefix = display + '-' + user_hash + '-'
+            if pod_name.startswith(cluster_prefix):
                 matched = display
                 break
         if matched and matched not in cluster_names:
