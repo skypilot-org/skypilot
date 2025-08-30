@@ -1212,6 +1212,22 @@ def test_managed_jobs_logs_sync_down(generic_cloud: str):
 def _get_ha_kill_test(name: str, generic_cloud: str,
                       status: sky.ManagedJobStatus, first_timeout: int,
                       second_timeout: int) -> smoke_tests_utils.Test:
+    skypilot_config_path = 'tests/test_yamls/managed_jobs_ha_config.yaml'
+
+    pytest_config_file_override = smoke_tests_utils.pytest_config_file_override(
+    )
+    if pytest_config_file_override is not None:
+        with open(pytest_config_file_override, 'r') as f:
+            base_config = f.read()
+        with open(skypilot_config_path, 'r') as f:
+            ha_config = f.read()
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                         delete=False) as f:
+            f.write(base_config)
+            f.write(ha_config)
+            f.flush()
+            skypilot_config_path = f.name
+
     return smoke_tests_utils.Test(
         f'test-managed-jobs-ha-kill-{status.value.lower()}',
         [
@@ -1230,9 +1246,7 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "SUCCEEDED"',
         ],
         f'sky jobs cancel -y -n {name}',
-        env={
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/managed_jobs_ha_config.yaml'
-        },
+        env={skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_path},
         timeout=20 * 60,
     )
 

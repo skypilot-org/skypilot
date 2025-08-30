@@ -1140,11 +1140,11 @@ def test_user_dependencies(generic_cloud: str):
             f'sky status -r {name} | grep UP',
             f'sky exec {name} "echo bye"',
             f'sky logs {name} 3 --status',
-            f'sky launch -c {name} tests/test_yamls/different_default_conda_env.yaml',
+            f'sky launch -y -c {name} tests/test_yamls/different_default_conda_env.yaml',
             f'sky logs {name} 4 --status',
             # Launch again to test the default env does not affect SkyPilot
             # runtime setup
-            f'sky launch -c {name} "python --version 2>&1 | grep \'Python 3.6\' || exit 1"',
+            f'sky launch -y -c {name} "python --version 2>&1 | grep \'Python 3.6\' || exit 1"',
             f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',

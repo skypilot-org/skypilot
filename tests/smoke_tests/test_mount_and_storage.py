@@ -36,6 +36,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import clouds
 from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import azure
@@ -153,6 +154,13 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     include_s3_mount = cloud in ['aws', 'kubernetes']
     include_gcs_mount = cloud in ['gcp', 'kubernetes']
     include_azure_mount = cloud == 'azure'
+
+    if cloud == 'kubernetes':
+        enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+        if not clouds.cloud_in_iterable(clouds.AWS(), enabled_cloud_storages):
+            include_s3_mount = False
+        if not clouds.cloud_in_iterable(clouds.GCP(), enabled_cloud_storages):
+            include_gcs_mount = False
 
     content = template.render(
         storage_name=storage_name,
@@ -363,6 +371,11 @@ def test_kubernetes_context_switch():
     name = smoke_tests_utils.get_cluster_name()
     new_context = f'sky-test-context-{int(time.time())}'
     new_namespace = f'sky-test-namespace-{int(time.time())}'
+
+    if smoke_tests_utils.non_docker_remote_api_server():
+        pytest.skip('Skipping test because the Kubernetes configs and '
+                    'credentials are located on the remote API server '
+                    'and not the machine where the test is running')
 
     test_commands = [
         # Launch a cluster and run a simple task
