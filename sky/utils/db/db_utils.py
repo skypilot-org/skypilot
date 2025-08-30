@@ -1,5 +1,4 @@
 """Utils for sky databases."""
-import asyncio
 import contextlib
 import enum
 import sqlite3
@@ -7,7 +6,6 @@ import threading
 import typing
 from typing import Any, Callable, Optional
 
-import aiosqlite
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 
@@ -285,12 +283,3 @@ class SQLiteConn(threading.local):
         self.conn = sqlite3.connect(db_path, timeout=_DB_TIMEOUT_S)
         self.cursor = self.conn.cursor()
         create_table(self.cursor, self.conn)
-        self._async_conn: Optional[aiosqlite.Connection] = None
-        self._async_conn_lock = asyncio.Lock()
-
-    async def async_conn(self) -> aiosqlite.Connection:
-        if self._async_conn is None:
-            async with self._async_conn_lock:
-                if self._async_conn is None:
-                    self._async_conn = await aiosqlite.connect(self.db_path)
-        return self._async_conn

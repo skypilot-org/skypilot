@@ -1426,6 +1426,8 @@ def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
+    *,
+    _include_credentials: bool = False,
 ) -> server_common.RequestId[List[responses.StatusResponse]]:
     """Gets cluster statuses.
 
@@ -1474,6 +1476,8 @@ def status(
             provider(s).
         all_users: whether to include all users' clusters. By default, only
             the current user's clusters are included.
+        _include_credentials: (internal) whether to include cluster ssh
+            credentials in the response (default: False).
 
     Returns:
         The request ID of the status request.
@@ -1508,6 +1512,7 @@ def status(
         cluster_names=cluster_names,
         refresh=refresh,
         all_users=all_users,
+        include_credentials=_include_credentials,
     )
     response = server_common.make_authenticated_request(
         'POST', '/status', json=json.loads(body.model_dump_json()))
