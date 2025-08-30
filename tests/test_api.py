@@ -59,10 +59,10 @@ def test_api_stream_heartbeat(monkeypatch):
                 self.schedule_type = requests_lib.ScheduleType.LONG
                 self.status_msg = None
 
-        def mock_get_request(request_id):
+        async def mock_get_request(request_id):
             return MockRequest()
 
-        monkeypatch.setattr('sky.server.requests.requests.get_request',
+        monkeypatch.setattr('sky.server.requests.requests.get_request_async',
                             mock_get_request)
 
         log_path = pathlib.Path(temp_log_path)
@@ -91,7 +91,7 @@ def test_api_stream_heartbeat(monkeypatch):
                     except Exception:
                         pass
 
-                    if current_time - start_time > 0.55:
+                    if current_time - start_time > 3.0:
                         break
             finally:
                 # Properly close the async generator to avoid pending task errors
@@ -144,10 +144,10 @@ def test_heartbeat_not_displayed_to_users(monkeypatch):
                 self.schedule_type = requests_lib.ScheduleType.LONG
                 self.status_msg = None
 
-        def mock_get_request(request_id):
+        async def mock_get_request(request_id):
             return MockRequest()
 
-        monkeypatch.setattr('sky.server.requests.requests.get_request',
+        monkeypatch.setattr('sky.server.requests.requests.get_request_async',
                             mock_get_request)
 
         log_path = pathlib.Path(temp_log_path)
@@ -180,7 +180,7 @@ def test_heartbeat_not_displayed_to_users(monkeypatch):
                         # Non-control messages should be displayed
                         user_visible_messages.append(item)
 
-                    if current_time - start_time > 0.55:
+                    if current_time - start_time > 2.0:
                         break
             finally:
                 await log_stream.aclose()

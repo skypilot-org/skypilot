@@ -39,7 +39,8 @@ install_requires = [
     # Light weight requirement, can be replaced with "typing" once
     # we deprecate Python 3.7 (this will take a while).
     'typing_extensions',
-    'filelock >= 3.6.0',
+    # filelock 3.15.0 or higher is required for async file locking.
+    'filelock >= 3.15.0',
     'packaging',
     'psutil',
     'pulp',
@@ -75,6 +76,7 @@ install_requires = [
     'types-paramiko',
     'alembic',
     'aiohttp',
+    'aiosqlite',
     'anyio',
 ]
 
@@ -100,6 +102,7 @@ server_dependencies = [
     'anyio',
     GRPC,
     PROTOBUF,
+    'aiosqlite',
 ]
 
 local_ray = [
