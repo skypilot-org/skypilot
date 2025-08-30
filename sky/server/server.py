@@ -1649,11 +1649,38 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         user=user if user is not None else None,
     )
 
+# For each server process, we maintain a dedicated event loop for the ssh proxy
+# operations to avoid potential blocking issues in the main event loop and vice
+# versa.
+_ssh_proxy_loop: Optional[asyncio.AbstractEventLoop] = None
+_ssh_proxy_loop_lock = threading.Lock()
+
+def _get_ssh_proxy_loop() -> asyncio.AbstractEventLoop:
+    """Get the ssh proxy event loop."""
+    global _ssh_proxy_loop
+    if _ssh_proxy_loop is not None:
+        return _ssh_proxy_loop
+    with _ssh_proxy_loop_lock:
+        if _ssh_proxy_loop is None:
+            _ssh_proxy_loop = asyncio.new_event_loop()
+            threading.Thread(target=_ssh_proxy_loop.run_forever, daemon=True).start()
+        return _ssh_proxy_loop
+
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
 async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                                    cluster_name: str) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
+    fut = asyncio.run_coroutine_threadsafe(
+        _kubernetes_pod_ssh_proxy_worker(websocket, cluster_name),
+        _get_ssh_proxy_loop(),
+    )
+    await asyncio.wrap_future(fut)
+
+
+async def _kubernetes_pod_ssh_proxy_worker(websocket: fastapi.WebSocket,
+                                          cluster_name: str) -> None:
+    """Do the actual SSH proxy operation."""
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
