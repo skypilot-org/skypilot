@@ -577,7 +577,7 @@ async def status(
     all_users: bool = False,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
     *,
-    include_credentials: bool = False,
+    _include_credentials: bool = False,
 ) -> List[Dict[str, Any]]:
     """Async version of status() that gets cluster statuses."""
     request_id = await context_utils.to_thread(
@@ -585,7 +585,7 @@ async def status(
         cluster_names,
         refresh,
         all_users,
-        include_credentials=include_credentials)
+        _include_credentials=_include_credentials)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:

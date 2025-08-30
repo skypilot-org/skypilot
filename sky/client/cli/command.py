@@ -146,7 +146,7 @@ def _get_cluster_records_and_set_ssh_config(
     request_id = sdk.status(clusters,
                             refresh=refresh,
                             all_users=all_users,
-                            include_credentials=True)
+                            _include_credentials=True)
     cluster_records = sdk.stream_and_get(request_id)
     # Update the SSH config for all clusters
     for record in cluster_records:
