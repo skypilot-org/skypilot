@@ -432,7 +432,7 @@ def get_volume_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': ['name', 'type', 'infra'],
+        'required': ['name', 'type'],
         'additionalProperties': False,
         'properties': {
             'name': {

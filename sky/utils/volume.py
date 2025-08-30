@@ -10,6 +10,8 @@ from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import status_lib
 
+MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB = 10
+
 
 class VolumeAccessMode(enum.Enum):
     """Volume access mode."""
@@ -22,6 +24,7 @@ class VolumeAccessMode(enum.Enum):
 class VolumeType(enum.Enum):
     """Volume type."""
     PVC = 'k8s-pvc'
+    RUNPOD_NETWORK_VOLUME = 'runpod-network-volume'
 
 
 class VolumeMount:
