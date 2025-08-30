@@ -17,7 +17,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.11.
+          # SkyPilot requires 3.7 <= python <= 3.13.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -33,10 +33,14 @@ Install SkyPilot using pip:
           pip install "skypilot[fluidstack]"
           pip install "skypilot[paperspace]"
           pip install "skypilot[cudo]"
+          # IBM is only supported for Python <= 3.11
           pip install "skypilot[ibm]"
+          # SCP is only supported for Python <= 3.11
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
+          # Nebius is only supported for Python >= 3.10
           pip install "skypilot[nebius]"
+
           pip install "skypilot[all]"
 
 
@@ -127,15 +131,52 @@ To use more than one cloud, combine the pip extras:
           pip install -e ".[kubernetes,aws,gcp]"
 
 
-Installing via ``uv`` is also supported:
+Installing via ``uv``
+~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: shell
+SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast Python package installer:
 
-  uv venv --seed --python 3.10
-  uv pip install "skypilot[kubernetes,aws,gcp]"
-  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-  uv pip install --prerelease allow azure-cli
-  uv pip install "skypilot[all]"
+.. tab-set::
+
+    .. tab-item:: uv venv
+        :sync: uv-venv-tab
+
+        .. code-block:: shell
+
+          # Create a virtual environment with pip pre-installed (required for SkyPilot)
+          uv venv --seed --python 3.10
+          source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+          
+          # Install SkyPilot with your chosen cloud providers
+          uv pip install "skypilot[kubernetes,aws,gcp]"
+          
+          # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+          uv pip install --prerelease allow azure-cli
+          uv pip install "skypilot[azure]"
+
+        .. note::
+          
+          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment. 
+          SkyPilot needs ``pip`` to build wheels for remote cluster setup.
+
+    .. tab-item:: uv tool
+        :sync: uv-tool-tab
+
+        .. code-block:: shell
+
+          # Install as a globally available tool with pip included
+          uv tool install --with pip "skypilot[aws,gcp]"
+          
+          # Or with all cloud providers
+          uv tool install --with pip "skypilot[all]"
+          
+          # Now you can use sky directly
+          sky check
+
+        .. note::
+          
+          The ``--with pip`` flag is **required** when using ``uv tool install``. 
+          Without it, SkyPilot will fail when building wheels for remote clusters.
 
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.

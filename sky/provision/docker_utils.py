@@ -83,6 +83,21 @@ def check_docker_image(cname, docker_cmd):
     return _check_helper(cname, '.Config.Image', docker_cmd)
 
 
+def maybe_remove_container_cmds(container_name, docker_cmd):
+    """Remove the container if it exists. If not, it will be a no-op.
+    """
+    docker_rm = [
+        docker_cmd,
+        'rm',
+        '-f',
+        container_name,
+        '2>/dev/null',
+        '||',
+        'true',
+    ]
+    return ' '.join(docker_rm)
+
+
 def docker_start_cmds(
     image,
     container_name,
@@ -285,6 +300,10 @@ class DockerInitializer:
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
                 'sudo systemctl restart docker; } || true')
             user_docker_run_options = self.docker_config.get('run_options', [])
+            remove_container_cmd = maybe_remove_container_cmds(
+                self.container_name,
+                self.docker_cmd,
+            )
             start_command = docker_start_cmds(
                 specific_image,
                 self.container_name,
@@ -292,7 +311,7 @@ class DockerInitializer:
                     self._auto_configure_shm(user_docker_run_options)),
                 self.docker_cmd,
             )
-            self._run(start_command)
+            self._run(f'{remove_container_cmd}; {start_command}')
 
         # SkyPilot: Setup Commands.
         # TODO(zhwu): the following setups should be aligned with the kubernetes
@@ -352,7 +371,7 @@ class DockerInitializer:
             'mkdir -p ~/.ssh;'
             'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
             'sudo service ssh start;'
-            'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;'
+            'sudo sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;'
             f'{SETUP_ENV_VARS_CMD}',
             run_env='docker')
 

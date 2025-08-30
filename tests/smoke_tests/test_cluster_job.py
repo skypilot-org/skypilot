@@ -19,6 +19,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_cluster_job.py --generic-cloud aws
 
+import os
 import pathlib
 import re
 import shlex
@@ -53,7 +54,10 @@ from sky.utils import resources_utils
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
-    accelerator = accelerator.get(generic_cloud, 'T4')
+    if generic_cloud == 'kubernetes':
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    else:
+        accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'job_queue',
@@ -421,6 +425,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.resource_heavy
+@pytest.mark.no_remote_server
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     use_spot = True
@@ -476,7 +481,10 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
-    accelerator = accelerator.get(generic_cloud, 'T4')
+    if generic_cloud == 'kubernetes':
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    else:
+        accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'huggingface_glue_imdb_app',
@@ -647,6 +655,22 @@ def test_multi_node_failure(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- EFA. ----------
+@pytest.mark.aws
+def test_efa():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'efa',
+        [
+            f'sky launch -y -c {name} --infra aws/ap-northeast-1 --gpus L4:1 --instance-type g6.8xlarge examples/aws_efa/efa_vm.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 1 | grep "Selected provider is efa, fabric is efa"',  # Ensure efa is enabled.
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Web apps with custom ports on GCP. ----------
 @pytest.mark.gcp
 def test_gcp_http_server_with_custom_ports():
@@ -700,6 +724,7 @@ def test_azure_http_server_with_custom_ports():
 
 # ---------- Web apps with custom ports on Kubernetes. ----------
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_server
 def test_kubernetes_http_server_with_custom_ports():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1421,7 +1446,10 @@ def test_cancel_azure():
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
-    accelerator = accelerator.get(generic_cloud, 'T4')
+    if generic_cloud == 'kubernetes':
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    else:
+        accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'cancel-pytorch',
@@ -1917,6 +1945,7 @@ def test_long_setup_run_script(generic_cloud: str):
 @pytest.mark.kubernetes
 @pytest.mark.resource_heavy
 def test_min_gpt_kubernetes():
+    accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     name = smoke_tests_utils.get_cluster_name()
     original_yaml_path = 'examples/distributed-pytorch/train.yaml'
 
@@ -1927,8 +1956,8 @@ def test_min_gpt_kubernetes():
     modified_content = content.replace('main.py',
                                        'main.py trainer_config.max_epochs=1')
 
-    modified_content = re.sub(r'accelerators:\s*[^\n]+', 'accelerators: T4',
-                              modified_content)
+    modified_content = re.sub(r'accelerators:\s*[^\n]+',
+                              f'accelerators: {accelerator}', modified_content)
 
     # Create a temporary YAML file with the modified content
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
@@ -2033,3 +2062,240 @@ def test_remote_server_api_login():
         # The sky api login command should not read from environment config
         # when an explicit endpoint is provided as an argument.
         smoke_tests_utils.run_one_test(test, check_sky_status=False)
+
+
+# ---------- Testing Autostopping ----------
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_nebius  # Nebius does not support autodown
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
+def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    # See test_autostop_wait_for_jobs() for explanation of autostop_timeout.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    test = smoke_tests_utils.Test(
+        'autostop_with_unhealthy_ray_cluster',
+        [
+            f'sky launch -y -d -c {name} --num-nodes 2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} -i 5',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "5m"',
+            # Ensure the job succeeded.
+            f'sky logs {name} 1 --status',
+            # Stop the ray cluster, but leave the node running.
+            # TODO(kevin): Find a better way to replicate the issue
+            f'ssh {name} "skypilot-runtime/bin/ray stop"',
+            # Ensure the cluster is not terminated early, and is in INIT,
+            # because the ray cluster is stopped.
+            'sleep 240',
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep INIT',
+            # Ensure the cluster is STOPPED.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Autodowning ----------
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_nebius  # Nebius does not support autodown
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
+def test_autodown(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
+    # the VM is terminated.
+    if generic_cloud == 'azure':
+        autodown_timeout = 900
+        total_timeout_minutes = 90
+    elif generic_cloud == 'kubernetes':
+        autodown_timeout = 300
+        total_timeout_minutes = 30
+    else:
+        autodown_timeout = 240
+        total_timeout_minutes = 20
+    check_autostop_set = f's=$(sky status) && echo "$s" && echo "==check autostop set==" && echo "$s" | grep {name} | grep "1m (down)"'
+    test = smoke_tests_utils.Test(
+        'autodown',
+        [
+            f'sky launch -y -d -c {name} --num-nodes 2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --down -i 1',
+            check_autostop_set,
+            # Ensure the cluster is not terminated early.
+            'sleep 40',
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
+            # Ensure the cluster is terminated.
+            f'sleep {autodown_timeout}',
+            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} --infra {generic_cloud} --num-nodes 2 --down {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky exec {name} --infra {generic_cloud} tests/test_yamls/minimal.yaml',
+            check_autostop_set,
+            f'sleep {autodown_timeout}',
+            # Ensure the cluster is terminated.
+            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} --infra {generic_cloud} --num-nodes 2 --down {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --cancel',
+            f'sleep {autodown_timeout}',
+            # Ensure the cluster is still UP.
+            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && echo "$s" | grep {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.scp
+def test_scp_autodown():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'SCP_autodown',
+        [
+            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --down -i 1',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m (down)"',
+            # Ensure the cluster is not terminated early.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
+            # Ensure the cluster is terminated.
+            'sleep 200',
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} --down tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky exec {name} {smoke_tests_utils.SCP_TYPE} tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep "1m (down)"',
+            'sleep 200',
+            # Ensure the cluster is terminated.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} --down tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --cancel',
+            'sleep 200',
+            # Ensure the cluster is still UP.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Kubernetes pod_config ----------
+@pytest.mark.kubernetes
+def test_kubernetes_pod_config_pvc():
+    """Test Kubernetes pod_config with PVC volume mounts."""
+    name = smoke_tests_utils.get_cluster_name()
+    pvc_name = f'{name}-pvc'
+
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_k8s_pod_config_pvc.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    task_yaml_content = template.render(pvc_name=pvc_name)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as f:
+        f.write(task_yaml_content)
+        f.flush()
+        task_yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_config_pvc',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, f'kubectl create -f - <<EOF\n'
+                    f'apiVersion: v1\n'
+                    f'kind: PersistentVolumeClaim\n'
+                    f'metadata:\n'
+                    f'  name: {pvc_name}\n'
+                    f'spec:\n'
+                    f'  accessModes:\n'
+                    f'    - ReadWriteOnce\n'
+                    f'  resources:\n'
+                    f'    requests:\n'
+                    f'      storage: 1Gi\n'
+                    f'EOF'),
+                # Verify PVC was created
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, f'kubectl get pvc {pvc_name} -oyaml'),
+                f'sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
+                # Write to the volume
+                f'sky exec {name} --infra kubernetes "ls -la /mnt/test-data/ && echo \'Hello\' > /mnt/test-data/hello.txt"',
+                # Down and launch again
+                f'sky down -y {name}',
+                f'sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
+                # Read the volume from the new pod
+                f'sky exec {name} --infra kubernetes "ls -la /mnt/test-data/ && cat /mnt/test-data/hello.txt"',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl delete pvc {pvc_name} --ignore-not-found=true --wait=false || true'
+                ),
+            ],
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+        os.unlink(task_yaml_path)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_pod_config_change_detection():
+    """Test that pod_config changes are detected and warning is shown."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    template_str_1 = pathlib.Path(
+        'tests/test_yamls/test_k8s_pod_config_env1.yaml.j2').read_text()
+    template_1 = jinja2.Template(template_str_1)
+    task_yaml_1_content = template_1.render()
+
+    template_str_2 = pathlib.Path(
+        'tests/test_yamls/test_k8s_pod_config_env2.yaml.j2').read_text()
+    template_2 = jinja2.Template(template_str_2)
+    task_yaml_2_content = template_2.render()
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w', delete=False) as f1, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w', delete=False) as f2:
+
+        f1.write(task_yaml_1_content)
+        f1.flush()
+        task_yaml_1_path = f1.name
+
+        f2.write(task_yaml_2_content)
+        f2.flush()
+        task_yaml_2_path = f2.name
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_config_change_detection',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Launch task with original pod_config
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_1_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 1"',
+                # Launch task with modified pod_config - should show warning
+                # Verify the job succeeds despite the warning and check that environment variables are not updated
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_2_path} 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Task requires different Kubernetes pod config" && '
+                f'echo "$s" | grep "TEST_VAR_1 = 1" && '
+                f'echo "$s" | grep "TEST_VAR_2 = "',
+                # Down and launch again to get the new pod_config
+                f'sky down -y {name}',
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_2_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 2" && '
+                f'echo "$s" | grep "TEST_VAR_2 = 2"',
+            ],
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+        os.unlink(task_yaml_1_path)
+        os.unlink(task_yaml_2_path)

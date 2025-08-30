@@ -47,12 +47,15 @@ import sky
 from sky import backends
 from sky import catalog
 from sky import clouds
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import jobs as managed_jobs
 from sky import models
+from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
+from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
@@ -60,6 +63,7 @@ from sky.client.cli import git
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import requests
@@ -73,6 +77,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import directory_utils
 from sky.utils import env_options
 from sky.utils import git as git_utils
 from sky.utils import infra_utils
@@ -84,6 +89,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
 from sky.volumes import utils as volumes_utils
 from sky.volumes.client import sdk as volumes_sdk
@@ -123,7 +129,7 @@ def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> List[dict]:
+) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
     Args:
@@ -137,7 +143,10 @@ def _get_cluster_records_and_set_ssh_config(
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
     if clusters is not None:
         all_users = True
-    request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
+    request_id = sdk.status(clusters,
+                            refresh=refresh,
+                            all_users=all_users,
+                            _include_credentials=True)
     cluster_records = sdk.stream_and_get(request_id)
     # Update the SSH config for all clusters
     for record in cluster_records:
@@ -162,7 +171,7 @@ def _get_cluster_records_and_set_ssh_config(
                     handle.cluster_name, credentials)))
             escaped_executable_path = shlex.quote(sys.executable)
             escaped_websocket_proxy_path = shlex.quote(
-                f'{sky.__root_dir__}/templates/websocket_proxy.py')
+                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
             # Instead of directly use websocket_proxy.py, we add an
             # additional proxy, so that ssh can use the head pod in the
             # cluster to jump to worker pods.
@@ -281,9 +290,10 @@ def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
     del ctx, param  # Unused.
     # TODO(zhwu): we send requests to API server for completion, which can cause
     # large latency. We should investigate caching mechanism if needed.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/cluster_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
@@ -294,9 +304,10 @@ def _complete_storage_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for storage names."""
     del ctx, param  # Unused.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/storage_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
@@ -307,12 +318,31 @@ def _complete_volume_name(ctx: click.Context, param: click.Parameter,
                           incomplete: str) -> List[str]:
     """Handle shell completion for volume names."""
     del ctx, param  # Unused.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/volume_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
+    return response.json()
+
+
+def _complete_api_request(ctx: click.Context, param: click.Parameter,
+                          incomplete: str) -> List[str]:
+    """Handle shell completion for API requests."""
+    del ctx, param  # Unused.
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/api/completion/api_request?incomplete={incomplete}',
+        retry=False,
+        timeout=2.0,
+    )
+    try:
+        response.raise_for_status()
+    except requests_lib.exceptions.HTTPError:
+        # Server may be outdated/missing this API. Silently skip.
+        return []
     return response.json()
 
 
@@ -584,7 +614,7 @@ def _check_yaml_only(
     try:
         with open(entrypoint, 'r', encoding='utf-8') as f:
             try:
-                config = list(yaml.safe_load_all(f))
+                config = list(yaml_utils.safe_load_all(f))
                 if config:
                     # FIXME(zongheng): in a chain DAG YAML it only returns the
                     # first section. OK for downstream but is weird.
@@ -682,7 +712,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
     git_ref: Optional[str] = None,
-) -> Union[sky.Task, sky.Dag]:
+) -> Union['task_lib.Task', 'dag_lib.Dag']:
     """Creates a task or a dag from an entrypoint with overrides.
 
     Returns:
@@ -745,8 +775,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
             f'If you see this, please file an issue; tasks: {dag.tasks}')
         task = dag.tasks[0]
     else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
-        task.set_resources({sky.Resources()})
+        task = task_lib.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({resources_lib.Resources()})
         # env update has been done for DAG in load_chain_dag_from_yaml for YAML.
         task.update_envs(env)
         task.update_secrets(secret)
@@ -769,7 +799,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     return task
 
 
-def _update_task_workdir(task: sky.Task, workdir: Optional[str],
+def _update_task_workdir(task: task_lib.Task, workdir: Optional[str],
                          git_url: Optional[str], git_ref: Optional[str]):
     """Updates the task workdir.
 
@@ -797,7 +827,7 @@ def _update_task_workdir(task: sky.Task, workdir: Optional[str],
     return
 
 
-def _update_task_workdir_and_secrets_from_workdir(task: sky.Task):
+def _update_task_workdir_and_secrets_from_workdir(task: task_lib.Task):
     """Updates the task secrets from the workdir.
 
     Args:
@@ -1108,7 +1138,7 @@ def launch(
         git_url=git_url,
         git_ref=git_ref,
     )
-    if isinstance(task_or_dag, sky.Dag):
+    if isinstance(task_or_dag, dag_lib.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky launch'))
     task = task_or_dag
@@ -1342,7 +1372,7 @@ def exec(
         git_ref=git_ref,
     )
 
-    if isinstance(task_or_dag, sky.Dag):
+    if isinstance(task_or_dag, dag_lib.Dag):
         raise click.UsageError('YAML specifies a DAG, while `sky exec` '
                                'supports a single task only.')
     task = task_or_dag
@@ -1562,7 +1592,7 @@ def _status_kubernetes(show_all: bool):
 
 
 def _show_endpoint(query_clusters: Optional[List[str]],
-                   cluster_records: List[Dict[str, Any]], ip: bool,
+                   cluster_records: List[responses.StatusResponse], ip: bool,
                    endpoints: bool, endpoint: Optional[int]) -> None:
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
@@ -1606,7 +1636,7 @@ def _show_endpoint(query_clusters: Optional[List[str]],
         if endpoint:
             request_id = sdk.endpoints(cluster_record['name'], endpoint)
             cluster_endpoints = sdk.stream_and_get(request_id)
-            cluster_endpoint = cluster_endpoints.get(str(endpoint), None)
+            cluster_endpoint = cluster_endpoints.get(endpoint, None)
             if not cluster_endpoint:
                 raise click.Abort(f'Endpoint {endpoint} not found for cluster '
                                   f'{cluster_record["name"]!r}.')
@@ -1628,7 +1658,9 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     return
 
 
-def _show_enabled_infra(active_workspace: str, show_workspace: bool):
+def _show_enabled_infra(
+        active_workspace: str, show_workspace: bool,
+        enabled_clouds_request_id: server_common.RequestId[List[str]]):
     """Show the enabled infrastructure."""
     workspace_str = ''
     if show_workspace:
@@ -1636,8 +1668,7 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
     title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
              f'{workspace_str}:'
              f'{colorama.Style.RESET_ALL} ')
-    all_infras = sdk.get(
-        sdk.enabled_clouds(workspace=active_workspace, expand=True))
+    all_infras = sdk.get(enabled_clouds_request_id)
     click.echo(f'{title}{", ".join(all_infras)}\n')
 
 
@@ -1851,6 +1882,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                            f'{colorama.Style.RESET_ALL}')
             return None
 
+    active_workspace = skypilot_config.get_active_workspace()
+
+    def submit_enabled_clouds():
+        return sdk.enabled_clouds(workspace=active_workspace, expand=True)
+
     managed_jobs_queue_request_id = None
     service_status_request_id = None
     workspace_request_id = None
@@ -1866,6 +1902,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             pools_request_future = executor.submit(submit_pools)
         if not (ip or show_endpoints):
             workspace_request_future = executor.submit(submit_workspace)
+        enabled_clouds_request_future = executor.submit(submit_enabled_clouds)
 
         # Get the request IDs
         if show_managed_jobs:
@@ -1876,6 +1913,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             pool_status_request_id = pools_request_future.result()
         if not (ip or show_endpoints):
             workspace_request_id = workspace_request_future.result()
+        enabled_clouds_request_id = enabled_clouds_request_future.result()
 
     managed_jobs_queue_request_id = (server_common.RequestId()
                                      if not managed_jobs_queue_request_id else
@@ -1910,9 +1948,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         all_workspaces = sdk.get(workspace_request_id)
     else:
         all_workspaces = {constants.SKYPILOT_DEFAULT_WORKSPACE: {}}
-    active_workspace = skypilot_config.get_active_workspace()
     show_workspace = len(all_workspaces) > 1
-    _show_enabled_infra(active_workspace, show_workspace)
+    _show_enabled_infra(active_workspace, show_workspace,
+                        enabled_clouds_request_id)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                f'{colorama.Style.RESET_ALL}')
 
@@ -4454,9 +4492,9 @@ def jobs_launch(
         git_ref=git_ref,
     )
 
-    if not isinstance(task_or_dag, sky.Dag):
-        assert isinstance(task_or_dag, sky.Task), task_or_dag
-        with sky.Dag() as dag:
+    if not isinstance(task_or_dag, dag_lib.Dag):
+        assert isinstance(task_or_dag, task_lib.Task), task_or_dag
+        with dag_lib.Dag() as dag:
             dag.add(task_or_dag)
             dag.name = task_or_dag.name
     else:
@@ -4892,7 +4930,7 @@ def jobs_pool_apply(
     click.secho(
         'Each pool worker will use the following resources (estimated):',
         fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = managed_jobs.pool_apply(task,
@@ -5216,7 +5254,7 @@ def _generate_task_with_service(
         network_tier: Optional[str],
         not_supported_cmd: str,
         pool: bool,  # pylint: disable=redefined-outer-name
-) -> sky.Task:
+) -> task_lib.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
     yaml_name = 'SERVICE_YAML' if not pool else 'POOL_YAML'
@@ -5246,7 +5284,7 @@ def _generate_task_with_service(
         network_tier=network_tier,
         ports=ports,
     )
-    if isinstance(task, sky.Dag):
+    if isinstance(task, dag_lib.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command=not_supported_cmd))
 
@@ -5432,7 +5470,7 @@ def serve_up(
 
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = serve_lib.up(task, service_name, _need_confirmation=not yes)
@@ -5535,7 +5573,7 @@ def serve_update(
 
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')
-    with sky.Dag() as dag:
+    with dag_lib.Dag() as dag:
         dag.add(task)
 
     request_id = serve_lib.update(task,
@@ -6012,7 +6050,10 @@ def api_stop():
 
 @api.command('logs', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_id', required=False, type=str)
+@click.argument('request_id',
+                required=False,
+                type=str,
+                **_get_shell_complete_args(_complete_api_request))
 @click.option('--server-logs',
               is_flag=True,
               default=False,
@@ -6056,7 +6097,11 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_ids', required=False, type=str, nargs=-1)
+@click.argument('request_ids',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
 @flags.all_users_option('Cancel all requests from all users.')
 @usage_lib.entrypoint
@@ -6088,7 +6133,11 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
 
 @api.command('status', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_ids', required=False, type=str, nargs=-1)
+@click.argument('request_ids',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_api_request))
 @click.option('--all-status',
               '-a',
               is_flag=True,
@@ -6195,6 +6244,9 @@ def api_info():
         user = api_server_user
     else:
         user = models.User.get_current_user()
+    # Print client version and commit.
+    click.echo(f'SkyPilot client version: {sky.__version__}, '
+               f'commit: {sky.__commit__}')
     click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '

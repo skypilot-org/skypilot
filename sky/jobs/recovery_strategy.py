@@ -261,9 +261,6 @@ class StrategyExecutor:
         if self.cluster_name is None:
             return
         if self.pool is None:
-            global_user_state.add_cluster_event(
-                self.cluster_name, None, 'Cluster was cleaned up.',
-                global_user_state.ClusterEventType.STATUS_CHANGE)
             managed_job_utils.terminate_cluster(self.cluster_name)
 
     def _launch(self,
@@ -330,10 +327,15 @@ class StrategyExecutor:
                                 cluster_name=self.cluster_name,
                                 # We expect to tear down the cluster as soon as
                                 # the job is finished. However, in case the
-                                # controller dies, set autodown to try and avoid
-                                # a resource leak.
-                                idle_minutes_to_autostop=_AUTODOWN_MINUTES,
-                                down=True,
+                                # controller dies, we may end up with a
+                                # resource leak.
+                                # Ideally, we should autodown to be safe,
+                                # but it's fine to disable it for now, as
+                                # Nebius doesn't support autodown yet.
+                                # TODO(kevin): set down=True once Nebius
+                                # supports autodown.
+                                # idle_minutes_to_autostop=_AUTODOWN_MINUTES,
+                                # down=True,
                                 _is_launched_by_jobs_controller=True)
                         else:
                             self.cluster_name = (

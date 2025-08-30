@@ -311,6 +311,25 @@ compatibility in the serialization, otherwise the server may not recognize the n
 from the client and return an error during validation.
 
 
+#### Adding new fields to API response body
+
+When adding new fields to objects that are serialized in API response bodies (such as resource handles), special care must be taken to ensure older clients can deserialize objects from newer servers. This commonly occurs with objects that are pickled and sent over the API.
+
+For example, if you add a new field like `SSHTunnelInfo` to `CloudVmRayResourceHandle`, older clients without this class definition will fail during deserialization with errors like:
+```
+AttributeError: Can't get attribute 'SSHTunnelInfo' on <module 'sky.backends.cloud_vm_ray_backend'>
+```
+
+To handle this:
+
+1. **Server-side encoding**: Modify the relevant encoders in `sky/server/requests/serializers/encoders.py` to
+remove or clean problematic fields before serialization when serving older clients.
+
+2. **Exception handling**: Update `sky/exceptions.py` if exceptions containing these objects also need
+backwards compatibility processing.
+
+See the `prepare_handle_for_backwards_compatibility` function and its usage for a concrete example of this.
+
 #### Refactoring existing APIs
 
 Refactoring existing APIs can be tricky. It is recommended to add an new API instead. Then the compatibility issue can be addressed in the same way as [Adding new APIs](#adding-new-apis), e.g.:

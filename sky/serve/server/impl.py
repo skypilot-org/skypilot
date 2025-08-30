@@ -34,6 +34,7 @@ from sky.utils import dag_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -129,11 +130,11 @@ def up(
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    dag.resolve_and_validate_volumes()
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(dag)
+    dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]
     assert task.service is not None
@@ -179,7 +180,7 @@ def up(
         controller = controller_utils.get_controller_for_pool(pool)
         controller_name = controller.value.cluster_name
         task_config = task.to_yaml_config()
-        common_utils.dump_yaml(service_file.name, task_config)
+        yaml_utils.dump_yaml(service_file.name, task_config)
         remote_tmp_task_yaml_path = (
             serve_utils.generate_remote_tmp_task_yaml_file_name(service_name))
         remote_config_yaml_path = (
@@ -531,7 +532,7 @@ def update(
             prefix=f'{service_name}-v{current_version}',
             mode='w') as service_file:
         task_config = task.to_yaml_config()
-        common_utils.dump_yaml(service_file.name, task_config)
+        yaml_utils.dump_yaml(service_file.name, task_config)
         remote_task_yaml_path = serve_utils.generate_task_yaml_file_name(
             service_name, current_version, expand_user=False)
 

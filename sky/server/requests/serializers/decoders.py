@@ -9,6 +9,7 @@ from sky import models
 from sky.catalog import common
 from sky.data import storage
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.server import constants as server_constants
 from sky.skylet import job_lib
@@ -50,13 +51,19 @@ def default_decode_handler(return_value: Any) -> Any:
 
 
 @register_decoders('status')
-def decode_status(return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def decode_status(
+        return_value: List[Dict[str, Any]]) -> List[responses.StatusResponse]:
     clusters = return_value
+    response = []
     for cluster in clusters:
         cluster['handle'] = decode_and_unpickle(cluster['handle'])
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
-
-    return clusters
+        cluster['storage_mounts_metadata'] = decode_and_unpickle(
+            cluster['storage_mounts_metadata'])
+        if 'is_managed' not in cluster:
+            cluster['is_managed'] = False
+        response.append(responses.StatusResponse.model_validate(cluster))
+    return response
 
 
 @register_decoders('status_kubernetes')
@@ -198,3 +205,8 @@ def decode_job_status(
 def decode_kubernetes_node_info(
         return_value: Dict[str, Any]) -> models.KubernetesNodesInfo:
     return models.KubernetesNodesInfo.from_dict(return_value)
+
+
+@register_decoders('endpoints')
+def decode_endpoints(return_value: Dict[int, str]) -> Dict[int, str]:
+    return {int(k): v for k, v in return_value.items()}

@@ -158,37 +158,53 @@ jobs:
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
-  smoke-tests-kubernetes:
-    needs: [gate-tests, smoke-tests-aws, backward-compat-test]
-    if: ${{ needs.gate-tests.outputs.run_tests == 'true' && always() }}
+  smoke-tests-kubernetes-resource-heavy:
+    needs: [gate-tests, nightly-build-pypi]
+    if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ github.sha }}
       branch: ${{ github.ref_name }}
-      message: "nightly-build-pypi --kubernetes --no-resource-heavy on test_cluster_job.py"
+      message: "nightly-build-pypi --kubernetes --resource-heavy"
       pipeline: "smoke-tests"
-      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy", "FILE_PATTERN": "test_cluster_job.py"}'
-      timeout_minutes: 40
+      build_env_vars: '{"ARGS": "--kubernetes --resource-heavy"}'
+      timeout_minutes: 100
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
-  smoke-tests-remote-server:
-    needs: [gate-tests, smoke-tests-kubernetes]
-    if: ${{ needs.gate-tests.outputs.run_tests == 'true' && always() }}
+  smoke-tests-kubernetes-no-resource-heavy:
+    needs: [gate-tests, nightly-build-pypi]
+    if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ github.sha }}
       branch: ${{ github.ref_name }}
-      message: "nightly-build-pypi --remote-server on test_cluster_job.py"
+      message: "nightly-build-pypi --kubernetes --no-resource-heavy"
       pipeline: "smoke-tests"
-      build_env_vars: '{"ARGS": "--remote-server", "FILE_PATTERN": "test_cluster_job.py"}'
-      timeout_minutes: 40
+      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy"}'
+      timeout_minutes: 60
+      sleep_seconds: 1200  # 20-minute delay to reduce buildkite resource usage
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  smoke-tests-remote-server-kubernetes:
+    needs: [gate-tests, nightly-build-pypi]
+    if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ github.sha }}
+      branch: ${{ github.ref_name }}
+      message: "nightly-build-pypi --remote-server --kubernetes"
+      pipeline: "smoke-tests"
+      build_env_vars: '{"ARGS": "--remote-server --kubernetes"}'
+      timeout_minutes: 60
+      sleep_seconds: 1500  # 25-minute delay to reduce buildkite resource usage
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   publish-and-validate-both:
-    needs: [gate-tests, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes, smoke-tests-remote-server, backward-compat-test]
-    if: ${{ needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes.result == 'success' && needs.smoke-tests-remote-server.result == 'success' && needs.backward-compat-test.result == 'success') }}
+    needs: [gate-tests, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-remote-server-kubernetes, backward-compat-test]
+    if: ${{ always() && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-remote-server-kubernetes.result == 'success' && needs.backward-compat-test.result == 'success')) }}
     uses: ./.github/workflows/publish-and-validate-both.yml
     with:
       package_name: skypilot-nightly
@@ -206,7 +222,7 @@ jobs:
 
   notify-slack-failure:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes, smoke-tests-remote-server, backward-compat-test, publish-and-validate-both, trigger-helm-release]
+    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-remote-server-kubernetes, backward-compat-test, publish-and-validate-both, trigger-helm-release]
     if: failure() # Only run this job if any of the previous jobs failed
     steps:
       - name: Prepare failure message
@@ -217,21 +233,27 @@ jobs:
           COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
           BUILDKITE_MSG=""
-          if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes.result }}" == "failure" || "${{ needs.smoke-tests-remote-server.result }}" == "failure" || "${{ needs.backward-compat-test.result }}" == "failure" ]]; then
+          if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" || "${{ needs.backward-compat-test.result }}" == "failure" ]]; then
             if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" ]]; then
               BUILDKITE_MSG="<https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-aws.outputs.build_number }}|Buildkite Log(--aws)>"
             fi
-            if [[ "${{ needs.smoke-tests-kubernetes.result }}" == "failure" ]]; then
+            if [[ "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes.outputs.build_number }}|Buildkite Log(--kubernetes)>"
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-resource-heavy.outputs.build_number }}|Buildkite Log(--kubernetes --resource-heavy)>"
             fi
-            if [[ "${{ needs.smoke-tests-remote-server.result }}" == "failure" ]]; then
+            if [[ "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server.outputs.build_number }}|Buildkite Log(--remote-server)>"
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy.outputs.build_number }}|Buildkite Log(--kubernetes --no-resource-heavy)>"
+            fi
+            if [[ "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" ]]; then
+              if [[ ! -z "$BUILDKITE_MSG" ]]; then
+                BUILDKITE_MSG="${BUILDKITE_MSG} and"
+              fi
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}|Buildkite Log(--remote-server --kubernetes)>"
             fi
             if [[ "${{ needs.backward-compat-test.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then

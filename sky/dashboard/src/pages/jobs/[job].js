@@ -11,6 +11,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
   CheckIcon,
+  Download,
 } from 'lucide-react';
 import {
   CustomTooltip as Tooltip,
@@ -18,7 +19,10 @@ import {
   renderPoolLink,
 } from '@/components/utils';
 import { LogFilter, formatLogs, stripAnsiCodes } from '@/components/utils';
-import { streamManagedJobLogs } from '@/data/connectors/jobs';
+import {
+  streamManagedJobLogs,
+  downloadManagedJobLogs,
+} from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
@@ -250,20 +254,40 @@ function JobDetails() {
                       logs.)
                     </span>
                   </div>
-                  <Tooltip
-                    content="Refresh logs"
-                    className="text-muted-foreground"
-                  >
-                    <button
-                      onClick={handleLogsRefresh}
-                      disabled={isLoadingLogs}
-                      className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  <div className="flex items-center space-x-3">
+                    <Tooltip
+                      content="Download full logs"
+                      className="text-muted-foreground"
                     >
-                      <RotateCwIcon
-                        className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
-                      />
-                    </button>
-                  </Tooltip>
+                      <button
+                        onClick={() =>
+                          downloadManagedJobLogs({
+                            jobId: parseInt(
+                              Array.isArray(jobId) ? jobId[0] : jobId
+                            ),
+                            controller: false,
+                          })
+                        }
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip
+                      content="Refresh logs"
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={handleLogsRefresh}
+                        disabled={isLoadingLogs}
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <RotateCwIcon
+                          className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                        />
+                      </button>
+                    </Tooltip>
+                  </div>
                 </div>
                 <div className="p-4">
                   <JobDetailsContent
@@ -291,20 +315,40 @@ function JobDetails() {
                       logs.)
                     </span>
                   </div>
-                  <Tooltip
-                    content="Refresh controller logs"
-                    className="text-muted-foreground"
-                  >
-                    <button
-                      onClick={handleControllerLogsRefresh}
-                      disabled={isLoadingControllerLogs}
-                      className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  <div className="flex items-center space-x-3">
+                    <Tooltip
+                      content="Download full controller logs"
+                      className="text-muted-foreground"
                     >
-                      <RotateCwIcon
-                        className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
-                      />
-                    </button>
-                  </Tooltip>
+                      <button
+                        onClick={() =>
+                          downloadManagedJobLogs({
+                            jobId: parseInt(
+                              Array.isArray(jobId) ? jobId[0] : jobId
+                            ),
+                            controller: true,
+                          })
+                        }
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip
+                      content="Refresh controller logs"
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={handleControllerLogsRefresh}
+                        disabled={isLoadingControllerLogs}
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <RotateCwIcon
+                          className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
+                        />
+                      </button>
+                    </Tooltip>
+                  </div>
                 </div>
                 <div className="p-4">
                   <JobDetailsContent

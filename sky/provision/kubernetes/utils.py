@@ -1,5 +1,7 @@
 """Kubernetes utilities for SkyPilot."""
+import copy
 import dataclasses
+import datetime
 import enum
 import functools
 import hashlib
@@ -14,7 +16,6 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
-import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -31,12 +32,14 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import directory_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import jinja2
@@ -692,6 +695,9 @@ def detect_gpu_label_formatter(
         for _, label_list in node_labels.items():
             for label, value in label_list:
                 if lf.match_label_key(label):
+                    # Skip empty label values
+                    if not value or value.strip() == '':
+                        continue
                     valid, reason = lf.validate_label_value(value)
                     if valid:
                         return lf(), node_labels
@@ -1077,6 +1083,14 @@ class KarpenterAutoscaler(Autoscaler):
     can_query_backend: bool = False
 
 
+class CoreweaveAutoscaler(Autoscaler):
+    """CoreWeave autoscaler
+    """
+
+    label_formatter: Any = CoreWeaveLabelFormatter
+    can_query_backend: bool = False
+
+
 class GenericAutoscaler(Autoscaler):
     """Generic autoscaler
     """
@@ -1089,6 +1103,7 @@ class GenericAutoscaler(Autoscaler):
 AUTOSCALER_TYPE_TO_AUTOSCALER = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterAutoscaler,
+    kubernetes_enums.KubernetesAutoscalerType.COREWEAVE: CoreweaveAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.GENERIC: GenericAutoscaler,
 }
 
@@ -1656,50 +1671,191 @@ def check_credentials(context: Optional[str],
         return True, None
 
 
+class PodValidator:
+    """Validates Kubernetes pod configs against the OpenAPI spec.
+
+    Adapted from kubernetes.client.ApiClient:
+    https://github.com/kubernetes-client/python/blob/0c56ef1c8c4b50087bc7b803f6af896fb973309e/kubernetes/client/api_client.py#L33
+
+    We needed to adapt it because the original implementation ignores
+    unknown fields, whereas we want to raise an error so that users
+    are aware of the issue.
+    """
+    PRIMITIVE_TYPES = (int, float, bool, str)
+    NATIVE_TYPES_MAPPING = {
+        'int': int,
+        'float': float,
+        'str': str,
+        'bool': bool,
+        'date': datetime.date,
+        'datetime': datetime.datetime,
+        'object': object,
+    }
+
+    @classmethod
+    def validate(cls, data):
+        return cls.__validate(data, kubernetes.models.V1Pod)
+
+    @classmethod
+    def __validate(cls, data, klass):
+        """Deserializes dict, list, str into an object.
+
+        :param data: dict, list or str.
+        :param klass: class literal, or string of class name.
+
+        :return: object.
+        """
+        if data is None:
+            return None
+
+        if isinstance(klass, str):
+            if klass.startswith('list['):
+                sub_kls = re.match(r'list\[(.*)\]', klass).group(1)
+                return [cls.__validate(sub_data, sub_kls) for sub_data in data]
+
+            if klass.startswith('dict('):
+                sub_kls = re.match(r'dict\(([^,]*), (.*)\)', klass).group(2)
+                return {k: cls.__validate(v, sub_kls) for k, v in data.items()}
+
+            # convert str to class
+            if klass in cls.NATIVE_TYPES_MAPPING:
+                klass = cls.NATIVE_TYPES_MAPPING[klass]
+            else:
+                klass = getattr(kubernetes.models, klass)
+
+        if klass in cls.PRIMITIVE_TYPES:
+            return cls.__validate_primitive(data, klass)
+        elif klass == object:
+            return cls.__validate_object(data)
+        elif klass == datetime.date:
+            return cls.__validate_date(data)
+        elif klass == datetime.datetime:
+            return cls.__validate_datetime(data)
+        else:
+            return cls.__validate_model(data, klass)
+
+    @classmethod
+    def __validate_primitive(cls, data, klass):
+        """Deserializes string to primitive type.
+
+        :param data: str.
+        :param klass: class literal.
+
+        :return: int, long, float, str, bool.
+        """
+        try:
+            return klass(data)
+        except UnicodeEncodeError:
+            return str(data)
+        except TypeError:
+            return data
+
+    @classmethod
+    def __validate_object(cls, value):
+        """Return an original value.
+
+        :return: object.
+        """
+        return value
+
+    @classmethod
+    def __validate_date(cls, string):
+        """Deserializes string to date.
+
+        :param string: str.
+        :return: date.
+        """
+        try:
+            return kubernetes.dateutil_parser.parse(string).date()
+        except ValueError as exc:
+            raise ValueError(
+                f'Failed to parse `{string}` as date object') from exc
+
+    @classmethod
+    def __validate_datetime(cls, string):
+        """Deserializes string to datetime.
+
+        The string should be in iso8601 datetime format.
+
+        :param string: str.
+        :return: datetime.
+        """
+        try:
+            return kubernetes.dateutil_parser.parse(string)
+        except ValueError as exc:
+            raise ValueError(
+                f'Failed to parse `{string}` as datetime object') from exc
+
+    @classmethod
+    def __validate_model(cls, data, klass):
+        """Deserializes list or dict to model.
+
+        :param data: dict, list.
+        :param klass: class literal.
+        :return: model object.
+        """
+
+        if not klass.openapi_types and not hasattr(klass,
+                                                   'get_real_child_model'):
+            return data
+
+        kwargs = {}
+        try:
+            if (data is not None and klass.openapi_types is not None and
+                    isinstance(data, (list, dict))):
+                # attribute_map is a dict that maps field names in snake_case
+                # to camelCase.
+                reverse_attribute_map = {
+                    v: k for k, v in klass.attribute_map.items()
+                }
+                for k, v in data.items():
+                    field_name = reverse_attribute_map.get(k, None)
+                    if field_name is None:
+                        raise ValueError(
+                            f'Unknown field `{k}`. Please ensure '
+                            'pod_config follows the Kubernetes '
+                            'Pod schema: '
+                            'https://github.com/kubernetes/kubernetes/blob/master/api/openapi-spec/v3/api__v1_openapi.json'
+                        )
+                    kwargs[field_name] = cls.__validate(
+                        v, klass.openapi_types[field_name])
+        except exceptions.KubernetesValidationError as e:
+            raise exceptions.KubernetesValidationError([k] + e.path,
+                                                       str(e)) from e
+        except Exception as e:
+            raise exceptions.KubernetesValidationError([k], str(e)) from e
+
+        instance = klass(**kwargs)
+
+        if hasattr(instance, 'get_real_child_model'):
+            klass_name = instance.get_real_child_model(data)
+            if klass_name:
+                instance = cls.__validate(data, klass_name)
+        return instance
+
 def check_pod_config(pod_config: dict) \
     -> Tuple[bool, Optional[str]]:
-    """Check if the pod_config is a valid pod config
+    """Check if the pod_config is a valid pod config.
 
-    Using deserialize api to check the pod_config is valid or not.
+    Uses the deserialize API from the kubernetes client library.
+
+    This is a client-side validation, meant to catch common errors like
+    unknown/misspelled fields, and missing required fields.
+
+    The full validation however is done later on by the Kubernetes API server
+    when the pod creation request is sent.
 
     Returns:
         bool: True if pod_config is valid.
         str: Error message about why the pod_config is invalid, None otherwise.
     """
-    errors = []
-    # This api_client won't be used to send any requests, so there is no need to
-    # load kubeconfig
-    api_client = kubernetes.kubernetes.client.ApiClient()
-
-    # Used for kubernetes api_client deserialize function, the function will use
-    # data attr, the detail ref:
-    # https://github.com/kubernetes-client/python/blob/master/kubernetes/client/api_client.py#L244
-    class InnerResponse():
-
-        def __init__(self, data: dict):
-            self.data = json.dumps(data)
-
     try:
-        # Validate metadata if present
-        if 'metadata' in pod_config:
-            try:
-                value = InnerResponse(pod_config['metadata'])
-                api_client.deserialize(
-                    value, kubernetes.kubernetes.client.V1ObjectMeta)
-            except ValueError as e:
-                errors.append(f'Invalid metadata: {str(e)}')
-        # Validate spec if present
-        if 'spec' in pod_config:
-            try:
-                value = InnerResponse(pod_config['spec'])
-                api_client.deserialize(value,
-                                       kubernetes.kubernetes.client.V1PodSpec)
-            except ValueError as e:
-                errors.append(f'Invalid spec: {str(e)}')
-        return len(errors) == 0, '.'.join(errors)
+        PodValidator.validate(pod_config)
+    except exceptions.KubernetesValidationError as e:
+        return False, f'Validation error in {".".join(e.path)}: {str(e)}'
     except Exception as e:  # pylint: disable=broad-except
-        errors.append(f'Validation error: {str(e)}')
-        return False, '.'.join(errors)
+        return False, f'Unexpected error: {str(e)}'
+    return True, None
 
 
 def is_kubeconfig_exec_auth(
@@ -1753,7 +1909,7 @@ def is_kubeconfig_exec_auth(
 
     # Load the kubeconfig for the context
     kubeconfig_text = _get_kubeconfig_text_for_context(context)
-    kubeconfig = yaml.safe_load(kubeconfig_text)
+    kubeconfig = yaml_utils.safe_load(kubeconfig_text)
 
     # Get the user details
     user_details = kubeconfig['users']
@@ -2444,7 +2600,7 @@ def clean_zombie_ssh_jump_pod(namespace: str, context: Optional[str],
 
 def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
                            ssh_jump_name: str, service_type: str) -> Dict:
-    template_path = os.path.join(sky.__root_dir__, 'templates',
+    template_path = os.path.join(directory_utils.get_sky_dir(), 'templates',
                                  'kubernetes-ssh-jump.yml.j2')
     if not os.path.exists(template_path):
         raise FileNotFoundError(
@@ -2456,7 +2612,7 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
                               image=ssh_jump_image,
                               secret=ssh_key_secret,
                               service_type=service_type)
-    content = yaml.safe_load(cont)
+    content = yaml_utils.safe_load(cont)
     return content
 
 
@@ -2560,11 +2716,11 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
 
 
 def combine_pod_config_fields(
-    cluster_yaml_path: str,
+    cluster_yaml_obj: Dict[str, Any],
     cluster_config_overrides: Dict[str, Any],
     cloud: Optional[clouds.Cloud] = None,
     context: Optional[str] = None,
-) -> None:
+) -> Dict[str, Any]:
     """Adds or updates fields in the YAML with fields from the
     ~/.sky/config.yaml's kubernetes.pod_spec dict.
     This can be used to add fields to the YAML that are not supported by
@@ -2603,9 +2759,7 @@ def combine_pod_config_fields(
                     - name: my-secret
         ```
     """
-    with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
-        yaml_content = f.read()
-    yaml_obj = yaml.safe_load(yaml_content)
+    merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
     if isinstance(cloud, clouds.SSH):
@@ -2632,26 +2786,20 @@ def combine_pod_config_fields(
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
     config_utils.merge_k8s_configs(
-        yaml_obj['available_node_types']['ray_head_default']['node_config'],
-        kubernetes_config)
-
-    # Write the updated YAML back to the file
-    common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
+        ['node_config'], kubernetes_config)
+    return merged_cluster_yaml_obj
 
 
-def combine_metadata_fields(cluster_yaml_path: str,
+def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
                             cluster_config_overrides: Dict[str, Any],
-                            context: Optional[str] = None) -> None:
+                            context: Optional[str] = None) -> Dict[str, Any]:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
     fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
 
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
-
-    with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
-        yaml_content = f.read()
-    yaml_obj = yaml.safe_load(yaml_content)
-
+    merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
@@ -2673,22 +2821,42 @@ def combine_metadata_fields(cluster_yaml_path: str,
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
         # Service accounts
-        yaml_obj['provider']['autoscaler_service_account']['metadata'],
-        yaml_obj['provider']['autoscaler_role']['metadata'],
-        yaml_obj['provider']['autoscaler_role_binding']['metadata'],
-        yaml_obj['provider']['autoscaler_service_account']['metadata'],
-        # Pod spec
-        yaml_obj['available_node_types']['ray_head_default']['node_config']
+        merged_cluster_yaml_obj['provider']['autoscaler_service_account']
         ['metadata'],
+        merged_cluster_yaml_obj['provider']['autoscaler_role']['metadata'],
+        merged_cluster_yaml_obj['provider']['autoscaler_role_binding']
+        ['metadata'],
+        merged_cluster_yaml_obj['provider']['autoscaler_service_account']
+        ['metadata'],
+        # Pod spec
+        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
+        ['node_config']['metadata'],
         # Services for pods
-        *[svc['metadata'] for svc in yaml_obj['provider']['services']]
+        *[
+            svc['metadata']
+            for svc in merged_cluster_yaml_obj['provider']['services']
+        ]
     ]
 
     for destination in combination_destinations:
         config_utils.merge_k8s_configs(destination, custom_metadata)
 
-    # Write the updated YAML back to the file
-    common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+    return merged_cluster_yaml_obj
+
+
+def combine_pod_config_fields_and_metadata(
+        cluster_yaml_obj: Dict[str, Any],
+        cluster_config_overrides: Dict[str, Any],
+        cloud: Optional[clouds.Cloud] = None,
+        context: Optional[str] = None) -> Dict[str, Any]:
+    """Combines pod config fields and metadata fields"""
+    combined_yaml_obj = combine_pod_config_fields(cluster_yaml_obj,
+                                                  cluster_config_overrides,
+                                                  cloud, context)
+    combined_yaml_obj = combine_metadata_fields(combined_yaml_obj,
+                                                cluster_config_overrides,
+                                                context)
+    return combined_yaml_obj
 
 
 def merge_custom_metadata(
@@ -3544,7 +3712,7 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     """
     # TODO(kyuds): GC cache files
     with open(kubeconfig_path, 'r', encoding='utf-8') as file:
-        config = yaml.safe_load(file)
+        config = yaml_utils.safe_load(file)
     normalized = yaml.dump(config, sort_keys=True)
     hashed = hashlib.sha1(normalized.encode('utf-8')).hexdigest()
     path = os.path.expanduser(
