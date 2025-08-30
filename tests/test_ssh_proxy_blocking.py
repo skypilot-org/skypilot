@@ -1,7 +1,8 @@
 """Test that demonstrates the SSH proxy blocking issue with actual SkyPilot code.
 
 This test directly uses the actual functions from sky/server/stream_utils.py
-and shows how synchronous database operations block the event loop.
+and sky/server/server.py to show how synchronous database operations block 
+the event loop.
 """
 
 import asyncio
@@ -140,13 +141,117 @@ async def test_stream_utils_blocking():
     for request_id, log_path in test_requests:
         try:
             os.unlink(log_path)
-        except:
+        except Exception:
             pass
     
     print("\n" + "="*60)
-    print("SUMMARY")
+    print("SUMMARY: stream_utils.log_streamer")
     print("="*60)
     print(f"Baseline SSH latency:     {baseline_avg*1000:.1f}ms")
-    print(f"With blocking streams:    {blocked_avg*1000:.1f}ms ({degradation:.1f}x slower)")
+    print(f"With blocking streams:    {blocked_avg*1000:.1f}ms"
+          f" ({degradation:.1f}x slower)")
     print("\nThe test proves that stream_utils.log_streamer blocks the event loop")
+    print("because it calls requests_lib.get_request() synchronously.")
+
+
+@pytest.mark.asyncio
+async def test_api_get_blocking():
+    """Test showing that /api/get endpoint blocks the event loop.
+    
+    This test demonstrates that the synchronous call to requests_lib.get_request()
+    in server.py:1400 (api_get function) blocks the event loop when many
+    concurrent GET requests are made, causing SSH proxy lag.
+    """
+    print("="*60)
+    print("TEST: SSH Proxy Blocking with /api/get endpoint")
+    print("="*60)
+    
+    # Track SSH responsiveness
+    ssh_latencies = []
+    
+    async def simulate_ssh_keystroke():
+        """Simulate SSH keystrokes through WebSocket."""
+        for _ in range(5):
+            start = time.time()
+            await asyncio.sleep(0.001)  # Should take ~1ms
+            latency = time.time() - start
+            ssh_latencies.append(latency)
+            if latency > 0.1:  # Report if > 100ms
+                print(f"      ⚠️  SSH keystroke lag: {latency*1000:.1f}ms")
+            await asyncio.sleep(0.02)
+    
+    print("\n1. BASELINE: Testing SSH responsiveness without load")
+    await simulate_ssh_keystroke()
+    baseline_avg = sum(ssh_latencies) / len(ssh_latencies)
+    print(f"   Average SSH latency: {baseline_avg*1000:.1f}ms")
+    
+    ssh_latencies.clear()
+    
+    print("\n2. PROBLEM: Testing with blocking /api/get requests")
+    print("   Simulating many concurrent /api/get requests...")
+    print("   NOTE: Testing server.py:1400 blocking")
+    
+    # Mock the server module
+    from sky.server import server
+    
+    # Create a mock request object
+    mock_request = mock.MagicMock()
+    mock_request.request_id = 'test_req_0000'
+    mock_request.status = requests_lib.RequestStatus.SUCCEEDED
+    mock_request.should_retry = False
+    mock_request.get_error = lambda: None
+    mock_request.encode = lambda: mock.MagicMock(model_dump=lambda: {})
+    
+    # Create a blocking mock that simulates database delay
+    def blocking_get_request(_request_id):
+        """Simulate blocking database operation in api_get."""
+        # Realistic delay for busy database with many concurrent requests
+        time.sleep(0.05)  # 50ms blocking delay per call
+        return mock_request
+    
+    async def simulate_api_get(request_id):
+        """Simulate calling the /api/get endpoint."""
+        # Patch get_request to simulate blocking in server.py
+        with mock.patch('sky.server.requests.requests.get_request',
+                        side_effect=blocking_get_request):
+            # Call the actual api_get function (simulating the endpoint)
+            try:
+                result = await server.api_get(request_id)
+                return result
+            except Exception:
+                # Handle the case where api_get raises an exception
+                pass
+    
+    # Start SSH monitoring
+    ssh_task = asyncio.create_task(simulate_ssh_keystroke())
+    
+    # Create many concurrent API GET requests to stress test
+    api_tasks = []
+    num_concurrent = 30  # Many concurrent GET requests
+    print(f"   Starting {num_concurrent} concurrent /api/get requests...")
+    for i in range(num_concurrent):
+        request_id = f'test_req_{i:04d}'
+        task = asyncio.create_task(simulate_api_get(request_id))
+        api_tasks.append(task)
+    
+    # Wait for all tasks
+    await asyncio.gather(*api_tasks, ssh_task)
+    
+    blocked_avg = sum(ssh_latencies) / len(ssh_latencies)
+    print(f"   Average SSH latency: {blocked_avg*1000:.1f}ms")
+    
+    degradation = blocked_avg / baseline_avg if baseline_avg > 0 else float('inf')
+    print(f"   SSH latency: {degradation:.1f}x slower")
+    
+    # Assert that blocking operations cause significant degradation
+    assert degradation > 5, f"Expected significant degradation, got {degradation:.1f}x"
+    print("   ❌ CONFIRMED: /api/get endpoint blocks the event loop!")
+    
+    print("\n" + "="*60)
+    print("SUMMARY: /api/get endpoint")
+    print("="*60)
+    print(f"Baseline SSH latency:     {baseline_avg*1000:.1f}ms")
+    print(f"With blocking /api/get:   {blocked_avg*1000:.1f}ms"
+          f" ({degradation:.1f}x slower)")
+    print("\nThe test proves that the /api/get endpoint blocks the event loop")
     print("because it calls requests_lib.get_request() synchronously.")
