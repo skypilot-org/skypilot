@@ -480,3 +480,26 @@ async def test_get_api_request_ids_start_with(isolated_database):
     # Test that limit is respected
     bulk_result = await requests.get_api_request_ids_start_with('bulk-')
     assert len(bulk_result) == 1000  # Should be limited to 1000
+
+
+@pytest.mark.asyncio
+async def test_get_request_async_race_condition(isolated_database):
+    """Test that get_request_async is concurrent safe."""
+
+    async def write_then_read(req: requests.Request):
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, requests.create_if_not_exists, req)
+        retrieved = await requests.get_request_async(req.request_id)
+        assert retrieved is not None
+
+    reqs = []
+    for i in range(128):
+        req = requests.Request(request_id=f'test-request-{i}',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=time.time(),
+                               user_id='test-user')
+        reqs.append(asyncio.create_task(write_then_read(req)))
+    await asyncio.gather(*reqs)

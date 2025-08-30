@@ -508,9 +508,9 @@ def _get_request_no_lock(request_id: str) -> Optional[Request]:
 async def _get_request_no_lock_async(request_id: str) -> Optional[Request]:
     """Async version of _get_request_no_lock."""
     assert _DB is not None
-    conn = await _DB.async_conn()
-    async with conn.execute(_get_request_sql, (request_id + '%',)) as cursor:
-        row = await cursor.fetchone()
+    async with _DB.execute_fetchall_async(_get_request_sql,
+                                          (request_id + '%',)) as rows:
+        row = rows[0] if rows else None
         if row is None:
             return None
     return Request.from_row(row)
@@ -640,10 +640,9 @@ def get_request_tasks(
 async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
     """Get a list of API request ids for shell completion."""
     assert _DB is not None
-    conn = await _DB.async_conn()
     # Prioritize alive requests (PENDING, RUNNING) over finished ones,
     # then order by creation time (newest first) within each category.
-    async with conn.execute(
+    async with _DB.execute_fetchall_async(
         f"""SELECT request_id FROM {REQUEST_TABLE}
                 WHERE request_id LIKE ?
                 ORDER BY
@@ -652,9 +651,8 @@ async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
                         ELSE 1
                     END,
                     created_at DESC
-                LIMIT 1000""", (f'{incomplete}%',)) as cursor:
-        rows = await cursor.fetchall()
-        if rows is None:
+                LIMIT 1000""", (f'{incomplete}%',)) as rows:
+        if not rows:
             return []
     return [row[0] for row in rows]
 
@@ -675,9 +673,8 @@ def _add_or_update_request_no_lock(request: Request):
 async def _add_or_update_request_no_lock_async(request: Request):
     """Async version of _add_or_update_request_no_lock."""
     assert _DB is not None
-    conn = await _DB.async_conn()
-    await conn.execute(_add_or_update_request_sql, request.to_row())
-    await conn.commit()
+    await _DB.execute_and_commit_async(_add_or_update_request_sql,
+                                       request.to_row())
 
 
 def set_request_failed(request_id: str, e: BaseException) -> None:
