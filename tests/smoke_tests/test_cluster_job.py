@@ -2286,7 +2286,7 @@ def test_kubernetes_pod_config_change_detection():
                 # Verify the job succeeds despite the warning and check that environment variables are not updated
                 f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_2_path} 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Task requires different Kubernetes pod config" && '
                 f'echo "$s" | grep "TEST_VAR_1 = 1" && '
-                f'echo "$s" | grep "TEST_VAR_2 = "',
+                f'echo "$s" | grep "TEST_VAR_2 =$"',
                 # Down and launch again to get the new pod_config
                 f'sky down -y {name}',
                 f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_2_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 2" && '
