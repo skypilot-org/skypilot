@@ -1652,31 +1652,27 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
-                                   cluster_name: str) -> None:
-    """Proxies SSH to the Kubernetes pod with websocket."""
-    # Run the entire websocket proxy operation in a separate thread with
-    # its own event loop to avoid blocking the main FastAPI event loop.
-    await context_utils.to_thread(_ssh_proxy_worker,
-                                  websocket, cluster_name)
-
-
-def _ssh_proxy_worker(websocket: fastapi.WebSocket,
-                                       cluster_name: str) -> None:
-    """Synchronous wrapper to run the kubernetes pod SSH proxy in a new event
-    loop within a separate thread."""
-    # Create a new event loop for this thread
+def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
+                             cluster_name: str) -> None:
+    """Proxies SSH to the Kubernetes pod with websocket.
+    
+    This handler is defined as a sync function to let FastAPI handle this
+    in a separate thread, so that we can run the ssh proxy operations in a
+    dedicated event loop to avoid potential blocking issues in the main event
+    loop and vice versa.
+    """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(
-            _pipe_ssh_proxy(websocket, cluster_name))
+            _kubernetes_pod_ssh_proxy_worker(websocket, cluster_name))
     finally:
         loop.close()
 
 
-async def _pipe_ssh_proxy(websocket: fastapi.WebSocket,
-                          cluster_name: str) -> None:
+async def _kubernetes_pod_ssh_proxy_worker(
+        websocket: fastapi.WebSocket,
+        cluster_name: str) -> None:
     """Maintain the pipe between kubectl port-forward and the websocket."""
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
@@ -1746,11 +1742,6 @@ async def _pipe_ssh_proxy(websocket: fastapi.WebSocket,
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
     finally:
         proc.terminate()
-
-async def _pipe_ssh_proxy(cluster_name: str,
-                          websocket: fastapi.WebSocket,
-                          proc: asyncio.subprocess.Process) -> None:
-    """Maintain the pipe between kubectl port-forward and the websocket."""
 
 
 @app.get('/all_contexts')
