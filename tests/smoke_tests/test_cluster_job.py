@@ -428,13 +428,18 @@ def test_docker_preinstalled_package(generic_cloud: str):
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     use_spot = True
-    # EKS does not support spot instances
+    accelerator = 'T4'
     if generic_cloud == 'kubernetes':
-        use_spot = not smoke_tests_utils.is_eks_cluster()
+        # EKS does not support spot instances
+        # Assume tests using a remote api server endpoint do not support spot instances
+        use_spot = not smoke_tests_utils.is_eks_cluster(
+        ) and not smoke_tests_utils.api_server_endpoint_configured_in_env_file(
+        )
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     test = smoke_tests_utils.Test(
         'multi_echo',
         [
-            f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)}',
+            f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)} {accelerator}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             'sleep 10',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
