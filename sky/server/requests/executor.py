@@ -455,7 +455,15 @@ async def execute_request_coroutine(request: api_requests.Request):
     async def poll_task(request_id: str) -> bool:
         request = await api_requests.get_request_async(request_id)
         if request is None:
-            raise RuntimeError('Request not found')
+            logger.info(f'Cannot find request when streaming request logs {request_id}')
+            logger.info(f'Try sync version')
+            request = api_requests.get_request(request_id)
+            if request is None:
+                logger.info(f'Cannot find request when streaming request logs {request_id}')
+                if request is None:
+                    raise RuntimeError('Request not found when streaming request logs')
+            else:
+                logger.info(f'Found request when streaming request logs {request_id} in sync version')
 
         if request.status == api_requests.RequestStatus.CANCELLED:
             ctx.cancel()
