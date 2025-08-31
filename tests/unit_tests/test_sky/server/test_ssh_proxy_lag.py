@@ -140,7 +140,7 @@ def mock_blocking_operations(mock_request_obj):
     async def async_get_request(*args, **kwargs):
         await asyncio.sleep(0.02)  # Async delay that doesn't block
         return mock_request_obj
-    
+
     get_request_async_patch = mock.patch(
         'sky.server.requests.requests.get_request_async',
         side_effect=async_get_request)
@@ -282,6 +282,7 @@ async def test_endpoint_api_cancel(monitor, mock_request,
     result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
     assert not result[
         'blocking'], "/api/cancel should not block (uses schedule_request)"
+
 
 @pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
@@ -474,6 +475,7 @@ async def test_endpoint_download(monitor, mock_request):
 
 
 # ========== CATEGORY 4: COMPLETION ENDPOINTS ==========
+
 
 @pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
