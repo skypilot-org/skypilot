@@ -129,14 +129,15 @@ def mock_blocking_operations(mock_request_obj):
     # Mock requests.get_request (most common blocking operation)
     get_request_patch = mock.patch(
         'sky.server.requests.requests.get_request',
-        side_effect=create_blocking_mock(mock_request_obj, delay=0.02)
+        side_effect=create_blocking_mock(mock_request_obj, delay=0.02, name='get_request')
     )
     patches.append(get_request_patch)
     
     # Mock requests.get_request_tasks
     get_tasks_patch = mock.patch(
         'sky.server.requests.requests.get_request_tasks',
-        side_effect=create_blocking_mock([mock_request_obj], delay=0.02)
+        # Mock a significant amount of time to load all requests
+        side_effect=create_blocking_mock([mock_request_obj], delay=0.2, name='get_request_tasks')
     )
     patches.append(get_tasks_patch)
     
@@ -153,12 +154,13 @@ def mock_blocking_operations(mock_request_obj):
 
 # ========== HELPER FUNCTIONS ==========
 
-def create_blocking_mock(return_value, delay=0.02):
+def create_blocking_mock(return_value, delay=0.02, name=None):
     """Create a mock that simulates blocking behavior.
     
     Args:
         return_value: Value to return after blocking
         delay: Time to block in seconds (default 20ms)
+        name: Optional name for debugging
     """
     def blocking_func(*args, **kwargs):
         time.sleep(delay)  # Simulate blocking
@@ -218,7 +220,7 @@ async def test_endpoint_api_get(monitor, mock_blocking_operations):
             pass
     
     result = await run_endpoint_test(test_func, monitor)
-    assert result['blocking'], "/api/get should be blocking due to sync DB calls"
+    assert not result['blocking'], "/api/get should NOT block the event loop"
 
 
 @pytest.mark.asyncio
@@ -228,13 +230,17 @@ async def test_endpoint_api_status(monitor, mock_blocking_operations):
     
     async def test_func():
         try:
-            await server.api_status()
-            await server.api_status(request_ids=['test1'])
-        except:
+            # This should call get_request_tasks (which should block for 1s)
+            # Must pass None explicitly since we're not going through FastAPI
+            await server.api_status(request_ids=None, all_status=False)
+            # This should call get_request (which should block for 0.02s each)
+            await server.api_status(request_ids=['test1', 'test2'], all_status=False)
+        except Exception as e:
+            print(f"      Error in test_func: {e}")
             pass
     
-    result = await run_endpoint_test(test_func, monitor)
-    assert result['blocking'], "/api/status should be blocking due to sync DB calls"
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=20)
+    assert not result['blocking'], "/api/status should NOT block the event loop"
 
 
 @pytest.mark.asyncio
@@ -273,9 +279,9 @@ async def test_endpoint_api_stream(monitor, mock_blocking_operations):
         except:
             pass
     
-    result = await run_endpoint_test(test_func, monitor, num_concurrent=10)
+    result = await run_endpoint_test(test_func, monitor)
     os.unlink(log_file.name)
-    assert result['blocking'], "/api/stream should be blocking due to sync DB calls"
+    assert not result['blocking'], "/api/stream should NOT block the event loop"
 
 
 # ========== CATEGORY 2: CLUSTER OPERATIONS ==========
