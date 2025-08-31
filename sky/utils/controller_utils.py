@@ -67,9 +67,22 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
 _LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX = (
     '__skypilot:local_skypilot_config_path.yaml')
 
+
+def _getenv_int(name: str, default: int = 0) -> int:
+    val = os.getenv(name)
+    try:
+        return int(val) if val is not None else default
+    except ValueError:
+        return default
+
+
 # Configuration for file mount compression
-_COMPRESSION_THRESHOLD_FILE_COUNT = 0  # Compress if more or equal to 10 files
-_COMPRESSION_THRESHOLD_TOTAL_SIZE_MB = 0  # Compress if total size > 50MB
+_COMPRESSION_THRESHOLD_FILE_COUNT = _getenv_int(
+    'SKYPILOT_COMPRESSION_THRESHOLD_FILE_COUNT',
+    0)  # Compress if more or equal to X files. Defaults to 0.
+_COMPRESSION_THRESHOLD_TOTAL_SIZE_MB = _getenv_int(
+    'SKYPILOT_COMPRESSION_THRESHOLD_TOTAL_SIZE_MB',
+    0)  # Compress if total size > X MB. Defaults to 0.
 _COMPRESSED_FILE_SUFFIX = '.skypilot.tar.gz'
 
 
@@ -165,7 +178,7 @@ def _get_decompression_commands(compressed_filename: str,
         f'mkdir -p "{temp_extract_dir}"',
         f'tar -xzf "{compressed_filename}" -C "{temp_extract_dir}"',
         f'rm -f "{compressed_filename}"', 'shopt -s dotglob',
-        f'cp -r "{temp_extract_dir}/." "{output_path}/"', 'shopt -u dotglob',
+        f'cp -a "{temp_extract_dir}/." "{output_path}/"', 'shopt -u dotglob',
         f'rm -rf "{temp_extract_dir}"', 'echo "Decompression complete"',
         'cd "$ORIGINAL_PWD"', 'echo "Returned to original directory: $PWD"'
     ]
