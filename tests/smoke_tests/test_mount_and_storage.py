@@ -113,6 +113,11 @@ def test_oci_mounts():
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 @pytest.mark.no_hyperbolic  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
+    if smoke_tests_utils.is_remote_server_test():
+        enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+        if not clouds.cloud_in_iterable(clouds.GCP(), enabled_cloud_storages):
+            pytest.skip('Skipping test because GCS is not enabled')
+
     name = smoke_tests_utils.get_cluster_name()
     storage_name = TestStorageWithCredentials.generate_bucket_name()
     test_commands = [
