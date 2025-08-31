@@ -448,8 +448,8 @@ async def test_endpoint_completion_cluster(monitor):
             except:
                 pass
     
-    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
-    assert result['blocking'], "Completion endpoints should block due to sync DB calls"
+    result = await run_endpoint_test(test_func, monitor)
+    assert not result['blocking'], "Completion endpoints should not block the event loop"
 
 
 @pytest.mark.asyncio
@@ -466,8 +466,8 @@ async def test_endpoint_completion_storage(monitor):
             except:
                 pass
     
-    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
-    assert result['blocking'], "Completion endpoints should block due to sync DB calls"
+    result = await run_endpoint_test(test_func, monitor)
+    assert not result['blocking'], "Completion endpoints should not block the event loop"
 
 
 @pytest.mark.asyncio
@@ -488,7 +488,7 @@ async def test_endpoint_provision_logs(monitor):
                     pass
     
     result = await run_endpoint_test(test_func, monitor)
-    assert result['blocking'], "/provision_logs should block due to sync DB calls"
+    assert not result['blocking'], "/provision_logs should not block the event loop"
 
 
 # ========== CATEGORY 5: USER MANAGEMENT ==========
@@ -501,15 +501,15 @@ async def test_endpoint_users_list(monitor):
     async def test_func():
         # Mock the database calls that fetch users
         with mock.patch('sky.users.server.get_all_users',
-                       side_effect=create_blocking_mock([], delay=0.02)):
+                       side_effect=create_blocking_mock([], delay=0.2)):
             try:
                 from sky.users import server as users_server
                 await users_server.users()
             except:
                 pass
     
-    result = await run_endpoint_test(test_func, monitor, num_concurrent=20)
-    assert result['blocking'], "/users should block due to sync DB calls"
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=100)
+    assert not result['blocking'], "/users should not block the event loop"
 
 
 @pytest.mark.asyncio
@@ -520,15 +520,15 @@ async def test_endpoint_users_export(monitor):
     async def test_func():
         # Mock the database calls and CSV generation
         with mock.patch('sky.users.server.get_all_users',
-                       side_effect=create_blocking_mock([], delay=0.02)):
+                       side_effect=create_blocking_mock([], delay=0.2)):
             try:
                 from sky.users import server as users_server
                 await users_server.user_export()
             except:
                 pass
     
-    result = await run_endpoint_test(test_func, monitor, num_concurrent=20)
-    assert result['blocking'], "/users/export should block due to sync DB calls"
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=100)
+    assert not result['blocking'], "/users/export should not block the event loop"
 
 
 @pytest.mark.asyncio
@@ -549,8 +549,8 @@ async def test_endpoint_users_service_tokens(monitor):
             except:
                 pass
     
-    result = await run_endpoint_test(test_func, monitor, num_concurrent=20)
-    assert result['blocking'], "/users/service-account-tokens should block due to sync DB calls"
+    result = await run_endpoint_test(test_func, monitor)
+    assert not result['blocking'], "/users/service-account-tokens should not block the event loop"
 
 
 # ========== CATEGORY 6: WORKSPACES ==========
