@@ -960,8 +960,7 @@ def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
     return default_gpu
 
 
-def get_enabled_cloud_storages(
-        default_storage_cloud: clouds.AWS) -> List[clouds.Cloud]:
+def get_enabled_cloud_storages() -> List[clouds.Cloud]:
     """Get the enabled cloud storages."""
     if is_remote_server_test():
         prefix = ''
@@ -987,4 +986,4 @@ def get_enabled_cloud_storages(
                 except ValueError:
                     pass
         return enabled_clouds
-    return [default_storage_cloud]
+    return [clouds.AWS()]
