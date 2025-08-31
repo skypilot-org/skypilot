@@ -427,18 +427,6 @@ def override_sky_config(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
         )
-        if services_account_token_configured_in_env_file():
-            config_file = pytest_config_file_override()
-            config = skypilot_config.parse_and_validate_config_file(config_file)
-            service_account_token = config.get_nested(
-                ('api_server', 'service_account_token'), 'UNKNOWN')
-            override_sky_config_dict.set_nested(
-                ('api_server', 'service_account_token'), service_account_token)
-            env_dict[
-                constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR] = service_account_token
-            echo(
-                f'Overriding service account token {service_account_token[:4]}...'
-            )
     if pytest_controller_cloud():
         cloud = pytest_controller_cloud()
         override_sky_config_dict.set_nested(
@@ -846,18 +834,22 @@ def non_docker_remote_api_server() -> bool:
 def get_dashboard_cluster_status_request_id() -> str:
     """Get the status of the cluster from the dashboard."""
     body = payloads.StatusBody(all_users=True,)
-    response = requests.post(
-        f'{get_api_server_url()}/internal/dashboard/status',
-        json=json.loads(body.model_dump_json()))
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/internal/dashboard/status',
+        json=json.loads(body.model_dump_json()),
+        server_url=get_api_server_url())
     return server_common.get_request_id(response)
 
 
 def get_dashboard_jobs_queue_request_id() -> str:
     """Get the jobs queue from the dashboard."""
     body = payloads.JobsQueueBody(all_users=True,)
-    response = requests.post(
-        f'{get_api_server_url()}/internal/dashboard/jobs/queue',
-        json=json.loads(body.model_dump_json()))
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/internal/dashboard/jobs/queue',
+        json=json.loads(body.model_dump_json()),
+        server_url=get_api_server_url())
     return server_common.get_request_id(response)
 
 
@@ -876,8 +868,10 @@ def get_response_from_request_id(request_id: str) -> Any:
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
-    response = requests.get(
-        f'{get_api_server_url()}/internal/dashboard/api/get?request_id={request_id}',
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/internal/dashboard/api/get?request_id={request_id}',
+        server_url=get_api_server_url(),
         timeout=15)
     request_task = None
     if response.status_code == 200:
@@ -932,7 +926,8 @@ def server_side_is_consolidation_mode() -> bool:
         # even if they are specified.
         # (TODO: zeping) support this in the future.
         return False
-    response = requests.get(f'{get_api_server_url()}/workspaces/config')
+    response = server_common.make_authenticated_request(
+        'GET', '/workspaces/config', server_url=get_api_server_url())
     request_id = server_common.get_request_id(response)
     config = config_utils.Config.from_dict(sdk.get(request_id))
     config = skypilot_config.overlay_skypilot_config(
