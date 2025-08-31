@@ -747,10 +747,14 @@ def unreachable_context():
     to it. So this must be session scoped that the kubeconfig is modified before
     the local API server starts.
     """
+    if smoke_tests_utils.non_docker_remote_api_server():
+        yield
+        return
     # Get kubeconfig path from environment variable or use default
     kubeconfig_path = os.environ.get('KUBECONFIG',
                                      os.path.expanduser('~/.kube/config'))
     if not os.path.exists(kubeconfig_path):
+        yield
         return
     import shutil
 
