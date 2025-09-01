@@ -1,5 +1,6 @@
 """This test is to test the hybrid load on the server."""
 import asyncio
+import os
 import time
 import traceback
 import uuid
@@ -32,6 +33,8 @@ class Workload():
         ctx = context.get()
         assert ctx is not None
         uid = suffix()
+        log_file = f'hybrid_load_logs/{self.name}-{uid}.log'
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
         origin = ctx.redirect_log(f'hybrid_load_logs/{self.name}-{uid}.log')
         count = 0
         failed = 0
