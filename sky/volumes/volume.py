@@ -50,11 +50,11 @@ class Volume:
         self.zone: Optional[str] = None
 
     @classmethod
-    def from_dict(cls,
-                  config_dict: Dict[str, Any],
-                  volume_type: Optional[str] = None) -> 'Volume':
+    def from_yaml_config(cls,
+                         config: Dict[str, Any],
+                         volume_type: Optional[str] = None) -> 'Volume':
         """Create a Volume subclass instance from a dictionary via factory."""
-        vol_type_val = volume_type or config_dict.get('type')
+        vol_type_val = volume_type or config.get('type')
         try:
             vt = (volume_lib.VolumeType(vol_type_val)
                   if vol_type_val is not None else None)
@@ -65,26 +65,26 @@ class Volume:
             raise ValueError(f'Invalid volume type: {vol_type_val}')
 
         if vt == volume_lib.VolumeType.PVC:
-            return PVCVolume(name=config_dict.get('name'),
+            return PVCVolume(name=config.get('name'),
                              type=vol_type_val,
-                             infra=config_dict.get('infra'),
-                             size=config_dict.get('size'),
-                             labels=config_dict.get('labels'),
-                             resource_name=config_dict.get('resource_name'),
-                             config=config_dict.get('config', {}))
+                             infra=config.get('infra'),
+                             size=config.get('size'),
+                             labels=config.get('labels'),
+                             resource_name=config.get('resource_name'),
+                             config=config.get('config', {}))
         if vt == volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME:
             return RunpodNetworkVolume(
-                name=config_dict.get('name'),
+                name=config.get('name'),
                 type=vol_type_val,
-                infra=config_dict.get('infra'),
-                size=config_dict.get('size'),
-                labels=config_dict.get('labels'),
-                resource_name=config_dict.get('resource_name'),
-                config=config_dict.get('config', {}))
+                infra=config.get('infra'),
+                size=config.get('size'),
+                labels=config.get('labels'),
+                resource_name=config.get('resource_name'),
+                config=config.get('config', {}))
 
         raise ValueError(f'Invalid volume type: {vol_type_val}')
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_yaml_config(self) -> Dict[str, Any]:
         """Convert the Volume to a dictionary."""
         return {
             'name': self.name,
@@ -124,7 +124,7 @@ class Volume:
             self.size = size
 
         # Validate schema
-        common_utils.validate_schema(self.to_dict(),
+        common_utils.validate_schema(self.to_yaml_config(),
                                      schemas.get_volume_schema(),
                                      'Invalid volumes config: ')
 

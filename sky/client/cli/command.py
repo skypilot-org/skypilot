@@ -4236,12 +4236,13 @@ def volumes_apply(
             volume_config_dict = yaml_config.copy()
 
     # Create Volume instance
-    volume = volume_lib.Volume.from_dict(volume_config_dict, volume_type=type)
+    volume = volume_lib.Volume.from_yaml_config(volume_config_dict,
+                                                volume_type=type)
 
     # Normalize the volume config with CLI options
     volume.normalize_config(name=name, infra=infra, type=type, size=size)
 
-    logger.debug(f'Volume config: {volume.to_dict()}')
+    logger.debug(f'Volume config: {volume.to_yaml_config()}')
 
     if not yes:
         click.confirm(f'Proceed to create volume {volume.name!r}?',
