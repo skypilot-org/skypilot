@@ -1402,7 +1402,7 @@ async def local_down(request: fastapi.Request) -> None:
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     while True:
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}', flush=True)
             raise fastapi.HTTPException(
@@ -1491,7 +1491,7 @@ async def stream(
 
     # Original plain text streaming logic
     if request_id is not None:
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
@@ -1586,7 +1586,7 @@ async def api_status(
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
-            request_task = requests_lib.get_request(request_id)
+            request_task = await requests_lib.get_request_async(request_id)
             if request_task is None:
                 continue
             encoded_request_tasks.append(request_task.readable_encode())
@@ -1796,7 +1796,7 @@ async def complete_volume_name(incomplete: str,) -> List[str]:
 
 @app.get('/api/completion/api_request')
 async def complete_api_request(incomplete: str,) -> List[str]:
-    return requests_lib.get_api_request_ids_start_with(incomplete)
+    return await requests_lib.get_api_request_ids_start_with(incomplete)
 
 
 @app.get('/dashboard/{full_path:path}')
