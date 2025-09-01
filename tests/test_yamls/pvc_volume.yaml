@@ -7,6 +7,7 @@ setup: |
   echo "running setup"
 
 run: |
+  set -e
   echo "check volume"
   df -h /mnt/data0 || (echo "df failed" && exit 1)
   touch /mnt/data0/0.txt || (echo "touch failed" && exit 1)
