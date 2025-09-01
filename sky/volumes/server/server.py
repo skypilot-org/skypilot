@@ -19,10 +19,15 @@ router = fastapi.APIRouter()
 @router.get('')
 async def volume_list(request: fastapi.Request) -> None:
     """Gets the volumes."""
+    auth_user = request.state.auth_user
+    auth_user_env_vars_kwargs = {
+        'env_vars': auth_user.to_env_vars()
+    } if auth_user else {}
+    volume_list_body = payloads.VolumeListBody(**auth_user_env_vars_kwargs)
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='volume_list',
-        request_body=payloads.RequestBody(),
+        request_body=volume_list_body,
         func=core.volume_list,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )

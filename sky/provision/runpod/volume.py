@@ -133,13 +133,13 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
             raise RuntimeError(
                 f'Failed to create RunPod network volume: {resp}')
         logger.info(f'Created RunPod network volume {name_on_cloud} '
-                    f'(id={config.id_on_cloud}).')
+                    f'(id={config.id_on_cloud})')
         return config
 
     # Use existing matched volume
     config.id_on_cloud = vol_id
-    logger.info(f'Using existing RunPod network volume {name_on_cloud} '
-                f'(id={config.id_on_cloud}).')
+    logger.debug(f'Using existing RunPod network volume {name_on_cloud} '
+                 f'(id={config.id_on_cloud})')
     return config
 
 
@@ -154,11 +154,11 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     if not vol_id:
         logger.warning(
             f'RunPod network volume id not found for {name_on_cloud}; '
-            f'skip delete.')
+            f'skip delete')
         return config
     _rest_request('DELETE', f'/networkvolumes/{vol_id}')
     logger.info(f'Deleted RunPod network volume {name_on_cloud} '
-                f'(id={vol_id}).')
+                f'(id={vol_id})')
     return config
 
 
