@@ -906,11 +906,13 @@ def _get_controller_pod_name(controller_name: str) -> str:
         f'awk \'$2 ~ /sky-{controller_name}-controller/ {{print $1; exit}}\'')
 
 
-def kill_and_wait_controller(controller_name: str) -> str:
+def kill_and_wait_controller(test_cluster_name: str,
+                             controller_name: str) -> str:
     """Kill the controller pod and wait for a new one to be ready."""
     assert controller_name in ['serve', 'jobs'
                               ], (f'Invalid controller name: {controller_name}')
-    return (
+    return run_cloud_cmd_on_cluster(
+        test_cluster_name,
         f'initial_controller_pod=$({_get_controller_pod_name(controller_name)}); '
         f'echo "Killing {controller_name} controller pod: $initial_controller_pod"; '
         'kubectl delete pod $initial_controller_pod; '
