@@ -21,11 +21,12 @@ class TestRunPodVolume:
                             lambda self, r, z: (r, z),
                             raising=True)
 
-    def test_factory_returns_runpod_subclass(self):
+    def test_factory_returns_runpod_subclass(self, monkeypatch):
+        self._mock_infra(monkeypatch, zone='ca-mtl-1')
         cfg = {
             'name': 'rpv',
             'type': 'runpod-network-volume',
-            'infra': 'runpod/iad-1',
+            'infra': 'runpod/ca/CA-MTL-1',
             'size': '100'
         }
         vol = volume_lib.Volume.from_yaml_config(cfg)
@@ -69,7 +70,6 @@ class TestRunPodVolume:
             'size': '100'
         }
         vol = volume_lib.Volume.from_yaml_config(cfg)
-        vol.normalize_config()
         assert vol.cloud == 'runpod'
         assert vol.zone == 'iad-1'
 
@@ -81,9 +81,8 @@ class TestRunPodVolume:
             'infra': 'runpod',
             'size': '100'
         }
-        vol = volume_lib.Volume.from_yaml_config(cfg)
         with pytest.raises(ValueError) as exc_info:
-            vol.normalize_config()
+            volume_lib.Volume.from_yaml_config(cfg)
         assert 'RunPod DataCenterId is required to create a network volume' in str(
             exc_info.value)
 
@@ -97,25 +96,20 @@ class TestRunPodVolume:
             'infra': 'runpod/iad-1',
             'size': str(too_small)
         }
-        vol = volume_lib.Volume.from_yaml_config(cfg)
         with pytest.raises(ValueError) as exc_info:
-            vol.normalize_config()
+            volume_lib.Volume.from_yaml_config(cfg)
         assert 'RunPod network volume size must be at least' in str(
             exc_info.value)
 
     def test_cli_overrides_applied(self, monkeypatch):
         self._mock_infra(monkeypatch, zone='iad-1')
         cfg = {
-            'name': 'rpv',
-            'type': 'runpod-network-volume',
+            'name': 'new',
             'infra': 'runpod/iad-1',
-            'size': '100'
+            'type': 'runpod-network-volume',
+            'size': '200',
         }
         vol = volume_lib.Volume.from_yaml_config(cfg)
-        vol.normalize_config(name='new',
-                             infra='runpod/iad-1',
-                             type='runpod-network-volume',
-                             size='200')
         assert vol.name == 'new'
         assert vol.type == 'runpod-network-volume'
         assert vol.size == '200'
@@ -128,9 +122,8 @@ class TestRunPodVolume:
             'infra': 'runpod/iad-1',
             'size': '50Mi'  # invalid in our adjust (expects Gi or integer)
         }
-        vol = volume_lib.Volume.from_yaml_config(cfg)
         with pytest.raises(ValueError) as exc_info:
-            vol.normalize_config()
+            volume_lib.Volume.from_yaml_config(cfg)
         assert 'Invalid size' in str(exc_info.value)
 
     def test_cloud_mismatch_raises(self, monkeypatch):
@@ -147,9 +140,8 @@ class TestRunPodVolume:
             'infra': 'k8s',
             'size': '100'
         }
-        vol = volume_lib.Volume.from_yaml_config(cfg)
         with pytest.raises(ValueError) as exc_info:
-            vol.normalize_config()
+            volume_lib.Volume.from_yaml_config(cfg)
         assert 'Invalid cloud' in str(exc_info.value)
 
     def test_resource_name_without_size_ok(self, monkeypatch):
@@ -160,8 +152,7 @@ class TestRunPodVolume:
             'infra': 'runpod/iad-1',
             'resource_name': 'existing-volume'
         }
-        vol = volume_lib.Volume.from_yaml_config(cfg)
-        vol.normalize_config()  # should not raise
+        volume_lib.Volume.from_yaml_config(cfg)
 
     def test_to_yaml_config_contains_cloud_after_normalize(self, monkeypatch):
         self._mock_infra(monkeypatch, zone='iad-1')
@@ -172,7 +163,6 @@ class TestRunPodVolume:
             'size': '100'
         }
         vol = volume_lib.Volume.from_yaml_config(cfg)
-        vol.normalize_config()
         d = vol.to_yaml_config()
         assert d['cloud'] == 'runpod'
         assert d['zone'] == 'iad-1'
@@ -186,9 +176,8 @@ class TestRunPodVolume:
             'infra': 'runpod/iad-1',
             'size': '100'
         }
-        vol = volume_lib.Volume.from_yaml_config(cfg)
         with pytest.raises(ValueError) as exc_info:
-            vol.normalize_config()
+            volume_lib.Volume.from_yaml_config(cfg)
         assert 'Invalid volume name: Volume name exceeds' in str(exc_info.value)
         # Max length boundary (30) should pass
         ok_cfg = {
@@ -197,22 +186,7 @@ class TestRunPodVolume:
             'infra': 'runpod/iad-1',
             'size': '100'
         }
-        vol2 = volume_lib.Volume.from_yaml_config(ok_cfg)
-        vol2.normalize_config()
-
-    def test_cli_override_keeps_subclass(self, monkeypatch):
-        self._mock_infra(monkeypatch, zone='iad-1')
-        cfg = {
-            'name': 'rpv',
-            'type': 'k8s-pvc',  # in file
-            'infra': 'runpod/iad-1',
-            'size': '100'
-        }
-        vol = volume_lib.Volume.from_yaml_config(
-            cfg, volume_type='runpod-network-volume')
-        assert type(vol).__name__ in ('RunpodNetworkVolume',)
-        vol.normalize_config(type='runpod-network-volume')
-        assert vol.type == 'runpod-network-volume'
+        volume_lib.Volume.from_yaml_config(ok_cfg)
 
 
 class TestRunPodProvisionVolume:

@@ -49,12 +49,12 @@ class Volume:
         self.region: Optional[str] = None
         self.zone: Optional[str] = None
 
+        self._normalize_config()
+
     @classmethod
-    def from_yaml_config(cls,
-                         config: Dict[str, Any],
-                         volume_type: Optional[str] = None) -> 'Volume':
+    def from_yaml_config(cls, config: Dict[str, Any]) -> 'Volume':
         """Create a Volume subclass instance from a dictionary via factory."""
-        vol_type_val = volume_type or config.get('type')
+        vol_type_val = config.get('type')
         try:
             vt = (volume_lib.VolumeType(vol_type_val)
                   if vol_type_val is not None else None)
@@ -99,30 +99,8 @@ class Volume:
             'zone': self.zone,
         }
 
-    def normalize_config(
-            self,
-            name: Optional[str] = None,
-            infra: Optional[str] = None,
-            type: Optional[str] = None,  # pylint: disable=redefined-builtin
-            size: Optional[str] = None) -> None:
-        """Override the volume config with CLI options,
-           adjust and validate the config.
-
-        Args:
-            name: Volume name to override
-            infra: Infrastructure to override
-            type: Volume type to override
-            size: Volume size to override
-        """
-        if name is not None:
-            self.name = name
-        if infra is not None:
-            self.infra = infra
-        if type is not None:
-            self.type = type
-        if size is not None:
-            self.size = size
-
+    def _normalize_config(self) -> None:
+        """Adjust and validate the config."""
         # Validate schema
         common_utils.validate_schema(self.to_yaml_config(),
                                      schemas.get_volume_schema(),

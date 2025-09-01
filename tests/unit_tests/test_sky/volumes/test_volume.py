@@ -156,7 +156,7 @@ class TestVolume:
         assert volume.size == '100'  # Size should remain unchanged
 
     def test_volume_normalize_config(self, monkeypatch):
-        """Test Volume.normalize_config method."""
+        """Test Volume._normalize_config method."""
         # Mock infra_utils.InfraInfo.from_str
         mock_infra_info = MagicMock()
         mock_infra_info.cloud = 'kubernetes'
@@ -165,13 +165,13 @@ class TestVolume:
         monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
                             lambda x: mock_infra_info)
 
-        volume = volume_lib.Volume(name='test', type='k8s-pvc', size='100Gi')
+        volume = volume_lib.Volume(name='new-name',
+                                   infra='k8s',
+                                   type='k8s-pvc',
+                                   size='200Gi')
 
         # Test normalize_config with CLI overrides
-        volume.normalize_config(name='new-name',
-                                infra='k8s',
-                                type='k8s-pvc',
-                                size='200Gi')
+        volume._normalize_config()
 
         assert volume.name == 'new-name'
         assert volume.infra == 'k8s'
@@ -203,7 +203,7 @@ class TestVolume:
         assert volume.type == 'k8s-pvc'
         assert volume.infra == 'k8s'
         assert volume.labels == {'key': 'value'}
-        assert volume.size == '100Gi'
+        assert volume.size == '100'
         assert volume.resource_name == 'existing-pvc'
         assert volume.config == {'access_mode': 'ReadWriteMany'}
         # Should be PVC subclass
@@ -287,8 +287,7 @@ class TestVolume:
         ]
 
         for config in valid_configs:
-            volume = volume_lib.Volume.from_yaml_config(config)
-            volume.normalize_config()  # Should not raise
+            volume_lib.Volume.from_yaml_config(config)
 
     def test_volume_schema_validation_missing_required_fields(
             self, monkeypatch):
@@ -321,9 +320,8 @@ class TestVolume:
         ]
 
         # Missing name (valid type) -> schema validation error during normalize
-        volume = volume_lib.Volume.from_yaml_config(invalid_configs[0])
         with pytest.raises(exceptions.InvalidSkyPilotConfigError) as exc_info:
-            volume.normalize_config()
+            volume_lib.Volume.from_yaml_config(invalid_configs[0])
         assert 'Invalid volumes config' in str(exc_info.value)
         # Missing type -> factory should raise immediately
         with pytest.raises(ValueError) as exc_info:
@@ -388,9 +386,8 @@ class TestVolume:
         ]
 
         for config in invalid_configs:
-            volume = volume_lib.Volume.from_yaml_config(config)
             with pytest.raises(ValueError):
-                volume.normalize_config()
+                volume_lib.Volume.from_yaml_config(config)
 
     def test_volume_schema_validation_invalid_config_object(self, monkeypatch):
         """Test volume schema validation with invalid config object."""
@@ -426,9 +423,8 @@ class TestVolume:
         ]
 
         for config in invalid_configs:
-            volume = volume_lib.Volume.from_yaml_config(config)
             with pytest.raises(exceptions.InvalidSkyPilotConfigError):
-                volume.normalize_config()
+                volume_lib.Volume.from_yaml_config(config)
 
     def test_volume_schema_validation_additional_properties(self, monkeypatch):
         """Test volume schema validation with additional properties."""
@@ -494,9 +490,8 @@ class TestVolume:
             _ = volume_lib.Volume.from_yaml_config(invalid_configs[0])
         assert 'Invalid volume type' in str(exc_info.value)
         # Case 2: wrong-cased access_mode should fail during normalize
-        volume = volume_lib.Volume.from_yaml_config(invalid_configs[1])
         with pytest.raises(exceptions.InvalidSkyPilotConfigError):
-            volume.normalize_config()
+            volume_lib.Volume.from_yaml_config(invalid_configs[1])
 
     def test_volume_schema_validation_access_modes(self, monkeypatch):
         """Test volume schema validation with different access modes."""
@@ -526,8 +521,7 @@ class TestVolume:
                     'access_mode': access_mode
                 }
             }
-            volume = volume_lib.Volume.from_yaml_config(config)
-            volume.normalize_config()  # Should not raise
+            volume_lib.Volume.from_yaml_config(config)
 
     def test_validate_config_with_valid_labels(self, monkeypatch):
         """Test Volume._validate_config with valid labels."""
@@ -550,10 +544,8 @@ class TestVolume:
                                        'app.kubernetes.io/version': 'v1.0.0'
                                    })
 
-        # First normalize config to set cloud info
-        volume.normalize_config()
         # Should not raise any exception
-        volume._validate_config()
+        volume._normalize_config()
 
     def test_validate_config_with_invalid_cloud(self, monkeypatch):
         """Test Volume._validate_config with invalid label key."""
@@ -646,7 +638,7 @@ class TestVolume:
                                    labels={})
 
         # First normalize config to set cloud info
-        volume.normalize_config()
+        volume._normalize_config()
         # Should not raise any exception
         volume._validate_config()
 
@@ -667,22 +659,9 @@ class TestVolume:
                                    labels=None)
 
         # First normalize config to set cloud info
-        volume.normalize_config()
+        volume._normalize_config()
         # Should not raise any exception
         volume._validate_config()
-
-    def test_from_yaml_config_type_override(self):
-        """Volume.from_yaml_config accepts volume_type to override dict type."""
-        cfg = {
-            'name': 'v1',
-            'type': 'k8s-pvc',
-            'infra': 'runpod',
-            'size': '100'
-        }
-        vol = volume_lib.Volume.from_yaml_config(
-            cfg, volume_type='runpod-network-volume')
-        assert vol.type == 'runpod-network-volume'
-        assert type(vol).__name__ in ('RunpodNetworkVolume',)
 
     def test_runpod_volume_validate_success(self, monkeypatch):
         """RunPod volume requires zone and min size; success case."""
@@ -705,8 +684,6 @@ class TestVolume:
             'size': '100'  # in GB
         }
         vol = volume_lib.Volume.from_yaml_config(cfg)
-        # normalize fills cloud/region/zone and adjusts size if needed
-        vol.normalize_config()
         # Should be subclass and not raise
         assert type(vol).__name__ in ('RunpodNetworkVolume',)
 
@@ -729,9 +706,8 @@ class TestVolume:
             'infra': 'runpod',
             'size': '100'
         }
-        vol = volume_lib.Volume.from_yaml_config(cfg)
         with pytest.raises(ValueError) as exc_info:
-            vol.normalize_config()
+            volume_lib.Volume.from_yaml_config(cfg)
         assert 'RunPod DataCenterId is required to create a network volume' in str(
             exc_info.value)
 
@@ -754,8 +730,7 @@ class TestVolume:
             'infra': 'runpod/iad-1',
             'size': str(max(1, min_size - 1))
         }
-        vol = volume_lib.Volume.from_yaml_config(cfg)
         with pytest.raises(ValueError) as exc_info:
-            vol.normalize_config()
+            volume_lib.Volume.from_yaml_config(cfg)
         assert 'RunPod network volume size must be at least' in str(
             exc_info.value)
