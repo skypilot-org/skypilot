@@ -82,10 +82,11 @@ def download_logs_from_api_server(
             local_machine_prefix) for remote_path in paths_on_api_server
     }
     body = payloads.DownloadBody(folder_paths=list(paths_on_api_server),)
-    response = requests.post(f'{server_common.get_server_url()}/download',
-                             json=json.loads(body.model_dump_json()),
-                             stream=True,
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/download',
+        json=json.loads(body.model_dump_json()),
+        stream=True)
     if response.status_code == 200:
         remote_home_path = response.headers.get('X-Home-Path')
         assert remote_home_path is not None, response.headers

@@ -26,6 +26,7 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
@@ -460,6 +461,7 @@ def request_lock_path(request_id: str) -> str:
 
 @contextlib.contextmanager
 @init_db
+@metrics_lib.time_me
 def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get and update a SkyPilot API request."""
     request = _get_request_no_lock(request_id)
@@ -469,6 +471,7 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
 
 
 @init_db
+@metrics_lib.time_me
 def update_request_async(
         request_id: str) -> AsyncContextManager[Optional[Request]]:
     """Async version of update_request.
@@ -508,15 +511,16 @@ def _get_request_no_lock(request_id: str) -> Optional[Request]:
 async def _get_request_no_lock_async(request_id: str) -> Optional[Request]:
     """Async version of _get_request_no_lock."""
     assert _DB is not None
-    conn = await _DB.async_conn()
-    async with conn.execute(_get_request_sql, (request_id + '%',)) as cursor:
-        row = await cursor.fetchone()
+    async with _DB.execute_fetchall_async(_get_request_sql,
+                                          (request_id + '%',)) as rows:
+        row = rows[0] if rows else None
         if row is None:
             return None
     return Request.from_row(row)
 
 
 @init_db
+@metrics_lib.time_me
 def get_latest_request_id() -> Optional[str]:
     """Get the latest request ID."""
     assert _DB is not None
@@ -529,6 +533,7 @@ def get_latest_request_id() -> Optional[str]:
 
 
 @init_db
+@metrics_lib.time_me
 def get_request(request_id: str) -> Optional[Request]:
     """Get a SkyPilot API request."""
     with filelock.FileLock(request_lock_path(request_id)):
@@ -536,6 +541,7 @@ def get_request(request_id: str) -> Optional[Request]:
 
 
 @init_db_async
+@metrics_lib.time_me_async
 async def get_request_async(request_id: str) -> Optional[Request]:
     """Async version of get_request."""
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
@@ -543,6 +549,7 @@ async def get_request_async(request_id: str) -> Optional[Request]:
 
 
 @init_db
+@metrics_lib.time_me
 def create_if_not_exists(request: Request) -> bool:
     """Create a SkyPilot API request if it does not exist."""
     with filelock.FileLock(request_lock_path(request.request_id)):
@@ -553,6 +560,7 @@ def create_if_not_exists(request: Request) -> bool:
 
 
 @init_db_async
+@metrics_lib.time_me_async
 async def create_if_not_exists_async(request: Request) -> bool:
     """Async version of create_if_not_exists."""
     async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
@@ -563,6 +571,7 @@ async def create_if_not_exists_async(request: Request) -> bool:
 
 
 @init_db
+@metrics_lib.time_me
 def get_request_tasks(
     status: Optional[List[RequestStatus]] = None,
     cluster_names: Optional[List[str]] = None,
@@ -637,13 +646,13 @@ def get_request_tasks(
 
 
 @init_db_async
+@metrics_lib.time_me_async
 async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
     """Get a list of API request ids for shell completion."""
     assert _DB is not None
-    conn = await _DB.async_conn()
     # Prioritize alive requests (PENDING, RUNNING) over finished ones,
     # then order by creation time (newest first) within each category.
-    async with conn.execute(
+    async with _DB.execute_fetchall_async(
         f"""SELECT request_id FROM {REQUEST_TABLE}
                 WHERE request_id LIKE ?
                 ORDER BY
@@ -652,9 +661,8 @@ async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
                         ELSE 1
                     END,
                     created_at DESC
-                LIMIT 1000""", (f'{incomplete}%',)) as cursor:
-        rows = await cursor.fetchall()
-        if rows is None:
+                LIMIT 1000""", (f'{incomplete}%',)) as rows:
+        if not rows:
             return []
     return [row[0] for row in rows]
 
@@ -675,9 +683,8 @@ def _add_or_update_request_no_lock(request: Request):
 async def _add_or_update_request_no_lock_async(request: Request):
     """Async version of _add_or_update_request_no_lock."""
     assert _DB is not None
-    conn = await _DB.async_conn()
-    await conn.execute(_add_or_update_request_sql, request.to_row())
-    await conn.commit()
+    await _DB.execute_and_commit_async(_add_or_update_request_sql,
+                                       request.to_row())
 
 
 def set_request_failed(request_id: str, e: BaseException) -> None:
@@ -711,6 +718,7 @@ def set_request_cancelled(request_id: str) -> None:
 
 
 @init_db
+@metrics_lib.time_me
 def _delete_requests(requests: List[Request]):
     """Clean up requests by their IDs."""
     id_list_str = ','.join(repr(req.request_id) for req in requests)
