@@ -696,7 +696,7 @@ def test_helm_deploy_gke(request):
 
 @pytest.mark.kubernetes
 def test_helm_deploy_okta():
-    if smoke_tests_utils.non_docker_remote_api_server():
+    if smoke_tests_utils.is_non_docker_remote_api_server():
         pytest.skip(
             'Skipping test because it is not relevant for a remotely running API server'
         )

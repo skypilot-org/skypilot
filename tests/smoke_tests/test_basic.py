@@ -747,7 +747,7 @@ def unreachable_context():
     to it. So this must be session scoped that the kubeconfig is modified before
     the local API server starts.
     """
-    if smoke_tests_utils.non_docker_remote_api_server():
+    if smoke_tests_utils.is_non_docker_remote_api_server():
         yield
         return
     # Get kubeconfig path from environment variable or use default
@@ -809,7 +809,7 @@ def test_kubernetes_context_failover(unreachable_context):
       # Set the namespace to test-namespace
       kubectl config set-context kind-skypilot --namespace=test-namespace --context kind-skypilot
     """
-    if smoke_tests_utils.non_docker_remote_api_server():
+    if smoke_tests_utils.is_non_docker_remote_api_server():
         pytest.skip('Skipping test because the Kubernetes configs and '
                     'credentials are located on the remote API server '
                     'and not the machine where the test is running')

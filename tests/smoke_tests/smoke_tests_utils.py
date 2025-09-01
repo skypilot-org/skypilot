@@ -837,7 +837,7 @@ def get_api_server_url() -> str:
     return server_common.get_server_url()
 
 
-def non_docker_remote_api_server() -> bool:
+def is_non_docker_remote_api_server() -> bool:
     if is_remote_server_test():
         return 'host.docker.internal' not in get_api_server_url()
     return False
