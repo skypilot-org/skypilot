@@ -574,6 +574,7 @@ def schedule_request(request_id: str,
 
     if precondition is not None:
         # Wait async to avoid blocking caller.
+        time.sleep(0.5)
         precondition.wait_async(on_condition_met=enqueue)
     else:
         enqueue()

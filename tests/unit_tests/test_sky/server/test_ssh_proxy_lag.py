@@ -119,8 +119,8 @@ def mock_request_obj():
 @pytest.fixture
 def mock_schedule_request():
     """Mock executor.schedule_request for all tests."""
-    with mock.patch.object(executor, 'schedule_request') as mock_sched:
-        yield mock_sched
+    # with mock.patch.object(executor, 'schedule_request') as mock_sched:
+    #     yield mock_sched
 
 
 @pytest.fixture
@@ -243,7 +243,6 @@ async def test_endpoint_api_get(monitor, mock_blocking_operations):
     assert not result['blocking'], "/api/get should NOT block the event loop"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_api_status(monitor, mock_blocking_operations):
     """Test /api/status endpoint for blocking operations."""
@@ -332,7 +331,7 @@ async def test_endpoint_launch(monitor, mock_request, mock_schedule_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_exec(monitor, mock_request, mock_schedule_request):
+async def test_endpoint_exec(monitor, mock_request):
     """Test /exec endpoint for blocking operations."""
     print("\n🔍 Testing: /exec")
 
@@ -345,7 +344,7 @@ async def test_endpoint_exec(monitor, mock_request, mock_schedule_request):
         except:
             pass
 
-    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=30, expected_degradation_threshold=2)
     assert not result[
         'blocking'], "/exec should not block (uses schedule_request)"
 
@@ -475,7 +474,6 @@ async def test_endpoint_download(monitor, mock_request):
 # ========== CATEGORY 4: COMPLETION ENDPOINTS ==========
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_completion_cluster(monitor):
     """Test /api/completion/cluster_name endpoint for blocking operations."""

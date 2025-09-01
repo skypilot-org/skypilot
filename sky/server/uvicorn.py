@@ -145,7 +145,8 @@ class Server(uvicorn.Server):
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-            reqs = requests_lib.get_request_tasks(status=statuses)
+            reqs = requests_lib.get_request_tasks(
+                req_filter=requests_lib.RequestTaskFilter(status=statuses))
             if not reqs:
                 break
             logger.info(f'{len(reqs)} on-going requests '

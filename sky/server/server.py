@@ -1579,10 +1579,9 @@ async def api_status(
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-        return [
-            request_task.readable_encode()
-            for request_task in requests_lib.get_request_tasks(status=statuses)
-        ]
+        request_tasks = await requests_lib.get_request_tasks_async(
+            req_filter=requests_lib.RequestTaskFilter(status=statuses))
+        return [r.readable_encode() for r in request_tasks]
     else:
         encoded_request_tasks = []
         for request_id in request_ids:

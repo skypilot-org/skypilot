@@ -146,6 +146,7 @@ class ClusterStartCompletePrecondition(Precondition):
         self.cluster_name = cluster_name
 
     async def check(self) -> Tuple[bool, Optional[str]]:
+        time.sleep(0.5)
         cluster_record = global_user_state.get_cluster_from_name(
             self.cluster_name)
         if (cluster_record and
@@ -162,13 +163,14 @@ class ClusterStartCompletePrecondition(Precondition):
         # We unify these situations into a single state: the process of starting
         # the cluster is done (either normally or abnormally) but cluster is not
         # in UP status.
-        requests = api_requests.get_request_tasks(
-            status=[
-                api_requests.RequestStatus.RUNNING,
-                api_requests.RequestStatus.PENDING
-            ],
-            include_request_names=['sky.launch', 'sky.start'],
-            cluster_names=[self.cluster_name])
+        requests = await api_requests.get_request_tasks_async(
+            req_filter=api_requests.RequestTaskFilter(
+                status=[
+                    api_requests.RequestStatus.RUNNING,
+                    api_requests.RequestStatus.PENDING
+                ],
+                include_request_names=['sky.launch', 'sky.start'],
+                cluster_names=[self.cluster_name]))
         if len(requests) == 0:
             # No running or pending tasks, the start process is done.
             return True, None
