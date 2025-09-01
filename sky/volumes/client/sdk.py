@@ -27,6 +27,22 @@ logger = sky_logging.init_logger(__name__)
 def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
     """Creates or registers a volume.
 
+    Example:
+        .. code-block:: python
+
+            import sky.volumes
+            cfg = {
+                'name': "pvc",
+                'type': "k8s-pvc",
+                'size': "100GB",
+                'labels': {
+                    'key': 'value',
+                },
+            }
+            vol = sky.volumes.Volume.from_yaml_config(cfg)
+            vol.normalize_config()
+            sky.volumes.apply(volume)
+
     Args:
         volume: The volume to apply.
 

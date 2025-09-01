@@ -19,6 +19,8 @@ Supported volume types:
 
   - Tested storage backends: AWS EBS, GCP Persistent Disk, Nebius network SSD, JuiceFS, Nebius shared file system, GCP Filestore
 
+- RunPod: `Network Volumes <https://docs.runpod.io/pods/storage/types#network-volume>`_
+
 - GCP: `Persistent Disks <https://cloud.google.com/compute/docs/disks/persistent-disks>`_ and `Local SSDs <https://cloud.google.com/compute/docs/disks/local-ssd>`_
 
 
@@ -76,6 +78,8 @@ Quickstart
 
      run: |
        echo "Hello, World!" > /mnt/data/hello.txt
+
+.. _volumes-on-kubernetes-manage:
 
 Managing volumes
 ~~~~~~~~~~~~~~~~
@@ -237,6 +241,62 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
           # Launch the cluster with the Nebius volume
           $ sky launch -c nebius-cluster task.yaml
+
+
+.. _volumes-on-runpod:
+
+Volumes on RunPod
+------------------
+
+RunPod Network Volumes provide persistent storage that can be mounted into pods on RunPod. SkyPilot supports creating and managing RunPod network volumes via the same three commands:
+
+- ``sky volumes apply``: Create a new network volume
+- ``sky volumes ls``: List all volumes
+- ``sky volumes delete``: Delete a volume
+
+Notes specific to RunPod:
+
+- ``infra`` must specify the RunPod data center (zone), e.g. ``runpod/CA/CA-MTL-1``.
+- Volume name length is limited (max 30 characters).
+- Labels are not currently supported for RunPod volumes.
+
+Quickstart
+~~~~~~~~~~
+
+1. Prepare a volume YAML file:
+
+   .. code-block:: yaml
+
+     # runpod-volume.yaml
+     name: rpvol
+     type: runpod-network-volume
+     infra: runpod/CA/CA-MTL-1  # DataCenterId (zone)
+     size: 100Gi                # GiB
+
+2. Create the volume with ``sky volumes apply runpod-volume.yaml``:
+
+   .. code-block:: console
+
+     $ sky volumes apply runpod-volume.yaml
+     Proceed to create volume 'rpvol'? [Y/n]: Y
+     Created RunPod network volume rpvol-43dbb4ab-15e906 (id=5w6ecp2w9n)
+
+3. Mount the volume in your task YAML:
+
+   .. code-block:: yaml
+
+     # task.yaml
+     volumes:
+       /workspace: rpvol
+
+     run: |
+       echo "Hello, RunPod!" > /workspace/hello.txt
+
+Managing volumes
+~~~~~~~~~~~~~~~~
+
+Same as Kubernetes volumes, refer to :ref:`volumes-on-kubernetes-manage` for more details.
+
 
 Volumes on GCP
 --------------
