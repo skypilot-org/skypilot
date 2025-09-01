@@ -13,6 +13,7 @@ import concurrent.futures
 import os
 import subprocess
 import sys
+import random
 import threading
 import time
 from typing import Dict, List, Optional
@@ -191,7 +192,7 @@ class BenchmarkRunner:
             for thread_id in range(self.threads):
                 future = executor.submit(self._worker_thread, thread_id)
                 future_to_thread[future] = thread_id
-                time.sleep()
+                time.sleep(random.uniform(0, 10))
 
             # Collect results as they complete
             for future in concurrent.futures.as_completed(future_to_thread):
