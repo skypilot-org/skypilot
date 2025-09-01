@@ -1162,7 +1162,7 @@ def test_skyserve_ha_kill_after_ready():
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-after-ready',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for ready
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
@@ -1195,8 +1195,8 @@ def test_skyserve_ha_kill_during_provision():
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-provision',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for provisioning
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             # Wait for service to enter PROVISIONING state
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
@@ -1237,7 +1237,7 @@ def test_skyserve_ha_kill_during_pending():
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-pending',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for pending
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             f'{_SERVE_STATUS_WAIT.format(name=name)}; ',
@@ -1274,7 +1274,7 @@ def test_skyserve_ha_kill_during_shutdown():
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-shutdown',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for ready
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
