@@ -3,6 +3,7 @@ import asyncio
 import time
 import traceback
 import uuid
+import signal
 
 import sky
 from sky import sky_logging
@@ -72,7 +73,7 @@ async def large_file_upload(exit: asyncio.Event):
         await sdk.launch(task=dag, cluster_name=name)
 
     async def down():
-        await sky.down(f'largefile-{uid}')
+        await sdk.down(f'largefile-{uid}')
 
     return await Workload('large_file_upload', exit, launch, down).run()
 
@@ -88,7 +89,7 @@ async def long_tailing(exit: asyncio.Event):
         await sdk.launch(task=dag, cluster_name=name)
 
     async def down():
-        await sky.down(f'longtail-{uid}')
+        await sdk.down(f'longtail-{uid}')
 
     return await Workload('long_tailing', exit, launch, down).run()
 
@@ -116,7 +117,7 @@ async def status(exit: asyncio.Event):
 async def status_refresh(exit: asyncio.Event):
 
     async def fn():
-        sdk.status(refresh=common.StatusRefreshMode.FORCE, all_users=True)
+        await sdk.status(refresh=common.StatusRefreshMode.FORCE, all_users=True)
 
     return await Workload('status_refresh', exit, fn, None).run()
 
@@ -146,10 +147,24 @@ async def hybrid_load(exit: asyncio.Event):
         logger.info('Hybrid load ended')
 
 
-if __name__ == '__main__':
-    try:
-        exit_event = asyncio.Event()
-        asyncio.run(hybrid_load(exit_event))
-    except KeyboardInterrupt as e:
+async def main():
+    exit_event = asyncio.Event()
+    main_task = asyncio.create_task(hybrid_load(exit_event))
+    
+    def signal_handler():
+        logger.info('Received interrupt signal, initiating graceful shutdown...')
         exit_event.set()
-        logger.info('Hybrid load ended by KeyboardInterrupt...')
+    
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGINT, signal_handler)
+
+    try:
+        await main_task
+    except asyncio.CancelledError:
+        logger.info('Main task was cancelled')
+    finally:
+        logger.info('Application shutdown complete')
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
