@@ -5,12 +5,12 @@ import shlex
 import signal
 import tempfile
 import threading
+import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
 import colorama
 import filelock
-import grpc
 
 from sky import backends
 from sky import exceptions
@@ -18,6 +18,7 @@ from sky import execution
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
@@ -37,6 +38,11 @@ from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+
+if typing.TYPE_CHECKING:
+    import grpc
+else:
+    grpc = adaptors_common.LazyImport('grpc')
 
 logger = sky_logging.init_logger(__name__)
 

@@ -1,11 +1,18 @@
 """Rpc Utilities for SkyServe"""
 
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import backends
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
-from sky.schemas.generated import servev1_pb2
 from sky.serve import serve_utils
+
+if typing.TYPE_CHECKING:
+    from sky.schemas.generated import servev1_pb2
+else:
+    servev1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.servev1_pb2')
 
 # ======================= gRPC Converters for Sky Serve =======================
 
@@ -15,7 +22,7 @@ class GetServiceStatusRequestConverter:
 
     @classmethod
     def to_proto(cls, service_names: Optional[List[str]],
-                 pool: bool) -> servev1_pb2.GetServiceStatusRequest:
+                 pool: bool) -> 'servev1_pb2.GetServiceStatusRequest':
         request = servev1_pb2.GetServiceStatusRequest()
         request.pool = pool
         if service_names is not None:
@@ -24,7 +31,7 @@ class GetServiceStatusRequestConverter:
 
     @classmethod
     def from_proto(
-        cls, proto: servev1_pb2.GetServiceStatusRequest
+        cls, proto: 'servev1_pb2.GetServiceStatusRequest'
     ) -> Tuple[Optional[List[str]], bool]:
         pool = proto.pool
         if proto.HasField('service_names'):
@@ -39,9 +46,9 @@ class GetServiceStatusResponseConverter:
 
     @classmethod
     def to_proto(
-            cls,
-            statuses: List[Dict[str,
-                                str]]) -> servev1_pb2.GetServiceStatusResponse:
+        cls,
+        statuses: List[Dict[str,
+                            str]]) -> 'servev1_pb2.GetServiceStatusResponse':
         response = servev1_pb2.GetServiceStatusResponse()
         for status in statuses:
             added = response.statuses.add()
@@ -50,7 +57,7 @@ class GetServiceStatusResponseConverter:
 
     @classmethod
     def from_proto(
-            cls, proto: servev1_pb2.GetServiceStatusResponse
+            cls, proto: 'servev1_pb2.GetServiceStatusResponse'
     ) -> List[Dict[str, str]]:
         pickled = [dict(status.status) for status in proto.statuses]
         return pickled
@@ -61,7 +68,7 @@ class TerminateServiceRequestConverter:
 
     @classmethod
     def to_proto(cls, service_names: Optional[List[str]], purge: bool,
-                 pool: bool) -> servev1_pb2.TerminateServiceRequest:
+                 pool: bool) -> 'servev1_pb2.TerminateServiceRequest':
         request = servev1_pb2.TerminateServiceRequest()
         request.purge = purge
         request.pool = pool
@@ -71,7 +78,7 @@ class TerminateServiceRequestConverter:
 
     @classmethod
     def from_proto(
-        cls, proto: servev1_pb2.TerminateServiceRequest
+        cls, proto: 'servev1_pb2.TerminateServiceRequest'
     ) -> Tuple[Optional[List[str]], bool, bool]:
         purge = proto.purge
         pool = proto.pool

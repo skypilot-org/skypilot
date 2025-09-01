@@ -2,11 +2,10 @@
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import grpc
-
 from sky import backends
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_utils
@@ -16,7 +15,11 @@ from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
+    import grpc
+
     import sky
+else:
+    grpc = adaptors_common.LazyImport('grpc')
 
 logger = sky_logging.init_logger(__name__)
 
