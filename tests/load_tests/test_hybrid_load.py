@@ -10,13 +10,14 @@ from sky import sky_logging
 from sky.client import sdk_async as sdk
 from sky.jobs.client import sdk_async as jobs_sdk
 from sky.utils import common
+from sky.utils import context
+from sky.utils import context_utils
 
 logger = sky_logging.init_logger(__name__)
 
 
 def suffix() -> str:
     return str(uuid.uuid4())[:4]
-
 
 class Workload():
 
@@ -27,6 +28,11 @@ class Workload():
         self.cleanup_fn = cleanup_fn
 
     async def run(self):
+        context.initialize()
+        ctx = context.get()
+        assert ctx is not None
+        uid = suffix()
+        origin = ctx.redirect_log(f'hybrid_load_logs/{self.name}-{uid}.log')
         count = 0
         failed = 0
         total_duration = 0
@@ -42,6 +48,7 @@ class Workload():
                 logger.error(f'Workload {self.name} failed: {e}')
             finally:
                 await self.cleanup_ignore_error()
+        ctx.redirect_log(origin)
         logger.info('Workload completed',
                     extra={
                         'name': self.name,
@@ -62,7 +69,7 @@ class Workload():
 
 
 async def large_file_upload(exit: asyncio.Event):
-    uid = str(uuid.uuid4())[:4]
+    uid = suffix()
 
     async def launch():
         name = f'largefile-{uid}'
@@ -79,7 +86,7 @@ async def large_file_upload(exit: asyncio.Event):
 
 
 async def long_tailing(exit: asyncio.Event):
-    uid = str(uuid.uuid4())[:4]
+    uid = suffix()
 
     async def launch():
         name = f'longtail-{uid}'
@@ -95,7 +102,7 @@ async def long_tailing(exit: asyncio.Event):
 
 
 async def jobs_tailing(exit: asyncio.Event):
-    uid = str(uuid.uuid4())[:4]
+    uid = suffix()
 
     async def launch():
         name = f'jobs-{uid}'
@@ -148,6 +155,7 @@ async def hybrid_load(exit: asyncio.Event):
 
 
 async def main():
+    context_utils.hijack_sys_attrs()
     exit_event = asyncio.Event()
     main_task = asyncio.create_task(hybrid_load(exit_event))
     
