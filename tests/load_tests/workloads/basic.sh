@@ -29,7 +29,6 @@ sky status -u --refresh
 sky start $CLUSTER
 sky down $CLUSTER -y
 sky api status
-sky down $CLUSTER
 sky jobs launch -y -n $JOB --infra $CLOUD 'for i in {1..60}; do echo "$i" && sleep 0.1; done' --workdir .
 sky jobs queue
 sky jobs logs $JOB

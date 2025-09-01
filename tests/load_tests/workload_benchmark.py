@@ -5,7 +5,7 @@ Benchmark script to test load on the SkyPilot server.
 This script launches N threads, each running workloads defined in bash scripts.
 
 Usage:
-    python workload_benchmark.py -t 8 -r 3 -w workloads/workload.sh --cloud aws
+    python workload_benchmark.py -t 8 -r 3 -s workloads/basic.sh --cloud aws
 """
 
 import argparse
@@ -19,7 +19,7 @@ import uuid
 from typing import Dict, List, Optional
 from sky import sky_logging
 
-logger = sky_logging.getLogger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 # Thread-safe statistics collection
 stats_lock = threading.Lock()
@@ -78,8 +78,8 @@ class BenchmarkRunner:
         })
         
         try:
-            logger.info(f"Thread {thread_id}, Repeat {repeat_id}: "
-                       f"Starting workload with ID {unique_id}")
+            logger.info(f'Thread {thread_id}, Repeat {repeat_id}: '
+                       f'Starting workload, log file: {log_file}')
             
             # Run the workload script
             with open(log_file, 'w') as log_f:
@@ -96,8 +96,8 @@ class BenchmarkRunner:
             duration = end_time - start_time
             
             if process.returncode == 0:
-                logger.info(f"Thread {thread_id}, Repeat {repeat_id}: "
-                           f"Completed successfully in {duration:.2f}s")
+                logger.info(f'Thread {thread_id}, Repeat {repeat_id}: '
+                           f'Completed successfully in {duration:.2f}s')
                 return {
                     'success': True,
                     'duration': duration,
@@ -107,8 +107,8 @@ class BenchmarkRunner:
                     'log_file': log_file
                 }
             else:
-                logger.error(f"Thread {thread_id}, Repeat {repeat_id}: "
-                            f"Failed with return code {process.returncode}")
+                logger.error(f'Thread {thread_id}, Repeat {repeat_id}: '
+                            f'Failed with return code {process.returncode}')
                 return {
                     'success': False,
                     'duration': duration,
@@ -122,8 +122,8 @@ class BenchmarkRunner:
         except subprocess.TimeoutExpired:
             end_time = time.time()
             duration = end_time - start_time
-            logger.error(f"Thread {thread_id}, Repeat {repeat_id}: "
-                        f"Timed out after {duration:.2f}s")
+            logger.error(f'Thread {thread_id}, Repeat {repeat_id}: '
+                        f'Timed out after {duration:.2f}s')
             return {
                 'success': False,
                 'duration': duration,
@@ -136,8 +136,8 @@ class BenchmarkRunner:
         except Exception as e:
             end_time = time.time()
             duration = end_time - start_time
-            logger.error(f"Thread {thread_id}, Repeat {repeat_id}: "
-                        f"Error: {str(e)}")
+            logger.error(f'Thread {thread_id}, Repeat {repeat_id}: '
+                        f'Error: {str(e)}')
             return {
                 'success': False,
                 'duration': duration,
@@ -171,10 +171,10 @@ class BenchmarkRunner:
     
     def run_benchmark(self) -> Dict:
         """Run the complete benchmark."""
-        logger.info(f"Starting benchmark: {self.threads} threads, "
-                   f"{self.repeats} repeats each, workload: {self.workload}")
-        logger.info(f"Output directory: {self.output_dir}")
-        logger.info(f"Cloud: {self.cloud}")
+        logger.info(f'Starting benchmark: {self.threads} threads, '
+                   f'{self.repeats} repeats each, workload: {self.workload}')
+        logger.info(f'Output directory: {self.output_dir}')
+        logger.info(f'Cloud: {self.cloud}')
         
         start_time = time.time()
         all_results = []
@@ -195,9 +195,9 @@ class BenchmarkRunner:
                 try:
                     thread_results = future.result()
                     all_results.extend(thread_results)
-                    logger.info(f"Thread {thread_id} completed all repeats")
+                    logger.info(f'Thread {thread_id} completed all repeats')
                 except Exception as e:
-                    logger.error(f"Thread {thread_id} failed: {str(e)}")
+                    logger.error(f'Thread {thread_id} failed: {str(e)}')
         
         end_time = time.time()
         total_duration = end_time - start_time
@@ -258,17 +258,8 @@ class BenchmarkRunner:
         print(f"Failed runs: {stats['failed_runs']}")
         print(f"Success rate: {stats['success_rate']:.1f}%")
         print("-"*60)
-        print(f"Total benchmark time: {stats['total_duration']:.2f}s")
-        print(f"Average time per run: {stats['avg_duration_per_run']:.2f}s")
-        print(f"Min run time: {stats['min_duration']:.2f}s")
-        print(f"Max run time: {stats['max_duration']:.2f}s")
-        print(f"Total workload time: {stats['total_workload_time']:.2f}s")
-        print(f"Throughput: {stats['throughput_runs_per_second']:.2f} "
-              f"runs/second")
-        print(f"Concurrency efficiency: "
-              f"{stats['concurrency_efficiency']:.1f}%")
-        print("="*60)
-    
+
+
     def _save_results(self, results: List[Dict], stats: Dict) -> None:
         """Save detailed results to a file."""
         results_file = os.path.join(self.output_dir, "benchmark_results.txt")
