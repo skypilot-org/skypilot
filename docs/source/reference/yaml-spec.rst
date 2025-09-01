@@ -597,7 +597,7 @@ Could be one of ``'standard'`` or ``'best'`` (default: ``'standard'``).
 If ``'best'`` is specified, use the best network tier available on the specified infra. This currently supports:
 
 - ``infra: gcp``: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
-- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs
+- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
 - ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes
 - ``infra: k8s/my-gke-cluster``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
 
