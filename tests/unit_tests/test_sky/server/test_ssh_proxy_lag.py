@@ -228,7 +228,6 @@ async def run_endpoint_test(
 # ========== CATEGORY 1: API REQUEST ENDPOINTS ==========
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_api_get(monitor, mock_blocking_operations):
     """Test /api/get endpoint for blocking operations."""
@@ -284,7 +283,6 @@ async def test_endpoint_api_cancel(monitor, mock_request,
         'blocking'], "/api/cancel should not block (uses schedule_request)"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_api_stream(monitor, mock_blocking_operations):
     """Test /api/stream endpoint for blocking operations."""
