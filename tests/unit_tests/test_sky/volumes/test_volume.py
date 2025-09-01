@@ -75,6 +75,7 @@ class TestVolume:
     def test_volume_validate_config_valid_with_size(self):
         """Test Volume._validate_config with valid size."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc', size='100Gi')
+        volume.cloud = 'kubernetes'
         volume._validate_config()  # Should not raise
 
     def test_volume_validate_config_valid_with_resource_name(self):
@@ -82,6 +83,7 @@ class TestVolume:
         volume = volume_lib.Volume(name='test',
                                    type='k8s-pvc',
                                    resource_name='existing-pvc')
+        volume.cloud = 'kubernetes'
         volume._validate_config()  # Should not raise
 
     def test_volume_validate_config_valid_with_both(self):
@@ -90,12 +92,13 @@ class TestVolume:
                                    type='k8s-pvc',
                                    size='100Gi',
                                    resource_name='existing-pvc')
+        volume.cloud = 'kubernetes'
         volume._validate_config()  # Should not raise
 
     def test_volume_validate_config_missing_size_and_resource_name(self):
         """Test Volume._validate_config with missing size and resource_name."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc')
-
+        volume.cloud = 'kubernetes'
         with pytest.raises(ValueError) as exc_info:
             volume._validate_config()
         assert 'Size is required for new volumes' in str(exc_info.value)
@@ -103,6 +106,7 @@ class TestVolume:
     def test_volume_validate_config_empty_config(self):
         """Test Volume._validate_config with empty config."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc', config={})
+        volume.cloud = 'kubernetes'
 
         with pytest.raises(ValueError) as exc_info:
             volume._validate_config()
@@ -113,16 +117,28 @@ class TestVolume:
         volume = volume_lib.Volume(name='test', type='k8s-pvc')
         volume.size = None
         volume.resource_name = None
+        volume.cloud = 'kubernetes'
 
         with pytest.raises(ValueError) as exc_info:
             volume._validate_config()
         assert 'Size is required for new volumes' in str(exc_info.value)
+
+    def test_volume_validate_config_invalid_name(self):
+        """Test Volume._validate_config with invalid name."""
+        volume = volume_lib.Volume(name='test_xyz', type='k8s-pvc')
+        volume.cloud = 'kubernetes'
+
+        with pytest.raises(ValueError) as exc_info:
+            volume._validate_config()
+        assert 'Volume name must be a valid DNS-1123 subdomain' in str(
+            exc_info.value)
 
     def test_volume_validate_config_empty_strings(self):
         """Test Volume._validate_config with empty strings."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc')
         volume.size = ''
         volume.resource_name = ''
+        volume.cloud = 'kubernetes'
 
         with pytest.raises(ValueError) as exc_info:
             volume._validate_config()
@@ -131,6 +147,7 @@ class TestVolume:
     def test_volume_adjust_and_validate_config_integration(self):
         """Test integration of adjust and validate config."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc', size='100Gi')
+        volume.cloud = 'kubernetes'
 
         # Should work together
         volume._adjust_config()

@@ -89,6 +89,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
 from sky.volumes import utils as volumes_utils
 from sky.volumes.client import sdk as volumes_sdk
@@ -142,7 +143,10 @@ def _get_cluster_records_and_set_ssh_config(
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
     if clusters is not None:
         all_users = True
-    request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
+    request_id = sdk.status(clusters,
+                            refresh=refresh,
+                            all_users=all_users,
+                            _include_credentials=True)
     cluster_records = sdk.stream_and_get(request_id)
     # Update the SSH config for all clusters
     for record in cluster_records:
@@ -286,9 +290,10 @@ def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
     del ctx, param  # Unused.
     # TODO(zhwu): we send requests to API server for completion, which can cause
     # large latency. We should investigate caching mechanism if needed.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/cluster_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
@@ -299,9 +304,10 @@ def _complete_storage_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for storage names."""
     del ctx, param  # Unused.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/storage_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
@@ -312,12 +318,31 @@ def _complete_volume_name(ctx: click.Context, param: click.Parameter,
                           incomplete: str) -> List[str]:
     """Handle shell completion for volume names."""
     del ctx, param  # Unused.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/volume_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
+    return response.json()
+
+
+def _complete_api_request(ctx: click.Context, param: click.Parameter,
+                          incomplete: str) -> List[str]:
+    """Handle shell completion for API requests."""
+    del ctx, param  # Unused.
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/api/completion/api_request?incomplete={incomplete}',
+        retry=False,
+        timeout=2.0,
+    )
+    try:
+        response.raise_for_status()
+    except requests_lib.exceptions.HTTPError:
+        # Server may be outdated/missing this API. Silently skip.
+        return []
     return response.json()
 
 
@@ -589,7 +614,7 @@ def _check_yaml_only(
     try:
         with open(entrypoint, 'r', encoding='utf-8') as f:
             try:
-                config = list(yaml.safe_load_all(f))
+                config = list(yaml_utils.safe_load_all(f))
                 if config:
                     # FIXME(zongheng): in a chain DAG YAML it only returns the
                     # first section. OK for downstream but is weird.
@@ -1633,7 +1658,9 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     return
 
 
-def _show_enabled_infra(active_workspace: str, show_workspace: bool):
+def _show_enabled_infra(
+        active_workspace: str, show_workspace: bool,
+        enabled_clouds_request_id: server_common.RequestId[List[str]]):
     """Show the enabled infrastructure."""
     workspace_str = ''
     if show_workspace:
@@ -1641,8 +1668,7 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
     title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
              f'{workspace_str}:'
              f'{colorama.Style.RESET_ALL} ')
-    all_infras = sdk.get(
-        sdk.enabled_clouds(workspace=active_workspace, expand=True))
+    all_infras = sdk.get(enabled_clouds_request_id)
     click.echo(f'{title}{", ".join(all_infras)}\n')
 
 
@@ -1856,6 +1882,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                            f'{colorama.Style.RESET_ALL}')
             return None
 
+    active_workspace = skypilot_config.get_active_workspace()
+
+    def submit_enabled_clouds():
+        return sdk.enabled_clouds(workspace=active_workspace, expand=True)
+
     managed_jobs_queue_request_id = None
     service_status_request_id = None
     workspace_request_id = None
@@ -1871,6 +1902,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             pools_request_future = executor.submit(submit_pools)
         if not (ip or show_endpoints):
             workspace_request_future = executor.submit(submit_workspace)
+        enabled_clouds_request_future = executor.submit(submit_enabled_clouds)
 
         # Get the request IDs
         if show_managed_jobs:
@@ -1881,6 +1913,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             pool_status_request_id = pools_request_future.result()
         if not (ip or show_endpoints):
             workspace_request_id = workspace_request_future.result()
+        enabled_clouds_request_id = enabled_clouds_request_future.result()
 
     managed_jobs_queue_request_id = (server_common.RequestId()
                                      if not managed_jobs_queue_request_id else
@@ -1915,9 +1948,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         all_workspaces = sdk.get(workspace_request_id)
     else:
         all_workspaces = {constants.SKYPILOT_DEFAULT_WORKSPACE: {}}
-    active_workspace = skypilot_config.get_active_workspace()
     show_workspace = len(all_workspaces) > 1
-    _show_enabled_infra(active_workspace, show_workspace)
+    _show_enabled_infra(active_workspace, show_workspace,
+                        enabled_clouds_request_id)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                f'{colorama.Style.RESET_ALL}')
 
@@ -6017,7 +6050,10 @@ def api_stop():
 
 @api.command('logs', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_id', required=False, type=str)
+@click.argument('request_id',
+                required=False,
+                type=str,
+                **_get_shell_complete_args(_complete_api_request))
 @click.option('--server-logs',
               is_flag=True,
               default=False,
@@ -6061,7 +6097,11 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_ids', required=False, type=str, nargs=-1)
+@click.argument('request_ids',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
 @flags.all_users_option('Cancel all requests from all users.')
 @usage_lib.entrypoint
@@ -6093,7 +6133,11 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
 
 @api.command('status', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_ids', required=False, type=str, nargs=-1)
+@click.argument('request_ids',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_api_request))
 @click.option('--all-status',
               '-a',
               is_flag=True,

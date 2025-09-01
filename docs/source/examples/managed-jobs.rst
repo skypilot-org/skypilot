@@ -800,7 +800,7 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
 How it works: The jobs controller
 ---------------------------------
 
-The jobs controller is a small on-demand CPU VM or pod running in the cloud that manages all jobs of a user.
+The jobs controller is a small on-demand CPU VM or pod created by SkyPilot to manage all jobs.
 It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
 Thus, **no user action is needed** to manage its lifecycle.
 

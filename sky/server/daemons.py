@@ -7,8 +7,10 @@ from typing import Callable
 from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
+from sky.utils import annotations
 from sky.utils import common
 from sky.utils import env_options
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -67,6 +69,10 @@ class InternalRequestDaemon:
                     sky_logging.reload_logger()
                     level = self.refresh_log_level()
                     self.event_fn()
+                # Clear request level cache after each run to avoid
+                # using too much memory.
+                annotations.clear_request_level_cache()
+                timeline.save_timeline()
             except Exception:  # pylint: disable=broad-except
                 # It is OK to fail to run the event, as the event is not
                 # critical, but we should log the error.
@@ -191,23 +197,28 @@ INTERNAL_REQUEST_DAEMONS = [
     # set to updated status automatically, without showing users the hint of
     # cluster being stopped or down when `sky status -r` is called.
     InternalRequestDaemon(id='skypilot-status-refresh-daemon',
-                          name='status',
+                          name='status-refresh',
                           event_fn=refresh_cluster_status_event,
                           default_log_level='DEBUG'),
     # Volume status refresh daemon to update the volume status periodically.
     InternalRequestDaemon(id='skypilot-volume-status-refresh-daemon',
-                          name='volume',
+                          name='volume-refresh',
                           event_fn=refresh_volume_status_event),
     InternalRequestDaemon(id='managed-job-status-refresh-daemon',
-                          name='managed-job-status',
+                          name='managed-job-status-refresh',
                           event_fn=managed_job_status_refresh_event,
                           should_skip=should_skip_managed_job_status_refresh),
     InternalRequestDaemon(id='sky-serve-status-refresh-daemon',
-                          name='sky-serve-status',
+                          name='sky-serve-status-refresh',
                           event_fn=sky_serve_status_refresh_event,
                           should_skip=should_skip_sky_serve_status_refresh),
     InternalRequestDaemon(id='pool-status-refresh-daemon',
-                          name='pool-status',
+                          name='pool-status-refresh',
                           event_fn=pool_status_refresh_event,
                           should_skip=should_skip_pool_status_refresh),
 ]
+
+
+def is_daemon_request_id(request_id: str) -> bool:
+    """Returns whether a specific request_id is an internal daemon."""
+    return any([d.id == request_id for d in INTERNAL_REQUEST_DAEMONS])

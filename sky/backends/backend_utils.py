@@ -60,6 +60,7 @@ from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -240,7 +241,7 @@ def _optimize_file_mounts(tmp_yaml_path: str) -> None:
         subprocess.CalledProcessError: If the file mounts are failed to be
             copied.
     """
-    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
 
     file_mounts = yaml_config.get('file_mounts', {})
     # Remove the file mounts added by the newline.
@@ -324,7 +325,7 @@ def _optimize_file_mounts(tmp_yaml_path: str) -> None:
             shell=True,
             check=True)
 
-    common_utils.dump_yaml(tmp_yaml_path, yaml_config)
+    yaml_utils.dump_yaml(tmp_yaml_path, yaml_config)
 
 
 def path_size_megabytes(path: str) -> int:
@@ -484,8 +485,8 @@ def _replace_yaml_dicts(
                 if key in old_block:
                     _restore_block(value, old_block[key])
 
-    new_config = yaml.safe_load(new_yaml)
-    old_config = yaml.safe_load(old_yaml)
+    new_config = yaml_utils.safe_load(new_yaml)
+    old_config = yaml_utils.safe_load(old_yaml)
     excluded_results = {}
     # Find all key values excluded from restore
     for exclude_restore_key_name_list in restore_key_names_exceptions:
@@ -509,7 +510,7 @@ def _replace_yaml_dicts(
         for key in exclude_restore_key_name[:-1]:
             curr = curr[key]
         curr[exclude_restore_key_name[-1]] = value
-    return common_utils.dump_yaml_str(new_config)
+    return yaml_utils.dump_yaml_str(new_config)
 
 
 def get_expirable_clouds(
@@ -927,19 +928,19 @@ def write_cluster_config(
     # Add kubernetes config fields from ~/.sky/config
     if isinstance(cloud, clouds.Kubernetes):
         cluster_config_overrides = to_provision.cluster_config_overrides
-        kubernetes_utils.combine_pod_config_fields(
-            tmp_yaml_path,
+        with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
+            tmp_yaml_str = f.read()
+        cluster_yaml_obj = yaml_utils.safe_load(tmp_yaml_str)
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields_and_metadata(
+            cluster_yaml_obj,
             cluster_config_overrides=cluster_config_overrides,
             cloud=cloud,
             context=region.name)
-        kubernetes_utils.combine_metadata_fields(
-            tmp_yaml_path,
-            cluster_config_overrides=cluster_config_overrides,
-            context=region.name)
-        yaml_obj = common_utils.read_yaml(tmp_yaml_path)
-        pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
-            'ray_head_default']['node_config']
+        # Write the updated YAML back to the file
+        yaml_utils.dump_yaml(tmp_yaml_path, combined_yaml_obj)
 
+        pod_config: Dict[str, Any] = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']
         # Check pod spec only. For high availability controllers, we deploy pvc & deployment for the controller. Read kubernetes-ray.yml.j2 for more details.
         pod_config.pop('deployment_spec', None)
         pod_config.pop('pvc_spec', None)
@@ -975,7 +976,7 @@ def write_cluster_config(
     # Read the cluster name from the tmp yaml file, to take the backward
     # compatbility restortion above into account.
     # TODO: remove this after 2 minor releases, 0.10.0.
-    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
     # Make sure to do this before we optimize file mounts. Optimization is
@@ -1021,7 +1022,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
 
     This function's output removes comments included in the jinja2 template.
     """
-    config = common_utils.read_yaml(tmp_yaml_path)
+    config = yaml_utils.read_yaml(tmp_yaml_path)
     # Check the availability of the cloud type.
     if isinstance(cloud, (
             clouds.AWS,
@@ -1053,7 +1054,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_hyperbolic_authentication(config)
     else:
         assert False, cloud
-    common_utils.dump_yaml(tmp_yaml_path, config)
+    yaml_utils.dump_yaml(tmp_yaml_path, config)
 
 
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
@@ -1155,7 +1156,7 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     """
 
     # Load the yaml contents so that we can directly remove keys.
-    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     for key_list in _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH:
         dict_to_remove_from = yaml_config
         found_key = True
@@ -1174,7 +1175,7 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     config_hash = hashlib.sha256()
 
     yaml_hash = hashlib.sha256(
-        common_utils.dump_yaml_str(yaml_config).encode('utf-8'))
+        yaml_utils.dump_yaml_str(yaml_config).encode('utf-8'))
     config_hash.update(yaml_hash.digest())
 
     file_mounts = yaml_config.get('file_mounts', {})
@@ -1406,6 +1407,62 @@ def ssh_credential_from_yaml(
     if 'kubernetes' in ssh_provider_module:
         credentials['disable_control_master'] = True
     return credentials
+
+
+def ssh_credentials_from_handles(
+    handles: List['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+) -> List[Dict[str, Any]]:
+    """Returns ssh_user, ssh_private_key and ssh_control name.
+    """
+    non_empty_cluster_yaml_paths = [
+        handle.cluster_yaml
+        for handle in handles
+        if handle.cluster_yaml is not None
+    ]
+    cluster_yaml_dicts = global_user_state.get_cluster_yaml_dict_multiple(
+        non_empty_cluster_yaml_paths)
+    cluster_yaml_dicts_to_index = {
+        cluster_yaml_path: cluster_yaml_dict
+        for cluster_yaml_path, cluster_yaml_dict in zip(
+            non_empty_cluster_yaml_paths, cluster_yaml_dicts)
+    }
+
+    credentials_to_return: List[Dict[str, Any]] = []
+    for handle in handles:
+        if handle.cluster_yaml is None:
+            credentials_to_return.append(dict())
+            continue
+        ssh_user = handle.ssh_user
+        docker_user = handle.docker_user
+        config = cluster_yaml_dicts_to_index[handle.cluster_yaml]
+        auth_section = config['auth']
+        if ssh_user is None:
+            ssh_user = auth_section['ssh_user'].strip()
+        ssh_private_key_path = auth_section.get('ssh_private_key')
+        ssh_control_name = config.get('cluster_name', '__default__')
+        ssh_proxy_command = auth_section.get('ssh_proxy_command')
+
+        # Update the ssh_user placeholder in proxy command, if required
+        if (ssh_proxy_command is not None and
+                constants.SKY_SSH_USER_PLACEHOLDER in ssh_proxy_command):
+            ssh_proxy_command = ssh_proxy_command.replace(
+                constants.SKY_SSH_USER_PLACEHOLDER, ssh_user)
+
+        credentials = {
+            'ssh_user': ssh_user,
+            'ssh_private_key': ssh_private_key_path,
+            'ssh_control_name': ssh_control_name,
+            'ssh_proxy_command': ssh_proxy_command,
+        }
+        if docker_user is not None:
+            credentials['docker_user'] = docker_user
+        ssh_provider_module = config['provider']['module']
+        # If we are running ssh command on kubernetes node.
+        if 'kubernetes' in ssh_provider_module:
+            credentials['disable_control_master'] = True
+        credentials_to_return.append(credentials)
+
+    return credentials_to_return
 
 
 def parallel_data_transfer_to_nodes(
@@ -2026,9 +2083,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             'Cluster has no YAML file. Removing the cluster from cache.',
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
-        global_user_state.remove_cluster(cluster_name,
-                                         terminate=True,
-                                         remove_events=True)
+        global_user_state.remove_cluster(cluster_name, terminate=True)
         logger.debug(f'Cluster {cluster_name!r} has no YAML file. '
                      'Removing the cluster from cache.')
         return None
@@ -2057,7 +2112,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                 f'{output}\n', stderr)
         return (*_count_healthy_nodes_from_ray(output), output, stderr)
 
+    ray_status_details: Optional[str] = None
+
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
+        nonlocal ray_status_details
         try:
             # NOTE: fetching the IPs is very slow as it calls into
             # `ray get head-ip/worker-ips`. Using cached IPs is safe because
@@ -2135,19 +2193,25 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                 #   showing up
                 time.sleep(1)
 
+            ray_status_details = (
+                f'{ready_head + ready_workers}/{total_nodes} ready')
             raise RuntimeError(
                 f'Refreshing status ({cluster_name!r}): ray status not showing '
                 f'all nodes ({ready_head + ready_workers}/'
                 f'{total_nodes});\noutput:\n{output}\nstderr:\n{stderr}')
 
         except exceptions.FetchClusterInfoError:
+            ray_status_details = 'failed to get IPs'
             logger.debug(
                 f'Refreshing status ({cluster_name!r}) failed to get IPs.')
         except RuntimeError as e:
+            if ray_status_details is None:
+                ray_status_details = str(e)
             logger.debug(common_utils.format_exception(e))
         except Exception as e:  # pylint: disable=broad-except
             # This can be raised by `external_ssh_ports()`, due to the
             # underlying call to kubernetes API.
+            ray_status_details = str(e)
             logger.debug(f'Refreshing status ({cluster_name!r}) failed: ',
                          exc_info=e)
         return False
@@ -2260,6 +2324,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     #  (2) Otherwise, we will reset the autostop setting, unless the cluster is
     #      autostopping/autodowning.
     some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
+    # If all nodes are up and ray cluster is health, we would have returned
+    # earlier. So if all_nodes_up is True and we are here, it means the ray
+    # cluster must have been unhealthy.
+    ray_cluster_unhealthy = all_nodes_up
     some_nodes_not_stopped = any(status[0] != status_lib.ClusterStatus.STOPPED
                                  for status in node_statuses)
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
@@ -2270,8 +2338,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
 
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
+        elif ray_cluster_unhealthy:
+            init_reason = f'ray cluster is unhealthy ({ray_status_details})'
         elif some_nodes_not_stopped:
-            init_reason = 'some nodes are up and some nodes are stopped'
+            init_reason = 'some but not all nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:
@@ -2366,7 +2436,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             # Some status reason clears after a certain time (e.g. k8s events
             # are only stored for an hour by default), so it is possible that
             # the previous event has a status reason, but now it does not.
-            init_reason_regex = f'^Cluster is abnormal because {init_reason} .*'
+            init_reason_regex = (f'^Cluster is abnormal because '
+                                 f'{re.escape(init_reason)}.*')
         log_message = f'Cluster is abnormal because {init_reason}'
         if status_reason:
             log_message += f' ({status_reason})'
@@ -2386,10 +2457,17 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
+    verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
     global_user_state.add_cluster_event(
-        cluster_name, None, 'All nodes terminated, cleaning up the cluster.',
-        global_user_state.ClusterEventType.STATUS_CHANGE)
+        cluster_name,
+        None,
+        f'All nodes {verb}, cleaning up the cluster.',
+        global_user_state.ClusterEventType.STATUS_CHANGE,
+        # This won't do anything for a terminated cluster, but it's needed for a
+        # stopped cluster.
+        nop_if_duplicate=True,
+    )
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
@@ -2851,6 +2929,7 @@ def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
+    include_credentials: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -2863,17 +2942,14 @@ def get_clusters(
     of the clusters.
 
     Args:
-        include_controller: Whether to include controllers, e.g. jobs controller
-            or sky serve controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
-        cloud_filter: Sets which clouds to filer through from the global user
-            state. Supports three values, 'all' for all clouds, 'public' for
-            public clouds only, and 'local' for only local clouds.
         cluster_names: If provided, only return records for the given cluster
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
+        include_credentials: If True, include cluster ssh credentials in the
+            return value.
         _include_is_managed: Whether to force include clusters created by the
             controller.
 
@@ -2881,76 +2957,23 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    records = global_user_state.get_clusters()
-    current_user = common_utils.get_current_user()
 
-    # Filter out clusters created by the controller.
-    if (not env_options.Options.SHOW_DEBUG_INFO.get() and
-            not _include_is_managed):
-        records = [
-            record for record in records if not record.get('is_managed', False)
-        ]
-
-    # Filter by user if requested
+    exclude_managed_clusters = False
+    if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
+        exclude_managed_clusters = True
+    user_hashes_filter = None
     if not all_users:
-        records = [
-            record for record in records
-            if record['user_hash'] == current_user.id
-        ]
-
+        user_hashes_filter = {common_utils.get_current_user().id}
     accessible_workspaces = workspaces_core.get_workspaces()
 
-    workspace_filtered_records = []
-    for record in records:
-        cluster_workspace = record.get('workspace',
-                                       constants.SKYPILOT_DEFAULT_WORKSPACE)
-        if cluster_workspace in accessible_workspaces:
-            workspace_filtered_records.append(record)
-
-    records = workspace_filtered_records
+    records = global_user_state.get_clusters(
+        exclude_managed_clusters=exclude_managed_clusters,
+        user_hashes_filter=user_hashes_filter,
+        workspaces_filter=accessible_workspaces)
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
-
-    def _update_record_with_credentials_and_resources_str(
-            record: Optional[Dict[str, Any]]) -> None:
-        """Add the credentials to the record.
-
-        This is useful for the client side to setup the ssh config of the
-        cluster.
-        """
-        if record is None:
-            return
-        handle = record['handle']
-        if handle is None:
-            return
-        record['resources_str'] = resources_utils.get_readable_resources_repr(
-            handle, simplify=True)
-        record[
-            'resources_str_full'] = resources_utils.get_readable_resources_repr(
-                handle, simplify=False)
-        credentials = ssh_credential_from_yaml(handle.cluster_yaml,
-                                               handle.docker_user,
-                                               handle.ssh_user)
-
-        if not credentials:
-            return
-        ssh_private_key_path = credentials.get('ssh_private_key', None)
-        if ssh_private_key_path is not None:
-            if not os.path.exists(os.path.expanduser(ssh_private_key_path)):
-                auth.create_ssh_key_files_from_db(ssh_private_key_path)
-            with open(os.path.expanduser(ssh_private_key_path),
-                      'r',
-                      encoding='utf-8') as f:
-                credentials['ssh_private_key_content'] = f.read()
-        else:
-            private_key_path, _ = auth.get_or_generate_keys()
-            with open(os.path.expanduser(private_key_path),
-                      'r',
-                      encoding='utf-8') as f:
-                credentials['ssh_private_key_content'] = f.read()
-        record['credentials'] = credentials
 
     if cluster_names is not None:
         if isinstance(cluster_names, str):
@@ -2970,15 +2993,68 @@ def get_clusters(
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
 
+    def _get_records_with_handle(
+            records: List[Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Filter for records that have a handle"""
+        return [
+            record for record in records
+            if record is not None and record['handle'] is not None
+        ]
+
+    def _update_records_with_resources_str(
+            records: List[Optional[Dict[str, Any]]]) -> None:
+        """Add resource str to record"""
+        for record in _get_records_with_handle(records):
+            handle = record['handle']
+            record[
+                'resources_str'] = resources_utils.get_readable_resources_repr(
+                    handle, simplify=True)
+            record[
+                'resources_str_full'] = resources_utils.get_readable_resources_repr(
+                    handle, simplify=False)
+
+    def _update_records_with_credentials(
+            records: List[Optional[Dict[str, Any]]]) -> None:
+        """Add the credentials to the record.
+
+        This is useful for the client side to setup the ssh config of the
+        cluster.
+        """
+        records_with_handle = _get_records_with_handle(records)
+        if len(records_with_handle) == 0:
+            return
+
+        handles = [record['handle'] for record in records_with_handle]
+        credentials = ssh_credentials_from_handles(handles)
+        cached_private_keys: Dict[str, str] = {}
+        for record, credential in zip(records_with_handle, credentials):
+            if not credential:
+                continue
+            ssh_private_key_path = credential.get('ssh_private_key', None)
+            if ssh_private_key_path is not None:
+                expanded_private_key_path = os.path.expanduser(
+                    ssh_private_key_path)
+                if not os.path.exists(expanded_private_key_path):
+                    auth.create_ssh_key_files_from_db(ssh_private_key_path)
+            else:
+                private_key_path, _ = auth.get_or_generate_keys()
+                expanded_private_key_path = os.path.expanduser(private_key_path)
+            if expanded_private_key_path in cached_private_keys:
+                credential['ssh_private_key_content'] = cached_private_keys[
+                    expanded_private_key_path]
+            else:
+                with open(expanded_private_key_path, 'r',
+                          encoding='utf-8') as f:
+                    credential['ssh_private_key_content'] = f.read()
+                    cached_private_keys[expanded_private_key_path] = credential[
+                        'ssh_private_key_content']
+            record['credentials'] = credential
+
     def _update_records_with_resources(
             records: List[Optional[Dict[str, Any]]]) -> None:
         """Add the resources to the record."""
-        for record in records:
-            if record is None:
-                continue
+        for record in _get_records_with_handle(records):
             handle = record['handle']
-            if handle is None:
-                continue
             record['nodes'] = handle.launched_nodes
             if handle.launched_resources is None:
                 continue
@@ -2995,9 +3071,9 @@ def get_clusters(
                 if handle.launched_resources.accelerators else None)
 
     # Add auth_config to the records
-    for record in records:
-        _update_record_with_credentials_and_resources_str(record)
-
+    _update_records_with_resources_str(records)
+    if include_credentials:
+        _update_records_with_credentials(records)
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
         _update_records_with_resources(records)
@@ -3037,7 +3113,9 @@ def get_clusters(
                 cluster_name,
                 force_refresh_statuses=force_refresh_statuses,
                 acquire_per_cluster_status_lock=True)
-            _update_record_with_credentials_and_resources_str(record)
+            _update_records_with_resources_str([record])
+            if include_credentials:
+                _update_records_with_credentials([record])
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:

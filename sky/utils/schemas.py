@@ -1410,6 +1410,9 @@ def get_config_schema():
                 **_NETWORK_CONFIG_SCHEMA, 'tenant_id': {
                     'type': 'string',
                 },
+                'domain': {
+                    'type': 'string',
+                },
                 'region_configs': {
                     'type': 'object',
                     'required': [],
@@ -1555,6 +1558,9 @@ def get_config_schema():
             'cluster_event_retention_hours': {
                 'type': 'number',
             },
+            'cluster_debug_event_retention_hours': {
+                'type': 'number',
+            },
         }
     }
 
@@ -1663,6 +1669,9 @@ def get_config_schema():
                             'type': 'string',
                         },
                         'tenant_id': {
+                            'type': 'string',
+                        },
+                        'domain': {
                             'type': 'string',
                         },
                         'disabled': {
