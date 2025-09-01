@@ -1,7 +1,7 @@
 """PrimeIntellect service catalog.
 
 This module loads the service catalog file and can be used to
-query instance types and pricing information for FluffyCloud.
+query instance types and pricing information for Prime Intellect.
 """
 
 import typing
@@ -88,7 +88,7 @@ def list_accelerators(
         all_regions: bool = False,
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Prime Intellect offering GPUs."""
-    del require_price  # Unused.
+    del require_price
     return common.list_accelerators_impl('PrimeIntellect', _df, gpus_only,
                                          name_filter, region_filter,
                                          quantity_filter, case_sensitive,
