@@ -38,7 +38,7 @@ async def launch(
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
     request_id = await context_utils.to_thread(
-        sdk.launch, 
+        sdk.launch,
         task=task,
         name=name,
         pool=pool,
