@@ -5,7 +5,7 @@ Benchmark script to test load on the SkyPilot server.
 This script launches N threads, each running workloads defined in bash scripts.
 
 Usage:
-    python benchmark_server.py -t 8 -r 3 -w workloads/workload.sh --cloud aws
+    python workload_benchmark.py -t 8 -r 3 -w workloads/workload.sh --cloud aws
 """
 
 import argparse
