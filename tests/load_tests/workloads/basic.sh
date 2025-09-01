@@ -24,9 +24,9 @@ sky exec -c $CLUSTER 'echo "$i" && sleep 1'
 sky logs $CLUSTER
 sky logs $CLUSTER --provision --no-follow
 sky queue $CLUSTER
-sky stop $CLUSTER
+sky stop $CLUSTER -y
 sky status -u --refresh
-sky start $CLUSTER
+sky start $CLUSTER -y
 sky down $CLUSTER -y
 sky api status
 sky jobs launch -y -n $JOB --infra $CLOUD 'for i in {1..60}; do echo "$i" && sleep 0.1; done' --workdir ${workdir}
