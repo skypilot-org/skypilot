@@ -147,4 +147,9 @@ async def hybrid_load(exit: asyncio.Event):
 
 
 if __name__ == '__main__':
-    asyncio.run(hybrid_load(asyncio.Event()))
+    try:
+        exit_event = asyncio.Event()
+        asyncio.run(hybrid_load(exit_event))
+    except KeyboardInterrupt as e:
+        exit_event.set()
+        logger.info('Hybrid load ended by KeyboardInterrupt...')
