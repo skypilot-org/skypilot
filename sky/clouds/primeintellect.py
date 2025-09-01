@@ -11,10 +11,8 @@ from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
-    # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
-# Type alias for credential check return type
 CredentialCheckResult = Tuple[bool, Optional[Union[str, Dict[str, str]]]]
 
 _CREDENTIAL_FILES = [
@@ -44,12 +42,10 @@ class PrimeIntellect(clouds.Cloud):
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
             ('Custom docker image not supported yet.'),
     }
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 120
-    _regions: List[clouds.Region] = []
-
-    # Using the latest SkyPilot provisioner API to provision and check status.
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 120
+    _regions: List[clouds.Region] = []
 
     @classmethod
     def _cloud_unsupported_features(
@@ -70,7 +66,7 @@ class PrimeIntellect(clouds.Cloud):
         zone: Optional[str],
     ) -> List[clouds.Region]:
         """Returns the regions that offer the specified resources."""
-        del accelerators  # Unused.
+        del accelerators
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'primeintellect')
 
@@ -137,7 +133,6 @@ class PrimeIntellect(clouds.Cloud):
         return 0.0
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        # Returns true if the two clouds are the same cloud type.
         return isinstance(other, PrimeIntellect)
 
     @classmethod
@@ -218,7 +213,6 @@ class PrimeIntellect(clouds.Cloud):
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # Return a default instance type
             default_instance_type = PrimeIntellect.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
@@ -264,9 +258,7 @@ class PrimeIntellect(clouds.Cloud):
             if not api_key:
                 print('API key is missing or empty')
 
-        # TODO: implement API endpoint for checking key capabilities
         client = utils.PrimeIntellectAPIClient()
-
         try:
             client.list_instances()
         except utils.PrimeintellectAPIError as e:
