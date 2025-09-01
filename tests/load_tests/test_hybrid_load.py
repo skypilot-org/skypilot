@@ -46,7 +46,7 @@ class Workload():
                 count += 1
                 total_duration += time.time() - now
                 now = time.time()
-            except Exception as e:
+            except BaseException as e:
                 failed += 1
                 logger.error(f'Workload {self.name} failed: {e}')
             finally:
@@ -67,7 +67,7 @@ class Workload():
             return
         try:
             await self.cleanup_fn()
-        except Exception as e:
+        except BaseException as e:
             logger.error(f'Workload {self.name} cleanup failed: {e}')
 
 
