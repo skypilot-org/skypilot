@@ -68,6 +68,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
+from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest
@@ -421,6 +422,28 @@ async def cleanup_upload_ids():
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
+async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
+                           interval: float = 0.1) -> None:
+    target = loop.time() + interval
+
+    pid = str(os.getpid())
+    lag_threshold = perf_utils.get_loop_lag_threshold()
+
+    def tick():
+        nonlocal target
+        now = loop.time()
+        lag = max(0.0, now - target)
+        if lag_threshold is not None and lag > lag_threshold:
+            logger.warning(f'Event loop lag {lag} seconds exceeds threshold '
+                           f'{lag_threshold} seconds.')
+        metrics.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.labels(
+            pid=pid).observe(lag)
+        target = now + interval
+        loop.call_at(target, tick)
+
+    loop.call_at(target, tick)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
@@ -446,6 +469,10 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             # can safely ignore the error if the task is already scheduled.
             logger.debug(f'Request {event.id} already exists.')
     asyncio.create_task(cleanup_upload_ids())
+    if metrics.METRICS_ENABLED:
+        # Start monitoring the event loop lag in each server worker
+        # event loop (process).
+        asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
     yield
     # Shutdown: Add any cleanup code here if needed
 
@@ -1254,20 +1281,25 @@ async def download(download_body: payloads.DownloadBody,
         logs_dir_on_api_server).expanduser().resolve() / zip_filename
 
     try:
-        folders = [
-            str(folder_path.expanduser().resolve())
-            for folder_path in folder_paths
-        ]
-        # Check for optional query parameter to control zip entry structure
-        relative = request.query_params.get('relative', 'home')
-        if relative == 'items':
-            # Dashboard-friendly: entries relative to selected folders
-            storage_utils.zip_files_and_folders(folders,
-                                                zip_path,
-                                                relative_to_items=True)
-        else:
-            # CLI-friendly (default): entries with full paths for mapping
-            storage_utils.zip_files_and_folders(folders, zip_path)
+
+        def _zip_files_and_folders(folder_paths, zip_path):
+            folders = [
+                str(folder_path.expanduser().resolve())
+                for folder_path in folder_paths
+            ]
+            # Check for optional query parameter to control zip entry structure
+            relative = request.query_params.get('relative', 'home')
+            if relative == 'items':
+                # Dashboard-friendly: entries relative to selected folders
+                storage_utils.zip_files_and_folders(folders,
+                                                    zip_path,
+                                                    relative_to_items=True)
+            else:
+                # CLI-friendly (default): entries with full paths for mapping
+                storage_utils.zip_files_and_folders(folders, zip_path)
+
+        await context_utils.to_thread(_zip_files_and_folders, folder_paths,
+                                      zip_path)
 
         # Add home path to the response headers, so that the client can replace
         # the remote path in the zip file to the local path.
@@ -1397,7 +1429,7 @@ async def local_down(request: fastapi.Request) -> None:
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     while True:
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}', flush=True)
             raise fastapi.HTTPException(
@@ -1486,7 +1518,7 @@ async def stream(
 
     # Original plain text streaming logic
     if request_id is not None:
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
@@ -1581,7 +1613,7 @@ async def api_status(
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
-            request_task = requests_lib.get_request(request_id)
+            request_task = await requests_lib.get_request_async(request_id)
             if request_task is None:
                 continue
             encoded_request_tasks.append(request_task.readable_encode())
@@ -1791,7 +1823,7 @@ async def complete_volume_name(incomplete: str,) -> List[str]:
 
 @app.get('/api/completion/api_request')
 async def complete_api_request(incomplete: str,) -> List[str]:
-    return requests_lib.get_api_request_ids_start_with(incomplete)
+    return await requests_lib.get_api_request_ids_start_with(incomplete)
 
 
 @app.get('/dashboard/{full_path:path}')

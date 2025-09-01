@@ -343,7 +343,11 @@ def test_skyserve_oci_http():
 @pytest.mark.resource_heavy
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
-    accelerator = accelerator.get(generic_cloud, 'T4')
+    if generic_cloud == 'kubernetes':
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    else:
+        accelerator = accelerator.get(generic_cloud, 'T4')
+
     name = _get_service_name()
     auth_token = '123456'
 

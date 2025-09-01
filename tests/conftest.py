@@ -686,6 +686,7 @@ def prepare_env_file(request):
     if os.path.exists(expanded_path):
         # It's a local file/directory, use it directly
         logger.info(f'Using local env file: {expanded_path}')
+        os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = expanded_path
         yield expanded_path
         return
 
