@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # SSH Proxy Benchmark
 
-import threading
-import asyncio
 import argparse
 import concurrent.futures
 import statistics
@@ -12,7 +10,6 @@ import time
 from typing import List, Tuple
 
 from sky import sky_logging
-from test_hybrid_load import hybrid_load
 
 logger = sky_logging.init_logger(__name__)
 
@@ -102,9 +99,6 @@ class SSHClient:
                     logger.error(f'Error reading command output: {e}')
                     return time.time() - start_time, False, str(e)
 
-        except BrokenPipeError:
-            # The connection has been closed, just break
-            raise
         except Exception as e:
             logger.error(f'Error executing command {command}: {e}')
             return 0.0, False, str(e)
@@ -189,29 +183,28 @@ def print_statistics(all_results: List[Tuple[float, bool]], parallelism: int):
     failed_commands = total_commands - successful_commands
     success_rate = (successful_commands / total_commands) * 100
 
-    with open('results.txt', 'a', encoding='utf-8') as f:
-        f.write("\n" + "=" * 60)
-        f.write("BENCHMARK RESULTS")
-        f.write("=" * 60)
-        f.write(f"Total commands executed: {total_commands}")
-        f.write(f"Successful commands: {successful_commands}")
-        f.write(f"Failed commands: {failed_commands}")
-        f.write(f"Success rate: {success_rate:.2f}%")
-        f.write(f"Parallelism: {parallelism}")
-        f.write()
+    print("\n" + "=" * 60)
+    print("BENCHMARK RESULTS")
+    print("=" * 60)
+    print(f"Total commands executed: {total_commands}")
+    print(f"Successful commands: {successful_commands}")
+    print(f"Failed commands: {failed_commands}")
+    print(f"Success rate: {success_rate:.2f}%")
+    print(f"Parallelism: {parallelism}")
+    print()
 
     if latencies:
-        f.write("LATENCY STATISTICS (successful commands only):")
-        f.write(f"  Minimum: {min(latencies):.4f}s")
-        f.write(f"  Maximum: {max(latencies):.4f}s")
-        f.write(f"  Mean: {statistics.mean(latencies):.4f}s")
-        f.write(f"  Median: {statistics.median(latencies):.4f}s")
+        print("LATENCY STATISTICS (successful commands only):")
+        print(f"  Minimum: {min(latencies):.4f}s")
+        print(f"  Maximum: {max(latencies):.4f}s")
+        print(f"  Mean: {statistics.mean(latencies):.4f}s")
+        print(f"  Median: {statistics.median(latencies):.4f}s")
         if len(latencies) > 1:
-            f.write(f"  Std Dev: {statistics.stdev(latencies):.4f}s")
+            print(f"  Std Dev: {statistics.stdev(latencies):.4f}s")
     else:
-        f.write("No successful commands to calculate latency statistics.")
+        print("No successful commands to calculate latency statistics.")
 
-    f.write("=" * 60)
+    print("=" * 60)
 
 
 def main():
@@ -270,14 +263,6 @@ Examples:
         print("Error: size must be positive")
         sys.exit(1)
 
-    print("Launch hybrid load...")
-    exit = asyncio.Event()
-    # Function to run hybrid_load in a separate thread
-    def run_hybrid_load():
-        asyncio.run(hybrid_load(exit))
-    load_thread = threading.Thread(target=run_hybrid_load)
-    load_thread.start()
-
     print("SSH Proxy Benchmark Starting...")
     print(f"Cluster: {args.cluster}")
     print(f"Data size: {args.size} bytes")
@@ -286,60 +271,56 @@ Examples:
     print(f"Total commands: {args.parallelism * args.num}")
     print()
 
-    try:
-        # Test basic SSH connectivity first
-        print("Testing SSH connectivity...")
-        test_client = SSHClient(args.cluster)
-        if not test_client.connect():
-            print(f"Error: Cannot establish SSH connection to {args.cluster}. "
-                f"Please check:")
-            print("  1. Cluster name is correct")
-            print("  2. SSH keys are properly configured")
-            print("  3. Cluster is running and accessible")
-            sys.exit(1)
-        test_command = generate_echo_command(args.size)
-        test_latency, test_success = test_client.execute_command(test_command)
-        test_client.disconnect()
+    # Test basic SSH connectivity first
+    print("Testing SSH connectivity...")
+    test_client = SSHClient(args.cluster)
+    if not test_client.connect():
+        print(f"Error: Cannot establish SSH connection to {args.cluster}. "
+              f"Please check:")
+        print("  1. Cluster name is correct")
+        print("  2. SSH keys are properly configured")
+        print("  3. Cluster is running and accessible")
+        sys.exit(1)
+    test_command = generate_echo_command(args.size)
+    test_latency, test_success = test_client.execute_command(test_command)
+    test_client.disconnect()
 
-        if not test_success:
-            print(f"Error: Test command failed on {args.cluster}")
-            sys.exit(1)
+    if not test_success:
+        print(f"Error: Test command failed on {args.cluster}")
+        sys.exit(1)
 
-        print(f"SSH connectivity test passed (echo latency: "
-            f"{test_latency:.4f}s)")
-        print()
+    print(f"SSH connectivity test passed (echo latency: "
+          f"{test_latency:.4f}s)")
+    print()
 
-        # Run concurrent benchmark
-        print("Starting concurrent benchmark with persistent connections...")
-        start_time = time.time()
+    # Run concurrent benchmark
+    print("Starting concurrent benchmark with persistent connections...")
+    start_time = time.time()
 
-        all_results = []
-        with concurrent.futures.ThreadPoolExecutor(
-                max_workers=args.parallelism) as executor:
-            # Submit all worker threads
-            futures = []
-            for thread_id in range(args.parallelism):
-                future = executor.submit(worker_thread, args.cluster, args.size,
-                                        args.num, thread_id)
-                futures.append(future)
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    thread_results = future.result()
-                    all_results.extend(thread_results)
-                except Exception as exc:
-                    logger.error(f'Thread generated an exception: {exc}')
+    all_results = []
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=args.parallelism) as executor:
+        # Submit all worker threads
+        futures = []
+        for thread_id in range(args.parallelism):
+            future = executor.submit(worker_thread, args.cluster, args.size,
+                                     args.num, thread_id)
+            futures.append(future)
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                thread_results = future.result()
+                all_results.extend(thread_results)
+            except Exception as exc:
+                logger.error(f'Thread generated an exception: {exc}')
 
-        end_time = time.time()
-        total_duration = end_time - start_time
+    end_time = time.time()
+    total_duration = end_time - start_time
 
-        print(f"\nBenchmark completed in {total_duration:.2f} seconds")
+    print(f"\nBenchmark completed in {total_duration:.2f} seconds")
 
-        # Print detailed statistics
-        print_statistics(all_results, args.parallelism)
-    finally:
-        exit.set()
-        logger.info("Stopping hybrid load...")
-        load_thread.join()
+    # Print detailed statistics
+    print_statistics(all_results, args.parallelism)
+
 
 if __name__ == '__main__':
     main()
