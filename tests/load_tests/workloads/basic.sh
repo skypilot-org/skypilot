@@ -31,8 +31,8 @@ sky down $CLUSTER -y
 sky api status
 sky jobs launch -y -n $JOB --infra $CLOUD 'for i in {1..60}; do echo "$i" && sleep 0.1; done' --workdir ${workdir}
 sky jobs queue
-sky jobs logs $JOB
-sky jobs logs $JOB --controller
+sky jobs logs -n $JOB || true
+sky jobs logs -n $JOB --controller
 sky volumes ls
 sky show-gpus
 sky cost-report --days 7
