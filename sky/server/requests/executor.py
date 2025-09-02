@@ -59,6 +59,9 @@ from sky.utils import timeline
 from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
 
+import tracemalloc
+import objgraph
+
 if typing.TYPE_CHECKING:
     import types
 
@@ -129,6 +132,7 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    tracemalloc.start()
 
 
 class RequestWorker:
@@ -385,6 +389,7 @@ def _request_execution_wrapper(request_id: str,
         # config, as there can be some logs during override that needs to be
         # captured in the log file.
         try:
+            objgraph.show_growth(limit=20)
             with sky_logging.add_debug_log_handler(request_id), \
                 override_request_env_and_config(request_body, request_id), \
                 tempstore.tempdir():
@@ -428,6 +433,12 @@ def _request_execution_wrapper(request_id: str,
                 request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
+        finally:
+            snapshot = tracemalloc.take_snapshot()
+            top_stats = snapshot.statistics('lineno')
+            for stat in top_stats[:30]:
+                print(stat)
+            objgraph.show_growth(limit=20)
 
 
 async def execute_request_coroutine(request: api_requests.Request):
