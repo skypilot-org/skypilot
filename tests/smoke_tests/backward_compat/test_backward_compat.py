@@ -567,6 +567,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_BASE} && sky exec {cluster_name} "echo from base"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky status)"; echo "$result"; echo "$result" | grep "{cluster_name}"',
             f'{self.ACTIVATE_BASE} && sky autostop -i 1 -y {cluster_name}',
             # serve test
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
@@ -635,6 +636,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_CURRENT} && sky exec {cluster_name} "echo from base"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"',
+            f'{self.ACTIVATE_BASE} && result="$(sky status)"; echo "$result"; echo "$result" | grep "{cluster_name}"',
             f'{self.ACTIVATE_CURRENT} && sky autostop -i 1 -y {cluster_name}',
             # serve test
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
