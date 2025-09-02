@@ -575,7 +575,7 @@ async def get_request_status_async(
         columns += ', status_msg'
     sql = f'SELECT {columns} FROM {REQUEST_TABLE} WHERE request_id LIKE ?'
     async with _DB.execute_fetchall_async(sql, (request_id + '%',)) as rows:
-        if rows is None:
+        if rows is None or len(rows) == 0:
             return None
         status = RequestStatus(rows[0][0])
         status_msg = rows[0][1] if include_msg else None
