@@ -1431,27 +1431,29 @@ async def local_down(request: fastapi.Request) -> None:
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     while True:
-        request_task = await requests_lib.get_request_async(request_id)
-        if request_task is None:
+        req_status = await requests_lib.get_request_status_async(request_id)
+        if req_status is None:
             print(f'No task with request ID {request_id}', flush=True)
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
-        if request_task.status > requests_lib.RequestStatus.RUNNING:
-            if request_task.should_retry:
-                raise fastapi.HTTPException(
-                    status_code=503,
-                    detail=f'Request {request_id!r} should be retried')
-            request_error = request_task.get_error()
-            if request_error is not None:
-                raise fastapi.HTTPException(
-                    status_code=500, detail=request_task.encode().model_dump())
-            return request_task.encode()
-        elif (request_task.status == requests_lib.RequestStatus.RUNNING and
-              daemons.is_daemon_request_id(request_id)):
-            return request_task.encode()
+        if (req_status.status == requests_lib.RequestStatus.RUNNING and
+                daemons.is_daemon_request_id(request_id)):
+            # Daemon requests run forever, break without waiting for complete.
+            break
+        if req_status.status > requests_lib.RequestStatus.RUNNING:
+            break
         # yield control to allow other coroutines to run, sleep shortly
         # to avoid storming the DB and CPU in the meantime
         await asyncio.sleep(0.1)
+    request_task = await requests_lib.get_request_async(request_id)
+    if request_task.should_retry:
+        raise fastapi.HTTPException(
+            status_code=503, detail=f'Request {request_id!r} should be retried')
+    request_error = request_task.get_error()
+    if request_error is not None:
+        raise fastapi.HTTPException(status_code=500,
+                                    detail=request_task.encode().model_dump())
+    return request_task.encode()
 
 
 @app.get('/api/stream')
