@@ -11,9 +11,9 @@ Usage:
 import argparse
 import concurrent.futures
 import os
+import random
 import subprocess
 import sys
-import random
 import threading
 import time
 from typing import Dict, List, Optional

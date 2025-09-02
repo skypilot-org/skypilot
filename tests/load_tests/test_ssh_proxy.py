@@ -98,7 +98,7 @@ class SSHClient:
                 except Exception as e:
                     logger.error(f'Error reading command output: {e}')
                     return time.time() - start_time, False, str(e)
-        
+
         except BrokenPipeError as e:
             # The connection has been disconnected.
             raise
@@ -163,7 +163,8 @@ def worker_thread(cluster: str, size_bytes: int, num: int,
             try:
                 latency, success = ssh_client.execute_command(command)
             except BrokenPipeError as e:
-                logger.error(f"Thread {thread_id} disconnected at command {i+1}: {e}")
+                logger.error(
+                    f"Thread {thread_id} disconnected at command {i+1}: {e}")
                 break
             results.append((latency, success))
             if not success:
