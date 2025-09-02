@@ -434,7 +434,7 @@ export function ManagedJobsTable({
           statusCounts = {},
         } = jobsResponse || {};
 
-        let isControllerStopped = !!controllerStopped;
+        let isControllerStopped = false;
         let isLaunching = false;
         if (includeStatus && clustersData) {
           const jobControllerCluster = clustersData?.find((c) =>
