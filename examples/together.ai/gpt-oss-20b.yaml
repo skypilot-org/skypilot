@@ -2,7 +2,7 @@ resources:
   accelerators: H100:2
 
 file_mounts:
-  /sft: ./sft
+  train.py: ./train.py
 
 num_nodes: 1
 
@@ -20,6 +20,6 @@ setup: |
 run: |
   source ~/training/bin/activate
 
-  python /sft/train.py --model_id openai/gpt-oss-20b --enable_lora
+  python train.py --model_id openai/gpt-oss-20b --enable_lora
 
   
