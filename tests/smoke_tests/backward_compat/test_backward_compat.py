@@ -514,8 +514,9 @@ class TestBackwardCompatibility:
         teardown = f'{self.ACTIVATE_CURRENT} && sky serve down {serve_name}* -y'
         self.run_compatibility_test(serve_name, commands, teardown)
 
-    def test_client_server_compatibility(self, generic_cloud: str):
-        """Test client server compatibility across versions"""
+    def test_client_server_forwards_compatibility(self, generic_cloud: str):
+        """Test client server compatibility across versions
+        where the API server is running an older version than the client."""
         if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
                 self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
             if self.BASE_API_VERSION < 11:
@@ -579,6 +580,74 @@ class TestBackwardCompatibility:
         ]
 
         teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+        self.run_compatibility_test(cluster_name, commands, teardown)
+
+    def test_client_server_backwards_compatibility(self, generic_cloud: str):
+        """Test client server compatibility across versions
+        where the API server is running a newer version than the client."""
+        if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
+                self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
+            if self.BASE_API_VERSION < 11:
+                pytest.skip(
+                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                )
+            if self.CURRENT_API_VERSION < 11:
+                pytest.skip(
+                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                )
+            # This test runs against the master branch or the latest release
+            # version, which must enforce compatibility in this test based on
+            # our new version strategy that adjacent minor versions must be
+            # compatible.
+            pytest.fail(
+                f'Base API version: {self.BASE_API_VERSION} and current API '
+                f'version: {self.CURRENT_API_VERSION} are not compatible:\n'
+                f'- Base minimal compatible API version: {self.BASE_MIN_COMPATIBLE_API_VERSION}\n'
+                f'- Current minimal compatible API version: {self.CURRENT_MIN_COMPATIBLE_API_VERSION}\n'
+                'Change is rejected since it breaks the compatibility between adjacent versions'
+            )
+        cluster_name = smoke_tests_utils.get_cluster_name()
+        job_name = f"{cluster_name}-job"
+        commands = [
+            # Check API version compatibility
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && result="$(sky status 2>&1)" || true; '
+            'if echo "$result" | grep -q "SkyPilot API server is too old"; then '
+            '  echo "$result" && exit 1; '
+            'fi',
+            # managed job test
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky jobs launch -d --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -n {job_name} "echo hello world; sleep 60"',
+            # No restart on switch to current, cli in current, server in base, verify cli works with different version of sky server
+            f'{self.ACTIVATE_BASE} && sky api status',
+            f'{self.ACTIVATE_BASE} && sky api info',
+            f'{self.ACTIVATE_BASE} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.RUNNING])}',
+            f'{self.ACTIVATE_BASE} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep RUNNING',
+            f'{self.ACTIVATE_BASE} && result="$(sky jobs logs --no-follow -n {job_name})"; echo "$result"; echo "$result" | grep "hello world"',
+            f'{self.ACTIVATE_BASE} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
+            f'{self.ACTIVATE_BASE} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
+            # cluster launch/exec test
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} &&'
+            f'sky launch --infra {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
+            # No restart on switch to current, cli in current, server in base
+            f'{self.ACTIVATE_BASE} && result="$(sky queue {cluster_name})"; echo "$result"',
+            f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
+            f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
+            f'{self.ACTIVATE_CURRENT} && sky exec {cluster_name} "echo from base"',
+            f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"',
+            f'{self.ACTIVATE_CURRENT} && sky autostop -i 1 -y {cluster_name}',
+            # serve test
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky serve up --infra {generic_cloud} -y -n {cluster_name}-0 examples/serve/http_server/task.yaml',
+            # No restart on switch to current, cli in current, server in base
+            f'{self.ACTIVATE_BASE} && sky serve status {cluster_name}-0',
+            f'{self.ACTIVATE_BASE} && sky serve logs {cluster_name}-0 2 --no-follow',
+            f'{self.ACTIVATE_BASE} && sky serve logs --controller {cluster_name}-0 --no-follow',
+            f'{self.ACTIVATE_BASE} && sky serve logs --load-balancer {cluster_name}-0 --no-follow',
+            f'{self.ACTIVATE_BASE} && sky serve down {cluster_name}-0 -y',
+        ]
+
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_sdk_compatibility(self, generic_cloud: str):
