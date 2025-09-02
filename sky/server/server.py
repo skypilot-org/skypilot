@@ -1327,10 +1327,12 @@ async def provision_logs(cluster_body: payloads.ClusterNameBody,
                          tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
     # Prefer clusters table first, then cluster_history as fallback.
-    log_path_str = global_user_state.get_cluster_provision_log_path(
+    log_path_str = await context_utils.to_thread(
+        global_user_state.get_cluster_provision_log_path,
         cluster_body.cluster_name)
     if not log_path_str:
-        log_path_str = global_user_state.get_cluster_history_provision_log_path(
+        log_path_str = await context_utils.to_thread(
+            global_user_state.get_cluster_history_provision_log_path,
             cluster_body.cluster_name)
     if not log_path_str:
         raise fastapi.HTTPException(
@@ -1807,17 +1809,20 @@ async def gpu_metrics() -> fastapi.Response:
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
 async def complete_cluster_name(incomplete: str,) -> List[str]:
-    return global_user_state.get_cluster_names_start_with(incomplete)
+    return await context_utils.to_thread(
+        global_user_state.get_cluster_names_start_with, incomplete)
 
 
 @app.get('/api/completion/storage_name')
 async def complete_storage_name(incomplete: str,) -> List[str]:
-    return global_user_state.get_storage_names_start_with(incomplete)
+    return await context_utils.to_thread(
+        global_user_state.get_storage_names_start_with, incomplete)
 
 
 @app.get('/api/completion/volume_name')
 async def complete_volume_name(incomplete: str,) -> List[str]:
-    return global_user_state.get_volume_names_start_with(incomplete)
+    return await context_utils.to_thread(
+        global_user_state.get_volume_names_start_with, incomplete)
 
 
 @app.get('/api/completion/api_request')

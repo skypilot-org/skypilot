@@ -474,7 +474,6 @@ async def test_endpoint_download(monitor, mock_request):
 # ========== CATEGORY 4: COMPLETION ENDPOINTS ==========
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_completion_cluster(monitor):
     """Test /api/completion/cluster_name endpoint for blocking operations."""
@@ -496,7 +495,6 @@ async def test_endpoint_completion_cluster(monitor):
         'blocking'], "Completion endpoints should not block the event loop"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_completion_storage(monitor):
     """Test /api/completion/storage_name endpoint for blocking operations."""
@@ -518,7 +516,6 @@ async def test_endpoint_completion_storage(monitor):
         'blocking'], "Completion endpoints should not block the event loop"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_provision_logs(monitor):
     """Test /provision_logs endpoint for blocking operations."""
