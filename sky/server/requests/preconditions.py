@@ -146,7 +146,6 @@ class ClusterStartCompletePrecondition(Precondition):
         self.cluster_name = cluster_name
 
     async def check(self) -> Tuple[bool, Optional[str]]:
-        time.sleep(0.5)
         cluster_record = global_user_state.get_cluster_from_name(
             self.cluster_name)
         if (cluster_record and
