@@ -429,13 +429,18 @@ def test_docker_preinstalled_package(generic_cloud: str):
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     use_spot = True
-    # EKS does not support spot instances
+    accelerator = 'T4'
     if generic_cloud == 'kubernetes':
-        use_spot = not smoke_tests_utils.is_eks_cluster()
+        # EKS does not support spot instances
+        # Assume tests using a remote api server endpoint do not support spot instances
+        use_spot = not smoke_tests_utils.is_eks_cluster(
+        ) and not smoke_tests_utils.api_server_endpoint_configured_in_env_file(
+        )
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     test = smoke_tests_utils.Test(
         'multi_echo',
         [
-            f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)}',
+            f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)} {accelerator}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             'sleep 10',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
@@ -1661,14 +1666,15 @@ def test_aws_custom_image():
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
+    accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test-kubernetes-custom-image',
         [
-            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus T4:1',
+            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1',
             f'sky logs {name} 1 --status',
             # Try exec to run again and check if the logs are printed
-            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus T4:1 | grep "Hello 100"',
+            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1 | grep "Hello 100"',
             # Make sure ssh is working with custom username
             f'ssh {name} echo hi | grep hi',
         ],
@@ -2033,7 +2039,7 @@ def test_remote_server_api_login():
     if not smoke_tests_utils.is_remote_server_test():
         pytest.skip('This test is only for remote server')
 
-    endpoint = docker_utils.get_api_server_endpoint_inside_docker()
+    endpoint = smoke_tests_utils.get_api_server_url()
     config_path = skypilot_config._GLOBAL_CONFIG_PATH
     backup_path = f'{config_path}.backup_for_test_remote_server_api_login'
 
