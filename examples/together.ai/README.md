@@ -1,8 +1,8 @@
 # Use Together.ai with SkyPilot
 
-Together.ai is a cloud platform that offers GPU clusters that can be used for running AI workloads.
+[Together.ai](https://www.together.ai/) is a cloud platform that offers GPU clusters that can be used for running AI workloads.
 
-This example shows how to use Together.ai with SkyPilot.
+This example shows how to use Together.ai with SkyPilot and run the `gpt-oss-20b` model for finetuning on it.
 
 ## Prerequisites
 
