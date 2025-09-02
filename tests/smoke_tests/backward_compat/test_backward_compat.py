@@ -514,7 +514,7 @@ class TestBackwardCompatibility:
         teardown = f'{self.ACTIVATE_CURRENT} && sky serve down {serve_name}* -y'
         self.run_compatibility_test(serve_name, commands, teardown)
 
-    def test_client_server_forwards_compatibility(self, generic_cloud: str):
+    def test_client_server_compatibility_old_server(self, generic_cloud: str):
         """Test client server compatibility across versions
         where the API server is running an older version than the client."""
         if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
@@ -583,7 +583,7 @@ class TestBackwardCompatibility:
         teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
-    def test_client_server_backwards_compatibility(self, generic_cloud: str):
+    def test_client_server_compatibility_new_server(self, generic_cloud: str):
         """Test client server compatibility across versions
         where the API server is running a newer version than the client."""
         if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
@@ -619,7 +619,7 @@ class TestBackwardCompatibility:
             # managed job test
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky jobs launch -d --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -n {job_name} "echo hello world; sleep 60"',
-            # No restart on switch to current, cli in current, server in base, verify cli works with different version of sky server
+            # No restart on switch to base, cli in base, server in current, verify cli works with different version of sky server
             f'{self.ACTIVATE_BASE} && sky api status',
             f'{self.ACTIVATE_BASE} && sky api info',
             f'{self.ACTIVATE_BASE} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.RUNNING])}',
@@ -630,18 +630,18 @@ class TestBackwardCompatibility:
             # cluster launch/exec test
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} &&'
             f'sky launch --infra {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
-            # No restart on switch to current, cli in current, server in base
+            # No restart on switch to base, cli in base, server in current
             f'{self.ACTIVATE_BASE} && result="$(sky queue {cluster_name})"; echo "$result"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
-            f'{self.ACTIVATE_CURRENT} && sky exec {cluster_name} "echo from base"',
-            f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"',
+            f'{self.ACTIVATE_CURRENT} && sky exec {cluster_name} "echo from current"',
+            f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from current"',
             f'{self.ACTIVATE_BASE} && result="$(sky status)"; echo "$result"; echo "$result" | grep "{cluster_name}"',
             f'{self.ACTIVATE_CURRENT} && sky autostop -i 1 -y {cluster_name}',
             # serve test
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky serve up --infra {generic_cloud} -y -n {cluster_name}-0 examples/serve/http_server/task.yaml',
-            # No restart on switch to current, cli in current, server in base
+            # No restart on switch to base, cli in base, server in current
             f'{self.ACTIVATE_BASE} && sky serve status {cluster_name}-0',
             f'{self.ACTIVATE_BASE} && sky serve logs {cluster_name}-0 2 --no-follow',
             f'{self.ACTIVATE_BASE} && sky serve logs --controller {cluster_name}-0 --no-follow',
