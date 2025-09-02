@@ -63,6 +63,8 @@ from sky.workspaces import core as workspaces_core
 
 import tracemalloc
 import objgraph
+from pympler import tracker, muppy, summary, refbrowser
+from typing import Dict
 
 if typing.TYPE_CHECKING:
     import types
@@ -351,6 +353,8 @@ def _restore_output(original_stdout: int, original_stderr: int) -> None:
     os.close(original_stdout)
     os.close(original_stderr)
 
+def output_function(o):
+    return str(type(o))
 
 def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
@@ -370,6 +374,7 @@ def _request_execution_wrapper(request_id: str,
     """
     # Handle the SIGTERM signal to abort the request processing gracefully.
     signal.signal(signal.SIGTERM, _sigterm_handler)
+    tr = tracker.SummaryTracker()
 
     pid = multiprocessing.current_process().pid
     logger.info(f'Running request {request_id} with pid {pid}')
@@ -452,6 +457,17 @@ def _request_execution_wrapper(request_id: str,
                 temp_file = tempfile.mktemp('.png')
                 objgraph.show_refs(objs=leaking[:3], max_depth=10, filename=temp_file)
                 ppf.write(f'leaking backrefs: {temp_file}\n')
+                logger.info(f'MEM Diff after request {request_id}:{request_name}, PID: {pid}')
+                tr.print_diff()
+                all_objs = muppy.get_objects()
+                logger.info(f'MEM summary after request {request_id}:{request_name}, PID: {pid}')
+                sum_obj = summary.summarize(all_objs)
+                summary.print_(sum_obj, limit=30)
+                logger.info(f'Tuple ref fater request {request_id}:{request_name}, PID: {pid}')
+                root = muppy.filter(all_objs, Dict)[0]
+                cb = refbrowser.ConsoleBrowser(root, maxdepth=2, str_func=output_function)
+                cb.print_tree()
+                logger.info('flush')
                 ppf.flush()
 
 
