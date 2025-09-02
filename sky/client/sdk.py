@@ -2456,7 +2456,8 @@ def api_login(endpoint: Optional[str] = None,
             server_status, api_server_info = server_common.check_server_healthy(
                 endpoint)
             dashboard_url = server_common.get_dashboard_url(endpoint)
-            _set_user_hash(api_server_info.user.get('id'))
+            if api_server_info.user is not None:
+                _set_user_hash(api_server_info.user.get('id'))
             _show_logged_in_message(endpoint, dashboard_url,
                                     api_server_info.user, server_status)
 
@@ -2600,6 +2601,15 @@ def api_login(endpoint: Optional[str] = None,
 
         # Now that the cookies are parsed, save them to the cookie jar.
         server_common.set_api_cookie_jar(cookie_jar)
+
+        # Set the user hash in the local file.
+        # If the server already has a token for this user set it to the local
+        # file, otherwise use the new user hash.
+        if (api_server_info.user is not None and
+                api_server_info.user.get('id') is not None):
+            _set_user_hash(api_server_info.user.get('id'))
+        else:
+            _set_user_hash(user_hash)
     else:
         # Check if basic auth is enabled
         if api_server_info.basic_auth_enabled:
@@ -2607,9 +2617,10 @@ def api_login(endpoint: Optional[str] = None,
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Basic auth is enabled but no valid user is found')
-    
-    # Set the user hash in the local file.
-    _set_user_hash(api_server_info.user.get('id'))
+
+        # Set the user hash in the local file.
+        if api_server_info.user is not None:
+            _set_user_hash(api_server_info.user.get('id'))
 
     # Set the endpoint in the config file
     _save_config_updates(endpoint=endpoint)
