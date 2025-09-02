@@ -1,8 +1,8 @@
 name: eval-head
 
 resources:
-  cpus: 8+
-  memory: 16+
+  cpus: 4+
+  memory: 8+
   # No GPU needed for eval head
   # Open ports for dashboard and API
   ports:

@@ -1,26 +1,15 @@
-# Distributed Evaluation System
+# Distributed RL Evaluation System
 
 A scalable system for distributed AI model evaluation using SkyPilot. The system automatically discovers and connects game servers for efficient batch processing.
 
 ## Architecture
 
-```
-┌──────────────┐
-│  Eval Head   │  ← Auto-discovers game servers via sky.endpoints()
-│  (1 node)    │    Sends actions to control game simulations
-└─────┬────────┘    Web dashboard at :8080
-      │
- ┌────┴─────────┬───────────┐
- ↓              ↓           ↓
-┌─────────┐ ┌─────────┐ ┌─────────┐
-│ Game    │ │ Game    │ │ Game    │  ← Simulation servers
-│ Server  │ │ Server  │ │ Server  │    Wait for actions on port 8081
-└─────────┘ └─────────┘ └─────────┘    Controlled by eval head
-```
+![](https://i.imgur.com/EOEeiBb.png)
+
 
 ## Features
 
-- **Auto-Discovery**: Evaluation head automatically discovers game servers by cluster name prefix
+- **Auto-Discovery**: Evaluation head automatically discovers game servers by cluster name prefix from centralized SkyPilot API server
 - **Real-time Dashboard**: Web-based monitoring at `http://<eval-head-ip>:8080/dashboard`
 - **Efficient Batching**: Processes multiple game states in batches for optimal throughput
 - **Cost-Optimized**: Game servers run on spot instances for 70-90% cost savings
@@ -35,13 +24,13 @@ If you have a centralized SkyPilot API server, the eval head can auto-discover g
 export SKYPILOT_API_SERVER_ENDPOINT=https://your-api-server.com
 export SKYPILOT_API_SERVER_SERVICE_ACCOUNT_TOKEN=your-service-account-token
 sky launch -c eval-head configs/eval_head.yaml \
-  --env GAME_SERVER_PREFIX=exp-game \
+  --env GAME_SERVER_PREFIX=game \
   --secret SKYPILOT_API_SERVER_ENDPOINT \
   --secret SKYPILOT_API_SERVER_SERVICE_ACCOUNT_TOKEN
 
 # Launch game servers (eval head will auto-discover them)
-sky launch -c exp-game-1 configs/game_server.yaml
-sky launch -c exp-game-2 configs/game_server.yaml
+sky launch -c game-1 configs/game_server.yaml
+sky launch -c game-2 configs/game_server.yaml
 ```
 
 The eval head will automatically discover all clusters and services with the matching prefix through the API server.
@@ -52,7 +41,7 @@ You can also deploy game servers as SkyServe services for automatic failover and
 ```bash
 # Deploy game servers as SkyServe services (with autoscaling and failover)
 # Note: Uses the same game_server.yaml - the service field is used by sky serve
-sky serve up -n exp-game-svc configs/game_server_service.yaml
+sky serve up -n game-svc configs/game_server_service.yaml
 ```
 
 SkyServe provides:
@@ -103,17 +92,17 @@ sky status --endpoint 8080 eval-head
 EVAL_HEAD_ENDPOINT=$(sky status --endpoint 8080 eval-head)
 
 # Launch additional servers
-sky launch -c exp-game-N configs/game_server.yaml
+sky launch -c game-N configs/game_server.yaml
 ```
 
 ### Remove Game Servers
 ```bash
-sky down exp-game-N
+sky down game-N
 ```
 
 ### Stop All Clusters
 ```bash
-sky down exp-game-* eval-head
+sky down game-* eval-head
 ```
 
 ## Updating and Restarting
@@ -128,13 +117,13 @@ sky cancel -ay eval-head
 
 # Execute the new configuration (with API server)
 sky exec eval-head configs/eval_head.yaml \
-  --env GAME_SERVER_PREFIX=exp-game \
+  --env GAME_SERVER_PREFIX=game \
   --secret SKYPILOT_API_SERVER_ENDPOINT \
   --secret SKYPILOT_API_SERVER_SERVICE_ACCOUNT_TOKEN
 
 # Or without API server
 sky exec eval-head configs/eval_head.yaml \
-  --env GAME_SERVER_PREFIX=exp-game
+  --env GAME_SERVER_PREFIX=game
 ```
 
 This approach:
@@ -149,11 +138,10 @@ Similarly, to restart game servers:
 
 ```bash
 # Cancel and restart a specific game server
-sky cancel -ay exp-game-1
-sky exec exp-game-1 configs/game_server.yaml \
-  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT```
-
-## API Endpoints
+sky cancel -ay game-1
+sky exec game-1 configs/game_server.yaml \
+  --env EVAL_HEAD_ENDPOINT=$EVAL_HEAD_ENDPOINT
+```
 
 The evaluation head exposes the following endpoints:
 
