@@ -309,7 +309,7 @@ class StatusBody(RequestBody):
     cluster_names: Optional[List[str]] = None
     refresh: common_lib.StatusRefreshMode = common_lib.StatusRefreshMode.NONE
     all_users: bool = True
-    # TODO (kyuds): default to False post 0.11.0
+    # TODO (kyuds): default to False post 0.10.5
     include_credentials: bool = True
 
 
