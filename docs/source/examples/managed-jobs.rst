@@ -740,15 +740,31 @@ The pool will be torn down in the background, and any remaining resources will b
   - **Fractional GPU support**: Allow jobs to request and share fractional GPU resources.
 
 
+File uploads for managed jobs
+-----------------------------
+
+For managed jobs, SkyPilot uses an intermediate bucket to store files used in the task, such as local :code:`file_mounts` and the :code:`workdir`.
+
+If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
+
+**Object store access is not necessary to use managed jobs.** If cloud object storage is not available (e.g., Kubernetes deployments), SkyPilot automatically falls back to a two-hop upload that copies files to the jobs controller and then downloads them to the jobs. 
+
+.. tip::
+
+  To force disable using cloud buckets even when available, set :ref:`jobs.force_disable_cloud_bucket <config-yaml-jobs-force-disable-cloud-bucket>` in your config:
+
+  .. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    jobs:
+      force_disable_cloud_bucket: true
+
 .. _intermediate-bucket:
 
 Setting the job files bucket
-----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For managed jobs, SkyPilot requires an intermediate bucket to store files used in the task, such as local file mounts, temporary files, and the workdir.
-If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
-
-Alternatively, you can pre-provision a bucket and use it as an intermediate for storing file by setting :code:`jobs.bucket` in :code:`~/.sky/config.yaml`:
+If you want to use a pre-provisioned bucket for storing intermediate files, set :code:`jobs.bucket` in :code:`~/.sky/config.yaml`:
 
 .. code-block:: yaml
 
@@ -779,13 +795,12 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
 .. tip::
   Multiple users can share the same intermediate bucket. Each user's jobs will have their own unique job-specific directories, ensuring that files are kept separate and organized.
 
-
 .. _jobs-controller:
 
 How it works: The jobs controller
 ---------------------------------
 
-The jobs controller is a small on-demand CPU VM or pod running in the cloud that manages all jobs of a user.
+The jobs controller is a small on-demand CPU VM or pod created by SkyPilot to manage all jobs.
 It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
 Thus, **no user action is needed** to manage its lifecycle.
 

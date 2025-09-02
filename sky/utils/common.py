@@ -11,18 +11,38 @@ from sky.utils import common_utils
 
 SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
 JOB_CONTROLLER_PREFIX: str = 'sky-jobs-controller-'
+
 # We use the user hash (machine-specific) for the controller name. It will be
 # the same across the whole lifecycle of the server, including:
-# 1. all requests, because this global variable is set once during server
-#    starts.
-# 2. SkyPilot API server restarts, as long as the `~/.sky` folder is persisted
-#    and the env var set during starting the server is the same.
+# 1. all requests, because all the server processes share the same user hash
+#    cache file.
+# 2. SkyPilot API server restarts, because the API server will restore the
+#    user hash from the global user state db on startup.
+# 3. Potential multiple server replicas, because multiple server replicas of
+#    a same deployment will share the same global user state db.
 # This behavior is the same for the local API server (where SERVER_ID is the
 # same as the normal user hash). This ensures backwards-compatibility with jobs
 # controllers from before #4660.
-SERVER_ID = common_utils.get_user_hash()
-SKY_SERVE_CONTROLLER_NAME: str = f'{SKY_SERVE_CONTROLLER_PREFIX}{SERVER_ID}'
-JOB_CONTROLLER_NAME: str = f'{JOB_CONTROLLER_PREFIX}{SERVER_ID}'
+SERVER_ID: str
+SKY_SERVE_CONTROLLER_NAME: str
+JOB_CONTROLLER_NAME: str
+
+
+def refresh_server_id() -> None:
+    """Refresh the server id.
+
+    This function is used to ensure the server id is read from the authorative
+    source.
+    """
+    global SERVER_ID
+    global SKY_SERVE_CONTROLLER_NAME
+    global JOB_CONTROLLER_NAME
+    SERVER_ID = common_utils.get_user_hash()
+    SKY_SERVE_CONTROLLER_NAME = f'{SKY_SERVE_CONTROLLER_PREFIX}{SERVER_ID}'
+    JOB_CONTROLLER_NAME = f'{JOB_CONTROLLER_PREFIX}{SERVER_ID}'
+
+
+refresh_server_id()
 
 
 @contextlib.contextmanager

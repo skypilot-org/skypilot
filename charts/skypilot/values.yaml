@@ -5,8 +5,9 @@ apiService:
   # Number of replicas to deploy - replicas > 1 is not well tested.
   replicas: 1
   preDeployHook: |-
-    # Run commands before deploying the API server, e.g. installing an admin
-    # policy. Remember to set the admin policy in the config section below.
+    # Run commands before deploying the API server, e.g. installing an admin policy.
+    # Refer to https://docs.skypilot.co/en/latest/cloud-setup/policy.html for more details about admin policy.
+    # Remember to set the admin policy in the config section below.
     echo "Pre-deploy hook"
 
     # Uncomment the following lines to install the admin policy
@@ -19,6 +20,8 @@ apiService:
   # - RollingUpdate: [EXPERIMENTAL] create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
   # Default to Recreate. When set to RollingUpdate, an external database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString.
   upgradeStrategy: Recreate
+  # Deprecated: use other auth methods instead.
+  # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
   # Enable basic auth and user management in the API server
   # If enabled, the user can be created, updated, and deleted in the Dashboard,
   # and the basic auth will be done in the API server instead of the ingress.
@@ -49,6 +52,7 @@ apiService:
   # Set ~/.sky/config.yaml content on the API server
   # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
   # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/config.yaml`
+  # Refer to https://docs.skypilot.co/en/latest/reference/config.html for more details.
   # @schema type: [string, null]
   config: null
   # config: |
@@ -69,7 +73,8 @@ apiService:
   #     - kubernetes
 
   # Use a secret to set the DB connection string for the API server.
-  # Refer to https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#optional-back-the-api-server-with-a-persistent-database for more details.
+  # If configured, SkyPilot uses the external database to store states instead of the SQLite database.
+  # Refer to https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#optional-back-the-api-server-with-a-persistent-database and https://docs.skypilot.co/en/latest/reference/architecture/state.html for more details.
   # If either this field or dbConnectionString is set, config must be null.
   # @schema type: [string, null]
   dbConnectionSecretName: null
@@ -80,6 +85,7 @@ apiService:
   # Set ~/.sky/ssh_node_pools.yaml content on the API server
   # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
   # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/ssh_node_pools.yaml`
+  # Refer to https://docs.skypilot.co/en/latest/reservations/existing-machines.html#defining-ssh-node-pools for more details.
   # @schema type: [string, null]
   sshNodePools: null
   # sshNodePools: |
@@ -94,6 +100,7 @@ apiService:
   # @schema type: [string, null]
   sshKeySecret: null
   # Metrics configuration for the API server.
+  # Refer to https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-metrics-setup.html for more details.
   metrics:
     # Whether to enable metrics collection, default to false. If this is enabled and the API server image does not support metrics, the deployment will fail.
     enabled: false
@@ -144,6 +151,7 @@ apiService:
   skypilotDev: false
 
 # Authentication configuration for the API server
+# Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
 # @schema type: [object, null]
 auth:
   # OAuth Proxy based authentication for the API server
@@ -202,6 +210,8 @@ auth:
 
 storage:
   # Enable/disable persistent storage
+  # With this enabled, SkyPilot will use a PV to persist the internal data like states, logs, lock files, catalog, etc.
+  # Refer to https://docs.skypilot.co/en/latest/reference/architecture/state.html for more details.
   enabled: true
   # Storage class name - leave empty to use cluster default
   storageClassName: ""
@@ -222,6 +232,13 @@ storage:
 ingress:
   enabled: true
   # Name of the secret containing basic auth credentials for ingress. If not specified, a new secret will be created using authCredentials
+  # Example:
+  # WEB_USERNAME=skypilot
+  # WEB_PASSWORD=skypilot
+  # AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
+  # kubectl create secret generic basic-auth \
+  #   --from-literal=auth=$AUTH_STRING \
+  #   -n $NAMESPACE
   # @schema type: [string, null]
   authSecret: null
   # TODO(aylei): deprecate skypilot managed proxy auth to reduce our maintenance burden, replace with examples instead.
@@ -400,6 +417,7 @@ rbac:
   # @schema type: [object, null]
   serviceAccountAnnotations: null
 
+# Refer to https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#optional-configure-cloud-accounts for more details to configure different cloud accounts.
 # kubernetesCredentials add additional kubernetes cluster permissions to the API server.
 kubernetesCredentials:
   # Enable/disable using the API server's cluster for workloads

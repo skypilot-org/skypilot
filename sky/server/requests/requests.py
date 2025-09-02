@@ -13,7 +13,8 @@ import sqlite3
 import threading
 import time
 import traceback
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import (Any, AsyncContextManager, Callable, Dict, Generator, List,
+                    Optional, Tuple)
 
 import colorama
 import filelock
@@ -25,6 +26,7 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
@@ -402,22 +404,42 @@ _DB = None
 _init_db_lock = threading.Lock()
 
 
+def _init_db_within_lock():
+    global _DB
+    if _DB is None:
+        db_path = os.path.expanduser(
+            server_constants.API_SERVER_REQUEST_DB_PATH)
+        pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
+        _DB = db_utils.SQLiteConn(db_path, create_table)
+
+
 def init_db(func):
     """Initialize the database."""
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        global _DB
         if _DB is not None:
             return func(*args, **kwargs)
         with _init_db_lock:
-            if _DB is None:
-                db_path = os.path.expanduser(
-                    server_constants.API_SERVER_REQUEST_DB_PATH)
-                pathlib.Path(db_path).parents[0].mkdir(parents=True,
-                                                       exist_ok=True)
-                _DB = db_utils.SQLiteConn(db_path, create_table)
+            _init_db_within_lock()
         return func(*args, **kwargs)
+
+    return wrapper
+
+
+def init_db_async(func):
+    """Async version of init_db."""
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        if _DB is not None:
+            return await func(*args, **kwargs)
+        # If _DB is not initialized, init_db_async will be blocked if there
+        # is a thread initializing _DB, this is fine since it occurs on process
+        # startup.
+        with _init_db_lock:
+            _init_db_within_lock()
+        return await func(*args, **kwargs)
 
     return wrapper
 
@@ -439,30 +461,66 @@ def request_lock_path(request_id: str) -> str:
 
 @contextlib.contextmanager
 @init_db
+@metrics_lib.time_me
 def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
-    """Get a SkyPilot API request."""
+    """Get and update a SkyPilot API request."""
     request = _get_request_no_lock(request_id)
     yield request
     if request is not None:
         _add_or_update_request_no_lock(request)
 
 
+@init_db
+@metrics_lib.time_me
+def update_request_async(
+        request_id: str) -> AsyncContextManager[Optional[Request]]:
+    """Async version of update_request.
+
+    Returns an async context manager that yields the request record and
+    persists any in-place updates upon exit.
+    """
+
+    @contextlib.asynccontextmanager
+    async def _cm():
+        request = await _get_request_no_lock_async(request_id)
+        try:
+            yield request
+        finally:
+            if request is not None:
+                await _add_or_update_request_no_lock_async(request)
+
+    return _cm()
+
+
+_get_request_sql = (f'SELECT {", ".join(REQUEST_COLUMNS)} FROM {REQUEST_TABLE} '
+                    'WHERE request_id LIKE ?')
+
+
 def _get_request_no_lock(request_id: str) -> Optional[Request]:
     """Get a SkyPilot API request."""
     assert _DB is not None
-    columns_str = ', '.join(REQUEST_COLUMNS)
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(
-            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-            'WHERE request_id LIKE ?', (request_id + '%',))
+        cursor.execute(_get_request_sql, (request_id + '%',))
         row = cursor.fetchone()
         if row is None:
             return None
     return Request.from_row(row)
 
 
+async def _get_request_no_lock_async(request_id: str) -> Optional[Request]:
+    """Async version of _get_request_no_lock."""
+    assert _DB is not None
+    async with _DB.execute_fetchall_async(_get_request_sql,
+                                          (request_id + '%',)) as rows:
+        row = rows[0] if rows else None
+        if row is None:
+            return None
+    return Request.from_row(row)
+
+
 @init_db
+@metrics_lib.time_me
 def get_latest_request_id() -> Optional[str]:
     """Get the latest request ID."""
     assert _DB is not None
@@ -475,13 +533,23 @@ def get_latest_request_id() -> Optional[str]:
 
 
 @init_db
+@metrics_lib.time_me
 def get_request(request_id: str) -> Optional[Request]:
     """Get a SkyPilot API request."""
     with filelock.FileLock(request_lock_path(request_id)):
         return _get_request_no_lock(request_id)
 
 
+@init_db_async
+@metrics_lib.time_me_async
+async def get_request_async(request_id: str) -> Optional[Request]:
+    """Async version of get_request."""
+    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+        return await _get_request_no_lock_async(request_id)
+
+
 @init_db
+@metrics_lib.time_me
 def create_if_not_exists(request: Request) -> bool:
     """Create a SkyPilot API request if it does not exist."""
     with filelock.FileLock(request_lock_path(request.request_id)):
@@ -491,7 +559,19 @@ def create_if_not_exists(request: Request) -> bool:
         return True
 
 
+@init_db_async
+@metrics_lib.time_me_async
+async def create_if_not_exists_async(request: Request) -> bool:
+    """Async version of create_if_not_exists."""
+    async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
+        if await _get_request_no_lock_async(request.request_id) is not None:
+            return False
+        await _add_or_update_request_no_lock_async(request)
+        return True
+
+
 @init_db
+@metrics_lib.time_me
 def get_request_tasks(
     status: Optional[List[RequestStatus]] = None,
     cluster_names: Optional[List[str]] = None,
@@ -565,17 +645,46 @@ def get_request_tasks(
     return requests
 
 
+@init_db_async
+@metrics_lib.time_me_async
+async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
+    """Get a list of API request ids for shell completion."""
+    assert _DB is not None
+    # Prioritize alive requests (PENDING, RUNNING) over finished ones,
+    # then order by creation time (newest first) within each category.
+    async with _DB.execute_fetchall_async(
+        f"""SELECT request_id FROM {REQUEST_TABLE}
+                WHERE request_id LIKE ?
+                ORDER BY
+                    CASE
+                        WHEN status IN ('PENDING', 'RUNNING') THEN 0
+                        ELSE 1
+                    END,
+                    created_at DESC
+                LIMIT 1000""", (f'{incomplete}%',)) as rows:
+        if not rows:
+            return []
+    return [row[0] for row in rows]
+
+
+_add_or_update_request_sql = (f'INSERT OR REPLACE INTO {REQUEST_TABLE} '
+                              f'({", ".join(REQUEST_COLUMNS)}) VALUES '
+                              f'({", ".join(["?"] * len(REQUEST_COLUMNS))})')
+
+
 def _add_or_update_request_no_lock(request: Request):
     """Add or update a REST request into the database."""
-    row = request.to_row()
-    key_str = ', '.join(REQUEST_COLUMNS)
-    fill_str = ', '.join(['?'] * len(row))
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(
-            f'INSERT OR REPLACE INTO {REQUEST_TABLE} ({key_str}) '
-            f'VALUES ({fill_str})', row)
+        cursor.execute(_add_or_update_request_sql, request.to_row())
+
+
+async def _add_or_update_request_no_lock_async(request: Request):
+    """Async version of _add_or_update_request_no_lock."""
+    assert _DB is not None
+    await _DB.execute_and_commit_async(_add_or_update_request_sql,
+                                       request.to_row())
 
 
 def set_request_failed(request_id: str, e: BaseException) -> None:
@@ -609,6 +718,7 @@ def set_request_cancelled(request_id: str) -> None:
 
 
 @init_db
+@metrics_lib.time_me
 def _delete_requests(requests: List[Request]):
     """Clean up requests by their IDs."""
     id_list_str = ','.join(repr(req.request_id) for req in requests)

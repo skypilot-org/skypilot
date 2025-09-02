@@ -144,7 +144,8 @@ async def get(request_id: str) -> Any:
 async def stream_response_async(request_id: Optional[str],
                                 response: 'aiohttp.ClientResponse',
                                 output_stream: Optional['io.TextIOBase'] = None,
-                                resumable: bool = False) -> Any:
+                                resumable: bool = False,
+                                get_result: bool = True) -> Any:
     """Async version of stream_response that streams the response to the
     console.
 
@@ -155,6 +156,9 @@ async def stream_response_async(request_id: Optional[str],
             console.
         resumable: Whether the response is resumable on retry. If True, the
             streaming will start from the previous failure point on retry.
+
+    Returns:
+        Result of request_id if given. Will only return if get_result is True.
     """
 
     retry_context: Optional[rest.RetryContext] = None
@@ -170,7 +174,7 @@ async def stream_response_async(request_id: Optional[str],
                 elif line_count > retry_context.line_processed:
                     print(line, flush=True, end='', file=output_stream)
                     retry_context.line_processed = line_count
-        if request_id is not None:
+        if request_id is not None and get_result:
             return await get(request_id)
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')
@@ -572,10 +576,16 @@ async def status(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
+    *,
+    _include_credentials: bool = False,
 ) -> List[Dict[str, Any]]:
     """Async version of status() that gets cluster statuses."""
-    request_id = await context_utils.to_thread(sdk.status, cluster_names,
-                                               refresh, all_users)
+    request_id = await context_utils.to_thread(
+        sdk.status,
+        cluster_names,
+        refresh,
+        all_users,
+        _include_credentials=_include_credentials)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
@@ -588,7 +598,7 @@ async def endpoints(
     cluster: str,
     port: Optional[Union[int, str]] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Dict[str, str]:
+) -> Dict[int, str]:
     """Async version of endpoints() that gets the endpoint for a given cluster
       and port number."""
     request_id = await context_utils.to_thread(sdk.endpoints, cluster, port)

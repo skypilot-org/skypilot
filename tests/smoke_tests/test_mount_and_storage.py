@@ -36,6 +36,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import clouds
 from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import azure
@@ -112,6 +113,11 @@ def test_oci_mounts():
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 @pytest.mark.no_hyperbolic  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
+    if smoke_tests_utils.is_remote_server_test():
+        enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+        if not clouds.cloud_in_iterable(clouds.GCP(), enabled_cloud_storages):
+            pytest.skip('Skipping test because GCS is not enabled')
+
     name = smoke_tests_utils.get_cluster_name()
     storage_name = TestStorageWithCredentials.generate_bucket_name()
     test_commands = [
@@ -153,6 +159,13 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     include_s3_mount = cloud in ['aws', 'kubernetes']
     include_gcs_mount = cloud in ['gcp', 'kubernetes']
     include_azure_mount = cloud == 'azure'
+
+    if cloud == 'kubernetes':
+        enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+        if not clouds.cloud_in_iterable(clouds.AWS(), enabled_cloud_storages):
+            include_s3_mount = False
+        if not clouds.cloud_in_iterable(clouds.GCP(), enabled_cloud_storages):
+            include_gcs_mount = False
 
     content = template.render(
         storage_name=storage_name,
@@ -363,6 +376,11 @@ def test_kubernetes_context_switch():
     name = smoke_tests_utils.get_cluster_name()
     new_context = f'sky-test-context-{int(time.time())}'
     new_namespace = f'sky-test-namespace-{int(time.time())}'
+
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip('Skipping test because the Kubernetes configs and '
+                    'credentials are located on the remote API server '
+                    'and not the machine where the test is running')
 
     test_commands = [
         # Launch a cluster and run a simple task
@@ -1262,6 +1280,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1354,6 +1373,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1400,6 +1420,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1430,6 +1451,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1679,6 +1701,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
     def test_copy_mount_existing_storage(self,
                                          tmp_copy_mnt_existing_storage_obj):
         # Creates a bucket with no source in MOUNT mode (empty bucket), and

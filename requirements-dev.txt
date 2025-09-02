@@ -28,6 +28,7 @@ types-pyvmomi
 types-aiofiles
 types-paramiko
 types-protobuf
+types-python-dateutil
 
 # testing
 pytest

@@ -71,7 +71,9 @@ EXTERNAL_LOCAL_ENV_VARS = [
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
-        if env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
+        if (env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX) and
+                not env_var.startswith(
+                    constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)):
             env_vars[env_var] = os.environ[env_var]
         if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
@@ -307,6 +309,8 @@ class StatusBody(RequestBody):
     cluster_names: Optional[List[str]] = None
     refresh: common_lib.StatusRefreshMode = common_lib.StatusRefreshMode.NONE
     all_users: bool = True
+    # TODO (kyuds): default to False post 0.10.5
+    include_credentials: bool = True
 
 
 class StartBody(RequestBody):
@@ -453,6 +457,7 @@ class VolumeApplyBody(RequestBody):
     zone: Optional[str] = None
     size: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
+    labels: Optional[Dict[str, str]] = None
 
 
 class VolumeDeleteBody(RequestBody):
@@ -503,6 +508,7 @@ class JobsQueueBody(RequestBody):
     pool_match: Optional[str] = None
     page: Optional[int] = None
     limit: Optional[int] = None
+    statuses: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):

@@ -25,6 +25,10 @@ def _make_job(job_id: int,
             def is_terminal(self):
                 return False
 
+            @property
+            def value(self):
+                return 'PENDING'
+
         status = DummyStatus()
     return {
         'job_id': job_id,
@@ -40,11 +44,12 @@ class TestFilterJobs:
 
     def test_filter_jobs_no_filters_returns_all_and_total(self):
         jobs = [_make_job(i) for i in range(5)]
-        filtered, total = jobs_utils.filter_jobs(jobs, None, None, None, None,
-                                                 None)
+        filtered, total, status_counts = jobs_utils.filter_jobs(
+            jobs, None, None, None, None, None)
         assert total == 5
         assert len(filtered) == 5
         assert [j['job_id'] for j in filtered] == list(range(0, 5))
+        assert status_counts == {'PENDING': 5}
 
     def test_filter_jobs_match_filters(self):
         jobs = [
@@ -54,35 +59,42 @@ class TestFilterJobs:
         ]
 
         # workspace match
-        filtered, total = jobs_utils.filter_jobs(jobs, '-b', None, None, None,
-                                                 None)
+        filtered, total, status_counts = jobs_utils.filter_jobs(
+            jobs, '-b', None, None, None, None)
         assert total == 2
         assert [j['job_id'] for j in filtered] == [2, 3]
+        assert status_counts == {'PENDING': 2}
 
         # job name match
-        filtered, total = jobs_utils.filter_jobs(jobs, None, 'a', None, None,
-                                                 None)
+        filtered, total, status_counts = jobs_utils.filter_jobs(
+            jobs, None, 'a', None, None, None)
         assert total == 3
         assert [j['job_id'] for j in filtered] == [1, 2, 3]
+        assert status_counts == {'PENDING': 3}
 
         # pool match
-        filtered, total = jobs_utils.filter_jobs(jobs, None, None, '2', None,
-                                                 None)
+        filtered, total, status_counts = jobs_utils.filter_jobs(
+            jobs, None, None, '2', None, None)
         assert total == 2
         assert [j['job_id'] for j in filtered] == [2, 3]
+        assert status_counts == {'PENDING': 2}
 
     def test_filter_jobs_pagination(self):
         jobs = [_make_job(i) for i in range(1, 26)]
         # page 1, limit 10
-        page1, total = jobs_utils.filter_jobs(jobs, None, None, None, 1, 10)
+        page1, total, status_counts = jobs_utils.filter_jobs(
+            jobs, None, None, None, 1, 10)
         assert total == 25
         assert [j['job_id'] for j in page1] == list(range(1, 11))
+        assert status_counts == {'PENDING': 25}
 
         # page 3, limit 10
-        page3, total = jobs_utils.filter_jobs(jobs, None, None, None, 3, 10)
+        page3, total, status_counts = jobs_utils.filter_jobs(
+            jobs, None, None, None, 3, 10)
         assert total == 25
         # Remaining 5 items
         assert [j['job_id'] for j in page3] == list(range(21, 26))
+        assert status_counts == {'PENDING': 25}
 
         # invalid page/limit combinations in helper should raise assertion
         with pytest.raises(AssertionError):
@@ -110,22 +122,32 @@ class TestFilterJobs:
                 'pool': None
             },
         ]
+        # Add status to jobs that don't have it
+        for job in jobs:
+            if 'status' not in job:
+                job['status'] = type('S', (), {
+                    'is_terminal': lambda self: False,
+                    'value': 'PENDING'
+                })()
 
         # With workspace match
-        filtered, total = jobs_utils.filter_jobs(jobs, None, 'ws', None, None,
-                                                 None)
+        filtered, total, status_counts = jobs_utils.filter_jobs(
+            jobs, None, 'ws', None, None, None)
         assert total == 0
+        assert status_counts == {}
 
         # With pool match
-        filtered, total = jobs_utils.filter_jobs(jobs, None, None, 'p2', None,
-                                                 None)
+        filtered, total, status_counts = jobs_utils.filter_jobs(
+            jobs, None, None, 'p2', None, None)
         assert total == 0
+        assert status_counts == {}
 
         # With job name match
-        filtered, total = jobs_utils.filter_jobs(jobs, None, 'tr', None, None,
-                                                 None)
+        filtered, total, status_counts = jobs_utils.filter_jobs(
+            jobs, None, 'tr', None, None, None)
         assert total == 1
         assert [j['job_id'] for j in filtered] == [4]
+        assert status_counts == {'PENDING': 1}
 
     def test_filter_jobs_non_string_values(self):
         jobs = [
@@ -134,21 +156,28 @@ class TestFilterJobs:
                 'pool': 1234,
                 'workspace': 'w',
                 'job_name': 'j',
-                'status': type('S', (), {'is_terminal': lambda self: False})()
+                'status': type('S', (), {
+                    'is_terminal': lambda self: False,
+                    'value': 'PENDING'
+                })()
             },
             {
                 'job_id': 2,
                 'pool': 56,
                 'workspace': 'w',
                 'job_name': 'j',
-                'status': type('S', (), {'is_terminal': lambda self: False})()
+                'status': type('S', (), {
+                    'is_terminal': lambda self: False,
+                    'value': 'PENDING'
+                })()
             },
         ]
         # pool as int should be cast to str and matched by startswith
-        filtered, total = jobs_utils.filter_jobs(jobs, None, None, '12', None,
-                                                 None)
+        filtered, total, status_counts = jobs_utils.filter_jobs(
+            jobs, None, None, '12', None, None)
         assert total == 1
         assert [j['job_id'] for j in filtered] == [1]
+        assert status_counts == {'PENDING': 1}
 
 
 class TestQueue:
@@ -191,7 +220,7 @@ class TestQueue:
 
         def fake_get_job_table(skip_finished, accessible_workspaces, job_ids,
                                workspace_match, name_match, pool_match, page,
-                               limit, user_hashes):
+                               limit, user_hashes, statuses):
             # Return a payload containing all args for the loader to consume
             return {
                 'skip_finished': skip_finished,
@@ -203,6 +232,7 @@ class TestQueue:
                 'page': page,
                 'limit': limit,
                 'user_hashes': user_hashes,
+                'statuses': statuses,
             }
 
         def fake_load_managed_job_queue(payload):
@@ -246,13 +276,20 @@ class TestQueue:
             pool_match = payload.get('pool_match')
             page = payload.get('page')
             limit = payload.get('limit')
+            statuses = payload.get('statuses')
 
-            filtered, total = jobs_utils.filter_jobs(result, workspace_match,
-                                                     name_match, pool_match,
-                                                     page, limit)
+            filtered, total, status_counts = jobs_utils.filter_jobs(
+                result,
+                workspace_match,
+                name_match,
+                pool_match,
+                page,
+                limit,
+                statuses=statuses)
 
-            # Return as server queue() does: (jobs, total)
-            return filtered, total, jobs_utils.ManagedJobQueueResultType.DICT
+            # Return as server queue() does: (jobs, total, result_type, total_no_filter, status_counts)
+            total_no_filter = len(jobs)  # Original total before any filtering
+            return filtered, total, jobs_utils.ManagedJobQueueResultType.DICT, total_no_filter, status_counts
 
         # Patch symbols used by queue()
         monkeypatch.setattr(jobs_core.backends,
@@ -291,7 +328,7 @@ class TestQueue:
                             lambda pattern: [type('U', (), {'id': 'hashA'})()])
 
         # Filter by user match 'a', page 1, limit 10
-        filtered, total = jobs_core.queue(
+        filtered, total, status_counts, total_no_filter = jobs_core.queue(
             refresh=False,
             skip_finished=False,
             all_users=True,
@@ -303,9 +340,10 @@ class TestQueue:
             page=None,
             limit=10,
         )
-        # queue() returns Tuple[List[Dict], int]
+        # queue() returns Tuple[List[Dict], int, Dict[str, int], int]
         assert total == 2
         assert [j['job_id'] for j in filtered] == [1, 3]
+        assert total_no_filter == 3
 
     def test_queue_user_match_none(self, monkeypatch):
         jobs = [_make_job(i, workspace='ws') for i in range(1, 31)]
@@ -315,7 +353,7 @@ class TestQueue:
         monkeypatch.setattr(jobs_core.global_user_state,
                             'get_user_by_name_match', lambda pattern: [])
 
-        filtered, total = jobs_core.queue(
+        filtered, total, status_counts, total_no_filter = jobs_core.queue(
             refresh=False,
             skip_finished=False,
             all_users=True,
@@ -330,13 +368,14 @@ class TestQueue:
         # When user_match returns no users, should return empty list and total 0
         assert total == 0
         assert len(filtered) == 0
+        assert total_no_filter == 0
 
     def test_queue_pagination(self, monkeypatch):
         jobs = [_make_job(i, workspace='ws') for i in range(1, 31)]
         self._patch_backend_and_utils(monkeypatch, jobs)
 
         # Page 2, limit 10
-        filtered, total = jobs_core.queue(
+        filtered, total, status_counts, total_no_filter = jobs_core.queue(
             refresh=False,
             skip_finished=False,
             all_users=True,
@@ -350,6 +389,7 @@ class TestQueue:
         )
         assert total == 30
         assert [j['job_id'] for j in filtered] == list(range(11, 21))
+        assert total_no_filter == 30
 
     def test_queue_page_limit_value_errors(self, monkeypatch):
         jobs = [_make_job(1)]
@@ -398,6 +438,10 @@ class TestQueue:
             def is_terminal(self):
                 return False
 
+            @property
+            def value(self):
+                return 'PENDING'
+
         jobs = [
             {
                 'job_id': 1,
@@ -431,18 +475,20 @@ class TestQueue:
         # Only my hash and None should pass when all_users=False
         monkeypatch.setattr(jobs_core.common_utils, 'get_user_hash',
                             lambda: 'me')
-        filtered, total = jobs_core.queue(refresh=False,
-                                          skip_finished=False,
-                                          all_users=False,
-                                          job_ids=None,
-                                          user_match=None,
-                                          workspace_match=None,
-                                          name_match=None,
-                                          pool_match=None,
-                                          page=None,
-                                          limit=None)
+        filtered, total, status_counts, total_no_filter = jobs_core.queue(
+            refresh=False,
+            skip_finished=False,
+            all_users=False,
+            job_ids=None,
+            user_match=None,
+            workspace_match=None,
+            name_match=None,
+            pool_match=None,
+            page=None,
+            limit=None)
         assert total == 2
         assert sorted([j['job_id'] for j in filtered]) == [1, 3]
+        assert total_no_filter == 3
 
     def test_queue_workspace_filtering(self, monkeypatch):
         jobs = [
@@ -457,18 +503,20 @@ class TestQueue:
         self._patch_backend_and_utils(monkeypatch, jobs)
         monkeypatch.setattr(jobs_core.workspaces_core, 'get_workspaces',
                             fake_get_workspaces_only_w1)
-        filtered, total = jobs_core.queue(refresh=False,
-                                          skip_finished=False,
-                                          all_users=True,
-                                          job_ids=None,
-                                          user_match=None,
-                                          workspace_match=None,
-                                          name_match=None,
-                                          pool_match=None,
-                                          page=None,
-                                          limit=None)
+        filtered, total, status_counts, total_no_filter = jobs_core.queue(
+            refresh=False,
+            skip_finished=False,
+            all_users=True,
+            job_ids=None,
+            user_match=None,
+            workspace_match=None,
+            name_match=None,
+            pool_match=None,
+            page=None,
+            limit=None)
         assert total == 1
         assert [j['job_id'] for j in filtered] == [1]
+        assert total_no_filter == 2
 
     def test_queue_skip_finished_includes_all_tasks_of_active_jobs(
             self, monkeypatch):
@@ -478,10 +526,18 @@ class TestQueue:
             def is_terminal(self):
                 return False
 
+            @property
+            def value(self):
+                return 'RUNNING'
+
         class Finished:
 
             def is_terminal(self):
                 return True
+
+            @property
+            def value(self):
+                return 'FINISHED'
 
         jobs = [
             {
@@ -510,35 +566,39 @@ class TestQueue:
             },
         ]
         self._patch_backend_and_utils(monkeypatch, jobs)
-        filtered, total = jobs_core.queue(refresh=False,
-                                          skip_finished=True,
-                                          all_users=True,
-                                          job_ids=None,
-                                          user_match=None,
-                                          workspace_match=None,
-                                          name_match=None,
-                                          pool_match=None,
-                                          page=None,
-                                          limit=None)
+        filtered, total, status_counts, total_no_filter = jobs_core.queue(
+            refresh=False,
+            skip_finished=True,
+            all_users=True,
+            job_ids=None,
+            user_match=None,
+            workspace_match=None,
+            name_match=None,
+            pool_match=None,
+            page=None,
+            limit=None)
         # Job id 1 has a running task, so both its tasks are included. Job id 2 excluded.
         assert total == 2
         assert sorted([j['job_id'] for j in filtered]) == [1, 1]
+        assert total_no_filter == 3
 
     def test_queue_filter_by_job_ids(self, monkeypatch):
         jobs = [_make_job(1), _make_job(2), _make_job(3)]
         self._patch_backend_and_utils(monkeypatch, jobs)
-        filtered, total = jobs_core.queue(refresh=False,
-                                          skip_finished=False,
-                                          all_users=True,
-                                          job_ids=[2, 3],
-                                          user_match=None,
-                                          workspace_match=None,
-                                          name_match=None,
-                                          pool_match=None,
-                                          page=None,
-                                          limit=None)
+        filtered, total, status_counts, total_no_filter = jobs_core.queue(
+            refresh=False,
+            skip_finished=False,
+            all_users=True,
+            job_ids=[2, 3],
+            user_match=None,
+            workspace_match=None,
+            name_match=None,
+            pool_match=None,
+            page=None,
+            limit=None)
         assert total == 2
         assert sorted([j['job_id'] for j in filtered]) == [2, 3]
+        assert total_no_filter == 3
 
 
 class TestDumpManagedJobQueue:

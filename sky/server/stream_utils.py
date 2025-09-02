@@ -56,7 +56,7 @@ async def log_streamer(request_id: Optional[str],
     if request_id is not None:
         status_msg = rich_utils.EncodedStatusMessage(
             f'[dim]Checking request: {request_id}[/dim]')
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
 
         if request_task is None:
             raise fastapi.HTTPException(
@@ -86,10 +86,12 @@ async def log_streamer(request_id: Optional[str],
                 # Use smaller padding (1024 bytes) to force browser rendering
                 yield f'{waiting_msg}' + ' ' * 4096 + '\n'
             # Sleep shortly to avoid storming the DB and CPU and allow other
-            # coroutines to run. This busy waiting loop is performance critical
-            # for short-running requests, so we do not want to yield too long.
+            # coroutines to run.
+            # TODO(aylei): we should use a better mechanism to avoid busy
+            # polling the DB, which can be a bottleneck for high-concurrency
+            # requests.
             await asyncio.sleep(0.1)
-            request_task = requests_lib.get_request(request_id)
+            request_task = await requests_lib.get_request_async(request_id)
             if not follow:
                 break
         if show_request_waiting_spinner:
@@ -151,7 +153,7 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
         line: Optional[bytes] = await f.readline()
         if not line:
             if request_id is not None:
-                request_task = requests_lib.get_request(request_id)
+                request_task = await requests_lib.get_request_async(request_id)
                 if request_task.status > requests_lib.RequestStatus.RUNNING:
                     if (request_task.status ==
                             requests_lib.RequestStatus.CANCELLED):
