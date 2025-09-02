@@ -287,9 +287,9 @@ class CommandRunner:
         rsync_command = []
         if prefix_command is not None:
             rsync_command.append(prefix_command)
-        rsync_command += [
-            'rsync', RSYNC_DISPLAY_OPTION, RSYNC_NO_OWNER_NO_GROUP_OPTION
-        ]
+        rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
+        if not up:
+            rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
 
         # --filter
         # The source is a local path, so we need to resolve it.
