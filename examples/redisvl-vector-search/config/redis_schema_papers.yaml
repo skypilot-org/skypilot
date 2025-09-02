@@ -9,7 +9,7 @@ fields:
     type: vector
     attrs:
       algorithm: HNSW
-      dims: 384
+      dims: 768
       distance_metric: COSINE
       initial_cap: 950
       ef_construction: 200
