@@ -228,10 +228,12 @@ class BurstableExecutor:
 
         while True:
             if self._executor is not None and self._executor.has_idle_workers():
+                logger.info('submit to guaranteed pool')
                 return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
             if (self._burst_executor is not None and
                     self._burst_executor.has_idle_workers()):
                 try:
+                    logger.info('submit to burst pool')
                     fut = self._burst_executor.submit(fn, *args, **kwargs)
                     return fut
                 except exceptions.ExecutionPoolFullError:
@@ -240,8 +242,9 @@ class BurstableExecutor:
             if self._executor is not None:
                 # No idle workers in either pool, still queue the request
                 # to the guaranteed pool to keep behavior consistent.
+                logger.info('submit to guaranteed pool')
                 return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
-            logger.debug('No guaranteed pool set and the burst pool is full, '
+            logger.info('No guaranteed pool set and the burst pool is full, '
                          'retry later.')
             time.sleep(0.1)
 

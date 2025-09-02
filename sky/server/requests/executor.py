@@ -19,6 +19,8 @@ The number of the workers is determined by the system resources.
 See the [README.md](../README.md) for detailed architecture of the executor.
 """
 import asyncio
+import tempfile
+import psutil
 import concurrent.futures
 import contextlib
 import multiprocessing
@@ -379,66 +381,78 @@ def _request_execution_wrapper(request_id: str,
         func = request_task.entrypoint
         request_body = request_task.request_body
         request_name = request_task.name
-
-    # Append to the log file instead of overwriting it since there might be
-    # logs from previous retries.
-    with log_path.open('a', encoding='utf-8') as f:
-        # Store copies of the original stdout and stderr file descriptors
-        original_stdout, original_stderr = _redirect_output(f)
-        # Redirect the stdout/stderr before overriding the environment and
-        # config, as there can be some logs during override that needs to be
-        # captured in the log file.
-        try:
-            objgraph.show_growth(limit=20)
-            with sky_logging.add_debug_log_handler(request_id), \
-                override_request_env_and_config(request_body, request_id), \
-                tempstore.tempdir():
-                if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-                    config = skypilot_config.to_dict()
-                    logger.debug(f'request config: \n'
-                                 f'{yaml_utils.dump_yaml_str(dict(config))}')
-                with metrics_lib.time_it(name=request_name,
-                                         group='request_execution'):
-                    return_value = func(**request_body.to_kwargs())
-                f.flush()
-        except KeyboardInterrupt:
-            logger.info(f'Request {request_id} cancelled by user')
-            # Kill all children processes related to this request.
-            # Each executor handles a single request, so we can safely kill all
-            # children processes related to this request.
-            # This is required as python does not pass the KeyboardInterrupt
-            # to the threads that are not main thread.
-            subprocess_utils.kill_children_processes()
-            _restore_output(original_stdout, original_stderr)
-            return
-        except exceptions.ExecutionRetryableError as e:
-            logger.error(e)
-            logger.info(e.hint)
-            with api_requests.update_request(request_id) as request_task:
-                assert request_task is not None, request_id
-                # Retried request will undergo rescheduling and a new execution,
-                # clear the pid of the request.
-                request_task.pid = None
-            # Yield control to the scheduler for uniform handling of retries.
-            _restore_output(original_stdout, original_stderr)
-            raise
-        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            api_requests.set_request_failed(request_id, e)
-            _restore_output(original_stdout, original_stderr)
-            logger.info(f'Request {request_id} failed due to '
-                        f'{common_utils.format_exception(e)}')
-            return
-        else:
-            api_requests.set_request_succeeded(
-                request_id, return_value if not ignore_return_value else None)
-            _restore_output(original_stdout, original_stderr)
-            logger.info(f'Request {request_id} finished')
-        finally:
-            snapshot = tracemalloc.take_snapshot()
-            top_stats = snapshot.statistics('lineno')
-            for stat in top_stats[:30]:
-                print(stat)
-            objgraph.show_growth(limit=20)
+    
+    with open(f'/tmp/{pid}-profile.txt', 'w') as ppf:
+        ppf.write(f'Snapshot objgraph of request {request_id}:{request_name}\n')
+        objgraph.show_growth(limit=20, file=ppf)
+        ppf.flush()
+        # Append to the log file instead of overwriting it since there might be
+        # logs from previous retries.
+        with log_path.open('a', encoding='utf-8') as f:
+            # Store copies of the original stdout and stderr file descriptors
+            original_stdout, original_stderr = _redirect_output(f)
+            # Redirect the stdout/stderr before overriding the environment and
+            # config, as there can be some logs during override that needs to be
+            # captured in the log file.
+            try:
+                with sky_logging.add_debug_log_handler(request_id), \
+                    override_request_env_and_config(request_body, request_id), \
+                    tempstore.tempdir():
+                    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+                        config = skypilot_config.to_dict()
+                        logger.debug(f'request config: \n'
+                                    f'{yaml_utils.dump_yaml_str(dict(config))}')
+                    with metrics_lib.time_it(name=request_name,
+                                            group='request_execution'):
+                        return_value = func(**request_body.to_kwargs())
+                    f.flush()
+            except KeyboardInterrupt:
+                logger.info(f'Request {request_id} cancelled by user')
+                # Kill all children processes related to this request.
+                # Each executor handles a single request, so we can safely kill all
+                # children processes related to this request.
+                # This is required as python does not pass the KeyboardInterrupt
+                # to the threads that are not main thread.
+                subprocess_utils.kill_children_processes()
+                _restore_output(original_stdout, original_stderr)
+                return
+            except exceptions.ExecutionRetryableError as e:
+                logger.error(e)
+                logger.info(e.hint)
+                with api_requests.update_request(request_id) as request_task:
+                    assert request_task is not None, request_id
+                    # Retried request will undergo rescheduling and a new execution,
+                    # clear the pid of the request.
+                    request_task.pid = None
+                # Yield control to the scheduler for uniform handling of retries.
+                _restore_output(original_stdout, original_stderr)
+                raise
+            except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                api_requests.set_request_failed(request_id, e)
+                _restore_output(original_stdout, original_stderr)
+                logger.info(f'Request {request_id} failed due to '
+                            f'{common_utils.format_exception(e)}')
+                return
+            else:
+                api_requests.set_request_succeeded(
+                    request_id, return_value if not ignore_return_value else None)
+                _restore_output(original_stdout, original_stderr)
+                logger.info(f'Request {request_id} finished')
+                ppf.write(f'Memory after request {request_id}:{request_name}\n')
+                objgraph.show_growth(limit=20, file=ppf)
+                snapshot = tracemalloc.take_snapshot()
+                top_stats = snapshot.statistics('lineno')
+                ppf.write(f'tracemalloc after request {request_id}:{request_name}\n')
+                for stat in top_stats[:30]:
+                    ppf.write(str(stat))
+                prc = psutil.Process(pid)
+                ppf.write(f'RSS: {prc.memory_info().rss / 1024 / 1024} MB\n')
+                leaking = objgraph.get_leaking_objects()
+                objgraph.show_most_common_types(objects=leaking, file=ppf)
+                temp_file = tempfile.mktemp('.png')
+                objgraph.show_refs(objs=leaking[:3], max_depth=10, filename=temp_file)
+                ppf.write(f'leaking backrefs: {temp_file}\n')
+                ppf.flush()
 
 
 async def execute_request_coroutine(request: api_requests.Request):
