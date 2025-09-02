@@ -157,10 +157,9 @@ class EvaluationHead:
                                 endpoints = await sdk_async.endpoints(
                                     cluster['name'], port=self.game_server_port)
                                 print(f"  Endpoints returned: {endpoints}")
-                                port_str = str(self.game_server_port)
-                                if endpoints and port_str in endpoints:
+                                if endpoints and self.game_server_port in endpoints:
                                     server_info['endpoint'] = endpoints[
-                                        port_str]
+                                        self.game_server_port]
                                     print(
                                         f"  ✓ Found endpoint for {cluster['name']}: {server_info['endpoint']}"
                                     )
@@ -182,7 +181,7 @@ class EvaluationHead:
                                         )
                                 else:
                                     print(
-                                        f"  ✗ No endpoint found for port {port_str} in {endpoints}"
+                                        f"  ✗ No endpoint found for port {self.game_server_port} in {endpoints}"
                                     )
                             except Exception as e:
                                 print(

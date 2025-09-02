@@ -2,6 +2,9 @@
 
 A scalable system for distributed AI model evaluation using SkyPilot. The system automatically discovers and connects game servers for efficient batch processing.
 
+![](https://i.imgur.com/UekLFhm.gif)
+
+
 ## Architecture
 
 ![](https://i.imgur.com/EOEeiBb.png)
@@ -61,9 +64,10 @@ sky status
 ```bash
 # Get the eval head endpoint
 sky status --endpoint 8080 eval-head
-
-# Open in browser (will show the full URL)
+xx.xx.xx.xx:8080
 ```
+
+Check the example dashboard page at beginning of this README.
 
 ## Configuration
 
