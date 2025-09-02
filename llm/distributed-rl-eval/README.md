@@ -2,21 +2,35 @@
 
 A scalable system for distributed AI model evaluation using SkyPilot. The system automatically discovers and connects game servers for efficient batch processing.
 
+
 ![](https://i.imgur.com/UekLFhm.gif)
 
 
 ## Architecture
 
-![](https://i.imgur.com/EOEeiBb.png)
+![](https://i.imgur.com/YbHmA5r.png)
 
+There are three components:
+- Evaluation head: The evaluation head is the main component that receives game states from game servers and returns actions to them. It also aggregates the history.
+- Game servers: The game servers are the components that simulate the game environment and send game states to the evaluation head.
+- SkyPilot API server: The centralized control plane for all the resources, e.g., eval head and game servers. Through the API server, the eval head can auto-discover game servers by cluster name prefix; and, users can manage the resources across different clouds/regions.
+
+
+Note that this examples use CPU instances only, but they can be easily adapted to use GPUs.
+
+```yaml
+resources:
+  # Use any of the following accelerators for a game server or the eval head
+  accelerators: {A10G, L4, L40S, A100, A100-80GB}
+```
 
 ## Features
 
 - **Auto-Discovery**: Evaluation head automatically discovers game servers by cluster name prefix from centralized SkyPilot API server
+- **Scalable**: Add/remove game servers dynamically with any cloud/regions or accelerators.
 - **Real-time Dashboard**: Web-based monitoring at `http://<eval-head-ip>:8080/dashboard`
 - **Efficient Batching**: Processes multiple game states in batches for optimal throughput
 - **Cost-Optimized**: Game servers run on spot instances for 70-90% cost savings
-- **Scalable**: Add/remove game servers dynamically
 
 ## Quick Start
 
