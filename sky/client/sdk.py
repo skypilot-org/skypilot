@@ -2435,6 +2435,12 @@ def api_login(endpoint: Optional[str] = None,
             f'{dashboard_msg}',
             fg='green')
 
+    def _set_user_hash(user_hash: Optional[str]) -> None:
+        if user_hash is not None:
+            if not common_utils.is_valid_user_hash(user_hash):
+                raise ValueError(f'Invalid user hash: {user_hash}')
+            common_utils.set_user_hash_locally(user_hash)
+
     # Handle service account token authentication
     if service_account_token:
         if not service_account_token.startswith('sky_'):
@@ -2450,6 +2456,7 @@ def api_login(endpoint: Optional[str] = None,
             server_status, api_server_info = server_common.check_server_healthy(
                 endpoint)
             dashboard_url = server_common.get_dashboard_url(endpoint)
+            _set_user_hash(api_server_info.user.get('id'))
             _show_logged_in_message(endpoint, dashboard_url,
                                     api_server_info.user, server_status)
 
@@ -2593,15 +2600,6 @@ def api_login(endpoint: Optional[str] = None,
 
         # Now that the cookies are parsed, save them to the cookie jar.
         server_common.set_api_cookie_jar(cookie_jar)
-
-        # If we have a user_hash, save it to the local file
-        if user_hash is not None:
-            if not common_utils.is_valid_user_hash(user_hash):
-                raise ValueError(f'Invalid user hash: {user_hash}')
-            with open(os.path.expanduser('~/.sky/user_hash'),
-                      'w',
-                      encoding='utf-8') as f:
-                f.write(user_hash)
     else:
         # Check if basic auth is enabled
         if api_server_info.basic_auth_enabled:
@@ -2609,14 +2607,9 @@ def api_login(endpoint: Optional[str] = None,
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Basic auth is enabled but no valid user is found')
-            # Set the user hash in the local file
-            user_hash = api_server_info.user.get('id')
-            if not user_hash or not common_utils.is_valid_user_hash(user_hash):
-                raise ValueError(f'Invalid user hash: {user_hash}')
-            with open(os.path.expanduser('~/.sky/user_hash'),
-                      'w',
-                      encoding='utf-8') as f:
-                f.write(user_hash)
+    
+    # Set the user hash in the local file.
+    _set_user_hash(api_server_info.user.get('id'))
 
     # Set the endpoint in the config file
     _save_config_updates(endpoint=endpoint)
