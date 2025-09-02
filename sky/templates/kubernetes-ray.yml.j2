@@ -1165,7 +1165,7 @@ available_node_types:
                         # which caused 'Operation not permitted' errors on the PVC root directory (/mnt/home).
                         # Owner/group preservation (-o, -g) is also skipped (default for -rl), ensuring
                         # files are owned by the container's user/group.
-                        rsync -rl --exclude='.cache/uv' --exclude='skypilot-runtime/' "$SOURCE_PATH/" "$DEST_PATH"
+                        rsync -rl "$SOURCE_PATH/" "$DEST_PATH"
 
                         # Check if rsync failed
                         if [ $? -ne 0 ]; then
