@@ -22,7 +22,7 @@ def parse_args():
     parser.add_argument('--end-idx', type=int, required=True)
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--model-name',
-                        default='sentence-transformers/all-MiniLM-L6-v2')
+                        default='nomic-ai/nomic-embed-text-v2-moe')
     parser.add_argument('--redis-host', required=True)
     parser.add_argument('--redis-port', type=int, required=True)
     parser.add_argument('--redis-user', required=True)
@@ -109,7 +109,7 @@ def main():
     writer_thread = Thread(target=redis_writer, args=(redis_queue, index))
     writer_thread.start()
 
-    model = SentenceTransformer(args.model_name)
+    model = SentenceTransformer(args.model_name, trust_remote_code=True)
     df_partition = df.iloc[args.start_idx:end_idx]
 
     batch_docs = []

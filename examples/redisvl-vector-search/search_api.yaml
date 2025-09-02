@@ -13,14 +13,14 @@ envs:
   REDIS_PORT: 
   REDIS_USER: 
   REDIS_PASSWORD: 
-  MODEL_NAME: "sentence-transformers/all-MiniLM-L6-v2"
+  MODEL_NAME: "nomic-ai/nomic-embed-text-v2-moe"
 
 workdir: .
 
 setup: |
   uv pip install -r requirements.txt
   # Pre-download the embedding model
-  python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${MODEL_NAME}')"
+  python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${MODEL_NAME}', trust_remote_code=True)"
 
 run: |
   # Start both FastAPI and Streamlit in background

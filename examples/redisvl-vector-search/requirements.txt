@@ -12,3 +12,4 @@ sentence-transformers>=5.1.0
 pandas>=2.3.1
 tqdm>=4.67.1
 requests>=2.32.4
+einops>=0.8.1

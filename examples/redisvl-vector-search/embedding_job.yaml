@@ -23,6 +23,7 @@ envs:
   JOB_START_IDX: ''
   JOB_END_IDX: ''
   BATCH_SIZE: 10240
+  MODEL_NAME: "nomic-ai/nomic-embed-text-v2-moe"
   REDIS_HOST: ''
   REDIS_PORT: ''
   REDIS_USER: ''
@@ -55,6 +56,7 @@ run: |
     --schema-file config/redis_schema_papers.yaml \
     --start-idx ${JOB_START_IDX} \
     --end-idx ${JOB_END_IDX} \
+    --model-name ${MODEL_NAME} \
     --batch-size ${BATCH_SIZE} \
     --redis-host ${REDIS_HOST} \
     --redis-port ${REDIS_PORT} \

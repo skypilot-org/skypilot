@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
         if "already exists" not in str(e).lower():
             raise
 
-    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    model = SentenceTransformer(os.getenv("MODEL_NAME"), trust_remote_code=True)
     logger.info("Ready")
 
     yield
