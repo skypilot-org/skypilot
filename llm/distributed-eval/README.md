@@ -1,4 +1,4 @@
-# Distributed RL Evaluation System
+# Distributed RL Evaluation with Game Servers
 
 A scalable system for distributed AI model evaluation using SkyPilot. The system automatically discovers and connects game servers for efficient batch processing.
 
