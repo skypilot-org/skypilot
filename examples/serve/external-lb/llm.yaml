@@ -1,0 +1,64 @@
+name: multi-lb-llm
+
+envs:
+  MODEL_NAME: meta-llama/Llama-3.1-8B-Instruct
+  HF_TOKEN:
+  STABLE_BUILD_API:
+  META_LB_POLICY: prefix_tree
+  LB_POLICY: prefix_tree
+
+service:
+  readiness_probe:
+    path: /v1/models
+  replicas: 3
+  route53_hosted_zone: aws.cblmemo.net
+  load_balancing_policy: $META_LB_POLICY
+  external_load_balancers:
+    - resources:
+        cloud: aws
+        region: us-east-2
+      load_balancing_policy: $LB_POLICY
+    - resources:
+        cloud: aws
+        region: ap-northeast-1
+      load_balancing_policy: $LB_POLICY
+    - resources:
+        cloud: aws
+        region: eu-central-1
+      load_balancing_policy: $LB_POLICY
+
+resources:
+  cloud: aws
+  cpus: 16+
+  disk_tier: high
+  accelerators: L4:1
+  ordered:
+    - region: us-east-2
+    - region: ap-northeast-1
+    - region: eu-central-1
+  ports: 8081
+
+setup: |
+  uv venv -p 3.10
+  source .venv/bin/activate
+  uv pip install huggingface-hub==0.30.2
+  # Parallel the installation and download the model.
+  uv pip install -i https://$STABLE_BUILD_API.pypimirror.stablebuild.com/2025-08-22/ \
+    sgl-kernel==0.0.8
+  uv pip install setuptools==79.0.0 "sglang[all]==0.4.5" \
+    --find-links https://flashinfer.ai/whl/cu124/torch2.5/flashinfer-python &
+  huggingface-cli download $MODEL_NAME \
+    --max-workers 32 \
+    --include "*.safetensors"
+  wait
+
+run: |
+  source .venv/bin/activate
+  python -m sglang.launch_server \
+    --model-path $MODEL_NAME \
+    --port 8081 \
+    --host 0.0.0.0 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --enable-metrics \
+    --enable-cache-report \
+    --mem-fraction-static 0.8

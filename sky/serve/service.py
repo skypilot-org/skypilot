@@ -9,12 +9,14 @@ import pathlib
 import shutil
 import time
 import traceback
+import typing
 from typing import Dict
 
 import filelock
 
 from sky import authentication
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -28,6 +30,9 @@ from sky.serve import serve_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky.serve import service_spec
 
 # Use the explicit logger name so that the logger is under the
 # `sky.serve.service` namespace when executed directly, so as
@@ -89,40 +94,79 @@ def cleanup_storage(task_yaml: str) -> bool:
     return True
 
 
-def _cleanup(service_name: str) -> bool:
+def _cleanup(service_name: str,
+             service_spec: 'service_spec.SkyServiceSpec') -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
     failed = False
+    hosted_zone = service_spec.route53_hosted_zone
+
+    lb_svc_name = serve_utils.format_lb_service_name(service_name)
     replica_infos = serve_state.get_replica_infos(service_name)
+    external_lbs = serve_state.get_replica_infos(lb_svc_name)
     info2proc: Dict[replica_managers.ReplicaInfo,
                     multiprocessing.Process] = dict()
-    for info in replica_infos:
-        p = multiprocessing.Process(target=replica_managers.terminate_cluster,
-                                    args=(info.cluster_name,))
-        p.start()
-        info2proc[info] = p
-        # Set replica status to `SHUTTING_DOWN`
-        info.status_property.sky_launch_status = (
-            replica_managers.ProcessStatus.SUCCEEDED)
-        info.status_property.sky_down_status = (
-            replica_managers.ProcessStatus.RUNNING)
-        serve_state.add_or_update_replica(service_name, info.replica_id, info)
-        logger.info(f'Terminating replica {info.replica_id} ...')
+    change_batch = []
+    for is_external_lb, infos in [(False, replica_infos), (True, external_lbs)]:
+        for info in infos:
+            cn = info.cluster_name
+            if is_external_lb:
+                lb_record = global_user_state.get_cluster_from_name(cn)
+                if lb_record is not None:
+                    lb_region = lb_record['handle'].launched_resources.region
+                    lb_ip = serve_utils.get_cluster_ip(cn)
+                    if lb_ip is not None:
+                        # Hosted zone must be set for external LBs.
+                        # TODO(tian): Directly query all related records,
+                        # so we don't need the LB IP anymore.
+                        assert hosted_zone is not None
+                        change_batch.append(
+                            serve_utils.get_route53_change(
+                                'DELETE', service_name, hosted_zone, 'A',
+                                lb_region, lb_ip))
+                # If lb_record is None or the ip is None, that means the LB does
+                # not have an IP address yet, which means the record is not
+                # added to Route53 yet. Hence we skip the cleanup for it.
+            p = multiprocessing.Process(
+                target=replica_managers.terminate_cluster, args=(cn,))
+            p.start()
+            info2proc[info] = p
+            # Set replica status to `SHUTTING_DOWN`
+            info.status_property.sky_launch_status = (
+                replica_managers.ProcessStatus.SUCCEEDED)
+            info.status_property.sky_down_status = (
+                replica_managers.ProcessStatus.RUNNING)
+            sn = (lb_svc_name if is_external_lb else service_name)
+            serve_state.add_or_update_replica(sn, info.replica_id, info)
+            identity = 'external load balancer' if is_external_lb else 'replica'
+            logger.info(f'Terminating {identity} {info.replica_id} ...')
+
+    serve_utils.apply_change_batch(change_batch, service_name,
+                                   service_spec.target_hosted_zone_id, logger)
+
     for info, p in info2proc.items():
         p.join()
+        # TODO(tian): Hack. Fix this.
+        sn = (lb_svc_name
+              if info.cluster_name.startswith(lb_svc_name) else service_name)
         if p.exitcode == 0:
-            serve_state.remove_replica(service_name, info.replica_id)
-            logger.info(f'Replica {info.replica_id} terminated successfully.')
+            serve_state.remove_replica(sn, info.replica_id)
+            logger.info(f'Replica {info.replica_id} for service {sn} '
+                        f'terminated successfully.')
         else:
             # Set replica status to `FAILED_CLEANUP`
             info.status_property.sky_down_status = (
                 replica_managers.ProcessStatus.FAILED)
-            serve_state.add_or_update_replica(service_name, info.replica_id,
-                                              info)
+            serve_state.add_or_update_replica(sn, info.replica_id, info)
             failed = True
-            logger.error(f'Replica {info.replica_id} failed to terminate.')
-    versions = serve_state.get_service_versions(service_name)
-    serve_state.remove_service_versions(service_name)
+            logger.error(f'Replica {info.replica_id} for service {sn}'
+                         f' failed to terminate.')
 
+    for sn in [lb_svc_name, service_name]:
+        versions = serve_state.get_service_versions(sn)
+        serve_state.remove_service_versions(sn)
+
+    # NOTE(tian): We dont need to cleanup the storage for external LB.
+    # Add when we need storage in external LB.
     def cleanup_version_storage(version: int) -> bool:
         task_yaml: str = serve_utils.generate_task_yaml_file_name(
             service_name, version)
@@ -185,12 +229,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         service_name, constants.INITIAL_VERSION)
     shutil.copy(tmp_task_yaml, task_yaml)
 
-    # Generate load balancer log file name.
-    load_balancer_log_file = os.path.expanduser(
-        serve_utils.generate_remote_load_balancer_log_file_name(service_name))
-
     controller_process = None
-    load_balancer_process = None
+    load_balancer_processes = []
     try:
         with filelock.FileLock(
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
@@ -201,14 +241,23 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             # inside a kubernetes cluster to allow external load balancers
             # (example, for high availability load balancers) to communicate
             # with the controller.
+            # Also, when we are using external load balancers, in which we
+            # need to get the information from a distinct machine.
             def _get_host():
-                if 'KUBERNETES_SERVICE_HOST' in os.environ:
+                if ('KUBERNETES_SERVICE_HOST' in os.environ or
+                        service_spec.external_load_balancers is not None):
                     return '0.0.0.0'
                 # Not using localhost to avoid using ipv6 address and causing
                 # the following error:
                 # ERROR:    [Errno 99] error while attempting to bind on address
                 # ('::1', 20001, 0, 0): cannot assign requested address
                 return '127.0.0.1'
+
+            # def _get_external_host():
+            #     assert service_spec.external_load_balancers is not None
+            #     # TODO(tian): Use a more robust way to get the host.
+            #     return subprocess.check_output(
+            #         'curl ifconfig.me', shell=True).decode('utf-8').strip()
 
             controller_host = _get_host()
 
@@ -223,25 +272,50 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
 
             controller_addr = f'http://{controller_host}:{controller_port}'
 
-            load_balancer_port = common_utils.find_free_port(
-                constants.LOAD_BALANCER_PORT_START)
+            load_balancer_process = None
+            if service_spec.external_load_balancers is None:
+                # Generate load balancer log file name.
+                load_balancer_log_file = os.path.expanduser(
+                    serve_utils.generate_remote_load_balancer_log_file_name(
+                        service_name))
 
-            # Extract the load balancing policy from the service spec
-            policy_name = service_spec.load_balancing_policy
+                load_balancer_port = common_utils.find_free_port(
+                    constants.LOAD_BALANCER_PORT_START)
 
-            # Start the load balancer.
-            # TODO(tian): Probably we could enable multiple ports specified in
-            # service spec and we could start multiple load balancers.
-            # After that, we will have a mapping from replica port to endpoint.
-            load_balancer_process = multiprocessing.Process(
-                target=ux_utils.RedirectOutputForProcess(
-                    load_balancer.run_load_balancer,
-                    load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port, policy_name,
-                      service_spec.tls_credential))
-            load_balancer_process.start()
-            serve_state.set_service_load_balancer_port(service_name,
-                                                       load_balancer_port)
+                # Extract the load balancing policy from the service spec
+                policy_name = service_spec.load_balancing_policy
+
+                # Start the load balancer.
+                # TODO(tian): Probably we could enable multiple ports specified
+                # in service spec and we could start multiple load balancers.
+                # After that, we need a mapping from replica port to endpoint.
+                load_balancer_process = multiprocessing.Process(
+                    target=ux_utils.RedirectOutputForProcess(
+                        load_balancer.run_load_balancer,
+                        load_balancer_log_file).run,
+                    args=(controller_addr, load_balancer_port, policy_name,
+                          service_spec.tls_credential))
+                load_balancer_process.start()
+                serve_state.set_service_load_balancer_port(
+                    service_name, load_balancer_port)
+            elif service_spec.route53_hosted_zone is not None:
+                # # Generate load balancer log file name.
+                # load_balancer_log_file = os.path.expanduser(
+                #     serve_utils.generate_remote_load_balancer_log_file_name(
+                #         service_name))
+                # NOTE(tian): Running this in sky/serve/controller.py,
+                # SkyServeController::_launch_lb_replicas now.
+                # load_balancer_process = multiprocessing.Process(
+                #     target=ux_utils.RedirectOutputForProcess(
+                #         serve_utils.wait_external_load_balancers,
+                #         load_balancer_log_file).run,
+                #     args=(service_name,
+                #           service_spec, logger))
+                # load_balancer_process.start()
+                serve_state.set_service_load_balancer_port(
+                    service_name, constants.EXTERNAL_LB_PORT)
+            if load_balancer_process is not None:
+                load_balancer_processes.append(load_balancer_process)
 
         while True:
             _handle_signal(service_name)
@@ -253,7 +327,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         # Kill load balancer process first since it will raise errors if failed
         # to connect to the controller. Then the controller process.
         process_to_kill = [
-            proc for proc in [load_balancer_process, controller_process]
+            proc for proc in [*load_balancer_processes, controller_process]
             if proc is not None
         ]
         subprocess_utils.kill_children_processes(
@@ -261,15 +335,20 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             force=True)
         for process in process_to_kill:
             process.join()
-        failed = _cleanup(service_name)
+        failed = _cleanup(service_name, service_spec)
+        lb_svc_name = serve_utils.format_lb_service_name(service_name)
         if failed:
-            serve_state.set_service_status_and_active_versions(
-                service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
+            for sn in [lb_svc_name, service_name]:
+                serve_state.set_service_status_and_active_versions(
+                    sn, serve_state.ServiceStatus.FAILED_CLEANUP)
             logger.error(f'Service {service_name} failed to clean up.')
         else:
-            shutil.rmtree(service_dir)
-            serve_state.remove_service(service_name)
-            serve_state.delete_all_versions(service_name)
+            for sn in [lb_svc_name, service_name]:
+                shutil.rmtree(
+                    os.path.expanduser(
+                        serve_utils.generate_remote_service_dir_name(sn)))
+                serve_state.remove_service(sn)
+                serve_state.delete_all_versions(sn)
             logger.info(f'Service {service_name} terminated successfully.')
 
 

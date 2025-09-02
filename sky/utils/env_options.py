@@ -19,6 +19,16 @@ class Options(enum.Enum):
     # will not be multiple identities, and skipping the check can increase
     # robustness.
     SKIP_CLOUD_IDENTITY_CHECK = ('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', False)
+    # TODO(tian): Hack. This is for let the external LB inherit this option.
+    # This should not be included in the controller envs.
+    DO_PUSHING_ACROSS_LB = ('DO_PUSHING_ACROSS_LB', False)
+    LB_PUSHING_ENABLE_LB = ('LB_PUSHING_ENABLE_LB', True)
+    DO_PUSHING_TO_REPLICA = ('DO_PUSHING_TO_REPLICA', False)
+    USE_V2_STEALING = ('USE_V2_STEALING', False)
+    ENABLE_SELECTIVE_PUSHING = ('ENABLE_SELECTIVE_PUSHING', False)
+    DISABLE_LEAST_LOAD_IN_PREFIX = ('DISABLE_LEAST_LOAD_IN_PREFIX', False)
+    USE_IE_QUEUE_INDICATOR = ('USE_IE_QUEUE_INDICATOR', True)
+    FORCE_DISABLE_STEALING = ('FORCE_DISABLE_STEALING', False)
 
     def __init__(self, env_var: str, default: bool) -> None:
         self.env_var = env_var

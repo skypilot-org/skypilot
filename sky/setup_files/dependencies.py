@@ -93,6 +93,7 @@ aws_dependencies = [
     # NOTE: required by awscli. To avoid ray automatically installing
     # the latest version.
     'colorama < 0.4.5',
+    'aiohttp',
 ]
 
 # azure-cli cannot be installed normally by uv, so we need to work around it in

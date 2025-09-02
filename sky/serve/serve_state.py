@@ -59,6 +59,14 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         service_name TEXT,
         spec BLOB,
         PRIMARY KEY (service_name, version))""")
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS external_load_balancers (
+        lb_id INTEGER, 
+        service_name TEXT,
+        cluster_name TEXT,
+        region TEXT,
+        port INTEGER,
+        PRIMARY KEY (service_name, lb_id))""")
     conn.commit()
 
     # Backward compatibility.
@@ -80,6 +88,8 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     # Whether the service's load balancer is encrypted with TLS.
     db_utils.add_column_to_table(cursor, conn, 'services', 'tls_encrypted',
                                  'INTEGER DEFAULT 0')
+    db_utils.add_column_to_table(cursor, conn, 'services', 'dns_endpoint',
+                                 'TEXT DEFAULT NULL')
     conn.commit()
 
 
@@ -137,6 +147,10 @@ class ReplicaStatus(enum.Enum):
 
     # Unknown. This should never happen (used only for unexpected errors).
     UNKNOWN = 'UNKNOWN'
+
+    @classmethod
+    def scheduled_statuses(cls) -> List['ReplicaStatus']:
+        return [cls.PENDING, cls.PROVISIONING, cls.STARTING, cls.READY]
 
     @classmethod
     def failed_statuses(cls) -> List['ReplicaStatus']:
@@ -331,10 +345,20 @@ def set_service_load_balancer_port(service_name: str,
             (load_balancer_port, service_name))
 
 
+def set_service_dns_endpoint(service_name: str, dns_endpoint: str) -> None:
+    """Sets the dns endpoint of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE services SET
+            dns_endpoint=(?) WHERE name=(?)""", (dns_endpoint, service_name))
+
+
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
-     _, active_versions, load_balancing_policy, tls_encrypted) = row[:15]
+     _, active_versions, load_balancing_policy, tls_encrypted,
+     dns_endpoint) = row[:16]
     if load_balancing_policy is None:
         # This entry in database was added in #4439, and it will always be set
         # to a str value. If it is None, it means it is an legacy entry and is
@@ -358,6 +382,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'requested_resources_str': requested_resources_str,
         'load_balancing_policy': load_balancing_policy,
         'tls_encrypted': bool(tls_encrypted),
+        'dns_endpoint': dns_endpoint,
     }
 
 

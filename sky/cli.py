@@ -1538,6 +1538,7 @@ def _handle_services_request(
             endpoint = service_records[0]['endpoint']
             msg = '-' if endpoint is None else endpoint
         else:
+            service_records.sort(key=lambda x: x['name'])
             msg = serve_lib.format_service_table(service_records, show_all)
             service_not_found_msg = ''
             if service_names is not None:
@@ -4206,63 +4207,6 @@ def _generate_task_with_service(
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
 
-    # NOTE(yi): we only allow one service port now.
-    service_port: Optional[int] = int(
-        task.service.ports) if task.service.ports is not None else None
-    if service_port is None:
-        for requested_resources in list(task.resources):
-            if requested_resources.ports is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Must specify at least one ports in resources. Each '
-                        'replica will use the port specified as application '
-                        'ingress port if only one port is specified in the '
-                        'replica resources. If there are multiple ports opened '
-                        'in the replica, please set the `service.ports` field '
-                        'in the service config.')
-            requested_ports = list(
-                resources_utils.port_ranges_to_set(requested_resources.ports))
-            if len(requested_ports) > 1:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Multiple ports specified in resources. Please '
-                        'specify the main port in the `service.ports` field.')
-            # We request all the replicas using the same port for now, but it
-            # should be fine to allow different replicas to use different ports
-            # in the future.
-            resource_port = requested_ports[0]
-            if service_port is None:
-                service_port = resource_port
-            if service_port != resource_port:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Got multiple ports: {service_port} and '
-                        f'{resource_port} in different resources. '
-                        'Please specify the same port in all replicas, or '
-                        'explicitly set the service port in the '
-                        '`service.ports` section.')
-        assert service_port is not None
-        task.service.set_ports(str(service_port))
-    else:
-        for requested_resources in list(task.resources):
-            if requested_resources.ports is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Must specify at least one ports in every replica '
-                        'resources.')
-            ports_set = resources_utils.port_ranges_to_set(
-                requested_resources.ports)
-            if service_port not in ports_set:
-                with ux_utils.print_exception_no_traceback():
-                    # TODO(tian): Automatically infer resource port from
-                    # service port if none of them is specified in the
-                    # replica resources.
-                    raise ValueError(
-                        f'The service port {service_port} specified in the '
-                        'service section is not found in some resources. '
-                        'Please check if the service port is correct or add '
-                        'the service port to replica resources.')
-
     return task
 
 
@@ -4721,11 +4665,13 @@ def serve_down(
     help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
 @click.option('--controller',
+              '-c',
               is_flag=True,
               default=False,
               required=False,
               help='Show the controller logs of this service.')
 @click.option('--load-balancer',
+              '--lb',
               is_flag=True,
               default=False,
               required=False,
@@ -4758,11 +4704,10 @@ def serve_logs(
         sky serve logs [SERVICE_NAME] 1
     """
     have_replica_id = replica_id is not None
-    num_flags = (controller + load_balancer + have_replica_id)
-    if num_flags > 1:
-        raise click.UsageError('At most one of --controller, --load-balancer, '
-                               '[REPLICA_ID] can be specified.')
-    if num_flags == 0:
+    if controller and (load_balancer or have_replica_id):
+        raise click.UsageError('--controller cannot be specified with '
+                               '--load-balancer or [REPLICA_ID].')
+    if not (controller or load_balancer or have_replica_id):
         raise click.UsageError('One of --controller, --load-balancer, '
                                '[REPLICA_ID] must be specified.')
     if controller:
@@ -4770,7 +4715,7 @@ def serve_logs(
     elif load_balancer:
         target_component = serve_lib.ServiceComponent.LOAD_BALANCER
     else:
-        # Already checked that num_flags == 1.
+        # Already checked that num_flags >= 1.
         assert replica_id is not None
         target_component = serve_lib.ServiceComponent.REPLICA
     try:

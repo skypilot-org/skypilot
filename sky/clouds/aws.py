@@ -921,7 +921,7 @@ class AWS(clouds.Cloud):
         tier = cls._translate_disk_tier(disk_tier)
         tier2iops = {
             resources_utils.DiskTier.ULTRA: 20000,
-            resources_utils.DiskTier.HIGH: 7000,
+            resources_utils.DiskTier.HIGH: 10000,
             resources_utils.DiskTier.MEDIUM: 3500,
             resources_utils.DiskTier.LOW: 0,  # iops is not required on standard disk
         }

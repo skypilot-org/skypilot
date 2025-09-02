@@ -1,6 +1,7 @@
 """Constants used for SkyServe."""
 
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
+EXTERNAL_LB_TEMPLATE = 'sky-serve-external-load-balancer.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
 
@@ -17,6 +18,11 @@ SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
 CONTROLLER_SETUP_TIMEOUT_SECONDS = 300
 # Time to wait in seconds for service to register on the controller.
 SERVICE_REGISTER_TIMEOUT_SECONDS = 60
+
+# Time to wait in seconds for service to register on the controller with
+# external load balancer. We need to wait longer for external load balancer to
+# be ready for the ip address of the service.
+SERVICE_REGISTER_TIMEOUT_SECONDS_WITH_EXTERNAL_LB = 300
 
 # The time interval in seconds for load balancer to sync with controller. Every
 # time the load balancer syncs with controller, it will update all available
@@ -65,7 +71,7 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # TODO(tian): We might need to be careful that service logs can take a lot of
 # disk space. Maybe we could use a larger disk size, migrate to cloud storage or
 # do some log rotation.
-CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
+CONTROLLER_RESOURCES = {'cpus': '32+', 'disk_size': 200}
 
 # Due to the CPU/memory usage of the controller process launched with a job on
 # controller VM (use ray job under the hood), we need to reserve some CPU/memory
@@ -82,8 +88,12 @@ DEFAULT_MIN_REPLICAS = 1
 # Default port range start for controller and load balancer. Ports will be
 # automatically generated from this start port.
 CONTROLLER_PORT_START = 20001
+CONTROLLER_PORT_RANGE = '20001-20020'
 LOAD_BALANCER_PORT_START = 30001
 LOAD_BALANCER_PORT_RANGE = '30001-30020'
+
+# Port for external load balancer.
+EXTERNAL_LB_PORT = 8000
 
 # Initial version of service.
 INITIAL_VERSION = 1
@@ -103,3 +113,6 @@ SERVE_VERSION = 2
 TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
     'The version of service is outdated and does not support manually '
     'terminating replicas. Please terminate the service and spin up again.')
+
+# The health check endpoint for load balancer.
+LB_HEALTH_ENDPOINT = '/sky-lb-health'

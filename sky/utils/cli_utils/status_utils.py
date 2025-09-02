@@ -72,14 +72,15 @@ def show_status_table(cluster_records: List[_ClusterRecord],
         StatusColumn('RESOURCES',
                      _get_resources,
                      trunc_length=70 if not show_all else 0),
-        StatusColumn('REGION', _get_region, show_by_default=False),
+        StatusColumn('REGION', _get_region, show_by_default=True),
         StatusColumn('ZONE', _get_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status_colored),
         StatusColumn('AUTOSTOP', _get_autostop),
         StatusColumn('HEAD_IP', _get_head_ip, show_by_default=False),
         StatusColumn('COMMAND',
                      _get_command,
-                     trunc_length=COMMAND_TRUNC_LENGTH if not show_all else 0),
+                     trunc_length=COMMAND_TRUNC_LENGTH if not show_all else 0,
+                     show_by_default=False),
     ]
 
     columns = []

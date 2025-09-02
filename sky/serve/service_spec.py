@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from sky import resources as resources_lib
 from sky import serve
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
@@ -35,6 +36,9 @@ class SkyServiceSpec:
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         load_balancing_policy: Optional[str] = None,
+        external_load_balancers: Optional[List[Dict[str, Any]]] = None,
+        route53_hosted_zone: Optional[str] = None,
+        max_concurrent_requests: Optional[int] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -61,13 +65,89 @@ class SkyServiceSpec:
                 raise ValueError('readiness_path must start with a slash (/). '
                                  f'Got: {readiness_path}')
 
-        # Add the check for unknown load balancing policies
-        if (load_balancing_policy is not None and
-                load_balancing_policy not in serve.LB_POLICIES):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Unknown load balancing policy: {load_balancing_policy}. '
-                    f'Available policies: {list(serve.LB_POLICIES.keys())}')
+        if load_balancing_policy is not None:
+            if load_balancing_policy not in serve.LB_POLICIES:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Unknown load balancing policy: '
+                                     f'{load_balancing_policy}. '
+                                     f'Available policies: '
+                                     f'{list(serve.LB_POLICIES.keys())}')
+            # Use load_balancing_policy as fallback for external_load_balancers.
+            if external_load_balancers is not None:
+                for lb_config in external_load_balancers:
+                    if lb_config.get('load_balancing_policy') is None:
+                        lb_config[
+                            'load_balancing_policy'] = load_balancing_policy
+
+        self._target_hosted_zone_id: Optional[str] = None
+        if external_load_balancers is not None:
+            for lb_config in external_load_balancers:
+                r = lb_config.get('resources')
+                if r is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError('`resources` must be set for '
+                                         'external_load_balancers.')
+                if 'ports' in r:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError('`ports` must not be set for '
+                                         'external_load_balancers.')
+                if route53_hosted_zone is not None:
+                    if r.get('cloud', None) != 'aws':
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                '`cloud` in `external_load_balancers` must be '
+                                'set to `aws` if using route53_hosted_zone.')
+                    r['cloud'] = 'aws'
+                    if r.get('region') is None:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                '`region` in `external_load_balancers` must be '
+                                'set when using route53_hosted_zone.')
+                # Validate resources
+                resources_lib.Resources.from_yaml_config(r)
+            if route53_hosted_zone is not None:
+                # TODO(tian): Move the import.
+                import boto3  # pylint: disable=import-outside-toplevel
+                client = boto3.client('route53')
+                hosted_zones = client.list_hosted_zones()['HostedZones']
+                target_hosted_zone_id = None
+                for hz in hosted_zones:
+                    # Amazon Route 53 treats domain name as FQDN.
+                    # Thus a trailing dot is added to the domain name.
+                    # Here we strip the trailing dot for comparison.
+                    if hz['Name'].strip('.') == route53_hosted_zone:
+                        if hz['Config']['PrivateZone']:
+                            with ux_utils.print_exception_no_traceback():
+                                raise ValueError('`route53_hosted_zone` must be'
+                                                 ' a public hosted zone.')
+                        target_hosted_zone_id = hz['Id']
+                        break
+                if target_hosted_zone_id is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'route53_hosted_zone ({route53_hosted_zone}) '
+                            'not found.')
+                self._target_hosted_zone_id = target_hosted_zone_id
+                print(f'Found hosted zone: {route53_hosted_zone} with ID: '
+                      f'{target_hosted_zone_id}.')
+                # TODO(tian): Here we dont have the service_name information.
+                # Skip checking it for now. We should add it back later.
+                # for record in client.list_resource_record_sets(
+                #         HostedZoneId=target_hosted_zone_id
+                # )['ResourceRecordSets']:
+                #     if (record['Type'] == 'A' and
+                #             record['Name'].split('.')[0] == service_name):
+                #         with ux_utils.print_exception_no_traceback():
+                #             raise ValueError(
+                #                 'Hosted zone already has an A record with '
+                #                 f'subdomain {service_name}. Please remove it '
+                #                 'before using it.')
+        else:
+            if route53_hosted_zone is not None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('`external_load_balancers` must be set '
+                                     'for route53_hosted_zone.')
+
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
@@ -86,6 +166,10 @@ class SkyServiceSpec:
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
         self._load_balancing_policy: Optional[str] = load_balancing_policy
+        self._external_load_balancers: Optional[List[Dict[str, Any]]] = (
+            external_load_balancers)
+        self._route53_hosted_zone = route53_hosted_zone
+        self._max_concurrent_requests: Optional[int] = max_concurrent_requests
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -185,6 +269,13 @@ class SkyServiceSpec:
                 certfile=tls_section.get('certfile', None),
             )
 
+        service_config['external_load_balancers'] = config.get(
+            'external_load_balancers', None)
+        service_config['route53_hosted_zone'] = config.get(
+            'route53_hosted_zone', None)
+        service_config['max_concurrent_requests'] = config.get(
+            'max_concurrent_requests', None)
+
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -249,6 +340,11 @@ class SkyServiceSpec:
         if self.tls_credential is not None:
             add_if_not_none('tls', 'keyfile', self.tls_credential.keyfile)
             add_if_not_none('tls', 'certfile', self.tls_credential.certfile)
+        add_if_not_none('external_load_balancers', None,
+                        self.external_load_balancers)
+        add_if_not_none('route53_hosted_zone', None, self.route53_hosted_zone)
+        add_if_not_none('max_concurrent_requests', None,
+                        self.max_concurrent_requests)
         return config
 
     def probe_str(self):
@@ -303,6 +399,11 @@ class SkyServiceSpec:
                 f'Certfile: {self.tls_credential.certfile}')
 
     def __repr__(self) -> str:
+        ext_lb_policies = {}
+        if self.external_load_balancers is not None:
+            for lb in self.external_load_balancers:
+                ext_lb_policies[lb['resources']
+                                ['region']] = lb['load_balancing_policy']
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
@@ -310,7 +411,8 @@ class SkyServiceSpec:
             Replica autoscaling policy:       {self.autoscaling_policy_str()}
             TLS Certificates:                 {self.tls_str()}
             Spot Policy:                      {self.spot_policy_str()}
-            Load Balancing Policy:            {self.load_balancing_policy}
+            Meta Load Balancing Policy:       {self.load_balancing_policy}
+            External Load Balancing Policy:   {json.dumps(ext_lb_policies)}
         """)
 
     @property
@@ -383,3 +485,19 @@ class SkyServiceSpec:
     def load_balancing_policy(self) -> str:
         return lb_policies.LoadBalancingPolicy.make_policy_name(
             self._load_balancing_policy)
+
+    @property
+    def external_load_balancers(self) -> Optional[List[Dict[str, Any]]]:
+        return self._external_load_balancers
+
+    @property
+    def route53_hosted_zone(self) -> Optional[str]:
+        return self._route53_hosted_zone
+
+    @property
+    def target_hosted_zone_id(self) -> Optional[str]:
+        return self._target_hosted_zone_id
+
+    @property
+    def max_concurrent_requests(self) -> Optional[int]:
+        return self._max_concurrent_requests

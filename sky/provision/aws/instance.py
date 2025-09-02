@@ -666,14 +666,27 @@ def terminate_instances(
             'Name': f'tag:{constants.TAG_RAY_NODE_KIND}',
             'Values': ['worker'],
         })
+    skip_cleanup_sg = (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
+                       not managed_by_skypilot)
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Instance
     instances = _filter_instances(ec2,
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
+    default_sg = None
+    if not skip_cleanup_sg:
+        default_sg = _get_sg_from_name(ec2,
+                                       aws_cloud.DEFAULT_SECURITY_GROUP_NAME)
+        if default_sg is None:
+            logger.warning('Skip optimization for default security group.')
+        else:
+            for instance in instances:
+                instance.modify_attribute(Groups=[default_sg.id])
+                logger.info(f'Moved instance {instance.id} with cluster '
+                            f'name {cluster_name_on_cloud} to '
+                            'default security group.')
     instances.terminate()
-    if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
-            not managed_by_skypilot):
+    if skip_cleanup_sg:
         # Using default AWS SG or user specified security group. We don't need
         # to wait for the termination of the instances, as we do not need to
         # delete the SG.
@@ -682,7 +695,8 @@ def terminate_instances(
     # Group. Here we wait for all instances to be terminated, since the
     # Security Group dependent on them.
     for instance in instances:
-        instance.wait_until_terminated()
+        if default_sg is None:
+            instance.wait_until_terminated()
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
     #  trigger the termination process (via http call) and then return.
@@ -822,7 +836,15 @@ def open_ports(
 
     # For the case when every new ports is already opened.
     if ip_permissions:
-        sg.authorize_ingress(IpPermissions=ip_permissions)
+        try:
+            sg.authorize_ingress(IpPermissions=ip_permissions)
+        except aws.botocore_exceptions().ClientError as e:
+            if 'InvalidPermission.Duplicate' in str(e):
+                # This is possible when a previous cleanup failed.
+                logger.warning(f'Port {ports} is already opened. '
+                               'Skip opening again.')
+            else:
+                raise
 
 
 def cleanup_ports(

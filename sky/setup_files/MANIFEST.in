@@ -15,3 +15,5 @@ include sky/jobs/dashboard/static/*
 include sky/templates/*
 include sky/utils/kubernetes/*
 include sky/server/html/*
+include sky/lbbench/*
+include sky/lbbench/workloads/*

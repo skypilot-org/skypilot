@@ -1,0 +1,37 @@
+# The template for the sky serve load balancers
+
+name: load-balancer
+
+envs:
+  IP:
+  PORT:
+  POLICY:
+  DISABLE_SELECTIVE_PUSHING: false
+  MAX_CONCURRENT_REQUESTS: 40
+
+resources:
+  # TODO(tian): Hack. We should figure out the optimal resources.
+  cloud: aws
+  region: us-east-2
+  cpus: 2+
+  ports: 9002
+
+setup: |
+  source ~/skypilot-runtime/bin/activate
+  # Install serve dependencies.
+  # TODO(tian): Gather those into serve constants.
+  pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
+  pip list | grep fastapi > /dev/null 2>&1 || pip install fastapi > /dev/null 2>&1
+  pip list | grep httpx > /dev/null 2>&1 || pip install httpx > /dev/null 2>&1
+  pip list | grep xxhash > /dev/null 2>&1 || pip install xxhash > /dev/null 2>&1
+  pip list | grep prometheus_client > /dev/null 2>&1 || pip install prometheus_client > /dev/null 2>&1
+
+run: |
+  source ~/skypilot-runtime/bin/activate
+  python -u -m sky.serve.load_balancer \
+    --controller-addr http://$IP:$PORT \
+    --load-balancer-port 9002 \
+    --load-balancing-policy $POLICY \
+    --meta-load-balancing-policy $POLICY \
+    --region global \
+    --max-concurrent-requests $MAX_CONCURRENT_REQUESTS

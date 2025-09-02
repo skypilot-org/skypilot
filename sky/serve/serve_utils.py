@@ -3,19 +3,24 @@ import base64
 import collections
 import dataclasses
 import enum
+import logging
 import os
 import pathlib
 import pickle
 import re
 import shlex
 import shutil
+import subprocess
 import threading
 import time
+import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar)
+                    Optional, TextIO, Type, TypeVar, Union)
+from urllib import parse
 import uuid
 
+import aiohttp
 import colorama
 import filelock
 import psutil
@@ -39,6 +44,7 @@ if typing.TYPE_CHECKING:
     import fastapi
 
     from sky.serve import replica_managers
+    from sky.serve import service_spec
 
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
@@ -61,6 +67,8 @@ _FAILED_TO_FIND_REPLICA_MSG = (
 # Max number of replicas to show in `sky serve status` by default.
 # If user wants to see all replicas, use `sky serve status --all`.
 _REPLICA_TRUNC_NUM = 10
+# Similar to _REPLICA_TRUNC_NUM, but for external load balancers.
+_EXTERNAL_LB_TRUNC_NUM = 10
 
 
 class ServiceComponent(enum.Enum):
@@ -200,6 +208,117 @@ class RequestTimestamp(RequestsAggregator):
         return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
+def get_external_host() -> str:
+    # TODO(tian): Use a more robust way to get the host.
+    return subprocess.check_output('curl -s https://checkip.amazonaws.com',
+                                   shell=True).decode('utf-8').strip()
+
+
+def get_cluster_ip(cluster_name: str) -> Optional[str]:
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        return None
+    if record['handle'].head_ip is None:
+        return None
+    return record['handle'].head_ip
+
+
+def get_domain_name(subdomain: str, hosted_zone: str) -> str:
+    return f'{subdomain}.{hosted_zone}'
+
+
+def get_route53_change(action: str, subdomain: str, hosted_zone: str,
+                       record_type: str, region: str,
+                       value: str) -> Dict[str, Any]:
+    return {
+        'Action': action,
+        'ResourceRecordSet': {
+            'Name': get_domain_name(subdomain, hosted_zone),
+            'Type': record_type,
+            'TTL': 300,
+            'Region': region,
+            'SetIdentifier': f'{subdomain}-{region}',
+            'ResourceRecords': [{
+                'Value': value
+            }]
+        }
+    }
+
+
+# TODO(tian): Fix this logger hack.
+def apply_change_batch(change_batch: List[Dict[str, Any]], service_name: str,
+                       target_hosted_zone_id: Optional[str],
+                       logger: logging.Logger) -> None:
+    if not change_batch:
+        return
+    assert target_hosted_zone_id is not None
+    # TODO(tian): Fix this import hack.
+    import boto3  # pylint: disable=import-outside-toplevel
+    client = boto3.client('route53')
+    logger.info(f'Deleting Route53 records for {service_name}. '
+                f'Change batch: {change_batch}')
+    try:
+        client.change_resource_record_sets(
+            HostedZoneId=target_hosted_zone_id,
+            ChangeBatch={'Changes': change_batch})
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to delete Route53 records for {service_name}:'
+                     f' {common_utils.format_exception(e)}')
+        with ux_utils.enable_traceback():
+            logger.error(f'  Traceback: {traceback.format_exc()}')
+
+
+def wait_external_load_balancers(service_name: str,
+                                 service_spec: 'service_spec.SkyServiceSpec',
+                                 logger: logging.Logger) -> None:
+    # Wait for the LBs is ready, get the IPs and setup Route53.
+    external_lbs = service_spec.external_load_balancers
+    hosted_zone = service_spec.route53_hosted_zone
+    assert hosted_zone is not None
+    assert external_lbs is not None
+    lb_replicas = []
+    lb_svc_name = format_lb_service_name(service_name)
+    while True:
+        # TODO(tian): Hack. Keep it align with
+        # sky/serve/controller.py::SkyServeController::__init__.
+        lb_replicas = serve_state.get_replica_infos(lb_svc_name)
+        # Filter those shutting down. This is possible when reloading LBs.
+        lb_replicas = [
+            info for info in lb_replicas
+            if info.status != serve_state.ReplicaStatus.SHUTTING_DOWN
+        ]
+        if len(lb_replicas) == len(external_lbs):
+            if all(
+                    get_cluster_ip(lb_info.cluster_name) is not None
+                    for lb_info in lb_replicas):
+                break
+        logger.info('Waiting for the LBs to be ready: '
+                    f'{len(lb_replicas)}/{len(external_lbs)}.')
+        time.sleep(1)
+    # TODO(tian): Fix this import hack.
+    import boto3  # pylint: disable=import-outside-toplevel
+    client = boto3.client('route53')
+    change_batch = []
+    for lb_info in lb_replicas:
+        lb_ip = get_cluster_ip(lb_info.cluster_name)
+        assert lb_ip is not None
+        lb_record = global_user_state.get_cluster_from_name(
+            lb_info.cluster_name)
+        assert lb_record is not None
+        lb_region = lb_record['handle'].launched_resources.region
+        assert lb_region is not None
+        logger.info(f'Setting up Route53 for {lb_info.cluster_name} '
+                    f'in {lb_region}...')
+        change_batch.append(
+            get_route53_change('CREATE', service_name, hosted_zone, 'A',
+                               lb_region, lb_ip))
+    client.change_resource_record_sets(
+        HostedZoneId=service_spec.target_hosted_zone_id,
+        ChangeBatch={'Changes': change_batch})
+    serve_state.set_service_dns_endpoint(
+        service_name, get_domain_name(service_name, hosted_zone))
+
+
 def generate_service_name():
     return f'sky-service-{uuid.uuid4().hex[:4]}'
 
@@ -242,6 +361,13 @@ def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     return os.path.join(dir_name, 'load_balancer.log')
 
 
+def generate_remote_external_load_balancer_log_file_name(
+        service_name: str, lb_id: int) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, f'external_load_balancer_{lb_id}.log')
+
+
 def generate_replica_launch_log_file_name(service_name: str,
                                           replica_id: int) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
@@ -278,9 +404,9 @@ def set_service_status_and_active_versions_from_replica(
     if record is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                'The service is up-ed in an old version and does not '
-                'support update. Please `sky serve down` '
-                'it first and relaunch the service.')
+                'The service is up-ed in an old version and does not support '
+                'update. Please `sky serve down` it first and relaunch '
+                f'the service. Got service name: {service_name!r}')
     if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
         # When the service is shutting down, there is a period of time which the
         # controller still responds to the request, and the replica is not
@@ -348,6 +474,14 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Failed to update service: {resp.text}')
 
+    resp_reload_lb = requests.post(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/reload_lb_replicas',
+        json={})
+    if resp_reload_lb.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to reload LBs: {resp_reload_lb.text}')
+
     service_msg = resp.json()['message']
     return message_utils.encode_payload(service_msg)
 
@@ -382,14 +516,21 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
     return message
 
 
+def format_lb_service_name(service_name: str) -> str:
+    return f'{service_name}-lb'
+
+
 def _get_service_status(
         service_name: str,
-        with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
+        with_replica_info: bool = True,
+        with_external_lb_info: bool = True) -> Optional[Dict[str, Any]]:
     """Get the status dict of the service.
 
     Args:
         service_name: The name of the service.
         with_replica_info: Whether to include the information of all replicas.
+        with_external_lb_info: Whether to include the information of external
+            load balancers.
 
     Returns:
         A dictionary describing the status of the service if the service exists.
@@ -403,6 +544,12 @@ def _get_service_status(
             info.to_info_dict(with_handle=True)
             for info in serve_state.get_replica_infos(service_name)
         ]
+    if with_external_lb_info:
+        record['external_lb_info'] = [
+            info.to_info_dict(with_handle=True)
+            for info in serve_state.get_replica_infos(
+                format_lb_service_name(service_name))
+        ]
     return record
 
 
@@ -412,6 +559,10 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
+        if service_name.endswith('-lb'):
+            # TODO(tian): Hack. Fix this.
+            # NOTE(tian): Align with format_lb_service_name.
+            continue
         service_status = _get_service_status(service_name)
         if service_status is None:
             continue
@@ -501,8 +652,13 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     terminated_service_names: List[str] = []
     messages: List[str] = []
     for service_name in service_names:
+        if service_name.endswith('-lb'):
+            # TODO(tian): Hack. Fix this.
+            # NOTE(tian): Align with format_lb_service_name.
+            continue
         service_status = _get_service_status(service_name,
-                                             with_replica_info=False)
+                                             with_replica_info=False,
+                                             with_external_lb_info=False)
         if (service_status is not None and service_status['status']
                 == serve_state.ServiceStatus.SHUTTING_DOWN):
             # Already scheduled to be terminated.
@@ -570,6 +726,12 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         Encoded load balancer port assigned to the service.
     """
     start_time = time.time()
+    # TODO(tian): Add a field in service record to indicate whether it has
+    # external load balancer or not. And change this timeout accordingly.
+    # TODO(tian): Or, immediately return and let the user to pull the latest
+    # external LB status.
+    # timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS
+    timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS_WITH_EXTERNAL_LB
     setup_completed = False
     while True:
         job_status = job_lib.get_status(job_id)
@@ -606,6 +768,9 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                         f'{service_name} <new-service-yaml>')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
+                if record.get('dns_endpoint', None) is not None:
+                    endpoint = f'{record["dns_endpoint"]}:{lb_port}'
+                    return message_utils.encode_payload(endpoint)
                 return message_utils.encode_payload(lb_port)
         elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
             with ux_utils.print_exception_no_traceback():
@@ -613,7 +778,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                                    'To spin up more services, please '
                                    'tear down some existing services.')
         elapsed = time.time() - start_time
-        if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
+        if elapsed > timeout:
             # Print the controller log to help user debug.
             controller_log_path = (
                 generate_remote_controller_log_file_name(service_name))
@@ -628,7 +793,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         time.sleep(1)
 
 
-def load_service_initialization_result(payload: str) -> int:
+def load_service_initialization_result(payload: str) -> Union[int, str]:
     return message_utils.decode_payload(payload)
 
 
@@ -736,30 +901,31 @@ def _follow_logs_with_provision_expanding(
 
 
 def stream_replica_logs(service_name: str, replica_id: int,
-                        follow: bool) -> str:
+                        is_external_lb: bool, follow: bool) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
 
-    log_file_name = generate_replica_log_file_name(service_name, replica_id)
+    sn = (format_lb_service_name(service_name)
+          if is_external_lb else service_name)
+
+    log_file_name = generate_replica_log_file_name(sn, replica_id)
     if os.path.exists(log_file_name):
         with open(log_file_name, 'r', encoding='utf-8') as f:
             print(f.read(), flush=True)
         return ''
 
-    launch_log_file_name = generate_replica_launch_log_file_name(
-        service_name, replica_id)
+    launch_log_file_name = generate_replica_launch_log_file_name(sn, replica_id)
     if not os.path.exists(launch_log_file_name):
         return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
                 f'{colorama.Style.RESET_ALL}')
 
-    replica_cluster_name = generate_replica_cluster_name(
-        service_name, replica_id)
+    replica_cluster_name = generate_replica_cluster_name(sn, replica_id)
 
     def _get_replica_status() -> serve_state.ReplicaStatus:
-        replica_info = serve_state.get_replica_infos(service_name)
+        replica_info = serve_state.get_replica_infos(sn)
         for info in replica_info:
             if info.replica_id == replica_id:
                 return info.status
@@ -829,12 +995,30 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
     return ''
 
 
+async def check_lb_latency(url: str) -> Optional[float]:
+    # TODO(tian): This only works for meta policy that applies to LB.
+    # Not works for replica LB policy.
+    path = constants.LB_HEALTH_ENDPOINT
+    url = parse.urljoin(url, path)
+    # TODO(tian): Hack. Dont use infinite loop.
+    while True:
+        start_time = time.perf_counter()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    await response.text()
+            return time.perf_counter() - start_time
+        except Exception as e:  # pylint: disable=broad-except
+            print(f'Error checking LB latency: {e}')
+            return None
+
+
 # ================== Table Formatter for `sky serve status` ==================
 
 
-def _get_replicas(service_record: Dict[str, Any]) -> str:
+def _get_replicas(service_record: Dict[str, Any], replica_key: str) -> str:
     ready_replica_num, total_replica_num = 0, 0
-    for info in service_record['replica_info']:
+    for info in service_record[replica_key]:
         if info['status'] == serve_state.ReplicaStatus.READY:
             ready_replica_num += 1
         # TODO(MaoZiming): add a column showing failed replicas number.
@@ -848,9 +1032,14 @@ def format_service_table(service_records: List[Dict[str, Any]],
     if not service_records:
         return 'No existing services.'
 
+    show_region_allocation = False
+
     service_columns = [
-        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
+        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'EXTERNAL_LBS',
+        'ENDPOINT'
     ]
+    if show_region_allocation:
+        service_columns.append('REGION_ALLOCATION')
     if show_all:
         service_columns.extend([
             'AUTOSCALING_POLICY', 'LOAD_BALANCING_POLICY', 'REQUESTED_RESOURCES'
@@ -858,10 +1047,24 @@ def format_service_table(service_records: List[Dict[str, Any]],
     service_table = log_utils.create_table(service_columns)
 
     replica_infos: List[Dict[str, Any]] = []
+    external_lb_infos: List[Dict[str, Any]] = []
     for record in service_records:
+        if record['name'].endswith('-lb'):
+            # TODO(tian): Hack. Fix this.
+            # NOTE(tian): Align with format_lb_service_name.
+            continue
+        region_allocation_dict = collections.defaultdict(int)
         for replica in record['replica_info']:
             replica['service_name'] = record['name']
             replica_infos.append(replica)
+            if show_region_allocation and replica['handle'] is not None:
+                if replica['handle'].launched_resources is not None:
+                    region_allocation_dict[
+                        replica['handle'].launched_resources.region] += 1
+        region_allocation = str(dict(region_allocation_dict))
+        for external_lb in record['external_lb_info']:
+            external_lb['service_name'] = record['name']
+            external_lb_infos.append(external_lb)
 
         service_name = record['name']
         version = ','.join(
@@ -871,7 +1074,8 @@ def format_service_table(service_records: List[Dict[str, Any]],
                                                   absolute=True)
         service_status = record['status']
         status_str = service_status.colored_str()
-        replicas = _get_replicas(record)
+        replicas = _get_replicas(record, 'replica_info')
+        external_lbs = _get_replicas(record, 'external_lb_info')
         endpoint = record['endpoint']
         if endpoint is None:
             endpoint = '-'
@@ -885,18 +1089,32 @@ def format_service_table(service_records: List[Dict[str, Any]],
             uptime,
             status_str,
             replicas,
+            external_lbs,
             endpoint,
         ]
+        if show_region_allocation:
+            service_values.append(region_allocation)
         if show_all:
             service_values.extend(
                 [policy, load_balancing_policy, requested_resources_str])
         service_table.add_row(service_values)
 
     replica_table = _format_replica_table(replica_infos, show_all)
-    return (f'{service_table}\n'
-            f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-            f'Service Replicas{colorama.Style.RESET_ALL}\n'
-            f'{replica_table}')
+
+    final_table = (f'{service_table}\n'
+                   f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Service Replicas{colorama.Style.RESET_ALL}\n'
+                   f'{replica_table}')
+
+    if external_lb_infos:
+        # external_lb_table = _format_external_lb_table(external_lb_infos,
+        #                                               show_all)
+        external_lb_table = _format_replica_table(external_lb_infos, show_all)
+        final_table += (f'\n\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                        f'External Load Balancers{colorama.Style.RESET_ALL}\n'
+                        f'{external_lb_table}')
+
+    return final_table
 
 
 def _format_replica_table(replica_records: List[Dict[str, Any]],
@@ -1026,10 +1244,11 @@ class ServeCodeGen:
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,
-                            follow: bool) -> str:
+                            is_external_lb: bool, follow: bool) -> str:
         code = [
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow})',
+            f'{service_name!r}, {replica_id!r}, '
+            f'is_external_lb={is_external_lb}, follow={follow})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)
