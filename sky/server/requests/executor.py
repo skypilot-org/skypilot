@@ -63,6 +63,7 @@ from sky.workspaces import core as workspaces_core
 
 import tracemalloc
 import objgraph
+import gc
 from pympler import tracker, muppy, summary, refbrowser
 from typing import Dict
 
@@ -439,6 +440,7 @@ def _request_execution_wrapper(request_id: str,
                             f'{common_utils.format_exception(e)}')
                 return
             else:
+                gc.collect()
                 api_requests.set_request_succeeded(
                     request_id, return_value if not ignore_return_value else None)
                 _restore_output(original_stdout, original_stderr)
