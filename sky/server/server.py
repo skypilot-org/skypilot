@@ -24,6 +24,7 @@ import aiofiles
 import anyio
 import fastapi
 from fastapi.middleware import cors
+from sqlalchemy import pool
 import starlette.middleware.base
 import uvloop
 
@@ -1902,7 +1903,7 @@ if __name__ == '__main__':
     skyuvicorn.add_timestamp_prefix_for_server_logs()
 
     # Initialize global user state db
-    global_user_state.initialize_and_get_db()
+    global_user_state.initialize_and_get_db(pool.QueuePool)
     # Initialize request db
     requests_lib.reset_db_and_logs()
     # Restore the server user hash
