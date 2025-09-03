@@ -358,7 +358,7 @@ Nebius
 
 Alternatively, you can also use a service account to access Nebius, see :ref:`Using Service Account for Nebius <nebius-service-account>`.
 
-To use Nebius Managed Kubernetes, see :ref:`Kubernetes Installation <kubernetes-installation>`. You can retrieve the Kubernetes credential with:
+To use `Nebius Managed Kubernetes <https://nebius.com/services/managed-kubernetes>`_, see :ref:`Kubernetes Installation <kubernetes-installation>`. Retrieve the Kubernetes credential with:
 
 .. code-block:: shell
 
