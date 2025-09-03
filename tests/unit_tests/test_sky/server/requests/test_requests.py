@@ -729,3 +729,111 @@ async def test_get_request_tasks_concurrent_access(isolated_database):
         if len(result_set) > 1:
             for i in range(len(result_set) - 1):
                 assert result_set[i].created_at >= result_set[i + 1].created_at
+
+def test_requests_filter():
+    """Test RequestTaskFilter.build_query() generates correct SQL."""
+    
+    # Test empty filter - should return base query with no WHERE clause
+    filter_empty = requests.RequestTaskFilter()
+    sql, params = filter_empty.build_query()
+    expected_columns = ', '.join(requests.REQUEST_COLUMNS)
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []
+
+    # Test status filter
+    filter_status = requests.RequestTaskFilter(
+        status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+    sql, params = filter_status.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE status IN (\'PENDING\',\'RUNNING\') '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []
+
+    # Test cluster_names filter
+    filter_clusters = requests.RequestTaskFilter(
+        cluster_names=['cluster1', 'cluster2'])
+    sql, params = filter_clusters.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE cluster_name IN (\'cluster1\',\'cluster2\') '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []
+
+    # Test user_id filter (uses parameterized query)
+    filter_user = requests.RequestTaskFilter(user_id='test-user-123')
+    sql, params = filter_user.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE user_id = ? ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == ['test-user-123']
+
+    # Test exclude_request_names filter
+    filter_exclude = requests.RequestTaskFilter(
+        exclude_request_names=['request1', 'request2'])
+    sql, params = filter_exclude.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE name NOT IN (\'request1\',\'request2\') '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []
+
+    # Test include_request_names filter
+    filter_include = requests.RequestTaskFilter(
+        include_request_names=['request3', 'request4'])
+    sql, params = filter_include.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE name IN (\'request3\',\'request4\') '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []
+
+    # Test finished_before filter (uses parameterized query)
+    timestamp = 1234567890.0
+    filter_finished = requests.RequestTaskFilter(finished_before=timestamp)
+    sql, params = filter_finished.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE finished_at < ? ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == [timestamp]
+
+    # Test combined filters
+    filter_combined = requests.RequestTaskFilter(
+        status=[RequestStatus.SUCCEEDED, RequestStatus.FAILED],
+        cluster_names=['prod-cluster'],
+        user_id='admin-user',
+        exclude_request_names=['internal-task'],
+        finished_before=9876543210.0
+    )
+    sql, params = filter_combined.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE status IN (\'SUCCEEDED\',\'FAILED\') AND '
+                    'name NOT IN (\'internal-task\') AND '
+                    'cluster_name IN (\'prod-cluster\') AND '
+                    'user_id = ? AND finished_at < ? '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == ['admin-user', 9876543210.0]
+
+    # Test mutually exclusive filters raise ValueError
+    with pytest.raises(ValueError, 
+                        match='Only one of exclude_request_names'):
+        requests.RequestTaskFilter(
+            exclude_request_names=['req1'],
+            include_request_names=['req2']
+        )
+
+    # Test special characters in names are properly escaped with repr()
+    filter_special_chars = requests.RequestTaskFilter(
+        cluster_names=['cluster\'with\'quotes', 
+                       'cluster\"with\"double'])
+    sql, params = filter_special_chars.build_query()
+    # repr() should properly escape the quotes
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE cluster_name IN (\"cluster\'with\'quotes\",'
+                    '\'cluster\"with\"double\') ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []
+
