@@ -1958,11 +1958,12 @@ if __name__ == '__main__':
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
-        config = uvicorn.Config('sky.server.server:app',
-                                host=cmd_args.host,
-                                port=cmd_args.port,
-                                workers=num_workers)
-        skyuvicorn.run(config)
+        uvicorn_config = uvicorn.Config('sky.server.server:app',
+                                        host=cmd_args.host,
+                                        port=cmd_args.port,
+                                        workers=num_workers)
+        skyuvicorn.run(uvicorn_config,
+                       max_db_connections=config.num_db_connections_per_worker)
     except Exception as exc:  # pylint: disable=broad-except
         logger.error(f'Failed to start SkyPilot API server: '
                      f'{common_utils.format_exception(exc, use_bracket=True)}')

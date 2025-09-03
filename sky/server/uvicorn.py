@@ -26,6 +26,7 @@ from sky.utils import context_utils
 from sky.utils import env_options
 from sky.utils import perf_utils
 from sky.utils import subprocess_utils
+from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -88,9 +89,12 @@ class Server(uvicorn.Server):
     - Run the server process with contextually aware.
     """
 
-    def __init__(self, config: uvicorn.Config):
+    def __init__(self,
+                 config: uvicorn.Config,
+                 max_db_connections: Optional[int] = None):
         super().__init__(config=config)
         self.exiting: bool = False
+        self.max_db_connections = max_db_connections
 
     def handle_exit(self, sig: int, frame: Union[FrameType, None]) -> None:
         """Handle exit signal.
@@ -196,6 +200,8 @@ class Server(uvicorn.Server):
 
     def run(self, *args, **kwargs):
         """Run the server process."""
+        if self.max_db_connections is not None:
+            db_utils.set_max_connections(self.max_db_connections)
         add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
         # Use default loop policy of uvicorn (use uvloop if available).
@@ -210,14 +216,14 @@ class Server(uvicorn.Server):
             asyncio.run(self.serve(*args, **kwargs))
 
 
-def run(config: uvicorn.Config):
+def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
     """Run unvicorn server."""
     if config.reload:
         # Reload and multi-workers are mutually exclusive
         # in uvicorn. Since we do not use reload now, simply
         # guard by an exception.
         raise ValueError('Reload is not supported yet.')
-    server = Server(config=config)
+    server = Server(config=config, max_db_connections=max_db_connections)
     try:
         if config.workers is not None and config.workers > 1:
             sock = config.bind_socket()
