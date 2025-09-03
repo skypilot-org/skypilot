@@ -6209,16 +6209,16 @@ def api_info():
 
     # Determine where the endpoint is set.
     if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
-        location = 'Endpoint set via the environment variable ' + \
-                    constants.SKY_API_SERVER_URL_ENV_VAR
+        location = ('Endpoint set via the environment variable '
+                    f'{constants.SKY_API_SERVER_URL_ENV_VAR}')
     elif 'endpoint' in config.get('api_server', {}):
         config_path = skypilot_config.resolve_user_config_path()
         if config_path is None:
-            location = 'Endpoint set via the command line.'
+            location = 'Endpoint set to default local API server.'
         else:
             location = f'Endpoint set via {config_path}'
     else:
-        location = 'Endpoint set via the command line.'
+        location = 'Endpoint set to default local API server.'
     click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '

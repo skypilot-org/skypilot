@@ -26,7 +26,7 @@ def test_endpoint_output_basic(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test('endpoint_output_basic', [
         f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-        f's=$(SKYPILOT_DEBUG=0 sky api info | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Endpoint set via the command line."',
+        f's=$(SKYPILOT_DEBUG=0 sky api info | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Endpoint set to default local API server."',
     ],
                                   timeout=smoke_tests_utils.get_timeout(
                                       generic_cloud),
@@ -86,7 +86,7 @@ def test_sky_logout_wih_env_endpoint(generic_cloud: str):
     """Test that sky api logout with env endpoint fails."""
     test = smoke_tests_utils.Test(
         'sky_logout_wih_env_endpoint', [
-            f's=$(SKYPILOT_DEBUG=0 sky api logout 2>&1 | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Cannot log out of API server when the endpoint is set via the environment variable. Run unset"',
+            f's=$(SKYPILOT_DEBUG=0 sky api logout 2>&1 | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Cannot logout of API server when the endpoint is set via the environment variable. Run unset"',
         ],
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
         env={
