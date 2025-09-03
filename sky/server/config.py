@@ -62,6 +62,7 @@ class QueueBackend(enum.Enum):
 class WorkerConfig:
     garanteed_parallelism: int
     burstable_parallelism: int
+    num_db_connections_per_worker: int
 
 
 @dataclasses.dataclass
@@ -174,10 +175,12 @@ def compute_server_config(deploy: bool,
         queue_backend=queue_backend,
         long_worker_config=WorkerConfig(
             garanteed_parallelism=max_parallel_for_long,
-            burstable_parallelism=burstable_parallel_for_long),
+            burstable_parallelism=burstable_parallel_for_long,
+            num_db_connections_per_worker=num_db_connections_per_worker),
         short_worker_config=WorkerConfig(
             garanteed_parallelism=max_parallel_for_short,
-            burstable_parallelism=burstable_parallel_for_short),
+            burstable_parallelism=burstable_parallel_for_short,
+            num_db_connections_per_worker=num_db_connections_per_worker),
         num_db_connections_per_worker=num_db_connections_per_worker,
     )
 
