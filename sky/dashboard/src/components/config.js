@@ -171,9 +171,17 @@ export function Config() {
             <button
               onClick={() => {
                 const grafanaUrl = getGrafanaUrl();
-                const host = window.location.hostname;
+                // Get app name from environment variable
+                const releaseName =
+                  process.env.SKYPILOT_RELEASE_NAME || 'skypilot';
+                const appName = `${releaseName}-api`;
+                // Fallback to hostname if environment variable is not available
+                const appParam =
+                  appName !== 'skypilot-api'
+                    ? appName
+                    : window.location.hostname;
                 window.open(
-                  `${grafanaUrl}/d/skypilot-apiserver-overview/skypilot-api-server?orgId=1&from=now-1h&to=now&timezone=browser&var-app=${host}`,
+                  `${grafanaUrl}/d/skypilot-apiserver-overview/skypilot-api-server?orgId=1&from=now-1h&to=now&timezone=browser&var-app=${appParam}`,
                   '_blank'
                 );
               }}
