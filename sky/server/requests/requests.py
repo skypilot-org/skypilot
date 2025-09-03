@@ -300,10 +300,11 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
             prevent killing the caller request.
     """
     request_ids = [
-        request_task.request_id for request_task in get_request_tasks(
+        request_task.request_id
+        for request_task in get_request_tasks(req_filter=RequestTaskFilter(
             cluster_names=[cluster_name],
             status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-            exclude_request_names=[exclude_request_name])
+            exclude_request_names=[exclude_request_name]))
     ]
     kill_requests(request_ids)
 
@@ -323,11 +324,12 @@ def kill_requests(request_ids: Optional[List[str]] = None,
     """
     if request_ids is None:
         request_ids = [
-            request_task.request_id for request_task in get_request_tasks(
+            request_task.request_id
+            for request_task in get_request_tasks(req_filter=RequestTaskFilter(
                 user_id=user_id,
                 status=[RequestStatus.RUNNING, RequestStatus.PENDING],
                 # Avoid cancelling the cancel request itself.
-                exclude_request_names=['sky.api_cancel'])
+                exclude_request_names=['sky.api_cancel']))
         ]
     cancelled_request_ids = []
     for request_id in request_ids:
@@ -604,17 +606,9 @@ async def create_if_not_exists_async(request: Request) -> bool:
         return True
 
 
-@init_db
-@metrics_lib.time_me
-def get_request_tasks(
-    status: Optional[List[RequestStatus]] = None,
-    cluster_names: Optional[List[str]] = None,
-    user_id: Optional[str] = None,
-    exclude_request_names: Optional[List[str]] = None,
-    include_request_names: Optional[List[str]] = None,
-    finished_before: Optional[float] = None,
-) -> List[Request]:
-    """Get a list of requests that match the given filters.
+@dataclasses.dataclass
+class RequestTaskFilter:
+    """Filter for requests.
 
     Args:
         status: a list of statuses of the requests to filter on.
@@ -632,51 +626,87 @@ def get_request_tasks(
         ValueError: If both exclude_request_names and include_request_names are
             provided.
     """
-    if exclude_request_names is not None and include_request_names is not None:
-        raise ValueError(
-            'Only one of exclude_request_names or include_request_names can be '
-            'provided, not both.')
+    status: Optional[List[RequestStatus]] = None
+    cluster_names: Optional[List[str]] = None
+    user_id: Optional[str] = None
+    exclude_request_names: Optional[List[str]] = None
+    include_request_names: Optional[List[str]] = None
+    finished_before: Optional[float] = None
 
-    filters = []
-    filter_params: List[Any] = []
-    if status is not None:
-        status_list_str = ','.join(repr(status.value) for status in status)
-        filters.append(f'status IN ({status_list_str})')
-    if exclude_request_names is not None:
-        exclude_request_names_str = ','.join(
-            repr(name) for name in exclude_request_names)
-        filters.append(f'name NOT IN ({exclude_request_names_str})')
-    if cluster_names is not None:
-        cluster_names_str = ','.join(repr(name) for name in cluster_names)
-        filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
-    if user_id is not None:
-        filters.append(f'{COL_USER_ID} = ?')
-        filter_params.append(user_id)
-    if include_request_names is not None:
-        request_names_str = ','.join(
-            repr(name) for name in include_request_names)
-        filters.append(f'name IN ({request_names_str})')
-    if finished_before is not None:
-        filters.append('finished_at < ?')
-        filter_params.append(finished_before)
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
+    def __post_init__(self):
+        if (self.exclude_request_names is not None and
+                self.include_request_names is not None):
+            raise ValueError(
+                'Only one of exclude_request_names or include_request_names '
+                'can be provided, not both.')
+
+    def build_query(self) -> Tuple[str, List[Any]]:
+        """Build the SQL query and filter parameters.
+
+        Returns:
+            A tuple of (SQL, SQL parameters).
+        """
+        filters = []
+        filter_params: List[Any] = []
+        if self.status is not None:
+            status_list_str = ','.join(
+                repr(status.value) for status in self.status)
+            filters.append(f'status IN ({status_list_str})')
+        if self.exclude_request_names is not None:
+            exclude_request_names_str = ','.join(
+                repr(name) for name in self.exclude_request_names)
+            filters.append(f'name NOT IN ({exclude_request_names_str})')
+        if self.cluster_names is not None:
+            cluster_names_str = ','.join(
+                repr(name) for name in self.cluster_names)
+            filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
+        if self.user_id is not None:
+            filters.append(f'{COL_USER_ID} = ?')
+            filter_params.append(self.user_id)
+        if self.include_request_names is not None:
+            request_names_str = ','.join(
+                repr(name) for name in self.include_request_names)
+            filters.append(f'name IN ({request_names_str})')
+        if self.finished_before is not None:
+            filters.append('finished_at < ?')
+            filter_params.append(self.finished_before)
         filter_str = ' AND '.join(filters)
         if filter_str:
             filter_str = f' WHERE {filter_str}'
         columns_str = ', '.join(REQUEST_COLUMNS)
-        cursor.execute(
-            f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
-            'ORDER BY created_at DESC', filter_params)
+        return (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
+                'ORDER BY created_at DESC'), filter_params
+
+
+@init_db
+@metrics_lib.time_me
+def get_request_tasks(req_filter: RequestTaskFilter) -> List[Request]:
+    """Get a list of requests that match the given filters.
+
+    Args:
+        req_filter: the filter to apply to the requests. Refer to
+            RequestTaskFilter for the details.
+    """
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute(*req_filter.build_query())
         rows = cursor.fetchall()
         if rows is None:
             return []
-    requests = []
-    for row in rows:
-        request = Request.from_row(row)
-        requests.append(request)
-    return requests
+    return [Request.from_row(row) for row in rows]
+
+
+@init_db_async
+@metrics_lib.time_me_async
+async def get_request_tasks_async(
+        req_filter: RequestTaskFilter) -> List[Request]:
+    """Async version of get_request_tasks."""
+    assert _DB is not None
+    async with _DB.execute_fetchall_async(*req_filter.build_query()) as rows:
+        if not rows:
+            return []
+    return [Request.from_row(row) for row in rows]
 
 
 @init_db_async
@@ -773,8 +803,10 @@ def clean_finished_requests_with_retention(retention_seconds: int):
         retention_seconds: Requests older than this many seconds will be
             deleted.
     """
-    reqs = get_request_tasks(status=RequestStatus.finished_status(),
-                             finished_before=time.time() - retention_seconds)
+    reqs = get_request_tasks(
+        req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
+                                     finished_before=time.time() -
+                                     retention_seconds))
 
     subprocess_utils.run_in_parallel(
         func=lambda req: req.log_path.unlink(missing_ok=True),
@@ -801,7 +833,7 @@ async def requests_gc_daemon():
         try:
             # Negative value disables the requests GC
             if retention_seconds >= 0:
-                clean_finished_requests_with_retention(retention_seconds)
+                await clean_finished_requests_with_retention(retention_seconds)
         except asyncio.CancelledError:
             logger.info('Requests GC daemon cancelled')
             break

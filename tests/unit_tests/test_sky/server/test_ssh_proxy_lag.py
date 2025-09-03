@@ -27,6 +27,7 @@ from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
+from sky.utils import context_utils
 
 
 class SSHLatencyMonitor:
@@ -243,7 +244,6 @@ async def test_endpoint_api_get(monitor, mock_blocking_operations):
     assert not result['blocking'], "/api/get should NOT block the event loop"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_api_status(monitor, mock_blocking_operations):
     """Test /api/status endpoint for blocking operations."""
@@ -332,7 +332,7 @@ async def test_endpoint_launch(monitor, mock_request, mock_schedule_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_exec(monitor, mock_request, mock_schedule_request):
+async def test_endpoint_exec(monitor, mock_request):
     """Test /exec endpoint for blocking operations."""
     print("\n🔍 Testing: /exec")
 
@@ -475,11 +475,14 @@ async def test_endpoint_download(monitor, mock_request):
 # ========== CATEGORY 4: COMPLETION ENDPOINTS ==========
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_completion_cluster(monitor):
     """Test /api/completion/cluster_name endpoint for blocking operations."""
     print("\n🔍 Testing: /api/completion/cluster_name")
+
+    # The first time to_thread is called, it will init a thread pool which
+    # may influence the result of the test. We call it in advance.
+    context_utils.to_thread(time.time)
 
     async def test_func():
         # Mock the actual blocking DB call
@@ -492,16 +495,17 @@ async def test_endpoint_completion_cluster(monitor):
             except:
                 pass
 
-    result = await run_endpoint_test(test_func, monitor)
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
     assert not result[
         'blocking'], "Completion endpoints should not block the event loop"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_completion_storage(monitor):
     """Test /api/completion/storage_name endpoint for blocking operations."""
     print("\n🔍 Testing: /api/completion/storage_name")
+
+    context_utils.to_thread(time.time)
 
     async def test_func():
         # Mock the actual blocking DB call
@@ -514,16 +518,21 @@ async def test_endpoint_completion_storage(monitor):
             except:
                 pass
 
-    result = await run_endpoint_test(test_func, monitor)
+    # Creating too much threads simultaneously also affects the event loop
+    # (CPU contention)
+    # TODO(aylei): should switch to async global_user_state operation instead
+    # of using to_thread
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
     assert not result[
         'blocking'], "Completion endpoints should not block the event loop"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_provision_logs(monitor):
     """Test /provision_logs endpoint for blocking operations."""
     print("\n🔍 Testing: /provision_logs")
+
+    context_utils.to_thread(time.time)
 
     async def test_func():
         # Mock the actual blocking DB calls
@@ -541,7 +550,7 @@ async def test_endpoint_provision_logs(monitor):
                 except:
                     pass
 
-    result = await run_endpoint_test(test_func, monitor)
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
     assert not result[
         'blocking'], "/provision_logs should not block the event loop"
 

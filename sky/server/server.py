@@ -1328,10 +1328,12 @@ async def provision_logs(cluster_body: payloads.ClusterNameBody,
                          tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
     # Prefer clusters table first, then cluster_history as fallback.
-    log_path_str = global_user_state.get_cluster_provision_log_path(
+    log_path_str = await context_utils.to_thread(
+        global_user_state.get_cluster_provision_log_path,
         cluster_body.cluster_name)
     if not log_path_str:
-        log_path_str = global_user_state.get_cluster_history_provision_log_path(
+        log_path_str = await context_utils.to_thread(
+            global_user_state.get_cluster_history_provision_log_path,
             cluster_body.cluster_name)
     if not log_path_str:
         raise fastapi.HTTPException(
@@ -1609,10 +1611,9 @@ async def api_status(
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-        return [
-            request_task.readable_encode()
-            for request_task in requests_lib.get_request_tasks(status=statuses)
-        ]
+        request_tasks = await requests_lib.get_request_tasks_async(
+            req_filter=requests_lib.RequestTaskFilter(status=statuses))
+        return [r.readable_encode() for r in request_tasks]
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
@@ -1811,17 +1812,20 @@ async def gpu_metrics() -> fastapi.Response:
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
 async def complete_cluster_name(incomplete: str,) -> List[str]:
-    return global_user_state.get_cluster_names_start_with(incomplete)
+    return await context_utils.to_thread(
+        global_user_state.get_cluster_names_start_with, incomplete)
 
 
 @app.get('/api/completion/storage_name')
 async def complete_storage_name(incomplete: str,) -> List[str]:
-    return global_user_state.get_storage_names_start_with(incomplete)
+    return await context_utils.to_thread(
+        global_user_state.get_storage_names_start_with, incomplete)
 
 
 @app.get('/api/completion/volume_name')
 async def complete_volume_name(incomplete: str,) -> List[str]:
-    return global_user_state.get_volume_names_start_with(incomplete)
+    return await context_utils.to_thread(
+        global_user_state.get_volume_names_start_with, incomplete)
 
 
 @app.get('/api/completion/api_request')
