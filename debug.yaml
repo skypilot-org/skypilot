@@ -1,0 +1,248 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    prometheus.io/path: /metrics
+    prometheus.io/port: "9090"
+    prometheus.io/scrape: "true"
+  labels:
+    app: skypilot-debug-api
+  name: skypilot-debug-server
+  namespace: skypilot
+spec:
+  automountServiceAccountToken: true
+  containers:
+  - args:
+    - /bin/sh
+    - -c
+    - |
+      set -e
+
+      # Run commands before deploying the API server, e.g. installing an admin policy.
+      # Refer to https://docs.skypilot.co/en/latest/cloud-setup/policy.html for more details about admin policy.
+      # Remember to set the admin policy in the config section below.
+      echo "Pre-deploy hook"
+
+      # Uncomment the following lines to install the admin policy
+
+      # echo "Installing admin policy"
+      # pip install git+https://github.com/michaelvll/admin-policy-examples
+      mkdir -p /root/.sky
+      # When the config.yaml is a symlink, it should be from the old API
+      # server code. We remove the symlink and copy the ConfigMap config to
+      # PVC location for backward compatibility.
+      # TODO(zhwu): remove this after 0.12.0.
+      if [ -L /root/.sky/config.yaml ]; then
+        echo "Config.yaml is a symlink to ConfigMap config, deleting symlink"
+        rm /root/.sky/config.yaml
+      fi
+      # Initialize the SkyPilot config.
+      if [ -s /root/.sky/config.yaml ]; then
+        # If the config.yaml is not empty, sync the PVC config to ConfigMap
+        python3 -c "from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup('~/.sky/config.yaml')"
+      else
+        # If the config.yaml is empty, we initialize the config on PVC with
+        # user specified config.
+        cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
+      fi
+      # Nebius credentials mounting
+      # Since the ~/.nebius directory is also used by the Nebius CLI, we mount the credentials to /root/.nebius_credentials
+      # and create a symlink to /root/.nebius. This cannot be done in the init container because the Nebius CLI needs read-write access to ~/.nebius.
+
+      tail -f /dev/null
+      if sky api start -h | grep -q -- "--foreground"; then
+        exec sky api start --deploy --foreground
+      else
+        # For backward compatibility, run in background if --foreground is not supported.
+        # TODO(aylei): this will be dropped in 0.11.0.
+        if sky api start --deploy; then
+          tail -n+0 -f /root/.sky/api_server/server.log
+        else
+          cat /root/.sky/api_server/server.log
+        fi
+      fi
+    command:
+    - tini
+    - --
+    env:
+    - name: SKYPILOT_DEV
+      value: "true"
+    - name: SKYPILOT_RELEASE_NAME
+      value: skypilot-alpha
+    - name: ENABLE_SERVICE_ACCOUNTS
+      value: "true"
+    - name: GOOGLE_APPLICATION_CREDENTIALS
+      value: /root/gcp-cred.json
+    - name: PYTHONASYNCIODEBUG
+      value: "1"
+    - name: SKYPILOT_DB_CONNECTION_URI
+      valueFrom:
+        secretKeyRef:
+          key: connection_string
+          name: skypilot-db-connection-uri
+    - name: SKYPILOT_GRACE_PERIOD_SECONDS
+      value: "60"
+    - name: SKYPILOT_APISERVER_UUID
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: metadata.uid
+    - name: SKY_API_SERVER_METRICS_ENABLED
+      value: "true"
+    - name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
+      value: "true"
+    - name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
+      value: http://skypilot-alpha-oauth2-proxy:4180
+    - name: IS_SKYPILOT_SERVER
+      value: "true"
+    image: berkeleyskypilot/skypilot-api-test:20250903103948
+    imagePullPolicy: Always
+    name: skypilot-api
+    ports:
+    - containerPort: 46580
+      protocol: TCP
+    - containerPort: 9090
+      name: metrics
+      protocol: TCP
+    resources:
+      limits:
+        cpu: "4"
+        memory: 8Gi
+      requests:
+        cpu: "4"
+        memory: 8Gi
+    securityContext:
+      capabilities:
+        add:
+        - ALL
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /var/skypilot/config
+      name: skypilot-config
+    - mountPath: /root/.aws
+      name: aws-config
+      readOnly: true
+    - mountPath: /root/.config/gcloud
+      name: gcp-config
+    - mountPath: /root/gcp-cred.json
+      name: gcp-credentials
+      subPath: gcp-cred.json
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-k2qlf
+      readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  initContainers:
+  - args:
+    - |
+      echo "Setting up AWS credentials..."
+      if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+        echo "AWS credentials found in environment variables."
+        aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+        aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+        echo "Credentials file created successfully."
+      else
+        echo "AWS credentials not found in environment variables. Skipping credentials setup."
+        sleep 600
+      fi
+    command:
+    - /bin/sh
+    - -c
+    env:
+    - name: AWS_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          key: aws_access_key_id
+          name: aws-credentials
+    - name: AWS_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          key: aws_secret_access_key
+          name: aws-credentials
+    image: berkeleyskypilot/skypilot-api-test:20250903103948
+    imagePullPolicy: IfNotPresent
+    name: create-aws-credentials
+    resources: {}
+    volumeMounts:
+    - mountPath: /root/.aws
+      name: aws-config
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-k2qlf
+      readOnly: true
+  - args:
+    - |
+      gcloud auth activate-service-account --key-file=/root/gcp-cred.json
+      gcloud config set project sky-dev-465
+    command:
+    - /bin/sh
+    - -c
+    env:
+    - name: GOOGLE_APPLICATION_CREDENTIALS
+      value: /root/gcp-cred.json
+    image: google/cloud-sdk:latest
+    imagePullPolicy: Always
+    name: setup-gcp-credentials
+    resources: {}
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /root/gcp-cred.json
+      name: gcp-credentials
+      subPath: gcp-cred.json
+    - mountPath: /root/.config/gcloud
+      name: gcp-config
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-k2qlf
+      readOnly: true
+  preemptionPolicy: PreemptLowerPriority
+  priority: 100
+  priorityClassName: low-priority
+  restartPolicy: Always
+  schedulerName: default-scheduler
+  serviceAccount: skypilot-alpha-api-sa
+  serviceAccountName: skypilot-alpha-api-sa
+  terminationGracePeriodSeconds: 60
+  tolerations:
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
+  volumes:
+  - emptyDir: {}
+    name: state-volume
+  - emptyDir: {}
+    name: aws-config
+  - name: gcp-credentials
+    secret:
+      defaultMode: 420
+      secretName: gcp-credentials
+  - emptyDir: {}
+    name: gcp-config
+  - configMap:
+      defaultMode: 420
+      name: skypilot-alpha-config
+    name: skypilot-config
+  - name: kube-api-access-k2qlf
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
+

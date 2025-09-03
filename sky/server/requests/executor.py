@@ -436,8 +436,7 @@ def _request_execution_wrapper(request_id: str,
             top_stats = snapshot.statistics('lineno')
             logger.info(f"Dumping memory trace for process {pid} request {request_id}")
             for stat in top_stats[:100]:
-                if f'{stat.traceback}'.startswith('/Users/seungjinyang/assemble/skypilot/'):
-                    logger.info(stat)
+                logger.info(stat)
             prc = psutil.Process(pid)
             logger.info(f'RSS: {prc.memory_info().rss / 1024 / 1024} MB for {pid}\n')
 
