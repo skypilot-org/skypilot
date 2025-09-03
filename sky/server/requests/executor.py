@@ -354,7 +354,8 @@ def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
 
-def _request_execution_wrapper(request_id: str, ignore_return_value: bool,
+def _request_execution_wrapper(request_id: str,
+                               ignore_return_value: bool,
                                num_db_connections_per_worker: int = 0) -> None:
     """Wrapper for a request execution.
 
