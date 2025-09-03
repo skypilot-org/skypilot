@@ -370,6 +370,9 @@ def set_max_connections(max_connections: int):
     global _max_connections
     _max_connections = max_connections
 
+def get_max_connections():
+    return _max_connections
+
 
 def get_engine(db_name: str):
     conn_string = None
