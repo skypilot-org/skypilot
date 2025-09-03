@@ -1430,7 +1430,7 @@ Default: ``false``.
 .. _config-yaml-nebius-use-static-ip-address:
 
 ``nebius.use_static_ip_address``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Should instances be assigned static IPs? (optional).
 
