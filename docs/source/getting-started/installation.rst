@@ -60,9 +60,10 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
+          pip install "skypilot-nightly[nebius]"
+          pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[oci]"
           pip install "skypilot-nightly[lambda]"
-          pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[fluidstack]"
           pip install "skypilot-nightly[paperspace]"
           pip install "skypilot-nightly[do]"
@@ -70,7 +71,6 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
-          pip install "skypilot-nightly[nebius]"
           pip install "skypilot-nightly[all]"
 
 
@@ -93,16 +93,16 @@ Install SkyPilot using pip:
           pip install -e ".[aws]"
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
+          pip install -e ".[nebius]"
+          pip install -e ".[runpod]"
           pip install -e ".[oci]"
           pip install -e ".[lambda]"
-          pip install -e ".[runpod]"
           pip install -e ".[fluidstack]"
           pip install -e ".[paperspace]"
           pip install -e ".[cudo]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
-          pip install -e ".[nebius]"
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:

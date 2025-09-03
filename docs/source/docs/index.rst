@@ -209,9 +209,9 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
-RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
-VMware vSphere, Nebius.
+Current supported infra: Kubernetes, AWS, GCP, Azure, Nebius, RunPod, OCI, Lambda Cloud, Fluidstack,
+Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
+VMware vSphere.
 
 .. raw:: html
 
