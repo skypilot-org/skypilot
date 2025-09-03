@@ -264,7 +264,7 @@ def get_nebius_credentials(boto3_session):
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
 # Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # pylint: disable=line-too-long
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='global', maxsize=1)
 def session():
     """Create an AWS session."""
     # Creating the session object is not thread-safe for boto3,
@@ -277,7 +277,7 @@ def session():
     return session_
 
 
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='global', maxsize=16)
 def resource(resource_name: str, **kwargs):
     """Create a Nebius resource.
 
@@ -295,7 +295,7 @@ def resource(resource_name: str, **kwargs):
     return session_.resource(resource_name, **kwargs)
 
 
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='global', maxsize=16)
 def client(service_name: str):
     """Create Nebius client of a certain service.
 

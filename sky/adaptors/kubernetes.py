@@ -198,7 +198,7 @@ def custom_objects_api(context: Optional[str] = None):
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='global', maxsize=16)
 def node_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NodeV1Api()

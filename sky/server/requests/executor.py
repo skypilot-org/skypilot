@@ -459,6 +459,11 @@ def _request_execution_wrapper(request_id: str,
             except AttributeError:
                 logger.info("Extended memory info not available on this platform")
             
+            # 4. Python tracemalloc info
+            current, peak = tracemalloc.get_traced_memory()
+            logger.info(f"Python heap (current): {current / 1024 / 1024:.2f} MB")
+            logger.info(f"Python heap (peak): {peak / 1024 / 1024:.2f} MB")
+            
             # 3. Detailed Memory maps analysis
             try:
                 memory_maps = prc.memory_maps()
@@ -596,10 +601,7 @@ def _request_execution_wrapper(request_id: str,
             except (AttributeError, psutil.AccessDenied) as e:
                 logger.info(f"Memory maps analysis not available: {e}")
             
-            # 4. Python tracemalloc info
-            current, peak = tracemalloc.get_traced_memory()
-            logger.info(f"Python heap (current): {current / 1024 / 1024:.2f} MB")
-            logger.info(f"Python heap (peak): {peak / 1024 / 1024:.2f} MB")
+
             
             # 5. Python memory breakdown by domain
             top_stats_by_domain = snapshot.statistics('filename')
