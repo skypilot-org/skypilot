@@ -2,9 +2,9 @@
 
 import contextlib
 import logging
-import threading
 import os
 import pathlib
+import threading
 from typing import Dict, Optional
 
 from alembic import command as alembic_command
@@ -35,8 +35,8 @@ SERVE_LOCK_PATH = '~/.sky/locks/.serve_db.lock'
 _postgres_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
 _sqlite_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
 
-
 _db_creation_lock = threading.Lock()
+
 
 def get_engine(db_name: str,
                pg_pool_class: Optional[sqlalchemy.pool.Pool] = None):
