@@ -1140,11 +1140,11 @@ def test_user_dependencies(generic_cloud: str):
             f'sky status -r {name} | grep UP',
             f'sky exec {name} "echo bye"',
             f'sky logs {name} 3 --status',
-            f'sky launch -c {name} tests/test_yamls/different_default_conda_env.yaml',
+            f'sky launch -y -c {name} tests/test_yamls/different_default_conda_env.yaml',
             f'sky logs {name} 4 --status',
             # Launch again to test the default env does not affect SkyPilot
             # runtime setup
-            f'sky launch -c {name} "python --version 2>&1 | grep \'Python 3.6\' || exit 1"',
+            f'sky launch -y -c {name} "python --version 2>&1 | grep \'Python 3.6\' || exit 1"',
             f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
@@ -1162,6 +1162,7 @@ def test_skyserve_ha_kill_after_ready():
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-after-ready',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for ready
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
@@ -1170,7 +1171,7 @@ def test_skyserve_ha_kill_after_ready():
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl $endpoint | grep "Hi, SkyPilot here"',
             # Kill controller and verify recovery
-            smoke_tests_utils.kill_and_wait_controller('serve'),
+            smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
             # Verify service remains accessible after controller recovery
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1194,6 +1195,7 @@ def test_skyserve_ha_kill_during_provision():
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-provision',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for provisioning
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             # Wait for service to enter PROVISIONING state
@@ -1204,7 +1206,7 @@ def test_skyserve_ha_kill_during_provision():
             f'  s=$(sky serve status {name}); '
             'done; echo "$s"',
             # Kill controller during provisioning
-            smoke_tests_utils.kill_and_wait_controller('serve'),
+            smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
             # Verify service eventually becomes ready
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1235,12 +1237,13 @@ def test_skyserve_ha_kill_during_pending():
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-pending',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for pending
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             f'{_SERVE_STATUS_WAIT.format(name=name)}; ',
             _check_replica_in_status(name, [(1, False, 'PENDING')]),
             # Kill controller during pending
-            smoke_tests_utils.kill_and_wait_controller('serve'),
+            smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
             # Verify service eventually becomes ready and accessible
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1271,6 +1274,7 @@ def test_skyserve_ha_kill_during_shutdown():
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-shutdown',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for ready
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
@@ -1290,7 +1294,7 @@ def test_skyserve_ha_kill_during_shutdown():
             f'  s=$(sky serve status {name}); '
             'done; echo "$s"',
             # Kill controller during shutdown
-            smoke_tests_utils.kill_and_wait_controller('serve'),
+            smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
             # Even after the pod ready, `serve status` may return `Failed to connect to serve controller, please try again later.`
             # So we need to wait for a while before checking the status again.
             'sleep 10',

@@ -299,7 +299,9 @@ def create_table(engine: sqlalchemy.engine.Engine):
 # a session has already been created with _SQLALCHEMY_ENGINE = e1,
 # and then another thread overwrites _SQLALCHEMY_ENGINE = e2
 # which could result in e1 being garbage collected unexpectedly.
-def initialize_and_get_db() -> sqlalchemy.engine.Engine:
+def initialize_and_get_db(
+    pg_pool_class: Optional[sqlalchemy.pool.Pool] = None
+) -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
 
     if _SQLALCHEMY_ENGINE is not None:
@@ -308,7 +310,8 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
         if _SQLALCHEMY_ENGINE is not None:
             return _SQLALCHEMY_ENGINE
         # get an engine to the db
-        engine = migration_utils.get_engine('state')
+        engine = migration_utils.get_engine('state',
+                                            pg_pool_class=pg_pool_class)
 
         # run migrations if needed
         create_table(engine)

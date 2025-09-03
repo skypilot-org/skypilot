@@ -52,6 +52,7 @@ export async function getClusters({ clusterNames = null } = {}) {
     const clusters = await apiClient.fetch('/status', {
       cluster_names: clusterNames,
       all_users: true,
+      include_credentials: false,
     });
 
     const clusterData = clusters.map((cluster) => {

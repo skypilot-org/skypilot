@@ -14,7 +14,7 @@ import threading
 import time
 import traceback
 from typing import (Any, AsyncContextManager, Callable, Dict, Generator, List,
-                    Optional, Tuple)
+                    NamedTuple, Optional, Tuple)
 
 import colorama
 import filelock
@@ -548,6 +548,40 @@ async def get_request_async(request_id: str) -> Optional[Request]:
     """Async version of get_request."""
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
         return await _get_request_no_lock_async(request_id)
+
+
+class StatusWithMsg(NamedTuple):
+    status: RequestStatus
+    status_msg: Optional[str] = None
+
+
+@init_db_async
+@metrics_lib.time_me_async
+async def get_request_status_async(
+    request_id: str,
+    include_msg: bool = False,
+) -> Optional[StatusWithMsg]:
+    """Get the status of a request.
+
+    Args:
+        request_id: The ID of the request.
+        include_msg: Whether to include the status message.
+
+    Returns:
+        The status of the request. If the request is not found, returns
+        None.
+    """
+    assert _DB is not None
+    columns = 'status'
+    if include_msg:
+        columns += ', status_msg'
+    sql = f'SELECT {columns} FROM {REQUEST_TABLE} WHERE request_id LIKE ?'
+    async with _DB.execute_fetchall_async(sql, (request_id + '%',)) as rows:
+        if rows is None or len(rows) == 0:
+            return None
+        status = RequestStatus(rows[0][0])
+        status_msg = rows[0][1] if include_msg else None
+        return StatusWithMsg(status, status_msg)
 
 
 @init_db
