@@ -161,8 +161,7 @@ def compute_server_config(deploy: bool,
                 'Increase the number of max db connections to '
                 f'at least {max_parallel_all_workers} for optimal performance.')
         else:
-            num_db_connections_per_worker = (max_db_connections //
-                                             max_parallel_all_workers)
+            num_db_connections_per_worker = 1
 
     logger.info(
         f'SkyPilot API server will start {num_server_workers} server processes '

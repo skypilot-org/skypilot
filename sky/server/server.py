@@ -24,7 +24,6 @@ import aiofiles
 import anyio
 import fastapi
 from fastapi.middleware import cors
-from sqlalchemy import pool
 import starlette.middleware.base
 import uvloop
 
@@ -1925,13 +1924,15 @@ if __name__ == '__main__':
     usage_lib.maybe_show_privacy_policy()
 
     # Initialize global user state db
-    global_user_state.initialize_and_get_db(pool.StaticPool)
+    db_utils.set_max_connections(1)
+    global_user_state.initialize_and_get_db()
     # Initialize request db
     requests_lib.reset_db_and_logs()
     # Restore the server user hash
     _init_or_restore_server_user_hash()
     max_db_connections = global_user_state.get_max_db_connections()
-    config = server_config.compute_server_config(cmd_args.deploy, max_db_connections)
+    config = server_config.compute_server_config(cmd_args.deploy,
+                                                 max_db_connections)
 
     num_workers = config.num_server_workers
 
