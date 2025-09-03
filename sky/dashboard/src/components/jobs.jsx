@@ -1069,6 +1069,7 @@ export function ManagedJobsTable({
                             jobParent="/jobs"
                             jobId={item.id}
                             managed={true}
+                            workspace={item.workspace}
                           />
                         </TableCell>
                       </TableRow>
@@ -1257,6 +1258,7 @@ export function Status2Actions({
   jobParent,
   jobId,
   managed,
+  workspace = 'default',
 }) {
   const router = useRouter();
 
@@ -1287,7 +1289,7 @@ export function Status2Actions({
         downloadJobLogs({
           clusterName: clusterName,
           jobIds: [jobId],
-          workspace: 'default', // TODO: Get actual workspace from context
+          workspace: workspace,
         });
       }
     }
@@ -1362,6 +1364,7 @@ export function ClusterJobs({
   refreshClusterJobsOnly,
   userFilter = null,
   nameFilter = null,
+  workspace = 'default',
 }) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
@@ -1602,6 +1605,7 @@ export function ClusterJobs({
                         jobParent={`/clusters/${clusterName}`}
                         jobId={item.id}
                         managed={false}
+                        workspace={workspace}
                       />
                     </TableCell>
                   </TableRow>
