@@ -32,9 +32,9 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
 
             import sky.volumes
             cfg = {
-                'name': "pvc",
-                'type': "k8s-pvc",
-                'size': "100GB",
+                'name': 'pvc',
+                'type': 'k8s-pvc',
+                'size': '100GB',
                 'labels': {
                     'key': 'value',
                 },
@@ -47,10 +47,10 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
 
             import sky.volumes
             vol = sky.volumes.Volume(
-                name="vol",
-                type="runpod-network-volume",
-                infra="runpod/ca/CA-MTL-1",
-                size="100GB",
+                name='vol',
+                type='runpod-network-volume',
+                infra='runpod/ca/CA-MTL-1',
+                size='100GB',
             )
             request_id = sky.volumes.apply(vol)
             sky.get(request_id)
