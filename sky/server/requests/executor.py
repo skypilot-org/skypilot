@@ -21,6 +21,7 @@ See the [README.md](../README.md) for detailed architecture of the executor.
 import asyncio
 import concurrent.futures
 import contextlib
+import gc
 import multiprocessing
 import os
 import queue as queue_lib
@@ -28,11 +29,10 @@ import signal
 import sys
 import threading
 import time
-import gc
-import psutil
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
+import psutil
 import setproctitle
 
 from sky import exceptions
@@ -57,7 +57,6 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
-from sky.server import config as server_config
 from sky.utils import timeline
 from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
@@ -432,13 +431,22 @@ def _request_execution_wrapper(request_id: str,
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
         gc.collect()
-        rss = psutil.Process(os.getpid()).memory_info().rss
-        rss_gb = rss / (1024 * 1024 * 1024)
-        logger.info(f"RSS (GB): {rss_gb}")
-        if rss_gb > server_config._SHORT_WORKER_MEM_GB:
-            logger.warning(f"Request {request_id} used more memory than the limit")
-            sys.exit(1)
 
+        def is_running_pytest() -> bool:
+            return 'PYTEST_CURRENT_TEST' in os.environ
+
+        if not is_running_pytest():
+            # pytest environment can be using more memory, so we only check
+            # the RSS in production environment.
+            rss = psutil.Process(os.getpid()).memory_info().rss
+            rss_gb = rss / (1024 * 1024 * 1024)
+            logger.debug(f'RSS after request {request_id}: {rss_gb} GB')
+            # TODO(this PR): we need to pass in this number based on if
+            # the executor is long or short.
+            if rss_gb > server_config._SHORT_WORKER_MEM_GB:
+                logger.warning(
+                    f'Request {request_id} used more memory than the limit')
+                sys.exit(1)
 
 
 async def execute_request_coroutine(request: api_requests.Request):
