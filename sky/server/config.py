@@ -74,7 +74,8 @@ class ServerConfig:
 
 
 def compute_server_config(deploy: bool,
-                          max_db_connections: Optional[int] = None) -> ServerConfig:
+                          max_db_connections: Optional[int] = None
+                         ) -> ServerConfig:
     """Compute the server config based on environment.
 
     We have different assumptions for the resources in different deployment
