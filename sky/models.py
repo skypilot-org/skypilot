@@ -109,3 +109,4 @@ class VolumeConfig(pydantic.BaseModel):
     size: Optional[str]
     config: Dict[str, Any] = {}
     labels: Optional[Dict[str, str]] = None
+    id_on_cloud: Optional[str] = None

@@ -4245,14 +4245,13 @@ def volumes_apply(
                     f'{entrypoint_str!r} needs to be a YAML file')
         if yaml_config is not None:
             volume_config_dict = yaml_config.copy()
+    override_config = _build_volume_override_config(name, infra, type, size)
+    volume_config_dict.update(override_config)
 
     # Create Volume instance
-    volume = volume_lib.Volume.from_dict(volume_config_dict)
+    volume = volume_lib.Volume.from_yaml_config(volume_config_dict)
 
-    # Normalize the volume config with CLI options
-    volume.normalize_config(name=name, infra=infra, type=type, size=size)
-
-    logger.debug(f'Volume config: {volume.to_dict()}')
+    logger.debug(f'Volume config: {volume.to_yaml_config()}')
 
     if not yes:
         click.confirm(f'Proceed to create volume {volume.name!r}?',
@@ -4268,6 +4267,22 @@ def volumes_apply(
         logger.error(f'{colorama.Fore.RED}Error applying volume: '
                      f'{common_utils.format_exception(e, use_bracket=True)}'
                      f'{colorama.Style.RESET_ALL}')
+
+
+def _build_volume_override_config(name: Optional[str], infra: Optional[str],
+                                  volume_type: Optional[str],
+                                  size: Optional[str]) -> Dict[str, str]:
+    """Parse the volume override config."""
+    override_config = {}
+    if name is not None:
+        override_config['name'] = name
+    if infra is not None:
+        override_config['infra'] = infra
+    if volume_type is not None:
+        override_config['type'] = volume_type
+    if size is not None:
+        override_config['size'] = size
+    return override_config
 
 
 @volumes.command('ls', cls=_DocumentedCodeCommand)

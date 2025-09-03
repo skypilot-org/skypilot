@@ -810,6 +810,7 @@ def write_cluster_config(
                 'name': vol.volume_name,
                 'path': vol.path,
                 'volume_name_on_cloud': vol.volume_config.name_on_cloud,
+                'volume_id_on_cloud': vol.volume_config.id_on_cloud,
             })
 
     runcmd = skypilot_config.get_effective_region_config(

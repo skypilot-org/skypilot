@@ -19,8 +19,7 @@ Supported volume types:
 
   - Tested storage backends: AWS EBS, GCP Persistent Disk, Nebius network SSD, JuiceFS, Nebius shared file system, GCP Filestore
 
-- GCP: `Persistent Disks <https://cloud.google.com/compute/docs/disks/persistent-disks>`_ and `Local SSDs <https://cloud.google.com/compute/docs/disks/local-ssd>`_
-
+- RunPod: `Network Volumes <https://docs.runpod.io/pods/storage/types#network-volume>`_
 
 .. _volumes-on-kubernetes:
 
@@ -76,6 +75,8 @@ Quickstart
 
      run: |
        echo "Hello, World!" > /mnt/data/hello.txt
+
+.. _volumes-on-kubernetes-manage:
 
 Managing volumes
 ~~~~~~~~~~~~~~~~
@@ -238,137 +239,57 @@ This section demonstrates how to configure and use distributed filesystems as Sk
           # Launch the cluster with the Nebius volume
           $ sky launch -c nebius-cluster task.yaml
 
-Volumes on GCP
---------------
 
-.. note::
+.. _volumes-on-runpod:
 
-  GCP volume support is currently in development, and will be updated to use the ``sky volumes`` commands.
+Volumes on RunPod
+------------------
 
-Volumes on GCP are specified using the :ref:`file_mounts <yaml-spec-file-mounts>` field in a SkyPilot task.
+RunPod Network Volumes provide persistent storage that can be mounted into pods on RunPod. SkyPilot supports creating and managing RunPod network volumes via the same three commands:
 
-There are three ways to mount volumes:
+- ``sky volumes apply``: Create a new network volume
+- ``sky volumes ls``: List all volumes
+- ``sky volumes delete``: Delete a volume
 
-1. Mount an existing volume
-2. Create and mount a new network volume (reattachable)
-3. Create and mount a new instance volume (temporary)
+Notes specific to RunPod:
 
-.. tab-set::
+- ``infra`` must specify the RunPod data center (zone), e.g. ``runpod/CA/CA-MTL-1``.
+- Volume name length is limited (max 30 characters).
+- Labels are not currently supported for RunPod volumes.
 
-    .. tab-item:: Mount existing volume
-        :sync: existing-volume-tab
+Quickstart
+~~~~~~~~~~
 
-        To mount an existing volume:
+1. Prepare a volume YAML file:
 
-        1. Ensure the volume exists
-        2. Specify the volume name using ``name: volume-name``
-        3. Specify the region or zone in the resources section to match the volume's location
+   .. code-block:: yaml
 
-        .. code-block:: yaml
+     # runpod-volume.yaml
+     name: rpvol
+     type: runpod-network-volume
+     infra: runpod/CA/CA-MTL-1  # DataCenterId (zone)
+     size: 100Gi                # GiB
 
-          file_mounts:
-            /mnt/path:
-              name: volume-name
-              store: volume
-              persistent: true
+2. Create the volume with ``sky volumes apply runpod-volume.yaml``:
 
-          resources:
-            # Must specify cloud, and region or zone.
-            # These need to match the volume's location.
-            cloud: gcp
-            region: us-central1
-            # zone: us-central1-a
+   .. code-block:: console
 
-    .. tab-item:: Create network volume
-        :sync: new-network-volume-tab
+     $ sky volumes apply runpod-volume.yaml
+     Proceed to create volume 'rpvol'? [Y/n]: Y
+     Created RunPod network volume rpvol-43dbb4ab-15e906 (id=5w6ecp2w9n)
 
-        To create and mount a new network volume:
+3. Mount the volume in your task YAML:
 
-        1. Specify the volume name using ``name: volume-name``
-        2. Specify the desired volume configuration (``disk_size``, ``disk_tier``, etc.)
+   .. code-block:: yaml
 
-        .. code-block:: yaml
+     # task.yaml
+     volumes:
+       /workspace: rpvol
 
-          file_mounts:
-            /mnt/path:
-              name: new-volume
-              store: volume
-              persistent: true  # If false, delete the volume when cluster is downed.
-              config:
-                disk_size: 100  # GiB.
+     run: |
+       echo "Hello, RunPod!" > /workspace/hello.txt
 
-          resources:
-            # Must specify cloud, and region or zone.
-            cloud: gcp
-            region: us-central1
-            # zone: us-central1-a
+Managing volumes
+~~~~~~~~~~~~~~~~
 
-        SkyPilot will automatically create and mount the volume to the specified path.
-
-    .. tab-item:: Create instance volume
-        :sync: new-instance-volume-tab
-
-        To create and mount a new instance volume (temporary disk; will be lost when the cluster is stopped or terminated):
-
-        .. code-block:: yaml
-
-          file_mounts:
-            /mnt/path:
-              store: volume
-              config:
-                storage_type: instance
-
-          resources:
-            # Must specify cloud.
-            cloud: gcp
-
-        Note that the ``name`` and ``config.disk_size`` fields are unsupported,
-        and will be ignored even if specified.
-
-        SkyPilot will automatically create and mount the volume to the specified path.
-
-
-Configuration options
-~~~~~~~~~~~~~~~~~~~~~
-
-Here's a complete example showing all available configuration options for GCP volumes:
-
-.. code-block:: yaml
-
-  file_mounts:
-    /mnt/path:
-      store: volume
-
-      # Name of the volume to mount.
-      #
-      # Required for network volume, ignored for instance volume.  If the volume
-      # doesn't exist in the specified region, it will be created in the region.
-      name: volume-name
-
-      # Source local path.
-      #
-      # Do not set if no need to sync data from local to volume.  If specified,
-      # the data will be synced to the /mnt/path/data directory.
-      source: /local/path
-
-      # If set to false, the volume will be deleted when the cluster is downed.
-      # Default: false
-      persistent: false
-
-      config:
-        # Size of the volume in GiB. Ignored for instance volumes.
-        disk_size: 100
-
-        # Type of the volume, either 'network' or 'instance'.
-        # Default: 'network'
-        storage_type: network
-
-        # Tier of the volume, same as `resources.disk_tier`.
-        # Default: best
-        disk_tier: best
-
-        # Attach mode, either 'read_write' or 'read_only'.
-        # Default: read_write
-        attach_mode: read_write
-
-See :ref:`YAML spec for volumes <yaml-spec-volumes>` for more details.
+Same as Kubernetes volumes, refer to :ref:`volumes-on-kubernetes-manage` for more details.

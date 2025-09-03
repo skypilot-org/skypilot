@@ -465,6 +465,11 @@ class VolumeDeleteBody(RequestBody):
     names: List[str]
 
 
+class VolumeListBody(RequestBody):
+    """The request body for the volume list endpoint."""
+    pass
+
+
 class EndpointsBody(RequestBody):
     """The request body for the endpoint."""
     cluster: str
