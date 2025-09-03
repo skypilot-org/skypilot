@@ -506,6 +506,7 @@ async def test_endpoint_completion_storage(monitor):
     print("\n🔍 Testing: /api/completion/storage_name")
 
     context_utils.to_thread(time.time)
+
     async def test_func():
         # Mock the actual blocking DB call
         with mock.patch.object(global_user_state,
@@ -518,7 +519,7 @@ async def test_endpoint_completion_storage(monitor):
                 pass
 
     # Creating too much threads simultaneously also affects the event loop
-    # (CPU contention) 
+    # (CPU contention)
     # TODO(aylei): should switch to async global_user_state operation instead
     # of using to_thread
     result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
