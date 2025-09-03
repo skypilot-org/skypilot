@@ -132,7 +132,7 @@ To use more than one cloud, combine the pip extras:
 
 
 Installing via ``uv``
-~~~~~~~~~~~~~~~~~~~~~
+----------------------
 
 SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast Python package installer:
 
