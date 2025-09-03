@@ -6211,7 +6211,7 @@ def api_info():
     if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
         location = 'Endpoint set via the environment variable ' + \
                     constants.SKY_API_SERVER_URL_ENV_VAR
-    elif 'api_server' in config and 'endpoint' in config['api_server']:
+    elif 'endpoint' in config.get('api_server', {}):
         config_path = skypilot_config.resolve_user_config_path()
         if config_path is None:
             location = 'Endpoint set via the command line.'
