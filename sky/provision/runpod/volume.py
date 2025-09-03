@@ -1,86 +1,19 @@
 """RunPod network volume provisioning."""
-import os
-import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.adaptors import runpod
 from sky.utils import common_utils
 from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
-# Lazy imports
-requests = adaptors_common.LazyImport('requests')
-
-_REST_BASE = 'https://rest.runpod.io/v1'
-_MAX_RETRIES = 3
-_TIMEOUT = 10
-
-
-def _get_api_key() -> str:
-    api_key = getattr(runpod.runpod, 'api_key', None)
-    if not api_key:
-        # Fallback to env if SDK global not set
-        api_key = os.environ.get('RUNPOD_API_KEY')
-    if not api_key:
-        raise RuntimeError(
-            'RunPod API key is not set. Please set runpod.api_key '
-            'or RUNPOD_API_KEY.')
-    return str(api_key)
-
-
-def _rest_request(method: str,
-                  path: str,
-                  json: Optional[Dict[str, Any]] = None) -> Any:
-    url = f'{_REST_BASE}{path}'
-    headers = {
-        'Authorization': f'Bearer {_get_api_key()}',
-        'Content-Type': 'application/json',
-    }
-    attempt = 0
-    while True:
-        attempt += 1
-        try:
-            resp = requests.request(method,
-                                    url,
-                                    headers=headers,
-                                    json=json,
-                                    timeout=_TIMEOUT)
-        except Exception as e:  # pylint: disable=broad-except
-            # Retry on transient network errors
-            if attempt >= _MAX_RETRIES:
-                raise RuntimeError(f'RunPod REST network error: {e}') from e
-            time.sleep(1)
-            continue
-
-        # Retry on 5xx and 429
-        if resp.status_code >= 500 or resp.status_code == 429:
-            if attempt >= _MAX_RETRIES:
-                raise RuntimeError(
-                    f'RunPod REST error {resp.status_code}: {resp.text}')
-            time.sleep(1)
-            continue
-
-        if resp.status_code >= 400:
-            # Non-retryable client error
-            raise RuntimeError(
-                f'RunPod REST error {resp.status_code}: {resp.text}')
-
-        if resp.text:
-            try:
-                return resp.json()
-            except Exception:  # pylint: disable=broad-except
-                return resp.text
-        return None
-
 
 def _list_volumes() -> List[Dict[str, Any]]:
     # GET /v1/networkvolumes returns a list
-    result = _rest_request('GET', '/networkvolumes')
+    result = runpod.rest_request('GET', '/networkvolumes')
     if isinstance(result, list):
         return result
     # Some deployments may wrap the list.
@@ -126,7 +59,7 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
             'name': name_on_cloud,
             'size': size_int,
         }
-        resp = _rest_request('POST', '/networkvolumes', json=payload)
+        resp = runpod.rest_request('POST', '/networkvolumes', json=payload)
         if isinstance(resp, dict):
             config.id_on_cloud = resp.get('id')
         else:
@@ -156,7 +89,7 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
             f'RunPod network volume id not found for {name_on_cloud}; '
             f'skip delete')
         return config
-    _rest_request('DELETE', f'/networkvolumes/{vol_id}')
+    runpod.rest_request('DELETE', f'/networkvolumes/{vol_id}')
     logger.info(f'Deleted RunPod network volume {name_on_cloud} '
                 f'(id={vol_id})')
     return config

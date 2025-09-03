@@ -4234,7 +4234,7 @@ def volumes_apply(
                     f'{entrypoint_str!r} needs to be a YAML file')
         if yaml_config is not None:
             volume_config_dict = yaml_config.copy()
-    override_config = _parse_volume_override_config(name, infra, type, size)
+    override_config = _build_volume_override_config(name, infra, type, size)
     volume_config_dict.update(override_config)
 
     # Create Volume instance
@@ -4258,19 +4258,17 @@ def volumes_apply(
                      f'{colorama.Style.RESET_ALL}')
 
 
-def _parse_volume_override_config(
-        name: Optional[str],
-        infra: Optional[str],
-        type: Optional[str],  # pylint: disable=redefined-builtin
-        size: Optional[str]) -> Dict[str, str]:
+def _build_volume_override_config(name: Optional[str], infra: Optional[str],
+                                  volume_type: Optional[str],
+                                  size: Optional[str]) -> Dict[str, str]:
     """Parse the volume override config."""
     override_config = {}
     if name is not None:
         override_config['name'] = name
     if infra is not None:
         override_config['infra'] = infra
-    if type is not None:
-        override_config['type'] = type
+    if volume_type is not None:
+        override_config['type'] = volume_type
     if size is not None:
         override_config['size'] = size
     return override_config

@@ -13,6 +13,19 @@ from sky.utils import volume
 
 logger = sky_logging.init_logger(__name__)
 
+_BASIC_COLUMNS = [
+    'NAME',
+    'TYPE',
+    'INFRA',
+    'SIZE',
+    'USER',
+    'WORKSPACE',
+    'AGE',
+    'STATUS',
+    'LAST_USE',
+    'USED_BY',
+]
+
 
 def _get_infra_str(cloud: Optional[str], region: Optional[str],
                    zone: Optional[str]) -> str:
@@ -30,19 +43,70 @@ def _get_infra_str(cloud: Optional[str], region: Optional[str],
 class VolumeTable(abc.ABC):
     """The volume table."""
 
-    @abc.abstractmethod
-    def format(self) -> str:
-        """Format the volume table for display."""
-        pass
-
-
-class PVCVolumeTable(VolumeTable):
-    """The PVC volume table."""
-
     def __init__(self, volumes: List[Dict[str, Any]], show_all: bool = False):
         super().__init__()
         self.table = self._create_table(show_all)
         self._add_rows(volumes, show_all)
+
+    def _get_row_base_columns(self,
+                              row: Dict[str, Any],
+                              show_all: bool = False) -> List[str]:
+        """Get the base columns for a row."""
+        # Convert last_attached_at timestamp to human readable string
+        last_attached_at = row.get('last_attached_at')
+        if last_attached_at is not None:
+            last_attached_at_str = datetime.fromtimestamp(
+                last_attached_at).strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            last_attached_at_str = '-'
+        size = row.get('size', '')
+        if size:
+            size = f'{size}Gi'
+        usedby_str = '-'
+        usedby_clusters = row.get('usedby_clusters')
+        usedby_pods = row.get('usedby_pods')
+        if usedby_clusters:
+            usedby_str = f'{", ".join(usedby_clusters)}'
+        elif usedby_pods:
+            usedby_str = f'{", ".join(usedby_pods)}'
+        if show_all:
+            usedby = usedby_str
+        else:
+            usedby = common_utils.truncate_long_string(
+                usedby_str, constants.USED_BY_TRUNC_LENGTH)
+        infra = _get_infra_str(row.get('cloud'), row.get('region'),
+                               row.get('zone'))
+        return [
+            row.get('name', ''),
+            row.get('type', ''),
+            infra,
+            size,
+            row.get('user_name', '-'),
+            row.get('workspace', '-'),
+            log_utils.human_duration(row.get('launched_at', 0)),
+            row.get('status', ''),
+            last_attached_at_str,
+            usedby,
+        ]
+
+    def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
+        """Create the volume table."""
+        raise NotImplementedError
+
+    def _add_rows(self,
+                  volumes: List[Dict[str, Any]],
+                  show_all: bool = False) -> None:
+        """Add rows to the volume table."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def format(self) -> str:
+        """Format the volume table for display."""
+        raise NotImplementedError
+
+
+class PVCVolumeTable(VolumeTable):
+    """The PVC volume table."""
 
     def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
         """Create the PVC volume table."""
@@ -55,34 +119,13 @@ class PVCVolumeTable(VolumeTable):
         #   STORAGE_CLASS, ACCESS_MODE
 
         if show_all:
-            columns = [
-                'NAME',
-                'TYPE',
-                'INFRA',
-                'SIZE',
-                'USER',
-                'WORKSPACE',
-                'AGE',
-                'STATUS',
-                'LAST_USE',
-                'USED_BY',
+            columns = _BASIC_COLUMNS + [
                 'NAME_ON_CLOUD',
                 'STORAGE_CLASS',
                 'ACCESS_MODE',
             ]
         else:
-            columns = [
-                'NAME',
-                'TYPE',
-                'INFRA',
-                'SIZE',
-                'USER',
-                'WORKSPACE',
-                'AGE',
-                'STATUS',
-                'LAST_USE',
-                'USED_BY',
-            ]
+            columns = _BASIC_COLUMNS
 
         table = log_utils.create_table(columns)
         return table
@@ -92,42 +135,7 @@ class PVCVolumeTable(VolumeTable):
                   show_all: bool = False) -> None:
         """Add rows to the PVC volume table."""
         for row in volumes:
-            # Convert last_attached_at timestamp to human readable string
-            last_attached_at = row.get('last_attached_at')
-            if last_attached_at is not None:
-                last_attached_at_str = datetime.fromtimestamp(
-                    last_attached_at).strftime('%Y-%m-%d %H:%M:%S')
-            else:
-                last_attached_at_str = '-'
-            size = row.get('size', '')
-            if size:
-                size = f'{size}Gi'
-            usedby_str = '-'
-            usedby_clusters = row.get('usedby_clusters')
-            usedby_pods = row.get('usedby_pods')
-            if usedby_clusters:
-                usedby_str = f'{", ".join(usedby_clusters)}'
-            elif usedby_pods:
-                usedby_str = f'{", ".join(usedby_pods)}'
-            if show_all:
-                usedby = usedby_str
-            else:
-                usedby = common_utils.truncate_long_string(
-                    usedby_str, constants.USED_BY_TRUNC_LENGTH)
-            infra = _get_infra_str(row.get('cloud'), row.get('region'),
-                                   row.get('zone'))
-            table_row = [
-                row.get('name', ''),
-                row.get('type', ''),
-                infra,
-                size,
-                row.get('user_name', '-'),
-                row.get('workspace', '-'),
-                log_utils.human_duration(row.get('launched_at', 0)),
-                row.get('status', ''),
-                last_attached_at_str,
-                usedby,
-            ]
+            table_row = self._get_row_base_columns(row, show_all)
             if show_all:
                 table_row.append(row.get('name_on_cloud', ''))
                 table_row.append(
@@ -144,11 +152,6 @@ class PVCVolumeTable(VolumeTable):
 class RunPodVolumeTable(VolumeTable):
     """The RunPod volume table."""
 
-    def __init__(self, volumes: List[Dict[str, Any]], show_all: bool = False):
-        super().__init__()
-        self.table = self._create_table(show_all)
-        self._add_rows(volumes, show_all)
-
     def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
         """Create the RunPod volume table."""
         #  If show_all is False, show the table with the columns:
@@ -159,32 +162,9 @@ class RunPodVolumeTable(VolumeTable):
         #   AGE, STATUS, LAST_USE, USED_BY, NAME_ON_CLOUD
 
         if show_all:
-            columns = [
-                'NAME',
-                'TYPE',
-                'INFRA',
-                'SIZE',
-                'USER',
-                'WORKSPACE',
-                'AGE',
-                'STATUS',
-                'LAST_USE',
-                'USED_BY',
-                'NAME_ON_CLOUD',
-            ]
+            columns = _BASIC_COLUMNS + ['NAME_ON_CLOUD']
         else:
-            columns = [
-                'NAME',
-                'TYPE',
-                'INFRA',
-                'SIZE',
-                'USER',
-                'WORKSPACE',
-                'AGE',
-                'STATUS',
-                'LAST_USE',
-                'USED_BY',
-            ]
+            columns = _BASIC_COLUMNS
 
         table = log_utils.create_table(columns)
         return table
@@ -194,42 +174,7 @@ class RunPodVolumeTable(VolumeTable):
                   show_all: bool = False) -> None:
         """Add rows to the RunPod volume table."""
         for row in volumes:
-            # Convert last_attached_at timestamp to human readable string
-            last_attached_at = row.get('last_attached_at')
-            if last_attached_at is not None:
-                last_attached_at_str = datetime.fromtimestamp(
-                    last_attached_at).strftime('%Y-%m-%d %H:%M:%S')
-            else:
-                last_attached_at_str = '-'
-            size = row.get('size', '')
-            if size:
-                size = f'{size}Gi'
-            usedby_str = '-'
-            usedby_clusters = row.get('usedby_clusters')
-            usedby_pods = row.get('usedby_pods')
-            if usedby_clusters:
-                usedby_str = f'{", ".join(usedby_clusters)}'
-            elif usedby_pods:
-                usedby_str = f'{", ".join(usedby_pods)}'
-            if show_all:
-                usedby = usedby_str
-            else:
-                usedby = common_utils.truncate_long_string(
-                    usedby_str, constants.USED_BY_TRUNC_LENGTH)
-            infra = _get_infra_str(row.get('cloud'), row.get('region'),
-                                   row.get('zone'))
-            table_row = [
-                row.get('name', ''),
-                row.get('type', ''),
-                infra,
-                size,
-                row.get('user_name', '-'),
-                row.get('workspace', '-'),
-                log_utils.human_duration(row.get('launched_at', 0)),
-                row.get('status', ''),
-                last_attached_at_str,
-                usedby,
-            ]
+            table_row = self._get_row_base_columns(row, show_all)
             if show_all:
                 table_row.append(row.get('name_on_cloud', ''))
 

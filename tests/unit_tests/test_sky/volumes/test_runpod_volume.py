@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from sky.adaptors import runpod
 from sky.provision.runpod import volume as runpod_prov
 from sky.volumes import volume as volume_lib
 
@@ -216,7 +217,7 @@ class TestRunPodProvisionVolume:
             def request(method, url, headers=None, json=None, timeout=30):
                 return response
 
-        monkeypatch.setattr(runpod_prov, 'requests', _Req)
+        monkeypatch.setattr(runpod, 'requests', _Req)
 
     def test_get_api_key_from_sdk(self, monkeypatch):
 
@@ -224,7 +225,7 @@ class TestRunPodProvisionVolume:
             api_key = 'abc'
 
         monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
-        assert runpod_prov._get_api_key() == 'abc'
+        assert runpod._get_api_key() == 'abc'
 
     def test_get_api_key_from_env(self, monkeypatch):
 
@@ -233,7 +234,7 @@ class TestRunPodProvisionVolume:
 
         monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
         monkeypatch.setenv('RUNPOD_API_KEY', 'envkey')
-        assert runpod_prov._get_api_key() == 'envkey'
+        assert runpod._get_api_key() == 'envkey'
 
     def test_get_api_key_missing_raises(self, monkeypatch):
 
@@ -243,7 +244,7 @@ class TestRunPodProvisionVolume:
         monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
         monkeypatch.delenv('RUNPOD_API_KEY', raising=False)
         with pytest.raises(RuntimeError):
-            _ = runpod_prov._get_api_key()
+            _ = runpod._get_api_key()
 
     def test_rest_request_success_json(self, monkeypatch):
 
@@ -255,7 +256,7 @@ class TestRunPodProvisionVolume:
                           text='{"foo":1}',
                           json_obj={'foo': 1})
         self._mock_requests(monkeypatch, resp)
-        out = runpod_prov._rest_request('GET', '/networkvolumes')
+        out = runpod.rest_request('GET', '/networkvolumes')
         assert out == {'foo': 1}
 
     def test_rest_request_success_plain_text(self, monkeypatch):
@@ -266,7 +267,7 @@ class TestRunPodProvisionVolume:
         monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
         resp = self._Resp(status_code=200, text='ok', json_raises=True)
         self._mock_requests(monkeypatch, resp)
-        out = runpod_prov._rest_request('GET', '/ping')
+        out = runpod.rest_request('GET', '/ping')
         assert out == 'ok'
 
     def test_rest_request_no_text(self, monkeypatch):
@@ -277,7 +278,7 @@ class TestRunPodProvisionVolume:
         monkeypatch.setattr('sky.adaptors.runpod.runpod', _SDK)
         resp = self._Resp(status_code=200, text='')
         self._mock_requests(monkeypatch, resp)
-        out = runpod_prov._rest_request('DELETE', '/networkvolumes/x')
+        out = runpod.rest_request('DELETE', '/networkvolumes/x')
         assert out is None
 
     def test_rest_request_error_raises(self, monkeypatch):
@@ -289,7 +290,7 @@ class TestRunPodProvisionVolume:
         resp = self._Resp(status_code=500, text='boom')
         self._mock_requests(monkeypatch, resp)
         with pytest.raises(RuntimeError):
-            _ = runpod_prov._rest_request('GET', '/fail')
+            _ = runpod.rest_request('GET', '/fail')
 
     def test_rest_request_retries_then_success_5xx(self, monkeypatch):
 
@@ -313,8 +314,8 @@ class TestRunPodProvisionVolume:
                 SeqReq.calls += 1
                 return SeqReq.seq[min(SeqReq.calls - 1, len(SeqReq.seq) - 1)]
 
-        monkeypatch.setattr(runpod_prov, 'requests', SeqReq)
-        out = runpod_prov._rest_request('GET', '/retry')
+        monkeypatch.setattr(runpod, 'requests', SeqReq)
+        out = runpod.rest_request('GET', '/retry')
         assert out == {'ok': True}
         assert SeqReq.calls == 3
 
@@ -337,8 +338,8 @@ class TestRunPodProvisionVolume:
                                                        text='{"v":1}',
                                                        json_obj={'v': 1})
 
-        monkeypatch.setattr(runpod_prov, 'requests', NetSeqReq)
-        out = runpod_prov._rest_request('GET', '/net')
+        monkeypatch.setattr(runpod, 'requests', NetSeqReq)
+        out = runpod.rest_request('GET', '/net')
         assert out == {'v': 1}
         assert NetSeqReq.calls == 2
 
@@ -357,10 +358,10 @@ class TestRunPodProvisionVolume:
                 AlwaysNetErr.calls += 1
                 raise RuntimeError('net')
 
-        monkeypatch.setattr(runpod_prov, 'requests', AlwaysNetErr)
+        monkeypatch.setattr(runpod, 'requests', AlwaysNetErr)
         with pytest.raises(RuntimeError):
-            _ = runpod_prov._rest_request('GET', '/net-exhaust')
-        assert AlwaysNetErr.calls == runpod_prov._MAX_RETRIES
+            _ = runpod.rest_request('GET', '/net-exhaust')
+        assert AlwaysNetErr.calls == runpod._MAX_RETRIES
 
     def test_rest_request_retry_exhaustion_5xx(self, monkeypatch):
 
@@ -378,10 +379,10 @@ class TestRunPodProvisionVolume:
                 return TestRunPodProvisionVolume._Resp(status_code=500,
                                                        text='boom')
 
-        monkeypatch.setattr(runpod_prov, 'requests', Always500)
+        monkeypatch.setattr(runpod, 'requests', Always500)
         with pytest.raises(RuntimeError):
-            _ = runpod_prov._rest_request('GET', '/exhaust')
-        assert Always500.calls == runpod_prov._MAX_RETRIES
+            _ = runpod.rest_request('GET', '/exhaust')
+        assert Always500.calls == runpod._MAX_RETRIES
 
     def test_rest_request_non_retryable_4xx_single_attempt(self, monkeypatch):
 
@@ -399,9 +400,9 @@ class TestRunPodProvisionVolume:
                 return TestRunPodProvisionVolume._Resp(status_code=400,
                                                        text='bad')
 
-        monkeypatch.setattr(runpod_prov, 'requests', Always400)
+        monkeypatch.setattr(runpod, 'requests', Always400)
         with pytest.raises(RuntimeError):
-            _ = runpod_prov._rest_request('GET', '/bad')
+            _ = runpod.rest_request('GET', '/bad')
         assert Always400.calls == 1
 
     def test_list_volumes_variants(self, monkeypatch):
@@ -470,7 +471,7 @@ class TestRunPodProvisionVolume:
             called['post'] = True
             return {}
 
-        monkeypatch.setattr(runpod_prov, '_rest_request', _rest)
+        monkeypatch.setattr(runpod, 'rest_request', _rest)
         out = runpod_prov.apply_volume(cfg)
         assert out.id_on_cloud == 'VID'
         assert called['post'] is False
@@ -492,7 +493,7 @@ class TestRunPodProvisionVolume:
             created['payload'] = (method, path, json)
             return {'id': 'VID'}
 
-        monkeypatch.setattr(runpod_prov, '_rest_request', _rest)
+        monkeypatch.setattr(runpod, 'rest_request', _rest)
         out = runpod_prov.apply_volume(cfg)
         assert out.id_on_cloud == 'VID'
         assert created['payload'][0] == 'POST'
@@ -540,7 +541,7 @@ class TestRunPodProvisionVolume:
             created['payload'] = (method, path, json)
             return "text"
 
-        monkeypatch.setattr(runpod_prov, '_rest_request', _rest)
+        monkeypatch.setattr(runpod, 'rest_request', _rest)
         with pytest.raises(RuntimeError) as exc_info:
             runpod_prov.apply_volume(cfg)
         assert 'Failed to create RunPod network volume' in str(exc_info.value)
@@ -553,7 +554,7 @@ class TestRunPodProvisionVolume:
             deleted['path'] = (method, path)
             return None
 
-        monkeypatch.setattr(runpod_prov, '_rest_request', _rest)
+        monkeypatch.setattr(runpod, 'rest_request', _rest)
 
         # id known
         class Cfg:
