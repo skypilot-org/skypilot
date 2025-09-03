@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.8"]
+        python-version: ["3.7", "3.8", "3.13"]
         test-path:
           - tests/test_jobs_and_serve.py tests/test_cli.py
         include:
