@@ -28,6 +28,7 @@ Install SkyPilot using pip:
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
           pip install "skypilot[oci]"
+          pip install "skypilot[nebius]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
           pip install "skypilot[fluidstack]"
@@ -39,7 +40,6 @@ Install SkyPilot using pip:
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
           # Nebius is only supported for Python >= 3.10
-          pip install "skypilot[nebius]"
 
           pip install "skypilot[all]"
 
@@ -60,10 +60,10 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
-          pip install "skypilot-nightly[nebius]"
-          pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[oci]"
+          pip install "skypilot-nightly[nebius]"
           pip install "skypilot-nightly[lambda]"
+          pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[fluidstack]"
           pip install "skypilot-nightly[paperspace]"
           pip install "skypilot-nightly[do]"
@@ -93,10 +93,10 @@ Install SkyPilot using pip:
           pip install -e ".[aws]"
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
-          pip install -e ".[nebius]"
-          pip install -e ".[runpod]"
           pip install -e ".[oci]"
+          pip install -e ".[nebius]"
           pip install -e ".[lambda]"
+          pip install -e ".[runpod]"
           pip install -e ".[fluidstack]"
           pip install -e ".[paperspace]"
           pip install -e ".[cudo]"
@@ -262,7 +262,7 @@ Kubernetes
 ~~~~~~~~~~
 
 SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
-(e.g., EKS, GKE). The only requirement is a valid kubeconfig at
+(e.g., EKS, GKE, Nebius Managed Kubernetes). The only requirement is a valid kubeconfig at
 :code:`~/.kube/config`.
 
 .. code-block:: shell
