@@ -448,7 +448,7 @@ def _request_execution_wrapper(request_id: str,
             if rss_gb > mem_limit:
                 logger.warning(
                     f'Request {request_id} used more memory than the limit. '
-                    f'RSS: {rss_gb} GB. '
+                    f'RSS: {rss_gb:.3f} GB. '
                     f'Limit: {mem_limit} GB. '
                     f'OOMKilling the executor (pid {pid}).')
                 sys.exit(1)
