@@ -27,6 +27,7 @@ from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
+from sky.utils import context_utils
 
 
 class SSHLatencyMonitor:
@@ -475,10 +476,13 @@ async def test_endpoint_download(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Skipping due to flakyness")
 async def test_endpoint_completion_cluster(monitor):
     """Test /api/completion/cluster_name endpoint for blocking operations."""
     print("\n🔍 Testing: /api/completion/cluster_name")
+
+    # The first time to_thread is called, it will init a thread pool which
+    # may influence the result of the test. We call it in advance.
+    context_utils.to_thread(time.time)
 
     async def test_func():
         # Mock the actual blocking DB call
@@ -501,6 +505,8 @@ async def test_endpoint_completion_storage(monitor):
     """Test /api/completion/storage_name endpoint for blocking operations."""
     print("\n🔍 Testing: /api/completion/storage_name")
 
+    context_utils.to_thread(time.time)
+
     async def test_func():
         # Mock the actual blocking DB call
         with mock.patch.object(global_user_state,
@@ -518,10 +524,11 @@ async def test_endpoint_completion_storage(monitor):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Skipping due to flakyness")
 async def test_endpoint_provision_logs(monitor):
     """Test /provision_logs endpoint for blocking operations."""
     print("\n🔍 Testing: /provision_logs")
+
+    context_utils.to_thread(time.time)
 
     async def test_func():
         # Mock the actual blocking DB calls
