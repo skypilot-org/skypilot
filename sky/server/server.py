@@ -1758,7 +1758,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             except fastapi.WebSocketDisconnect:
                 pass
             writer.close()
-        
+
         async def ssh_to_websocket():
             try:
                 while True:
@@ -1770,8 +1770,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                 pass
             await websocket.close()
 
-        await asyncio.gather(websocket_to_ssh(),
-                             ssh_to_websocket(),
+        await asyncio.gather(websocket_to_ssh(), ssh_to_websocket(),
                              heartbeat())
     finally:
         proc.terminate()
