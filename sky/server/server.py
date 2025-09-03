@@ -1738,6 +1738,18 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
         # Connect to the local port
         reader, writer = await asyncio.open_connection('127.0.0.1', local_port)
 
+        async def heartbeat():
+            """Send heartbeat to keep the connection alive."""
+            try:
+                while True:
+                    await asyncio.sleep(30)
+                    writer.write('')
+                    await writer.drain()
+                    await websocket.send_bytes(b'')
+            except fastapi.WebSocketDisconnect:
+                pass
+            writer.close()
+
         async def websocket_to_ssh():
             try:
                 async for message in websocket.iter_bytes():
@@ -1746,7 +1758,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             except fastapi.WebSocketDisconnect:
                 pass
             writer.close()
-
+        
         async def ssh_to_websocket():
             try:
                 while True:
@@ -1758,7 +1770,9 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                 pass
             await websocket.close()
 
-        await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
+        await asyncio.gather(websocket_to_ssh(),
+                             ssh_to_websocket(),
+                             heartbeat())
     finally:
         proc.terminate()
 
