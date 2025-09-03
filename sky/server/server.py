@@ -449,25 +449,25 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     """FastAPI lifespan context manager."""
     del app  # unused
     # Startup: Run background tasks
-    for event in daemons.INTERNAL_REQUEST_DAEMONS:
-        if event.should_skip():
-            continue
-        try:
-            executor.schedule_request(
-                request_id=event.id,
-                request_name=event.name,
-                request_body=payloads.RequestBody(),
-                func=event.run_event,
-                schedule_type=requests_lib.ScheduleType.SHORT,
-                is_skypilot_system=True,
-                # Request deamon should be retried if the process pool is
-                # broken.
-                retryable=True,
-            )
-        except exceptions.RequestAlreadyExistsError:
-            # Lifespan will be executed in each uvicorn worker process, we
-            # can safely ignore the error if the task is already scheduled.
-            logger.debug(f'Request {event.id} already exists.')
+    # for event in daemons.INTERNAL_REQUEST_DAEMONS:
+    #     if event.should_skip():
+    #         continue
+    #     try:
+    #         executor.schedule_request(
+    #             request_id=event.id,
+    #             request_name=event.name,
+    #             request_body=payloads.RequestBody(),
+    #             func=event.run_event,
+    #             schedule_type=requests_lib.ScheduleType.SHORT,
+    #             is_skypilot_system=True,
+    #             # Request deamon should be retried if the process pool is
+    #             # broken.
+    #             retryable=True,
+    #         )
+    #     except exceptions.RequestAlreadyExistsError:
+    #         # Lifespan will be executed in each uvicorn worker process, we
+    #         # can safely ignore the error if the task is already scheduled.
+    #         logger.debug(f'Request {event.id} already exists.')
     asyncio.create_task(cleanup_upload_ids())
     if metrics.METRICS_ENABLED:
         # Start monitoring the event loop lag in each server worker

@@ -140,6 +140,9 @@ def compute_server_config(deploy: bool) -> ServerConfig:
                 'SkyPilot API server will run in low resource mode because '
                 'the available memory is less than '
                 f'{server_constants.MIN_AVAIL_MEM_GB}GB.')
+    num_server_workers = 1
+    max_parallel_for_long = 1
+    max_parallel_for_short = 1
     logger.info(
         f'SkyPilot API server will start {num_server_workers} server processes '
         f'with {max_parallel_for_long} background workers for long requests '
