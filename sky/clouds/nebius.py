@@ -87,7 +87,8 @@ class Nebius(clouds.Cloud):
             for acc_name, acc_count in resources.accelerators.items():
                 if acc_name.lower() in ('h100', 'h200') and acc_count == 8:
                     # Remove CUSTOM_NETWORK_TIER from unsupported features for
-                    # InfiniBand-capable accelerators
+                    # InfiniBand-capable accelerators. Refer to:
+                    # https://docs.nebius.com/compute/clusters/gpu#fabrics
                     unsupported.pop(
                         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
                         None)
