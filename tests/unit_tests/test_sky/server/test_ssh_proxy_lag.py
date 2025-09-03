@@ -119,8 +119,8 @@ def mock_request_obj():
 @pytest.fixture
 def mock_schedule_request():
     """Mock executor.schedule_request for all tests."""
-    # with mock.patch.object(executor, 'schedule_request') as mock_sched:
-    #     yield mock_sched
+    with mock.patch.object(executor, 'schedule_request') as mock_sched:
+        yield mock_sched
 
 
 @pytest.fixture
