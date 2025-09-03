@@ -30,6 +30,8 @@ import threading
 import time
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
+import tracemalloc
+import psutil
 
 import setproctitle
 
@@ -78,6 +80,8 @@ logger = sky_logging.init_logger(__name__)
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
 
+print("Tracing allocated memory")
+tracemalloc.start()
 
 class RequestQueue:
     """The queue for the requests, either redis or multiprocessing.
@@ -428,7 +432,14 @@ def _request_execution_wrapper(request_id: str,
                 request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
-
+            snapshot = tracemalloc.take_snapshot()
+            top_stats = snapshot.statistics('lineno')
+            logger.info(f"Dumping memory trace for process {pid} request {request_id}")
+            for stat in top_stats[:100]:
+                if f'{stat.traceback}'.startswith('/Users/seungjinyang/assemble/skypilot/'):
+                    logger.info(stat)
+            prc = psutil.Process(pid)
+            logger.info(f'RSS: {prc.memory_info().rss / 1024 / 1024} MB for {pid}\n')
 
 async def execute_request_coroutine(request: api_requests.Request):
     """Execute a request in current event loop.

@@ -3,6 +3,7 @@ import dataclasses
 import os
 import time
 from typing import Callable
+import gc
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -11,6 +12,7 @@ from sky.utils import annotations
 from sky.utils import common
 from sky.utils import env_options
 from sky.utils import timeline
+import psutil
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -73,6 +75,10 @@ class InternalRequestDaemon:
                 # using too much memory.
                 annotations.clear_request_level_cache()
                 timeline.save_timeline()
+                gc.collect()
+                pid = os.getpid()
+                prc = psutil.Process(pid)
+                logger.info(f'RSS: {prc.memory_info().rss / 1024 / 1024} MB for {pid}\n')
             except Exception:  # pylint: disable=broad-except
                 # It is OK to fail to run the event, as the event is not
                 # critical, but we should log the error.
