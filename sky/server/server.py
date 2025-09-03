@@ -1909,13 +1909,6 @@ if __name__ == '__main__':
 
     skyuvicorn.add_timestamp_prefix_for_server_logs()
 
-    # Initialize global user state db
-    global_user_state.initialize_and_get_db(pool.QueuePool)
-    # Initialize request db
-    requests_lib.reset_db_and_logs()
-    # Restore the server user hash
-    _init_or_restore_server_user_hash()
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', default=46580, type=int)
@@ -1931,28 +1924,14 @@ if __name__ == '__main__':
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
 
-    config = server_config.compute_server_config(cmd_args.deploy)
-
+    # Initialize global user state db
+    global_user_state.initialize_and_get_db(pool.StaticPool)
+    # Initialize request db
+    requests_lib.reset_db_and_logs()
+    # Restore the server user hash
+    _init_or_restore_server_user_hash()
     max_db_connections = global_user_state.get_max_db_connections()
-    if max_db_connections is not None:
-        apisrv_max_connections = global_user_state.get_max_engine_connections(
-        ) * config.num_server_workers
-        executor_max_connections = max_db_connections - apisrv_max_connections
-
-        max_short_executors = (
-            config.short_worker_config.garanteed_parallelism +
-            config.short_worker_config.burstable_parallelism)
-        max_long_executors = (config.long_worker_config.garanteed_parallelism +
-                              config.long_worker_config.burstable_parallelism)
-        max_executors = max_short_executors + max_long_executors
-        conns_per_executor = executor_max_connections // max_executors
-        print(f'API server s co: {config.short_worker_config}')
-        print(f'Max connections: {max_db_connections}')
-        print(f'Max executors: {max_executors}')
-        print(f'Max executor connections: {executor_max_connections}')
-        print(f'Max short executors: {max_short_executors}')
-        print(f'Max long executors: {max_long_executors}')
-        print(f'Connections per executor: {conns_per_executor}')
+    config = server_config.compute_server_config(cmd_args.deploy, max_db_connections)
 
     num_workers = config.num_server_workers
 
