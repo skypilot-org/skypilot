@@ -2,6 +2,7 @@
 
 import contextlib
 import logging
+import threading
 import os
 import pathlib
 from typing import Dict, Optional
@@ -35,6 +36,8 @@ _postgres_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
 _sqlite_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
 
 
+_db_creation_lock = threading.Lock()
+
 def get_engine(db_name: str,
                pg_pool_class: Optional[sqlalchemy.pool.Pool] = None):
     conn_string = None
@@ -43,10 +46,11 @@ def get_engine(db_name: str,
     if conn_string:
         if pg_pool_class is None:
             pg_pool_class = sqlalchemy.NullPool
-        if conn_string not in _postgres_engine_cache:
-            _postgres_engine_cache[conn_string] = sqlalchemy.create_engine(
-                conn_string, poolclass=pg_pool_class)
-        engine = _postgres_engine_cache[conn_string]
+        with _db_creation_lock:
+            if conn_string not in _postgres_engine_cache:
+                _postgres_engine_cache[conn_string] = sqlalchemy.create_engine(
+                    conn_string, poolclass=pg_pool_class)
+            engine = _postgres_engine_cache[conn_string]
     else:
         db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
