@@ -1323,36 +1323,6 @@ export function Status2Actions({
           {withLabel && <span className="ml-1.5">Download</span>}
         </button>
       </Tooltip>
-      {managed && (
-        <>
-          <Tooltip
-            key="controllerlogs"
-            content="View Controller Logs"
-            className="capitalize text-sm text-muted-foreground"
-          >
-            <button
-              onClick={(e) => handleLogsClick(e, 'controllerlogs')}
-              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
-            >
-              <MonitorPlay className="w-4 h-4" />
-              {withLabel && <span className="ml-2">Controller Logs</span>}
-            </button>
-          </Tooltip>
-          <Tooltip
-            key="downloadcontrollerlogs"
-            content="Download Controller Logs"
-            className="capitalize text-sm text-muted-foreground"
-          >
-            <button
-              onClick={(e) => handleDownloadLogs(e, true)}
-              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
-            >
-              <Download className="w-4 h-4" />
-              {withLabel && <span className="ml-1.5">Download Controller</span>}
-            </button>
-          </Tooltip>
-        </>
-      )}
     </div>
   );
 }
