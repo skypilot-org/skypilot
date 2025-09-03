@@ -181,22 +181,6 @@ def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
     return df
 
 
-def _get_df() -> 'pd.DataFrame':
-    global _user_df
-    with _apply_az_mapping_lock:
-        if _user_df is None:
-            try:
-                _user_df = _fetch_and_apply_az_mapping(_default_df)
-            except (RuntimeError, ImportError) as e:
-                if config.get_use_default_catalog_if_failed():
-                    logger.warning('Failed to fetch availability zone mapping. '
-                                   f'{common_utils.format_exception(e)}')
-                    return _default_df
-                else:
-                    raise
-    return _user_df
-
-
 def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
     """Get the quota code based on `instance_type` and `use_spot`.
 
@@ -219,27 +203,25 @@ def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
 
 
 def instance_type_exists(instance_type: str) -> bool:
-    return common.instance_type_exists_impl(_get_df(), instance_type)
+    return True
 
 
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl('aws', _get_df(), region, zone)
+    return region, zone
 
 
 def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
-    return common.get_hourly_cost_impl(_get_df(), instance_type, use_spot,
-                                       region, zone)
+    return 0.0
 
 
 def get_vcpus_mem_from_instance_type(
         instance_type: str) -> Tuple[Optional[float], Optional[float]]:
-    return common.get_vcpus_mem_from_instance_type_impl(_get_df(),
-                                                        instance_type)
+    return None, None
 
 
 def get_default_instance_type(cpus: Optional[str] = None,
@@ -258,17 +240,12 @@ def get_default_instance_type(cpus: Optional[str] = None,
         memory_gb_or_ratio = memory
     instance_type_prefix = tuple(
         f'{family}.' for family in _DEFAULT_INSTANCE_FAMILY)
-    df = _get_df()
-    df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
-    return common.get_instance_type_for_cpus_mem_impl(df, cpus,
-                                                      memory_gb_or_ratio,
-                                                      region, zone)
+    return None
 
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
-    return common.get_accelerators_from_instance_type_impl(
-        _get_df(), instance_type)
+    return None
 
 
 def get_instance_type_for_accelerator(
@@ -286,31 +263,12 @@ def get_instance_type_for_accelerator(
     accelerators/cpus/memory with sorted prices and a list of candidates with
     fuzzy search.
     """
-    return common.get_instance_type_for_accelerator_impl(df=_get_df(),
-                                                         acc_name=acc_name,
-                                                         acc_count=acc_count,
-                                                         cpus=cpus,
-                                                         memory=memory,
-                                                         use_spot=use_spot,
-                                                         region=region,
-                                                         zone=zone)
+    return None, []
 
 
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
-    df = _get_df()
-    df = df[df['InstanceType'] == instance_type]
-    region_list = common.get_region_zones(df, use_spot)
-    # Hack: Enforce US regions are always tried first:
-    #   [US regions sorted by price] + [non-US regions sorted by price]
-    us_region_list = []
-    other_region_list = []
-    for region in region_list:
-        if region.name.startswith('us-'):
-            us_region_list.append(region)
-        else:
-            other_region_list.append(region)
-    return us_region_list + other_region_list
+    return []
 
 
 def list_accelerators(
@@ -323,26 +281,14 @@ def list_accelerators(
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in AWS offering accelerators."""
     del require_price  # Unused.
-    return common.list_accelerators_impl('AWS', _get_df(), gpus_only,
-                                         name_filter, region_filter,
-                                         quantity_filter, case_sensitive,
-                                         all_regions)
+    return {}
 
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
     global _image_df
 
-    image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
-    if image_id is None:
-        # Refresh the image catalog and try again, if the image tag is not
-        # found.
-        logger.debug('Refreshing the image catalog and trying again.')
-        _image_df = common.read_catalog('aws/images.csv',
-                                        pull_frequency_hours=0)
-        image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
-    return image_id
-
+    return None
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     """Returns whether the image tag is valid."""

@@ -34,6 +34,7 @@ import tracemalloc
 import psutil
 import gc
 from collections import defaultdict
+import pandas as pd
 
 import setproctitle
 
@@ -355,6 +356,18 @@ def _restore_output(original_stdout: int, original_stderr: int) -> None:
 def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
+def get_dataframe_true_memory(df: pd.DataFrame) -> int:
+    """
+    Calculates the true memory usage of a DataFrame by summing the
+    .nbytes of its underlying NumPy arrays (blocks).
+    This is often a more accurate representation of the C-level memory
+    than df.memory_usage().
+    """
+    # Using the internal BlockManager is the most direct way to get the
+    # underlying NumPy arrays without double-counting memory.
+    # Each 'block' in the manager holds one or more columns as a single NumPy array.
+    return sum(block.values.nbytes for block in df._mgr.blocks)
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool) -> None:
     """Wrapper for a request execution.
@@ -649,7 +662,6 @@ def _request_execution_wrapper(request_id: str,
             try:
                 # Check if pandas is imported and analyze its memory usage
                 if 'pandas' in sys.modules:
-                    import pandas as pd
                     logger.info(f"Pandas version: {pd.__version__}")
                     
                     # Check pandas configuration that might affect memory
@@ -673,14 +685,17 @@ def _request_execution_wrapper(request_id: str,
                                             total_mem = memory_usage.sum()
                                         else:
                                             total_mem = memory_usage
+                                        total_mem_numpy = 0
+                                        if isinstance(obj, pd.DataFrame):
+                                            total_mem_numpy = get_dataframe_true_memory(obj)
                                         
-                                        if total_mem > 10 * 1024 * 1024:  # >10MB
-                                            pandas_objects.append({
-                                                'type': type(obj).__name__,
-                                                'shape': getattr(obj, 'shape', 'N/A'),
-                                                'memory_mb': total_mem / 1024 / 1024,
-                                                'dtypes': str(getattr(obj, 'dtypes', 'N/A'))[:100]
-                                            })
+                                        pandas_objects.append({
+                                            'type': type(obj).__name__,
+                                            'shape': getattr(obj, 'shape', 'N/A'),
+                                            'memory_mb': total_mem / 1024 / 1024,
+                                            'memory_mb_numpy': total_mem_numpy / 1024 / 1024,
+                                            'dtypes': str(getattr(obj, 'dtypes', 'N/A'))[:100]
+                                        })
                                     except:
                                         pass
                             except:
@@ -690,7 +705,7 @@ def _request_execution_wrapper(request_id: str,
                             logger.info(f"Found {len(pandas_objects)} large pandas objects:")
                             for i, obj_info in enumerate(pandas_objects[:10]):  # Show top 10
                                 logger.info(f"  {i+1}. {obj_info['type']} shape={obj_info['shape']} "
-                                          f"memory={obj_info['memory_mb']:.2f}MB dtypes={obj_info['dtypes']}")
+                                          f"memory={obj_info['memory_mb']:.2f}MB numpy={obj_info['memory_mb_numpy']:.2f}MB dtypes={obj_info['dtypes']}")
                         else:
                             logger.info("No large pandas objects found in current scope")
                             
