@@ -37,6 +37,27 @@ _GOOFYS_WRAPPER = ('$(if [ -S /dev/log ] ; then '
                    'echo "goofys --log-file $(mktemp -t goofys.XXXX.log)"; '
                    'fi)')
 
+def get_rclone_install_cmd() -> str:
+    """ RClone installation for both apt-get and rpm.
+    This would be common command.
+    """
+    # pylint: disable=line-too-long
+    install_cmd = (
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        '  ARCH_SUFFIX="arm64"; '
+        'else '
+        '  ARCH_SUFFIX="amd64"; '
+        'fi && '
+        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
+        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
+        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
+    return install_cmd
 
 def get_s3_mount_install_cmd() -> str:
     """Returns command for basic S3 mounting (goofys by default, rclone for
@@ -47,18 +68,7 @@ def get_s3_mount_install_cmd() -> str:
         'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
         # Use rclone for ARM64 since goofys doesn't support it
         # Extract core rclone installation logic without redundant ARCH check
-        '  ARCH_SUFFIX="arm" && '
-        f'  (which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || '
-        f'(cd ~ > /dev/null && curl -O https://downloads.rclone.org/'
-        f'{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb '
-        f'&& sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb '
-        f'&& rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb))) || '
-        f'(which rclone > /dev/null || (cd ~ > /dev/null && curl -O '
-        f'https://downloads.rclone.org/{RCLONE_VERSION}/'
-        f'rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm && '
-        f'sudo yum --nogpgcheck install '
-        f'rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y && '
-        f'rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm)); '
+        f'  {get_rclone_install_cmd()}; '
         'else '
         '  sudo wget -nc https://github.com/aylei/goofys/'
         'releases/download/0.24.0-aylei-upstream/goofys '
@@ -391,28 +401,6 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         '> /dev/null 2>&1')
     return mount_cmd
 
-
-def get_rclone_install_cmd() -> str:
-    """ RClone installation for both apt-get and rpm.
-    This would be common command.
-    """
-    # pylint: disable=line-too-long
-    install_cmd = (
-        'ARCH=$(uname -m) && '
-        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-        '  ARCH_SUFFIX="arm"; '
-        'else '
-        '  ARCH_SUFFIX="amd64"; '
-        'fi && '
-        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
-        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
-        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
-        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
-    return install_cmd
 
 
 def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,

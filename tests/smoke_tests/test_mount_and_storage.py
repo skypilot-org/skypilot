@@ -75,6 +75,23 @@ def test_file_mounts(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.aws
+def test_aws_arm64_file_mounts():
+    name = smoke_tests_utils.get_cluster_name()
+    test_commands = [
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        f'sky launch -y -c {name} --infra aws/us-west-2 --image-id ami-03ac43540bf1c63c0 -t t4g.large examples/using_file_mounts.yaml',
+        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+    ]
+    test = smoke_tests_utils.Test(
+        'aws_arm64_using_file_mounts',
+        test_commands,
+        f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.scp
 def test_scp_file_mounts():
     name = smoke_tests_utils.get_cluster_name()
