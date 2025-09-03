@@ -4,6 +4,8 @@ import contextlib
 import logging
 import os
 import pathlib
+import threading
+from typing import Dict, Optional
 
 from alembic import command as alembic_command
 from alembic.config import Config
@@ -19,7 +21,7 @@ logger = sky_logging.init_logger(__name__)
 DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
-GLOBAL_USER_STATE_VERSION = '006'
+GLOBAL_USER_STATE_VERSION = '007'
 GLOBAL_USER_STATE_LOCK_PATH = '~/.sky/locks/.state_db.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
@@ -30,18 +32,32 @@ SERVE_DB_NAME = 'serve_db'
 SERVE_VERSION = '001'
 SERVE_LOCK_PATH = '~/.sky/locks/.serve_db.lock'
 
+_postgres_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
+_sqlite_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
 
-def get_engine(db_name: str):
+_db_creation_lock = threading.Lock()
+
+
+def get_engine(db_name: str,
+               pg_pool_class: Optional[sqlalchemy.pool.Pool] = None):
     conn_string = None
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
-        engine = sqlalchemy.create_engine(conn_string,
-                                          poolclass=sqlalchemy.NullPool)
+        if pg_pool_class is None:
+            pg_pool_class = sqlalchemy.NullPool
+        with _db_creation_lock:
+            if conn_string not in _postgres_engine_cache:
+                _postgres_engine_cache[conn_string] = sqlalchemy.create_engine(
+                    conn_string, poolclass=pg_pool_class)
+            engine = _postgres_engine_cache[conn_string]
     else:
         db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
-        engine = sqlalchemy.create_engine('sqlite:///' + db_path)
+        if db_path not in _sqlite_engine_cache:
+            _sqlite_engine_cache[db_path] = sqlalchemy.create_engine(
+                'sqlite:///' + db_path)
+        engine = _sqlite_engine_cache[db_path]
     return engine
 
 
