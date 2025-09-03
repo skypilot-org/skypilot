@@ -6,6 +6,7 @@ envs:
   STABLE_BUILD_API:
   META_LB_POLICY: prefix_tree
   LB_POLICY: prefix_tree
+  REPLICAS:
 
 service:
   readiness_probe:
@@ -45,7 +46,7 @@ setup: |
   # Parallel the installation and download the model.
   uv pip install -i https://$STABLE_BUILD_API.pypimirror.stablebuild.com/2025-08-22/ \
     sgl-kernel==0.0.8
-  uv pip install setuptools==79.0.0 "sglang[all]==0.4.5" \
+  uv pip install "torchao<0.13.0" setuptools==79.0.0 "sglang[all]==0.4.5" \
     --find-links https://flashinfer.ai/whl/cu124/torch2.5/flashinfer-python &
   huggingface-cli download $MODEL_NAME \
     --max-workers 32 \

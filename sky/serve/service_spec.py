@@ -122,11 +122,11 @@ class SkyServiceSpec:
                                                  ' a public hosted zone.')
                         target_hosted_zone_id = hz['Id']
                         break
-                if target_hosted_zone_id is None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'route53_hosted_zone ({route53_hosted_zone}) '
-                            'not found.')
+                # if target_hosted_zone_id is None:
+                #     with ux_utils.print_exception_no_traceback():
+                #         raise ValueError(
+                #             f'route53_hosted_zone ({route53_hosted_zone}) '
+                #             'not found.')
                 self._target_hosted_zone_id = target_hosted_zone_id
                 print(f'Found hosted zone: {route53_hosted_zone} with ID: '
                       f'{target_hosted_zone_id}.')
