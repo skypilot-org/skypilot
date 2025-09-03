@@ -120,7 +120,7 @@ export async function getCloudInfrastructure(
  * Main function to get all infrastructure data.
  * Uses cached data from clusters and jobs to avoid redundant API calls.
  */
-export async function getInfraData(forceRefresh = false) {
+export async function getInfraData(forceRefresh = true) {
   // Import here to avoid circular dependencies
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
