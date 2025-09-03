@@ -32,6 +32,8 @@ import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 import tracemalloc
 import psutil
+import gc
+from typing import Dict
 
 import setproctitle
 
@@ -353,6 +355,26 @@ def _restore_output(original_stdout: int, original_stderr: int) -> None:
 def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
+def memory_breakdown(pid=None):
+    pid = pid or os.getpid()
+    p = psutil.Process(pid)
+    stats: Dict[str, int] = {}
+
+    for m in p.memory_maps(grouped=False):
+        if m.path.startswith("[heap]"):
+            stats["heap"] += m.rss
+        elif m.path.startswith("[stack]"):
+            stats["stack"] += m.rss
+        elif m.path.startswith("[anon]"):
+            stats["anonymous mmap"] += m.rss
+        elif m.path.endswith(".so") or m.path.endswith(".dll") or m.path.endswith(".dylib"):
+            stats["shared libs"] += m.rss
+        else:
+            stats["other"] += m.rss
+
+    total = sum(stats.values())
+    return {k: f"{v/1024/1024:.2f} MB" for k, v in stats.items()}, f"{total/1024/1024:.2f} MB"
+
 
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool) -> None:
@@ -439,6 +461,17 @@ def _request_execution_wrapper(request_id: str,
                 logger.info(stat)
             prc = psutil.Process(pid)
             logger.info(f'RSS: {prc.memory_info().rss / 1024 / 1024} MB for {pid}\n')
+            current, peak = tracemalloc.get_traced_memory()
+            print(f"Current heap size: {current / 1024 / 1024:.2f} MB for {pid}\n")
+            print(f"Peak heap size: {peak / 1024 / 1024:.2f} MB for {pid}\n")
+            heap_size = sum(sys.getsizeof(obj) for obj in gc.get_objects())
+            print(f"Approx heap size: {heap_size / 1024 / 1024:.2f} MB before GC for {pid}\n")
+            gc.collect()
+            heap_size = sum(sys.getsizeof(obj) for obj in gc.get_objects())
+            print(f"Approx heap size: {heap_size / 1024 / 1024:.2f} MB after GC for {pid}\n")
+            breakdown, total = memory_breakdown()
+            print("Mem Breakdown:", breakdown)
+            print("Total RSS:", total)
 
 async def execute_request_coroutine(request: api_requests.Request):
     """Execute a request in current event loop.
