@@ -85,8 +85,8 @@ jobs:
           - tests/test_jobs_and_serve.py tests/test_cli.py
         include:
           - test-path: tests/test_jobs_and_serve.py tests/test_cli.py
-            test-name: "Limited Deps - Jobs, Serve & CLI (${{ matrix.python-version }})"
-    name: "Python Tests - ${{ matrix.test-name }}"
+            test-name: "Limited Deps - Jobs, Serve & CLI"
+    name: "Python Tests - ${{ matrix.test-name }} (${{ matrix.python-version }})"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
