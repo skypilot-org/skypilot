@@ -72,6 +72,7 @@ from sky.utils import dag_utils
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.utils.db import db_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
 
@@ -1931,6 +1932,28 @@ if __name__ == '__main__':
     usage_lib.maybe_show_privacy_policy()
 
     config = server_config.compute_server_config(cmd_args.deploy)
+
+    max_db_connections = global_user_state.get_max_db_connections()
+    if max_db_connections is not None:
+        apisrv_max_connections = global_user_state.get_max_engine_connections(
+        ) * config.num_server_workers
+        executor_max_connections = max_db_connections - apisrv_max_connections
+
+        max_short_executors = (
+            config.short_worker_config.garanteed_parallelism +
+            config.short_worker_config.burstable_parallelism)
+        max_long_executors = (config.long_worker_config.garanteed_parallelism +
+                              config.long_worker_config.burstable_parallelism)
+        max_executors = max_short_executors + max_long_executors
+        conns_per_executor = executor_max_connections // max_executors
+        print(f'API server s co: {config.short_worker_config}')
+        print(f'Max connections: {max_db_connections}')
+        print(f'Max executors: {max_executors}')
+        print(f'Max executor connections: {executor_max_connections}')
+        print(f'Max short executors: {max_short_executors}')
+        print(f'Max long executors: {max_long_executors}')
+        print(f'Connections per executor: {conns_per_executor}')
+
     num_workers = config.num_server_workers
 
     queue_server: Optional[multiprocessing.Process] = None

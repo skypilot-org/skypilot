@@ -71,7 +71,7 @@ class ServerConfig:
     queue_backend: QueueBackend
 
 
-def compute_server_config(deploy: bool) -> ServerConfig:
+def compute_server_config(deploy: bool, max_db_connections: Optional[int]) -> ServerConfig:
     """Compute the server config based on environment.
 
     We have different assumptions for the resources in different deployment

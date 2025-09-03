@@ -277,6 +277,14 @@ def drop_column_from_table_alembic(
             raise
 
 
+def get_max_connections(engine: sqlalchemy.engine.Engine) -> Optional[int]:
+    """Get the maximum number of connections for the engine."""
+    if engine.dialect.name == SQLAlchemyDialect.SQLITE.value:
+        return None
+    with sqlalchemy.orm.Session(engine) as session:
+        return session.execute(sqlalchemy.text('SHOW max_connections')).scalar()
+
+
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
