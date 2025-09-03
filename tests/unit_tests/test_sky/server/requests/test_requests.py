@@ -730,9 +730,10 @@ async def test_get_request_tasks_concurrent_access(isolated_database):
             for i in range(len(result_set) - 1):
                 assert result_set[i].created_at >= result_set[i + 1].created_at
 
+
 def test_requests_filter():
     """Test RequestTaskFilter.build_query() generates correct SQL."""
-    
+
     # Test empty filter - should return base query with no WHERE clause
     filter_empty = requests.RequestTaskFilter()
     sql, params = filter_empty.build_query()
@@ -805,8 +806,7 @@ def test_requests_filter():
         cluster_names=['prod-cluster'],
         user_id='admin-user',
         exclude_request_names=['internal-task'],
-        finished_before=9876543210.0
-    )
+        finished_before=9876543210.0)
     sql, params = filter_combined.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE status IN (\'SUCCEEDED\',\'FAILED\') AND '
@@ -818,17 +818,13 @@ def test_requests_filter():
     assert params == ['admin-user', 9876543210.0]
 
     # Test mutually exclusive filters raise ValueError
-    with pytest.raises(ValueError, 
-                        match='Only one of exclude_request_names'):
-        requests.RequestTaskFilter(
-            exclude_request_names=['req1'],
-            include_request_names=['req2']
-        )
+    with pytest.raises(ValueError, match='Only one of exclude_request_names'):
+        requests.RequestTaskFilter(exclude_request_names=['req1'],
+                                   include_request_names=['req2'])
 
     # Test special characters in names are properly escaped with repr()
     filter_special_chars = requests.RequestTaskFilter(
-        cluster_names=['cluster\'with\'quotes', 
-                       'cluster\"with\"double'])
+        cluster_names=['cluster\'with\'quotes', 'cluster\"with\"double'])
     sql, params = filter_special_chars.build_query()
     # repr() should properly escape the quotes
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
@@ -836,4 +832,3 @@ def test_requests_filter():
                     '\'cluster\"with\"double\') ORDER BY created_at DESC')
     assert sql == expected_sql
     assert params == []
-
