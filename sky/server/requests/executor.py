@@ -593,67 +593,174 @@ def _request_execution_wrapper(request_id: str,
                     try:
                         path = getattr(mmap, 'path', 'N/A')
                         rss = getattr(mmap, 'rss', 0)
+                        size = getattr(mmap, 'size', 0)
+                        private_dirty = getattr(mmap, 'private_dirty', 0)
+                        private_clean = getattr(mmap, 'private_clean', 0)
+                        
                         logger.info(f"  {i+1}. Path: {path}, RSS: {rss/1024/1024:.2f} MB, "
-                                  f"Attrs: {[attr for attr in dir(mmap) if not attr.startswith('_')]}")
+                                  f"Size: {size/1024/1024:.2f} MB")
+                        
+                        # For large anonymous regions, show detailed breakdown
+                        if path == '[anon]' and rss > 50 * 1024 * 1024:  # >50MB
+                            logger.info(f"    *** LARGE ANON REGION DETAILS ***")
+                            logger.info(f"    Private dirty: {private_dirty/1024/1024:.2f} MB (actively written)")
+                            logger.info(f"    Private clean: {private_clean/1024/1024:.2f} MB (read-only/cached)")
+                            logger.info(f"    Virtual size: {size/1024/1024:.2f} MB")
+                            logger.info(f"    RSS usage: {rss/1024/1024:.2f} MB")
+                            
                     except Exception as e:
                         logger.info(f"  {i+1}. Error reading mmap: {e}")
+                
+                # Detailed pandas/numpy library analysis
+                logger.info("=== Pandas/NumPy Library Memory Analysis ===")
+                
+                # Analyze all pandas-related memory
+                pandas_maps = [mmap for mmap in memory_maps if 'pandas' in getattr(mmap, 'path', '')]
+                total_pandas_rss = sum(getattr(mmap, 'rss', 0) for mmap in pandas_maps)
+                total_pandas_size = sum(getattr(mmap, 'size', 0) for mmap in pandas_maps)
+                
+                logger.info(f"Pandas libraries count: {len(pandas_maps)}")
+                logger.info(f"Total Pandas RSS: {total_pandas_rss/1024/1024:.2f} MB")
+                logger.info(f"Total Pandas virtual size: {total_pandas_size/1024/1024:.2f} MB")
+                
+                # Show top pandas libraries by memory usage
+                pandas_sorted = sorted(pandas_maps, key=lambda x: getattr(x, 'rss', 0), reverse=True)
+                logger.info("Top 5 Pandas libraries by RSS:")
+                for i, mmap in enumerate(pandas_sorted[:5]):
+                    path = getattr(mmap, 'path', '')
+                    rss = getattr(mmap, 'rss', 0)
+                    lib_name = path.split('/')[-1] if '/' in path else path
+                    logger.info(f"  {i+1}. {lib_name}: {rss/1024/1024:.2f} MB")
+                
+                # Analyze numpy if present
+                numpy_maps = [mmap for mmap in memory_maps if 'numpy' in getattr(mmap, 'path', '')]
+                if numpy_maps:
+                    total_numpy_rss = sum(getattr(mmap, 'rss', 0) for mmap in numpy_maps)
+                    logger.info(f"NumPy libraries RSS: {total_numpy_rss/1024/1024:.2f} MB")
+                else:
+                    logger.info("No NumPy libraries found in memory maps")
                     
             except (AttributeError, psutil.AccessDenied) as e:
                 logger.info(f"Memory maps analysis not available: {e}")
             
-
+            # Add detailed pandas/numpy runtime analysis
+            logger.info("=== Pandas/NumPy Runtime Memory Analysis ===")
             
-            # 5. Python memory breakdown by domain
-            top_stats_by_domain = snapshot.statistics('filename')
-            total_python_memory = sum(stat.size for stat in top_stats_by_domain)
-            logger.info(f"Total Python objects: {total_python_memory / 1024 / 1024:.2f} MB")
-            
-            # 6. Garbage collection stats
-            gc_stats = gc.get_stats()
-            logger.info(f"GC generations: {[gen['collections'] for gen in gc_stats]}")
-            logger.info(f"GC objects count: {sum(gc.get_count())}")
-            
-            # 7. Calculate unaccounted memory
-            unaccounted = memory_info.rss - current
-            logger.info(f"Unaccounted memory (RSS - Python heap): {unaccounted / 1024 / 1024:.2f} MB")
-            
-            # 8. Top memory consuming Python modules
-            logger.info("Top 10 Python modules by memory usage:")
-            top_files = snapshot.statistics('filename')[:10]
-            for index, stat in enumerate(top_files):
-                logger.info(f"  {index + 1}. {stat.traceback.format()}: {stat.size / 1024 / 1024:.2f} MB")
-            
-            # 9. Additional anonymous memory investigation
             try:
-                # Check for loaded modules that might allocate large amounts of memory
-                import sys
-                large_memory_modules = [
-                    'numpy', 'torch', 'tensorflow', 'pandas', 'scipy', 
-                    'sklearn', 'cv2', 'PIL', 'matplotlib'
-                ]
-                
-                loaded_large_modules = []
-                for module_name in large_memory_modules:
-                    if module_name in sys.modules:
-                        loaded_large_modules.append(module_name)
-                
-                if loaded_large_modules:
-                    logger.info(f"Loaded memory-intensive modules: {loaded_large_modules}")
+                # Check if pandas is imported and analyze its memory usage
+                if 'pandas' in sys.modules:
+                    import pandas as pd
+                    logger.info(f"Pandas version: {pd.__version__}")
                     
-                # Check thread count (each thread has its own stack)
-                thread_count = prc.num_threads()
-                estimated_stack_memory = thread_count * 8  # Assume 8MB per thread stack
-                logger.info(f"Thread count: {thread_count}, "
-                          f"Estimated stack memory: {estimated_stack_memory:.2f} MB")
+                    # Check pandas configuration that might affect memory
+                    try:
+                        # Get pandas options that affect memory usage
+                        logger.info("Pandas memory-related options:")
+                        logger.info(f"  display.memory_usage: {pd.get_option('display.memory_usage')}")
+                        logger.info(f"  compute.use_bottleneck: {pd.get_option('compute.use_bottleneck')}")
+                        logger.info(f"  compute.use_numba: {pd.get_option('compute.use_numba')}")
+                        
+                        # Try to detect large pandas objects in memory (limited scope)
+                        # Note: We can't access all namespaces, but we can check some globals
+                        pandas_objects = []
+                        for obj in gc.get_objects():
+                            try:
+                                if isinstance(obj, (pd.DataFrame, pd.Series)):
+                                    # Get approximate memory usage
+                                    try:
+                                        memory_usage = obj.memory_usage(deep=True)
+                                        if hasattr(memory_usage, 'sum'):
+                                            total_mem = memory_usage.sum()
+                                        else:
+                                            total_mem = memory_usage
+                                        
+                                        if total_mem > 10 * 1024 * 1024:  # >10MB
+                                            pandas_objects.append({
+                                                'type': type(obj).__name__,
+                                                'shape': getattr(obj, 'shape', 'N/A'),
+                                                'memory_mb': total_mem / 1024 / 1024,
+                                                'dtypes': str(getattr(obj, 'dtypes', 'N/A'))[:100]
+                                            })
+                                    except:
+                                        pass
+                            except:
+                                pass
+                        
+                        if pandas_objects:
+                            logger.info(f"Found {len(pandas_objects)} large pandas objects:")
+                            for i, obj_info in enumerate(pandas_objects[:10]):  # Show top 10
+                                logger.info(f"  {i+1}. {obj_info['type']} shape={obj_info['shape']} "
+                                          f"memory={obj_info['memory_mb']:.2f}MB dtypes={obj_info['dtypes']}")
+                        else:
+                            logger.info("No large pandas objects found in current scope")
+                            
+                    except Exception as e:
+                        logger.info(f"Pandas detailed analysis failed: {e}")
+                else:
+                    logger.info("Pandas not imported")
                 
+                # Check numpy memory usage
+                if 'numpy' in sys.modules:
+                    import numpy as np
+                    logger.info(f"NumPy version: {np.__version__}")
+                    
+                    try:
+                        # Check for large numpy arrays
+                        numpy_arrays = []
+                        for obj in gc.get_objects():
+                            try:
+                                if isinstance(obj, np.ndarray):
+                                    size_bytes = obj.nbytes
+                                    if size_bytes > 10 * 1024 * 1024:  # >10MB
+                                        numpy_arrays.append({
+                                            'shape': obj.shape,
+                                            'dtype': str(obj.dtype),
+                                            'size_mb': size_bytes / 1024 / 1024
+                                        })
+                            except:
+                                pass
+                        
+                        if numpy_arrays:
+                            logger.info(f"Found {len(numpy_arrays)} large numpy arrays:")
+                            for i, arr_info in enumerate(numpy_arrays[:10]):
+                                logger.info(f"  {i+1}. shape={arr_info['shape']} dtype={arr_info['dtype']} "
+                                          f"size={arr_info['size_mb']:.2f}MB")
+                        else:
+                            logger.info("No large numpy arrays found in current scope")
+                            
+                    except Exception as e:
+                        logger.info(f"NumPy analysis failed: {e}")
+                else:
+                    logger.info("NumPy not imported")
                 
+                # Check for other common memory-heavy libraries
+                logger.info("=== Other Memory-Heavy Libraries ===")
+                other_libs = {
+                    'sklearn': 'scikit-learn',
+                    'scipy': 'SciPy', 
+                    'torch': 'PyTorch',
+                    'tensorflow': 'TensorFlow'
+                }
+                
+                for lib_name, display_name in other_libs.items():
+                    if lib_name in sys.modules:
+                        try:
+                            lib = sys.modules[lib_name]
+                            version = getattr(lib, '__version__', 'unknown')
+                            logger.info(f"{display_name} {version} is loaded")
+                            
+                            # Check for library-specific memory maps
+                            lib_maps = [mmap for mmap in memory_maps if lib_name in getattr(mmap, 'path', '')]
+                            if lib_maps:
+                                lib_rss = sum(getattr(mmap, 'rss', 0) for mmap in lib_maps)
+                                logger.info(f"  {display_name} library RSS: {lib_rss/1024/1024:.2f} MB")
+                        except Exception as e:
+                            logger.info(f"{display_name} version check failed: {e}")
+                    
             except Exception as e:
-                logger.info(f"Additional memory analysis failed: {e}")
-            
-            logger.info("=== End Memory Analysis ===\n")
-            
+                logger.info(f"Runtime analysis failed: {e}")
 
-
+            
             gc.collect()
 
 async def execute_request_coroutine(request: api_requests.Request):
