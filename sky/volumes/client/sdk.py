@@ -40,7 +40,8 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
                 },
             }
             vol = sky.volumes.Volume.from_yaml_config(cfg)
-            sky.volumes.apply(vol)
+            request_id = sky.volumes.apply(vol)
+            sky.get(request_id)
 
             or
 
@@ -51,7 +52,8 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
                 infra="runpod/ca/CA-MTL-1",
                 size="100GB",
             )
-            sky.volumes.apply(vol)
+            request_id = sky.volumes.apply(vol)
+            sky.get(request_id)
 
     Args:
         volume: The volume to apply.
