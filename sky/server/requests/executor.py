@@ -354,18 +354,6 @@ def _restore_output(original_stdout: int, original_stderr: int) -> None:
 def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
-def get_dataframe_true_memory(df: pd.DataFrame) -> int:
-    """
-    Calculates the true memory usage of a DataFrame by summing the
-    .nbytes of its underlying NumPy arrays (blocks).
-    This is often a more accurate representation of the C-level memory
-    than df.memory_usage().
-    """
-    # Using the internal BlockManager is the most direct way to get the
-    # underlying NumPy arrays without double-counting memory.
-    # Each 'block' in the manager holds one or more columns as a single NumPy array.
-    return sum(block.values.nbytes for block in df._mgr.blocks)
-
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool) -> None:
     """Wrapper for a request execution.
