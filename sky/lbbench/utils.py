@@ -28,7 +28,7 @@ def sky_serve_status() -> List[Dict[str, Any]]:
 
 
 def sky_status() -> List[Dict[str, Any]]:
-    req = sky.status()
+    req = sky.status(all_users=True)  # Include all users to find the controller
     return sky.client.sdk.get(req)
 
 

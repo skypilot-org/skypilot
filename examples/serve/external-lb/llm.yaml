@@ -10,7 +10,7 @@ envs:
 service:
   readiness_probe:
     path: /v1/models
-  replicas: 3
+  replicas: $REPLICAS
   route53_hosted_zone: aws.cblmemo.net
   load_balancing_policy: $META_LB_POLICY
   external_load_balancers:

@@ -59,6 +59,7 @@ def _run_cmd(cmd: str):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--service-names', type=str, nargs='+', required=True)
+    parser.add_argument('--yes', '-y', action='store_true', default=False)
     args = parser.parse_args()
     sns = args.service_names
     if len(sns) != len(enabled_systems):
@@ -84,7 +85,9 @@ def main() -> None:
     commands = [_get_single_cmd(i) for i in enabled_systems]
     for cmd in commands:
         print(cmd)
-    input('Press Enter to launch LBs...')
+    if not args.yes:
+        input('Press Enter to launch LBs...')
+    print('\nLaunching load balancers...\n')
 
     processes: List[multiprocessing.Process] = []
     for cmd in commands:

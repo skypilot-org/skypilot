@@ -96,8 +96,8 @@ def _fill_in_env_vars(
                   content: How to print hello world?
               max_tokens: 1
 
-    We simply dump yaml_field into a json string, and replace env vars using
-    regex. This should be safe as yaml config has been schema-validated.
+    This function recursively processes the YAML structure and replaces
+    environment variables while preserving data types.
 
     Env vars of the following forms are detected:
         - ${ENV}
@@ -105,17 +105,53 @@ def _fill_in_env_vars(
     where <ENV> must appear in task.envs.
     """
     # TODO(zongheng): support ${ENV:-default}?
-    yaml_field_str = json.dumps(yaml_field)
-
-    def replace_var(match):
-        var_name = match.group(1)
-        # If the variable isn't in the dictionary, return it unchanged
-        return task_envs.get(var_name, match.group(0))
-
-    # Pattern for valid env var names in bash.
-    pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
-    yaml_field_str = re.sub(pattern, replace_var, yaml_field_str)
-    return json.loads(yaml_field_str)
+    
+    def _replace_env_vars_in_value(value: Any) -> Any:
+        """Recursively replace env vars in a value while preserving types."""
+        if isinstance(value, str):
+            # Pattern for valid env var names in bash.
+            pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
+            
+            # Check if the entire value is a single env var
+            matches = list(re.finditer(pattern, value))
+            if len(matches) == 1 and matches[0].group(0) == value:
+                # Entire value is a single env var, try type conversion
+                var_name = matches[0].group(1)
+                if var_name in task_envs:
+                    env_value = task_envs[var_name]
+                    # Try to convert to appropriate type
+                    try:
+                        # Try int first
+                        return int(env_value)
+                    except ValueError:
+                        try:
+                            # Try float
+                            return float(env_value)
+                        except ValueError:
+                            # Try boolean
+                            if env_value.lower() in ('true', 'false'):
+                                return env_value.lower() == 'true'
+                            # Keep as string
+                            return env_value
+                else:
+                    # Variable not found, return unchanged
+                    return value
+            else:
+                # Multiple replacements or partial replacement, do string substitution
+                def replace_var(match):
+                    var_name = match.group(1)
+                    return task_envs.get(var_name, match.group(0))
+                
+                return re.sub(pattern, replace_var, value)
+        elif isinstance(value, dict):
+            return {k: _replace_env_vars_in_value(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [_replace_env_vars_in_value(item) for item in value]
+        else:
+            # Keep other types (int, float, bool, None) unchanged
+            return value
+    
+    return _replace_env_vars_in_value(yaml_field)
 
 
 def _check_docker_login_config(task_envs: Dict[str, str]) -> bool:
@@ -446,8 +482,6 @@ class Task:
                 else:
                     new_envs[str(k)] = None
             config['envs'] = new_envs
-        common_utils.validate_schema(config, schemas.get_task_schema(),
-                                     'Invalid task YAML: ')
         if env_overrides is not None:
             # We must override env vars before constructing the Task, because
             # the Storage object creation is eager and it (its name/source
@@ -483,6 +517,10 @@ class Task:
         if config.get('workdir') is not None:
             config['workdir'] = _fill_in_env_vars(config['workdir'],
                                                   config.get('envs', {}))
+
+        # Validate schema AFTER environment variable substitution
+        common_utils.validate_schema(config, schemas.get_task_schema(),
+                                     'Invalid task YAML: ')
 
         task = Task(
             config.pop('name', None),
