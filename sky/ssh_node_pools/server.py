@@ -14,6 +14,10 @@ from sky.utils import common_utils
 router = fastapi.APIRouter()
 
 
+# Most of the handlers in /ssh_node_pools are sync to get fastAPI run it in a
+# ThreadPoolExecutor to avoid blocking the async event loop.
+# TODO(aylei): make these async once we have the ssh_node_pools operation async
+# support.
 @router.get('')
 def get_ssh_node_pools() -> Dict[str, Any]:
     """Get all SSH Node Pool configurations."""

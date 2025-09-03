@@ -78,6 +78,8 @@ class SSHConfigHelper(object):
               StrictHostKeyChecking no
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
+              ServerAliveInterval 30
+              ServerAliveCountMax 3
               Port {port}
               {proxy}
             """.rstrip())
