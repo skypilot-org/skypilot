@@ -355,7 +355,7 @@ def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
 
 
 def _request_execution_wrapper(request_id: str, ignore_return_value: bool,
-                               num_db_connections_per_worker: int) -> None:
+                               num_db_connections_per_worker: int = 0) -> None:
     """Wrapper for a request execution.
 
     It wraps the execution of a request to:
