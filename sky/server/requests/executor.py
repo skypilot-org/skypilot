@@ -480,42 +480,74 @@ def _request_execution_wrapper(request_id: str,
                 logger.info("=== Detailed Anonymous Memory Analysis ===")
                 large_regions = []
                 
+                # Check the structure of memory_maps first
+                sample_mmap = memory_maps[0] if memory_maps else None
+                has_addr = hasattr(sample_mmap, 'addr') if sample_mmap else False
+                has_size = hasattr(sample_mmap, 'size') if sample_mmap else False
+                has_perms = hasattr(sample_mmap, 'perms') if sample_mmap else False
+                
+                logger.info(f"Memory maps structure - addr: {has_addr}, size: {has_size}, perms: {has_perms}")
+                
                 for mmap in memory_maps:
-                    if '[heap]' in mmap.path:
-                        heap_memory += mmap.rss
-                    elif '[stack]' in mmap.path:
-                        stack_memory += mmap.rss
-                    elif '.so' in mmap.path or '.dylib' in mmap.path:
-                        shared_lib_memory += mmap.rss
-                    elif mmap.path == '' or mmap.path.startswith('['):
-                        anonymous_memory += mmap.rss
+                    # Handle different memory map structures across platforms
+                    try:
+                        path = getattr(mmap, 'path', '')
+                        rss = getattr(mmap, 'rss', 0)
                         
-                        # Categorize anonymous memory
-                        size_mb = mmap.rss / 1024 / 1024
-                        
-                        if size_mb > 10:
-                            anonymous_categories['large_anonymous'] += mmap.rss
-                            large_regions.append({
-                                'size': size_mb,
-                                'addr': f"{hex(mmap.addr)}-{hex(mmap.addr + mmap.size)}",
-                                'perms': mmap.perms,
-                                'path': mmap.path
-                            })
-                        elif size_mb > 1:
-                            anonymous_categories['medium_anonymous'] += mmap.rss
-                        else:
-                            anonymous_categories['small_anonymous'] += mmap.rss
+                        if '[heap]' in path:
+                            heap_memory += rss
+                        elif '[stack]' in path:
+                            stack_memory += rss
+                        elif '.so' in path or '.dylib' in path:
+                            shared_lib_memory += rss
+                        elif path == '' or path.startswith('['):
+                            anonymous_memory += rss
                             
-                        # Try to identify Python memory arenas
-                        # Python typically allocates in 256KB chunks
-                        if 0.2 <= size_mb <= 0.3:  # ~256KB regions
-                            anonymous_categories['python_arenas'] += mmap.rss
-                        
-                        # Check for mmap'd regions (typically have specific permissions)
-                        if 'r' in mmap.perms and 'w' in mmap.perms and 'x' not in mmap.perms:
-                            anonymous_categories['mmap_anonymous'] += mmap.rss
-                        else:
-                            anonymous_categories['other_anonymous'] += mmap.rss
+                            # Categorize anonymous memory
+                            size_mb = rss / 1024 / 1024
+                            
+                            if size_mb > 10:
+                                anonymous_categories['large_anonymous'] += rss
+                                
+                                # Try to get address info if available
+                                addr_info = "unknown"
+                                if has_addr and has_size:
+                                    try:
+                                        addr_info = f"{hex(mmap.addr)}-{hex(mmap.addr + mmap.size)}"
+                                    except:
+                                        addr_info = f"addr={getattr(mmap, 'addr', 'N/A')}"
+                                
+                                perms_info = getattr(mmap, 'perms', 'unknown')
+                                
+                                large_regions.append({
+                                    'size': size_mb,
+                                    'addr': addr_info,
+                                    'perms': perms_info,
+                                    'path': path
+                                })
+                            elif size_mb > 1:
+                                anonymous_categories['medium_anonymous'] += rss
+                            else:
+                                anonymous_categories['small_anonymous'] += rss
+                                
+                            # Try to identify Python memory arenas
+                            # Python typically allocates in 256KB chunks
+                            if 0.2 <= size_mb <= 0.3:  # ~256KB regions
+                                anonymous_categories['python_arenas'] += rss
+                            
+                            # Check for mmap'd regions (if perms available)
+                            if has_perms:
+                                perms = getattr(mmap, 'perms', '')
+                                if 'r' in perms and 'w' in perms and 'x' not in perms:
+                                    anonymous_categories['mmap_anonymous'] += rss
+                                else:
+                                    anonymous_categories['other_anonymous'] += rss
+                            else:
+                                anonymous_categories['other_anonymous'] += rss
+                                
+                    except Exception as e:
+                        logger.info(f"Error processing memory map entry: {e}")
+                        continue
                 
                 logger.info(f"Native heap memory: {heap_memory / 1024 / 1024:.2f} MB")
                 logger.info(f"Stack memory: {stack_memory / 1024 / 1024:.2f} MB")
@@ -535,12 +567,12 @@ def _request_execution_wrapper(request_id: str,
                 
                 # Additional analysis for potential memory leaks
                 total_anonymous_mb = anonymous_memory / 1024 / 1024
-                python_heap_mb = current / 1024 / 1024
+                current_heap_mb = current / 1024 / 1024
                 
-                if total_anonymous_mb > python_heap_mb * 2:
+                if total_anonymous_mb > current_heap_mb * 2:
                     logger.info(f"WARNING: Anonymous memory ({total_anonymous_mb:.2f} MB) "
-                              f"is {total_anonymous_mb/python_heap_mb:.1f}x larger than Python heap "
-                              f"({python_heap_mb:.2f} MB)")
+                              f"is {total_anonymous_mb/current_heap_mb:.1f}x larger than Python heap "
+                              f"({current_heap_mb:.2f} MB)")
                     
                     # Check for potential causes
                     logger.info("Potential causes for large anonymous memory:")
@@ -549,6 +581,17 @@ def _request_execution_wrapper(request_id: str,
                     logger.info("3. Memory mapped files")
                     logger.info("4. Thread stacks")
                     logger.info("5. Memory leaks in native code")
+                    
+                # Show all memory map entries for debugging (limit to first 20)
+                logger.info("Sample memory map entries:")
+                for i, mmap in enumerate(memory_maps[:20]):
+                    try:
+                        path = getattr(mmap, 'path', 'N/A')
+                        rss = getattr(mmap, 'rss', 0)
+                        logger.info(f"  {i+1}. Path: {path}, RSS: {rss/1024/1024:.2f} MB, "
+                                  f"Attrs: {[attr for attr in dir(mmap) if not attr.startswith('_')]}")
+                    except Exception as e:
+                        logger.info(f"  {i+1}. Error reading mmap: {e}")
                     
             except (AttributeError, psutil.AccessDenied) as e:
                 logger.info(f"Memory maps analysis not available: {e}")
