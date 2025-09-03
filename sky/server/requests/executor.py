@@ -355,27 +355,6 @@ def _restore_output(original_stdout: int, original_stderr: int) -> None:
 def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
-def memory_breakdown(pid=None):
-    pid = pid or os.getpid()
-    p = psutil.Process(pid)
-    stats: defaultdict = defaultdict(int)
-
-    for m in p.memory_maps(grouped=False):
-        if m.path.startswith("[heap]"):
-            stats["heap"] += m.rss
-        elif m.path.startswith("[stack]"):
-            stats["stack"] += m.rss
-        elif m.path.startswith("[anon]"):
-            stats["anonymous mmap"] += m.rss
-        elif m.path.endswith(".so") or m.path.endswith(".dll") or m.path.endswith(".dylib"):
-            stats["shared libs"] += m.rss
-        else:
-            stats["other"] += m.rss
-
-    total = sum(stats.values())
-    return {k: f"{v/1024/1024:.2f} MB" for k, v in stats.items()}, f"{total/1024/1024:.2f} MB"
-
-
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool) -> None:
     """Wrapper for a request execution.
@@ -454,24 +433,96 @@ def _request_execution_wrapper(request_id: str,
                 request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
+            
+            # Original tracemalloc dump (top 100)
             snapshot = tracemalloc.take_snapshot()
             top_stats = snapshot.statistics('lineno')
             logger.info(f"Dumping memory trace for process {pid} request {request_id}")
             for stat in top_stats[:100]:
                 logger.info(stat)
+            # Memory diagnostics before gc.collect()
+            pid = os.getpid()
             prc = psutil.Process(pid)
-            logger.info(f'RSS: {prc.memory_info().rss / 1024 / 1024} MB for {pid}\n')
+            
+            # 1. Basic memory info
+            memory_info = prc.memory_info()
+            logger.info(f"=== Memory Analysis for Process {pid} Request {request_id} ===")
+            logger.info(f"RSS (Resident Set Size): {memory_info.rss / 1024 / 1024:.2f} MB")
+            logger.info(f"VMS (Virtual Memory Size): {memory_info.vms / 1024 / 1024:.2f} MB")
+            
+            # 2. Extended memory info (Linux/macOS specific)
+            try:
+                memory_full_info = prc.memory_full_info()
+                logger.info(f"USS (Unique Set Size): {memory_full_info.uss / 1024 / 1024:.2f} MB")
+                logger.info(f"PSS (Proportional Set Size): {memory_full_info.pss / 1024 / 1024:.2f} MB")
+                logger.info(f"Shared memory: {(memory_info.rss - memory_full_info.uss) / 1024 / 1024:.2f} MB")
+            except AttributeError:
+                logger.info("Extended memory info not available on this platform")
+            
+            # 3. Memory maps analysis
+            try:
+                memory_maps = prc.memory_maps()
+                heap_memory = 0
+                stack_memory = 0
+                shared_lib_memory = 0
+                anonymous_memory = 0
+                
+                for mmap in memory_maps:
+                    if '[heap]' in mmap.path:
+                        heap_memory += mmap.rss
+                    elif '[stack]' in mmap.path:
+                        stack_memory += mmap.rss
+                    elif '.so' in mmap.path or '.dylib' in mmap.path:
+                        shared_lib_memory += mmap.rss
+                    elif mmap.path == '' or mmap.path.startswith('['):
+                        anonymous_memory += mmap.rss
+                
+                logger.info(f"Native heap memory: {heap_memory / 1024 / 1024:.2f} MB")
+                logger.info(f"Stack memory: {stack_memory / 1024 / 1024:.2f} MB")
+                logger.info(f"Shared libraries: {shared_lib_memory / 1024 / 1024:.2f} MB")
+                logger.info(f"Anonymous memory: {anonymous_memory / 1024 / 1024:.2f} MB")
+                
+            except (AttributeError, psutil.AccessDenied):
+                logger.info("Memory maps analysis not available")
+            
+            # 4. Python tracemalloc info
             current, peak = tracemalloc.get_traced_memory()
-            logger.info(f"Current heap size: {current / 1024 / 1024:.2f} MB for {pid}\n")
-            logger.info(f"Peak heap size: {peak / 1024 / 1024:.2f} MB for {pid}\n")
-            heap_size = sum(sys.getsizeof(obj) for obj in gc.get_objects())
-            logger.info(f"Approx heap size: {heap_size / 1024 / 1024:.2f} MB before GC for {pid}\n")
+            logger.info(f"Python heap (current): {current / 1024 / 1024:.2f} MB")
+            logger.info(f"Python heap (peak): {peak / 1024 / 1024:.2f} MB")
+            
+            # 5. Python memory breakdown by domain
+            top_stats_by_domain = snapshot.statistics('filename')
+            total_python_memory = sum(stat.size for stat in top_stats_by_domain)
+            logger.info(f"Total Python objects: {total_python_memory / 1024 / 1024:.2f} MB")
+            
+            # 6. Garbage collection stats
+            gc_stats = gc.get_stats()
+            logger.info(f"GC generations: {[gen['collections'] for gen in gc_stats]}")
+            logger.info(f"GC objects count: {sum(gc.get_count())}")
+            
+            # 7. Calculate unaccounted memory
+            unaccounted = memory_info.rss - current
+            logger.info(f"Unaccounted memory (RSS - Python heap): {unaccounted / 1024 / 1024:.2f} MB")
+            
+            # 8. Top memory consuming Python modules
+            logger.info("Top 10 Python modules by memory usage:")
+            top_files = snapshot.statistics('filename')[:10]
+            for index, stat in enumerate(top_files):
+                logger.info(f"  {index + 1}. {stat.traceback.format()}: {stat.size / 1024 / 1024:.2f} MB")
+            
+            # 9. Memory growth analysis (if available)
+            try:
+                import resource
+                rusage = resource.getrusage(resource.RUSAGE_SELF)
+                logger.info(f"Max RSS during process lifetime: {rusage.ru_maxrss / 1024:.2f} MB")
+            except ImportError:
+                pass
+            
+            logger.info("=== End Memory Analysis ===\n")
+            
+
+
             gc.collect()
-            heap_size = sum(sys.getsizeof(obj) for obj in gc.get_objects())
-            logger.info(f"Approx heap size: {heap_size / 1024 / 1024:.2f} MB after GC for {pid}\n")
-            breakdown, total = memory_breakdown()
-            logger.info("Mem Breakdown:", breakdown)
-            logger.info("Total RSS:", total)
 
 async def execute_request_coroutine(request: api_requests.Request):
     """Execute a request in current event loop.
