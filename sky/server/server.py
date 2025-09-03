@@ -1083,10 +1083,6 @@ async def status(
     status_body: payloads.StatusBody = payloads.StatusBody()
 ) -> None:
     """Gets cluster statuses."""
-    if state.get_block_requests():
-        raise fastapi.HTTPException(
-            status_code=503,
-            detail='Server is shutting down, please try again later.')
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='status',
@@ -1689,7 +1685,6 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
 @app.websocket('/kubernetes-pod-ssh-proxy')
 async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                                    cluster_name: str) -> None:
-    """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
