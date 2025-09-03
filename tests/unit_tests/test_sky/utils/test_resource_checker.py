@@ -92,7 +92,7 @@ class TestResourceChecker:
         """Test resource check passes when user has no active resources."""
         # Setup mocks - no resources
         mock_get_clusters.return_value = []
-        mock_queue.return_value = []
+        mock_queue.return_value = [], 0, {}, 0
 
         # Should not raise any exception
         resource_checker.check_no_active_resources_for_users([('user123',
@@ -111,7 +111,7 @@ class TestResourceChecker:
         """Test resource check fails when user has active clusters."""
         # Setup mocks - user has clusters
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = []
+        mock_queue.return_value = [], 0, {}, 0
 
         # Should raise ValueError for user with clusters
         with pytest.raises(ValueError) as exc_info:
@@ -130,7 +130,7 @@ class TestResourceChecker:
         """Test resource check fails when user has active managed jobs."""
         # Setup mocks - user has jobs
         mock_get_clusters.return_value = []
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
 
         # Should raise ValueError for user with jobs
         with pytest.raises(ValueError) as exc_info:
@@ -151,7 +151,7 @@ class TestResourceChecker:
         """Test resource check fails when user has both clusters and jobs."""
         # Setup mocks - user has both clusters and jobs
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
         mock_get_user.return_value = sample_user
 
         # Should raise ValueError for user with both types of resources
@@ -173,7 +173,7 @@ class TestResourceChecker:
         """Test resource check for service account user."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
 
         # Should raise ValueError for service account with resources
         with pytest.raises(ValueError) as exc_info:
@@ -194,7 +194,7 @@ class TestResourceChecker:
         """Test resource check for multiple users with mixed results."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
 
         # Should raise ValueError with details for multiple users
         with pytest.raises(ValueError) as exc_info:
@@ -239,7 +239,7 @@ class TestResourceChecker:
         """Test resource check for workspaces."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
 
         # Should raise ValueError for workspace with resources
         with pytest.raises(ValueError) as exc_info:
@@ -273,7 +273,7 @@ class TestResourceChecker:
         """Test resource check for update operations (not just delete)."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = []
+        mock_queue.return_value = [], 0, {}, 0
 
         # Should raise ValueError even for update operations with active resources
         with pytest.raises(ValueError) as exc_info:
@@ -293,7 +293,7 @@ class TestResourceChecker:
         """Test resource check with mixed update and delete operations."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
 
         # Should handle mixed operations correctly
         with pytest.raises(ValueError) as exc_info:
@@ -323,7 +323,7 @@ class TestResourceChecker:
         ]
 
         mock_get_clusters.return_value = workspace_clusters
-        mock_queue.return_value = workspace_jobs
+        mock_queue.return_value = workspace_jobs, 0, {}, 0
 
         # All users who have resources in these workspaces
         authorized_users = ['user123', 'user456', 'sa-service123']
@@ -345,7 +345,7 @@ class TestResourceChecker:
         """Test when some active resources belong to unauthorized users."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
 
         # Mock user data for name resolution
         class MockUser:
@@ -382,7 +382,7 @@ class TestResourceChecker:
         """Test when there are no active resources in specified workspaces."""
         # Setup mocks - no resources
         mock_get_clusters.return_value = []
-        mock_queue.return_value = []
+        mock_queue.return_value = [], 0, {}, 0
 
         authorized_users = ['user123', 'user456']
         workspaces = ['empty-workspace']
@@ -403,7 +403,7 @@ class TestResourceChecker:
         """Test when only clusters exist (no managed jobs)."""
         # Setup mocks - only clusters
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = []
+        mock_queue.return_value = [], 0, {}, 0
 
         # Mock user data
         class MockUser:
@@ -436,7 +436,7 @@ class TestResourceChecker:
         """Test when only managed jobs exist (no clusters)."""
         # Setup mocks - only jobs
         mock_get_clusters.return_value = []
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
 
         # Mock user data
         class MockUser:
@@ -468,7 +468,7 @@ class TestResourceChecker:
         """Test getting active resources for multiple workspaces."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
 
         workspaces = ['default', 'production']
 
@@ -493,7 +493,7 @@ class TestResourceChecker:
         """Test getting active resources for a single workspace."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
 
         workspaces = ['default']
 
@@ -541,7 +541,7 @@ class TestResourceChecker:
         """Test getting active resources for non-existent workspace."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
 
         workspaces = ['nonexistent-workspace']
 
@@ -561,7 +561,7 @@ class TestResourceChecker:
         """Test handling users without names (fallback to user ID)."""
         # Setup mocks - only clusters
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = []
+        mock_queue.return_value = [], 0, {}, 0
 
         # Mock user data with some users having no name
         class MockUser:
@@ -615,7 +615,7 @@ class TestResourceChecker:
         """Test the generic _get_active_resources_by_names function."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = sample_managed_jobs, 0, {}, 0
 
         # Create a custom filter factory for testing
         def test_filter_factory(resource_names):
@@ -697,7 +697,7 @@ class TestResourceChecker:
         }]
 
         mock_get_clusters.return_value = mixed_clusters
-        mock_queue.return_value = mixed_jobs
+        mock_queue.return_value = mixed_jobs, 0, {}, 0
 
         # Mock user data
         class MockUser:

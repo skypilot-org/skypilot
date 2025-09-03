@@ -269,10 +269,10 @@ def _get_active_resources(
         all_managed_jobs: List[Dict[str, Any]]
     """
 
-    def get_all_clusters():
+    def get_all_clusters() -> List[Dict[str, Any]]:
         return global_user_state.get_clusters()
 
-    def get_all_managed_jobs():
+    def get_all_managed_jobs() -> List[Dict[str, Any]]:
         # pylint: disable=import-outside-toplevel
         from sky.jobs.server import core as managed_jobs_core
         try:
