@@ -876,8 +876,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 dispose_engine = False
                 if db_utils.get_max_connections() == 0:
                     dispose_engine = True
-                    sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
-                                                             poolclass=NullPool)
+                    sqlalchemy_engine = sqlalchemy.create_engine(
+                        existing_db_url, poolclass=NullPool)
                 else:
                     sqlalchemy_engine = db_utils.get_engine('config')
                 db_utils.add_all_tables_to_db_sqlalchemy(
