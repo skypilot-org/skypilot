@@ -243,9 +243,12 @@ class Nebius(clouds.Cloud):
                 'filesystem_mount_tag': f'filesystem-skypilot-{i+1}'
             })
 
+        use_static_ip_address = skypilot_config.get_nested(
+            ('nebius', 'use_static_ip_address'), default_value=False)
         resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
+            'use_static_ip_address': use_static_ip_address,
             'region': region.name,
             'image_id': image_family,
             # Nebius does not support specific zones.

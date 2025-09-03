@@ -167,6 +167,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         project_id: project-e01xxxxxxxxxxx
         fabric: fabric-5
     :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
+    :ref:`use_static_ip_address <config-yaml-nebius-use-static-ip-address>`: true
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.com:443
@@ -256,7 +257,7 @@ Example:
 
   api_server:
     cluster_event_retention_hours: -1 # Disable all cluster event GC
-  
+
 .. _config-yaml-api-server-cluster-debug-event-retention-hours:
 
 ``api_server.cluster_debug_event_retention_hours``
@@ -1386,6 +1387,7 @@ Example:
 
     nebius:
         use_internal_ips: true
+        use_static_ip_address: true
         ssh_proxy_command:
           eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
           eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
@@ -1422,6 +1424,17 @@ Set to ``true`` to use private IPs to communicate between the local client and
 any SkyPilot nodes. This requires the networking stack be properly set up.
 
 This flag is typically set together with ``ssh_proxy_command`` below.
+
+Default: ``false``.
+
+.. _config-yaml-nebius-use-static-ip-address:
+
+``nebius.use_static_ip_address``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Should instances be assigned static IPs? (optional).
+
+Set to ``true`` to use static IPs.
 
 Default: ``false``.
 
