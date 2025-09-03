@@ -27,6 +27,14 @@ from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
+from sky.utils import context_utils
+
+
+async def _run_endpoint_func(func, *args, **kwargs):
+    if asyncio.iscoroutinefunction(func):
+        return await func(*args, **kwargs)
+    else:
+        return context_utils.to_thread(func, *args, **kwargs)
 
 
 class SSHLatencyMonitor:
@@ -396,10 +404,8 @@ async def test_endpoint_status(monitor, mock_request, mock_schedule_request):
             pass
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
-    # Note: This might have some blocking depending on implementation
-    # Adjust assertion based on actual behavior
-    if result['degradation'] > 5:
-        pytest.skip("/status has known blocking issues")
+    assert not result[
+        'blocking'], "/status should not block (uses schedule_request)"
 
 
 # ========== CATEGORY 3: FILE OPERATIONS ==========
@@ -437,7 +443,6 @@ async def test_endpoint_upload(monitor):
     assert not result['blocking'], "/upload should not block significantly"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_download(monitor, mock_request):
     """Test /download endpoint for blocking operations."""
@@ -463,12 +468,12 @@ async def test_endpoint_download(monitor, mock_request):
                 pass
             finally:
                 import shutil
-                shutil.rmtree(test_dir, ignore_errors=True)
+                await context_utils.to_thread(shutil.rmtree,
+                                              test_dir,
+                                              ignore_errors=True)
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=10)
-    # Download has known blocking due to zip operations
-    if result['blocking']:
-        pytest.skip("/download has known blocking due to zip operations")
+    assert not result['blocking'], "/download should not block the event loop"
 
 
 # ========== CATEGORY 4: COMPLETION ENDPOINTS ==========
@@ -584,7 +589,6 @@ async def test_endpoint_users_export(monitor):
         'blocking'], "/users/export should not block the event loop"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_users_service_tokens(monitor):
     """Test /users/service-account-tokens endpoint for blocking operations."""
@@ -599,7 +603,8 @@ async def test_endpoint_users_service_tokens(monitor):
                         side_effect=create_blocking_mock([], delay=0.02)):
             try:
                 from sky.users import server as users_server
-                await users_server.get_service_account_tokens(mock_req)
+                await _run_endpoint_func(
+                    users_server.get_service_account_tokens, mock_req)
             except:
                 pass
 
@@ -681,14 +686,15 @@ async def test_endpoint_ssh_node_pools_list(monitor):
             with mock.patch('builtins.open', mock.mock_open(read_data='{}')):
                 try:
                     from sky.ssh_node_pools import server as ssh_pools_server
-                    await ssh_pools_server.get_ssh_node_pools()
+                    await _run_endpoint_func(ssh_pools_server.get_ssh_node_pools
+                                            )
                 except:
                     pass
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=20)
     # File I/O operations may cause some blocking
-    if result['degradation'] > 5:
-        pytest.skip("/ssh_node_pools has known blocking due to file I/O")
+    assert not result[
+        'blocking'], "/ssh_node_pools should not block (uses to_thread)"
 
 
 @pytest.mark.asyncio
