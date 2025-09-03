@@ -459,13 +459,26 @@ def _request_execution_wrapper(request_id: str,
             except AttributeError:
                 logger.info("Extended memory info not available on this platform")
             
-            # 3. Memory maps analysis
+            # 3. Detailed Memory maps analysis
             try:
                 memory_maps = prc.memory_maps()
                 heap_memory = 0
                 stack_memory = 0
                 shared_lib_memory = 0
                 anonymous_memory = 0
+                
+                # Detailed anonymous memory breakdown
+                anonymous_categories = {
+                    'large_anonymous': 0,  # >10MB anonymous regions
+                    'medium_anonymous': 0,  # 1-10MB anonymous regions  
+                    'small_anonymous': 0,   # <1MB anonymous regions
+                    'python_arenas': 0,     # Python memory arenas
+                    'mmap_anonymous': 0,    # mmap'd anonymous memory
+                    'other_anonymous': 0    # Other anonymous memory
+                }
+                
+                logger.info("=== Detailed Anonymous Memory Analysis ===")
+                large_regions = []
                 
                 for mmap in memory_maps:
                     if '[heap]' in mmap.path:
@@ -476,14 +489,69 @@ def _request_execution_wrapper(request_id: str,
                         shared_lib_memory += mmap.rss
                     elif mmap.path == '' or mmap.path.startswith('['):
                         anonymous_memory += mmap.rss
+                        
+                        # Categorize anonymous memory
+                        size_mb = mmap.rss / 1024 / 1024
+                        
+                        if size_mb > 10:
+                            anonymous_categories['large_anonymous'] += mmap.rss
+                            large_regions.append({
+                                'size': size_mb,
+                                'addr': f"{hex(mmap.addr)}-{hex(mmap.addr + mmap.size)}",
+                                'perms': mmap.perms,
+                                'path': mmap.path
+                            })
+                        elif size_mb > 1:
+                            anonymous_categories['medium_anonymous'] += mmap.rss
+                        else:
+                            anonymous_categories['small_anonymous'] += mmap.rss
+                            
+                        # Try to identify Python memory arenas
+                        # Python typically allocates in 256KB chunks
+                        if 0.2 <= size_mb <= 0.3:  # ~256KB regions
+                            anonymous_categories['python_arenas'] += mmap.rss
+                        
+                        # Check for mmap'd regions (typically have specific permissions)
+                        if 'r' in mmap.perms and 'w' in mmap.perms and 'x' not in mmap.perms:
+                            anonymous_categories['mmap_anonymous'] += mmap.rss
+                        else:
+                            anonymous_categories['other_anonymous'] += mmap.rss
                 
                 logger.info(f"Native heap memory: {heap_memory / 1024 / 1024:.2f} MB")
                 logger.info(f"Stack memory: {stack_memory / 1024 / 1024:.2f} MB")
                 logger.info(f"Shared libraries: {shared_lib_memory / 1024 / 1024:.2f} MB")
-                logger.info(f"Anonymous memory: {anonymous_memory / 1024 / 1024:.2f} MB")
+                logger.info(f"Total Anonymous memory: {anonymous_memory / 1024 / 1024:.2f} MB")
                 
-            except (AttributeError, psutil.AccessDenied):
-                logger.info("Memory maps analysis not available")
+                # Breakdown of anonymous memory
+                logger.info("Anonymous memory breakdown:")
+                for category, size in anonymous_categories.items():
+                    logger.info(f"  {category}: {size / 1024 / 1024:.2f} MB")
+                
+                # Log large anonymous regions
+                logger.info(f"Large anonymous regions (>10MB): {len(large_regions)}")
+                for i, region in enumerate(large_regions[:10]):  # Show top 10
+                    logger.info(f"  Region {i+1}: {region['size']:.2f} MB at {region['addr']} "
+                              f"perms={region['perms']} path='{region['path']}'")
+                
+                # Additional analysis for potential memory leaks
+                total_anonymous_mb = anonymous_memory / 1024 / 1024
+                python_heap_mb = current / 1024 / 1024
+                
+                if total_anonymous_mb > python_heap_mb * 2:
+                    logger.info(f"WARNING: Anonymous memory ({total_anonymous_mb:.2f} MB) "
+                              f"is {total_anonymous_mb/python_heap_mb:.1f}x larger than Python heap "
+                              f"({python_heap_mb:.2f} MB)")
+                    
+                    # Check for potential causes
+                    logger.info("Potential causes for large anonymous memory:")
+                    logger.info("1. Native extensions (NumPy, PyTorch, etc.) allocating memory")
+                    logger.info("2. C++ libraries using malloc/new")
+                    logger.info("3. Memory mapped files")
+                    logger.info("4. Thread stacks")
+                    logger.info("5. Memory leaks in native code")
+                    
+            except (AttributeError, psutil.AccessDenied) as e:
+                logger.info(f"Memory maps analysis not available: {e}")
             
             # 4. Python tracemalloc info
             current, peak = tracemalloc.get_traced_memory()
@@ -510,13 +578,32 @@ def _request_execution_wrapper(request_id: str,
             for index, stat in enumerate(top_files):
                 logger.info(f"  {index + 1}. {stat.traceback.format()}: {stat.size / 1024 / 1024:.2f} MB")
             
-            # 9. Memory growth analysis (if available)
+            # 9. Additional anonymous memory investigation
             try:
-                import resource
-                rusage = resource.getrusage(resource.RUSAGE_SELF)
-                logger.info(f"Max RSS during process lifetime: {rusage.ru_maxrss / 1024:.2f} MB")
-            except ImportError:
-                pass
+                # Check for loaded modules that might allocate large amounts of memory
+                import sys
+                large_memory_modules = [
+                    'numpy', 'torch', 'tensorflow', 'pandas', 'scipy', 
+                    'sklearn', 'cv2', 'PIL', 'matplotlib'
+                ]
+                
+                loaded_large_modules = []
+                for module_name in large_memory_modules:
+                    if module_name in sys.modules:
+                        loaded_large_modules.append(module_name)
+                
+                if loaded_large_modules:
+                    logger.info(f"Loaded memory-intensive modules: {loaded_large_modules}")
+                    
+                # Check thread count (each thread has its own stack)
+                thread_count = prc.num_threads()
+                estimated_stack_memory = thread_count * 8  # Assume 8MB per thread stack
+                logger.info(f"Thread count: {thread_count}, "
+                          f"Estimated stack memory: {estimated_stack_memory:.2f} MB")
+                
+                
+            except Exception as e:
+                logger.info(f"Additional memory analysis failed: {e}")
             
             logger.info("=== End Memory Analysis ===\n")
             
