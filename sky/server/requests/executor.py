@@ -438,14 +438,19 @@ def _request_execution_wrapper(request_id: str,
         if not is_running_pytest():
             # pytest environment can be using more memory, so we only check
             # the RSS in production environment.
-            rss = psutil.Process(os.getpid()).memory_info().rss
+            pid = os.getpid()
+            rss = psutil.Process(pid).memory_info().rss
             rss_gb = rss / (1024 * 1024 * 1024)
             logger.debug(f'RSS after request {request_id}: {rss_gb} GB')
             # TODO(this PR): we need to pass in this number based on if
             # the executor is long or short.
-            if rss_gb > server_config._SHORT_WORKER_MEM_GB:
+            mem_limit = server_config._SHORT_WORKER_MEM_GB
+            if rss_gb > mem_limit:
                 logger.warning(
-                    f'Request {request_id} used more memory than the limit')
+                    f'Request {request_id} used more memory than the limit. '
+                    f'RSS: {rss_gb} GB. '
+                    f'Limit: {mem_limit} GB. '
+                    f'OOMKilling the executor (pid {pid}).')
                 sys.exit(1)
 
 
