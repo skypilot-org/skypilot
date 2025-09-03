@@ -357,7 +357,7 @@ class TestWithNoCloudEnabled:
         assert output[
             2] == f'├── Status: {mock_api_info.status}, commit: {mock_api_info.commit}, version: {mock_api_info.version}'
         assert output[3] == f'├── User: {current_user.name} ({current_user.id})'
-        assert output[4] == f'└── Endpoint set via the command line.'
+        assert output[4] == f'└── Endpoint set to default local API server.'
         assert len(output) == 6
 
 
