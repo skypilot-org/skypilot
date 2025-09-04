@@ -298,7 +298,7 @@ def open_ports(cluster_name_on_cloud: str,
                provider_config: Optional[Dict[str, Any]] = None) -> None:
     """Open ports (not supported by Shadeform)."""
     del cluster_name_on_cloud, ports, provider_config  # unused
-    logger.warning('Opening ports dynamically is not supported by Shadeform')
+    raise NotImplementedError()
 
 
 def cleanup_ports(cluster_name_on_cloud: str,
