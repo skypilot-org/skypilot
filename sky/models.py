@@ -124,8 +124,6 @@ class VolumeConfig(pydantic.BaseModel):
     def __setstate__(self, state: Dict[str, Any]) -> None:
         """Set state from pickled state, for backward compatibility."""
         super().__setstate__(state)
-        state['_version'] = self._VERSION
-
         version = state.pop('_version', None)
         if version is None:
             version = -1
@@ -133,4 +131,5 @@ class VolumeConfig(pydantic.BaseModel):
         if version < 0:
             state['id_on_cloud'] = None
 
+        state['_version'] = self._VERSION
         self.__dict__.update(state)
