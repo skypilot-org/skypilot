@@ -29,7 +29,7 @@ class TestMountingUtilsArm64(unittest.TestCase):
                       cmd)
         # Should install rclone for ARM64
         self.assertIn('rclone', cmd)
-        self.assertIn('ARCH_SUFFIX="arm"', cmd)
+        self.assertIn('ARCH_SUFFIX="arm64"', cmd)
         # Should contain fallback for x86_64 (goofys)
         self.assertIn('goofys', cmd)
 
