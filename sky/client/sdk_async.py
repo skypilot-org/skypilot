@@ -450,19 +450,24 @@ async def tail_logs(cluster_name: str,
                     job_id: Optional[int],
                     follow: bool,
                     tail: int = 0,
-                    output_stream: Optional['io.TextIOBase'] = None) -> int:
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    *,
+                    credentials: Optional[Dict[str, Any]] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
     return await context_utils.to_thread(sdk.tail_logs, cluster_name, job_id,
-                                         follow, tail, output_stream)
+                                         follow, tail, output_stream,
+                                         preload_content=True, credentials=credentials)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
 async def download_logs(cluster_name: str,
-                        job_ids: Optional[List[str]]) -> Dict[str, str]:
+                        job_ids: Optional[List[str]],
+                        *,
+                        credentials: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
     """Async version of download_logs() that downloads the logs of jobs."""
     return await context_utils.to_thread(sdk.download_logs, cluster_name,
-                                         job_ids)
+                                         job_ids, credentials=credentials)
 
 
 @usage_lib.entrypoint
@@ -543,11 +548,13 @@ async def queue(
         cluster_name: str,
         skip_finished: bool = False,
         all_users: bool = False,
-        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
+        credentials: Optional[Dict[str, Any]] = None
 ) -> List[dict]:
     """Async version of queue() that gets the job queue of a cluster."""
     request_id = await context_utils.to_thread(sdk.queue, cluster_name,
-                                               skip_finished, all_users)
+                                               skip_finished, all_users,
+                                               credentials=credentials)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
