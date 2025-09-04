@@ -81,7 +81,7 @@ def add_timestamp_prefix_for_server_logs() -> None:
         uvicorn_logger.setLevel(logging.DEBUG)
     debug_logger = logging.getLogger('uvicorn.error')
     debug_logger.setLevel(logging.DEBUG)
-    debugf = open('/tmp/uvicorn.log', 'w')
+    debugf = open(f'/tmp/uvicorn{os.getpid()}.log', 'w')
     handler = logging.StreamHandler(debugf)
     handler.setFormatter(sky_logging.FORMATTER)
     handler.setLevel(logging.DEBUG)

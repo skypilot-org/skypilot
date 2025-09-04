@@ -1606,8 +1606,6 @@ async def api_status(
         False, description='Get finished requests as well.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
-    import time
-    time.sleep(30)
     if request_ids is None:
         statuses = None
         if not all_status:
@@ -1772,10 +1770,6 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                 logger.error(f'Error in ssh_to_websocket: {e}, {traceback.format_exc()}')
             try:
                 await websocket.close()
-            except Exception as e:
-                # Connection may have already been closed by client
-                pass
-
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
     finally:
         proc.terminate()
