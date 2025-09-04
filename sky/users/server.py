@@ -34,7 +34,7 @@ router = fastapi.APIRouter()
 
 
 @router.get('')
-async def users() -> List[Dict[str, Any]]:
+def users() -> List[Dict[str, Any]]:
     """Gets all users."""
     all_users = []
     user_list = global_user_state.get_all_users()
