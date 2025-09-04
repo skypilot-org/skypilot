@@ -599,6 +599,7 @@ def write_cluster_config(
     dryrun: bool = False,
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    task: Optional['task_lib.Task'] = None,
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -722,6 +723,16 @@ def write_cluster_config(
                 excluded_clouds.add(cloud_obj)
 
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
+
+    # Apply task-level credential file mount overrides if present.
+    if task is not None and getattr(task, 'credential_file_mount_overrides', None):
+        for remote_path, local_path in task.credential_file_mount_overrides.items():
+            expanded = os.path.realpath(os.path.expanduser(local_path))
+            if not os.path.exists(expanded):
+                logger.warning(
+                    f'Credential override skipped (missing local path): {local_path}')
+                continue
+            credentials[remote_path] = expanded
 
     logging_agent = logs.get_logging_agent()
     if logging_agent:

@@ -379,7 +379,32 @@ def get_cached_enabled_clouds_or_refresh(
 
     cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
         capability, active_workspace)
-    if not cached_enabled_clouds or allowed_clouds_changed:
+    
+    # Check if we have service principal credentials that would enable Azure
+    force_refresh = False
+    try:
+        from sky.adaptors import azure as azure_adaptor
+        service_principal_creds = azure_adaptor._get_thread_azure_credentials()
+        if service_principal_creds:
+            # Check if Azure is not in cached enabled clouds but would be enabled
+            # with service principal credentials
+            azure_in_cache = any(isinstance(cloud, sky_clouds.Azure) for cloud in cached_enabled_clouds)
+            if not azure_in_cache:
+                # Test if Azure would be enabled with current credentials
+                azure_cloud = sky_clouds.Azure()
+                try:
+                    is_enabled, _ = azure_cloud._check_credentials()
+                    if is_enabled:
+                        force_refresh = True
+                except Exception:
+                    # If check fails, don't force refresh
+                    pass
+    except Exception:
+        # If any error occurs while checking service principal credentials, 
+        # continue with normal flow
+        pass
+    
+    if not cached_enabled_clouds or allowed_clouds_changed or force_refresh:
         try:
             check_capability(capability, quiet=True, workspace=active_workspace)
             if allowed_clouds_changed:

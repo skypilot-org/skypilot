@@ -433,6 +433,8 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    *,
+    credentials: Optional[Dict[str, Any]] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -503,6 +505,8 @@ def launch(
           different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
           skip provisioning and setup steps.
+        credentials: Optional inline credentials to materialize on the API
+            server for this launch.
         _need_confirmation: (Internal only) If True, show the confirmation
             prompt.
 
@@ -596,10 +600,12 @@ def launch(
             no_setup,
             clone_disk_from,
             fast,
-            _need_confirmation,
-            _is_launched_by_jobs_controller,
-            _is_launched_by_sky_serve_controller,
-            _disable_controller_check,
+            credentials=credentials,
+            _need_confirmation=_need_confirmation,
+            _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
+            _is_launched_by_sky_serve_controller=
+            (_is_launched_by_sky_serve_controller),
+            _disable_controller_check=_disable_controller_check,
         )
 
 
@@ -616,6 +622,8 @@ def _launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    *,
+    credentials: Optional[Dict[str, Any]] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -701,6 +709,7 @@ def _launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         fast=fast,
+        credentials=credentials,
         # For internal use
         quiet_optimizer=_need_confirmation,
         is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
@@ -1042,7 +1051,10 @@ def start(
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def down(cluster_name: str,
-         purge: bool = False) -> server_common.RequestId[None]:
+         purge: bool = False,
+         *,
+         credentials: Optional[Dict[str, Any]] = None
+         ) -> server_common.RequestId[None]:
     """Tears down a cluster.
 
     Tearing down a cluster will delete all associated resources (all billing
@@ -1057,6 +1069,10 @@ def down(cluster_name: str,
             troubleshooting scenarios; with it set, it is the user's
             responsibility to ensure there are no leaked instances and related
             resources.
+
+    Args:
+        credentials: Optional inline credentials to materialize on the API
+            server for this request.
 
     Returns:
         The request ID of the down request.
@@ -1075,6 +1091,7 @@ def down(cluster_name: str,
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
+        credentials=credentials,
     )
     response = server_common.make_authenticated_request(
         'POST', '/down', json=json.loads(body.model_dump_json()), timeout=5)
@@ -1085,7 +1102,10 @@ def down(cluster_name: str,
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def stop(cluster_name: str,
-         purge: bool = False) -> server_common.RequestId[None]:
+         purge: bool = False,
+         *,
+         credentials: Optional[Dict[str, Any]] = None
+         ) -> server_common.RequestId[None]:
     """Stops a cluster.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
@@ -1104,6 +1124,10 @@ def stop(cluster_name: str,
             user's responsibility to ensure there are no leaked instances and
             related resources.
 
+    Args:
+        credentials: Optional inline credentials to materialize on the API
+            server for this request.
+
     Returns:
         The request ID of the stop request.
 
@@ -1121,6 +1145,7 @@ def stop(cluster_name: str,
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
+        credentials=credentials,
     )
     response = server_common.make_authenticated_request(
         'POST', '/stop', json=json.loads(body.model_dump_json()), timeout=5)

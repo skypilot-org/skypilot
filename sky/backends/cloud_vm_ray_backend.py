@@ -1348,6 +1348,7 @@ class RetryingVmProvisioner(object):
         prev_cluster_ever_up: bool,
         skip_if_config_hash_matches: Optional[str],
         volume_mounts: Optional[List[volume_lib.VolumeMount]],
+        task: task_lib.Task,
     ) -> Dict[str, Any]:
         """The provision retry loop.
 
@@ -1458,6 +1459,7 @@ class RetryingVmProvisioner(object):
                     dryrun=dryrun,
                     keep_launch_fields_in_existing_config=cluster_exists,
                     volume_mounts=volume_mounts,
+                    task=task,
                 )
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found, or
@@ -2094,6 +2096,21 @@ class RetryingVmProvisioner(object):
                 else:
                     cloud_user = to_provision.cloud.get_active_user_identity()
 
+                # Fail fast on invalid cloud credentials before marking cluster INIT
+                # or attempting provisioning. This prevents clusters from being
+                # left in INIT state when credentials are wrong.
+                # We validate compute credentials for the chosen cloud.
+                if not dryrun:
+                    ok, reason = to_provision.cloud.check_credentials(
+                        sky_cloud.CloudCapability.COMPUTE)
+                    if not ok:
+                        message = (
+                            f'Invalid credentials for {to_provision.cloud}: '
+                            f'{reason}' if reason else
+                            f'Invalid credentials for {to_provision.cloud}.')
+                        with ux_utils.print_exception_no_traceback():
+                            raise exceptions.InvalidCloudCredentials(message)
+
                 requested_features = self._requested_features.copy()
                 # Skip stop feature for Kubernetes and RunPod controllers.
                 if (isinstance(to_provision.cloud,
@@ -2122,6 +2139,7 @@ class RetryingVmProvisioner(object):
                     prev_cluster_ever_up=prev_cluster_ever_up,
                     skip_if_config_hash_matches=skip_if_config_hash_matches,
                     volume_mounts=task.volume_mounts,
+                    task=task
                 )
                 if dryrun:
                     return config_dict

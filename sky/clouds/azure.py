@@ -545,7 +545,59 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to this cloud."""
+        """Checks if the user has access credentials to this cloud.
+
+        This focuses on compute viability. It does not require optional
+        packages such as msgraph or azure.storage.blob.
+        """
+        from sky.adaptors import azure as azure_adaptor
+
+        # Prefer request-scoped service principal credentials if present.
+        service_principal_creds = azure_adaptor._get_thread_azure_credentials()
+        if service_principal_creds:
+            try:
+                credential = azure_adaptor.create_azure_service_principal_credential(
+                    service_principal_creds)
+                # Use token acquisition to validate credentials without making
+                # an ARM list call which can be slow or require broader perms.
+                credential.get_token('https://management.azure.com/.default')
+
+                # Additionally verify the provided subscription is accessible.
+                # This prevents launches from proceeding when the principal is
+                # valid but does not have access to the specified subscription
+                # (or the subscription_id is wrong), which would otherwise cause
+                # long hangs during provisioning and INIT status.
+                try:
+                    subscription_id = (
+                        service_principal_creds.get('subscription_id')
+                        or azure_adaptor.get_subscription_id())
+                    if not subscription_id:
+                        return False, (
+                            'Missing subscription_id in credentials and no '
+                            'active subscription is configured.')
+                    # Use Resource Management client for a lightweight check.
+                    # Listing providers requires basic reader access at the
+                    # subscription scope and is fast.
+                    resource_client = azure_adaptor.get_client(
+                        'resource', subscription_id)
+                    # Trigger a request; iterate one item only.
+                    _ = next(iter(resource_client.providers.list()))
+                except StopIteration:
+                    # No providers returned is unexpected but indicates the
+                    # request succeeded; treat as valid.
+                    pass
+                except Exception as e:  # pylint: disable=broad-except
+                    return False, (
+                        'Service principal has no access to subscription '
+                        f'{subscription_id!r} or the subscription is invalid. '
+                        f'Details: {common_utils.format_exception(e)}')
+                return True, None
+            except Exception as e:  # pylint: disable=broad-except
+                return False, (
+                    'Service principal credentials failed: '
+                    f'{common_utils.format_exception(e)}')
+
+        # Fall back to standard Azure CLI check (for compute usability)
         help_str = (
             ' Run the following commands:'
             f'\n{cls._INDENT_PREFIX}  $ az login'
@@ -556,13 +608,14 @@ class Azure(clouds.Cloud):
         # This file is required because it will be synced to remote VMs for
         # `az` to access private storage buckets.
         # `az account show` does not guarantee this file exists.
-        azure_token_cache_file = '~/.azure/msal_token_cache.json'
-        if not os.path.isfile(os.path.expanduser(azure_token_cache_file)):
+        azure_config_dir = azure_adaptor.get_azure_config_dir()
+        azure_token_cache_file = os.path.join(azure_config_dir, 'msal_token_cache.json')
+        if not os.path.isfile(azure_token_cache_file):
             return (False,
                     f'{azure_token_cache_file} does not exist.' + help_str)
 
         try:
-            _run_output('az --version')
+            azure_adaptor.run_azure_cli_with_config('az --version')
         except subprocess.CalledProcessError as e:
             return False, (
                 # TODO(zhwu): Change the installation hint to from PyPI.
@@ -581,24 +634,23 @@ class Azure(clouds.Cloud):
                            f'{cls._INDENT_PREFIX}Details: '
                            f'{common_utils.format_exception(e)}')
 
-        # Check if the azure blob storage dependencies are installed.
-        try:
-            # pylint: disable=redefined-outer-name, import-outside-toplevel, unused-import
-            from azure.storage import blob
-            import msgraph
-        except ImportError as e:
-            return False, (
-                f'Azure blob storage depdencies are not installed. '
-                'Run the following commands:'
-                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
-                f'\n{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e)}')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
+        from sky.adaptors import azure as azure_adaptor
+        
+        # Check if we have service principal credentials
+        service_principal_creds = azure_adaptor._get_thread_azure_credentials()
+        if service_principal_creds:
+            # When using service principal credentials, no file mounts needed
+            return {}
+        
+        # Use custom Azure config directory if specified
+        azure_config_dir = azure_adaptor.get_azure_config_dir()
+        
         return {
-            f'~/.azure/{filename}': f'~/.azure/{filename}'
+            f'{azure_config_dir}/{filename}': f'~/.azure/{filename}'
             for filename in _CREDENTIAL_FILES
         }
 
@@ -606,8 +658,9 @@ class Azure(clouds.Cloud):
         return catalog.instance_type_exists(instance_type, clouds='azure')
 
     @classmethod
-    @annotations.lru_cache(scope='global',
-                           maxsize=1)  # Cache since getting identity is slow.
+    # Cache per-request so custom inline credentials are respected.
+    # Global caching would cause mismatches when switching identities.
+    @annotations.lru_cache(scope='request', maxsize=1)
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].

@@ -35,8 +35,12 @@ async def launch(
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
-    request_id = await context_utils.to_thread(sdk.launch, task, name,
-                                               _need_confirmation)
+    request_id = await context_utils.to_thread(
+        sdk.launch,
+        task,
+        name,
+        _need_confirmation=_need_confirmation,
+    )
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:

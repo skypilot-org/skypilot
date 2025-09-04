@@ -2,11 +2,14 @@
 
 # pylint: disable=import-outside-toplevel
 import asyncio
+import json
+import contextvars
 import datetime
 import logging
+import os
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 import uuid
 
 from sky import exceptions as sky_exceptions
@@ -23,6 +26,13 @@ azure = common.LazyImport(
                           'Try pip install "skypilot[azure]"'),
     set_loggers=lambda: logging.getLogger('azure.identity').setLevel(logging.
                                                                      ERROR))
+
+# Additional Azure identity imports
+try:
+    from azure.identity import ClientSecretCredential
+except ImportError:
+    ClientSecretCredential = None
+
 Client = Any
 sky_logger = sky_logging.init_logger(__name__)
 
@@ -31,11 +41,57 @@ _LAZY_MODULES = (azure,)
 _session_creation_lock = threading.RLock()
 _MAX_RETRY_FOR_GET_SUBSCRIPTION_ID = 5
 
+"""Request-scoped Azure credential context using contextvars.
+
+These propagate across asyncio tasks and are explicitly propagated to new
+threads via context_utils.to_thread().
+"""
+_CTX_AZURE_CREDENTIALS: contextvars.ContextVar[Optional[Dict[str, str]]] = (
+    contextvars.ContextVar('azure_credentials', default=None))
+_CTX_AZURE_CONFIG_DIR: contextvars.ContextVar[Optional[str]] = (
+    contextvars.ContextVar('azure_config_dir', default=None))
+
+
+def _get_thread_azure_credentials() -> Optional[Dict[str, str]]:
+    """Get the Azure service principal credentials from the request context."""
+    return _CTX_AZURE_CREDENTIALS.get()
+
+
+def set_thread_azure_credentials(credentials: Dict[str, str]) -> None:
+    """Set the Azure service principal credentials in the request context."""
+    _CTX_AZURE_CREDENTIALS.set(credentials)
+
+
+def clear_thread_azure_credentials() -> None:
+    """Clear the Azure service principal credentials from the request context."""
+    _CTX_AZURE_CREDENTIALS.set(None)
+
+
+def _get_thread_azure_config_dir() -> Optional[str]:
+    """Get the Azure config directory from the request context."""
+    return _CTX_AZURE_CONFIG_DIR.get()
+
+
+def set_thread_azure_config_dir(config_dir: str) -> None:
+    """Set the Azure config directory in the request context."""
+    _CTX_AZURE_CONFIG_DIR.set(os.path.expanduser(config_dir))
+
+
+def clear_thread_azure_config_dir() -> None:
+    """Clear the Azure config directory from the request context."""
+    _CTX_AZURE_CONFIG_DIR.set(None)
+
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
-@annotations.lru_cache(scope='global', maxsize=1)
+@annotations.lru_cache(scope='request', maxsize=1)
 def get_subscription_id() -> str:
     """Get the default subscription id."""
+    # First check if we have service principal credentials with subscription_id
+    subscription_id = get_subscription_id_from_credentials()
+    if subscription_id:
+        return subscription_id
+    
+    # Fall back to Azure CLI
     from azure.common import credentials
     retry = 0
     backoff = common_utils.Backoff(initial_backoff=0.5, max_backoff_factor=4)
@@ -58,8 +114,74 @@ def get_subscription_id() -> str:
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_current_account_user() -> str:
     """Get the default account user."""
+    # Check if we have service principal credentials
+    service_principal_creds = _get_thread_azure_credentials()
+    sky_logger.debug(f"Service principal credentials in get_current_account_user: {service_principal_creds is not None}")
+    if service_principal_creds:
+        # For service principal, use client_id as the user identifier
+        client_id = service_principal_creds.get('client_id', 'unknown')
+        sky_logger.debug(f"Using service principal client_id: {client_id}")
+        return f"service-principal:{client_id}"
+
+    # Prefer Azure CLI JSON to detect principal type and normalize format.
+    # If a custom config dir is set, require success; otherwise, fall back.
+    custom_config_dir = _get_thread_azure_config_dir()
+    sky_logger.debug(f"Custom config dir: {custom_config_dir}")
+    try:
+        output = run_azure_cli_with_config('az account show -o json',
+                                           custom_config_dir)
+        account = json.loads(output)
+        user = account.get('user', {}) or {}
+        name = user.get('name')
+        user_type = (user.get('type') or '').lower()
+        if not name:
+            raise ValueError('Azure CLI returned empty user.name')
+        if user_type == 'serviceprincipal':
+            return f'service-principal:{name}'
+        return name
+    except Exception as e:
+        if custom_config_dir:
+            # Do not silently switch identity sources when a custom
+            # configuration directory is specified.
+            raise sky_exceptions.CloudUserIdentityError(
+                'Failed to resolve Azure identity from custom AZURE_CONFIG_DIR.\n'
+                f'  Config dir: {custom_config_dir}\n'
+                f'  Reason: {common_utils.format_exception(e, use_bracket=True)}'
+            ) from e
+
+    # Default behavior using Azure SDK if Azure CLI access failed without
+    # a custom config dir specified.
+    sky_logger.debug("Falling back to Azure CLI profile (SDK)")
     from azure.common import credentials
     return credentials.get_cli_profile().get_current_account_user()
+
+
+def get_azure_config_dir() -> str:
+    """Get the Azure config directory, respecting custom thread-local config."""
+    custom_dir = _get_thread_azure_config_dir()
+    if custom_dir:
+        return custom_dir
+    return os.path.expanduser('~/.azure')
+
+
+def run_azure_cli_with_config(cmd: str, azure_config_dir: Optional[str] = None) -> str:
+    """Run Azure CLI command with custom config directory if specified."""
+    import subprocess
+    
+    if azure_config_dir is None:
+        azure_config_dir = get_azure_config_dir()
+    
+    # Use AZURE_CONFIG_DIR env var for this specific command only
+    env = os.environ.copy()
+    env['AZURE_CONFIG_DIR'] = azure_config_dir
+    
+    proc = subprocess.run(cmd,
+                          shell=True,
+                          check=True,
+                          stderr=subprocess.PIPE,
+                          stdout=subprocess.PIPE,
+                          env=env)
+    return proc.stdout.decode('ascii')
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
@@ -107,37 +229,45 @@ def get_client(name: str,
         TimeoutError: If unable to get the container client within the
             specified time.
     """
-    # Sky only supports Azure CLI credential for now.
-    # Increase the timeout to fix the Azure get-access-token timeout issue.
-    # Tracked in
-    # https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
     from azure import identity
-    with _session_creation_lock:
-        credential = identity.AzureCliCredential(process_timeout=30)
-        if name == 'compute':
-            from azure.mgmt import compute
-            return compute.ComputeManagementClient(credential, subscription_id)
-        elif name == 'network':
-            from azure.mgmt import network
-            return network.NetworkManagementClient(credential, subscription_id)
-        elif name == 'resource':
-            from azure.mgmt import resource
-            return resource.ResourceManagementClient(credential,
-                                                     subscription_id)
-        elif name == 'storage':
-            from azure.mgmt import storage
-            return storage.StorageManagementClient(credential, subscription_id)
-        elif name == 'authorization':
-            from azure.mgmt import authorization
-            return authorization.AuthorizationManagementClient(
-                credential, subscription_id)
-        elif name == 'msi':
-            from azure.mgmt import msi
-            return msi.ManagedServiceIdentityClient(credential, subscription_id)
-        elif name == 'graph':
-            import msgraph
-            return msgraph.GraphServiceClient(credential)
-        elif name == 'container':
+    
+    # First try to get service principal credential
+    credential = get_azure_service_principal_credential()
+    sky_logger.debug(f"Service principal credential in get_client: {credential is not None}")
+
+    if credential is None:
+        # Fall back to Azure CLI credential
+        # Increase the timeout to fix the Azure get-access-token timeout issue.
+        # Tracked in
+        # https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
+        sky_logger.debug("Falling back to Azure CLI credential")
+        with _session_creation_lock:
+            credential = identity.AzureCliCredential(process_timeout=30)
+    
+    if name == 'compute':
+        from azure.mgmt import compute
+        return compute.ComputeManagementClient(credential, subscription_id)
+    elif name == 'network':
+        from azure.mgmt import network
+        return network.NetworkManagementClient(credential, subscription_id)
+    elif name == 'resource':
+        from azure.mgmt import resource
+        return resource.ResourceManagementClient(credential,
+                                                 subscription_id)
+    elif name == 'storage':
+        from azure.mgmt import storage
+        return storage.StorageManagementClient(credential, subscription_id)
+    elif name == 'authorization':
+        from azure.mgmt import authorization
+        return authorization.AuthorizationManagementClient(
+            credential, subscription_id)
+    elif name == 'msi':
+        from azure.mgmt import msi
+        return msi.ManagedServiceIdentityClient(credential, subscription_id)
+    elif name == 'graph':
+        import msgraph
+        return msgraph.GraphServiceClient(credential)
+    elif name == 'container':
             # There is no direct way to check if a container URL is public or
             # private. Attempting to access a private container without
             # credentials or a public container with credentials throws an
@@ -260,8 +390,8 @@ def get_client(name: str,
                     'Failed to get the container client within '
                     f'{constants.WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT}'
                     ' seconds.')
-        else:
-            raise ValueError(f'Client not supported: "{name}"')
+    else:
+        raise ValueError(f'Client not supported: "{name}"')
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
@@ -480,3 +610,33 @@ def deployment_mode():
     """Azure deployment mode."""
     from azure.mgmt.resource.resources.models import DeploymentMode
     return DeploymentMode
+
+
+def create_azure_service_principal_credential(credentials: Dict[str, str]):
+    """Create Azure ClientSecretCredential from service principal credentials."""
+    if ClientSecretCredential is None:
+        raise ImportError("azure.identity.ClientSecretCredential not available. "
+                         "Try pip install 'skypilot[azure]'")
+    
+    return ClientSecretCredential(
+        tenant_id=credentials['tenant_id'],
+        client_id=credentials['client_id'],
+        client_secret=credentials['client_secret']
+    )
+
+
+def get_azure_service_principal_credential():
+    """Get Azure credential from thread-local service principal credentials."""
+    credentials = _get_thread_azure_credentials()
+    if credentials is None:
+        return None
+    
+    return create_azure_service_principal_credential(credentials)
+
+
+def get_subscription_id_from_credentials() -> Optional[str]:
+    """Get subscription ID from thread-local credentials or environment."""
+    credentials = _get_thread_azure_credentials()
+    if credentials and 'subscription_id' in credentials:
+        return credentials['subscription_id']
+    return None
