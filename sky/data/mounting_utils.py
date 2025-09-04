@@ -363,9 +363,9 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     # the filename length limit.
     # The hash is a non-negative integer in string form.
     hashed_mount_path = hashlib.md5(mount_path.encode()).hexdigest()
-    log_file_path = os.path.join(constants.RCLONE_LOG_DIR,
+    log_file_path = os.path.join(constants.RCLONE_MOUNT_CACHED_LOG_DIR,
                                  f'{hashed_mount_path}.log')
-    create_log_cmd = (f'mkdir -p {constants.RCLONE_LOG_DIR} && '
+    create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
                       f'touch {log_file_path}')
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
