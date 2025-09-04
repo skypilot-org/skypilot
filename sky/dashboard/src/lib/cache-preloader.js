@@ -6,8 +6,9 @@ import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
 import { getManagedJobsWithClientPagination } from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
-import { getInfraData } from '@/data/connectors/infra';
 import { getVolumes } from '@/data/connectors/volumes';
+import { getGPUs, getCloudInfrastructure } from '@/data/connectors/infra';
+import { getSSHNodePools } from '@/data/connectors/ssh-node-pools';
 
 /**
  * Complete list of all dashboard cache functions organized by page
@@ -23,7 +24,12 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
-    getInfraData: { fn: getInfraData, args: [] },
+    getGPUs: { fn: getGPUs, args: [] },
+    getCloudInfrastructure: {
+      fn: getCloudInfrastructure,
+      args: [false],
+    },
+    getSSHNodePools: { fn: getSSHNodePools, args: [] },
     getVolumes: { fn: getVolumes, args: [] },
   },
 
@@ -36,7 +42,13 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   pages: {
     clusters: ['getClusters', 'getClusterHistory', 'getWorkspaces'],
     jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
-    infra: ['getInfraData', 'getClusters', 'getManagedJobs'],
+    infra: [
+      'getClusters',
+      'getManagedJobs',
+      'getGPUs',
+      'getCloudInfrastructure',
+      'getSSHNodePools',
+    ],
     workspaces: [
       'getWorkspaces',
       'getClusters',
