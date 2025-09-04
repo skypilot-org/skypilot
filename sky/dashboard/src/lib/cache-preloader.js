@@ -34,7 +34,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
 
   // Page-specific function requirements
   pages: {
-    clusters: ['getClusters', 'getClusterHistory', 'getWorkspaces', 'getUsers'],
+    clusters: ['getClusters', 'getClusterHistory', 'getWorkspaces'],
     jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
     infra: ['getInfraData', 'getClusters', 'getManagedJobs'],
     workspaces: [
