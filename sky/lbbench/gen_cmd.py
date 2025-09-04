@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 import shlex
-import tempfile
 from typing import List
 
 from sky.lbbench import utils
@@ -92,10 +91,7 @@ def main():
     if any('None' in e for e in endpoints):
         raise ValueError('Some endpoints are not found')
 
-    name_mapping = []
-    ens = []
     scps = []
-    exp2backend = {}
     cn2cmds = collections.defaultdict(list)
 
     regions = None
@@ -118,16 +114,11 @@ def main():
 
     output = '~/bench_result'
     output_local = f'{args.output_dir}/result'
-    signal_file = tempfile.NamedTemporaryFile(delete=False).name
-    queue_status_file = tempfile.NamedTemporaryFile(delete=False).name
 
     for e, d, p in zip(endpoints, describes, presents):
         en = f'{args.exp_name}_{d}'
-        ens.append(en)
-        name_mapping.append(f'    \'{en}\': \'{p}\',')
         cmd = (f'python3 -m sky.lbbench.bench --exp-name {en} --backend-url '
                f'{e} {args.extra_args} --output-dir {output} -y')
-        exp2backend[en] = e
         scps.append(f'mkdir -p {output_local}/metric/{en}')
         for r in regions:
             cluster = _region_cluster_name(r)
@@ -145,11 +136,6 @@ def main():
             met = f'{output_remote}/metric/{en}.json'
             scps.append(f'scp {met} {output_local}'
                         f'/metric/{en}/{cluster}.json')
-
-    status_puller_cmd = (
-        f'python3 -m sky.lbbench.queue_fetcher -y '
-        f'--exp2backend {shlex.quote(json.dumps(exp2backend))} '
-        f'--output-dir {output_local} --signal-file {signal_file}')
 
     script_path = Path(output_local) / 'scripts' / f'{args.exp_name}.bash'
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -198,11 +184,6 @@ def main():
                 f.write(f'  {cn2cmds[cluster][cmd_idx]}\n')
                 f.write('}\n\n')
 
-        # Phase 0: Start the status puller in the background
-        f.write('# ---------- phase 0: start status puller in background\n')
-        f.write(f'{status_puller_cmd} > {queue_status_file} 2>&1 &\n')
-        f.write('status_puller_pid=$!\n\n')
-
         # Phase 1: Launch clusters in parallel
         f.write(
             '# ---------- phase 1: launches in parallel, barrier via wait\n')
@@ -214,16 +195,6 @@ def main():
         for r in regions:
             region_safe = r.replace('-', '_')
             f.write(f'wait $pid_launch_{region_safe}\n')
-
-        f.write('# Wait for queue status puller to initialize\n')
-        f.write('echo "Waiting for queue status puller to initialize..."\n')
-        f.write(f'echo "Check log file: tail -f {queue_status_file}"\n')
-        f.write('while ! grep -q "Pulling queue status" '
-                f'{queue_status_file}; do\n')
-        f.write('  sleep 1\n')
-        f.write('  echo -n "."\n')
-        f.write('done\n')
-        f.write('echo "Queue status puller is ready!"\n\n')
 
         # Phase 2: Execute benchmarks in parallel for each experiment
         for i, d in enumerate(describes):
@@ -291,7 +262,6 @@ def main():
             '    echo "Waiting for queues to be empty... Elapsed time: '
             '$elapsed seconds, Check #$wait_count, Finished: $num_succeeded, Running: $num_running"\n'
         )
-        # f.write('    echo "$queue_output"\n')
         f.write('    sleep 10\n')
         f.write('  done\n')
         f.write('}\n\n')
@@ -307,11 +277,6 @@ def main():
         for i in range(len(scps)):
             f.write(f'wait $pid_scp_{i}\n')
         f.write('echo "Finished syncing results at $(date)"\n')
-
-        # Phase 4: Stop the status puller
-        f.write('\n# ---------- phase 5: stop status puller\n')
-        f.write(f'echo stop > {signal_file}\n')
-        f.write('echo "Status puller stopped at $(date)"\n')
 
         # Make the script executable
         os.system(f'chmod +x {script_path}')
