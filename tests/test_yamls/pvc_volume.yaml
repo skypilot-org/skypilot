@@ -1,6 +1,6 @@
 name: min
 resources:
-  cpus: 0.1+
+  cpus: 1+
 volumes:
   /mnt/data0: pvc0
 setup: |
