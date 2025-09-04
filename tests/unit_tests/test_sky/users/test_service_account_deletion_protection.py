@@ -110,8 +110,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect it to fail
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            users_server.delete_service_account_token(
-                mock_request, delete_body)
+            users_server.delete_service_account_token(mock_request, delete_body)
 
         # Verify error details
         assert exc_info.value.status_code == 400
@@ -158,8 +157,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect it to fail
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            users_server.delete_service_account_token(
-                mock_request, delete_body)
+            users_server.delete_service_account_token(mock_request, delete_body)
 
         # Verify error details
         assert exc_info.value.status_code == 400
@@ -202,8 +200,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect it to fail
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            users_server.delete_service_account_token(
-                mock_request, delete_body)
+            users_server.delete_service_account_token(mock_request, delete_body)
 
         # Verify error details
         assert exc_info.value.status_code == 400
@@ -232,8 +229,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect permission error
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            users_server.delete_service_account_token(
-                mock_request, delete_body)
+            users_server.delete_service_account_token(mock_request, delete_body)
 
         # Verify permission error
         assert exc_info.value.status_code == 403
@@ -253,8 +249,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect not found error
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            users_server.delete_service_account_token(
-                mock_request, delete_body)
+            users_server.delete_service_account_token(mock_request, delete_body)
 
         # Verify not found error
         assert exc_info.value.status_code == 404
@@ -273,8 +268,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect authentication error
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            users_server.delete_service_account_token(
-                request, delete_body)
+            users_server.delete_service_account_token(request, delete_body)
 
         # Verify authentication error
         assert exc_info.value.status_code == 401
@@ -304,8 +298,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect DB error
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            users_server.delete_service_account_token(
-                mock_request, delete_body)
+            users_server.delete_service_account_token(mock_request, delete_body)
 
         # Verify database error
         assert exc_info.value.status_code == 404
