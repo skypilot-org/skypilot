@@ -161,12 +161,13 @@ class LazyDataFrame:
         # Unlike _load_df(), the result is not cached in the class object.
         # The LRU cache still ensures that the catalog data is reused within
         # the same request.
+        self.update_if_stale_func()
         try:
             return pd.read_csv(self._filename)
         except Exception as e:  # pylint: disable=broad-except
             # As users can manually modify the catalog, read_csv can fail.
             logger.error(f'Failed to read {self._filename}. '
-                            'To fix: delete the csv file and try again.')
+                         'To fix: delete the csv file and try again.')
             with ux_utils.print_exception_no_traceback():
                 raise e
 
