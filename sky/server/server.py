@@ -1578,7 +1578,7 @@ async def stream(
         'Transfer-Encoding': 'chunked'
     }
     if request_id is not None:
-        headers['X-Stream-Request-ID'] = request_id
+        headers[server_constants.STREAM_REQUEST_HEADER] = request_id
 
     return fastapi.responses.StreamingResponse(
         content=stream_utils.log_streamer(request_id,
