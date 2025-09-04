@@ -194,6 +194,7 @@ export function Clusters() {
     workspace: [],
     infra: [],
   }); /// Option values for properties
+  const [preloadingComplete, setPreloadingComplete] = useState(false);
 
   // Handle URL query parameters for workspace and user filtering and show history
   useEffect(() => {
@@ -269,8 +270,13 @@ export function Clusters() {
             display: formatUserDisplay(user.username, user.userId),
           });
         });
+
+        // Signal that preloading is complete
+        setPreloadingComplete(true);
       } catch (error) {
         console.error('Error fetching data for filters:', error);
+        // Still signal completion even on error so the table can load
+        setPreloadingComplete(true);
       }
     };
 
@@ -370,6 +376,14 @@ export function Clusters() {
     dashboardCache.invalidate(getClusterHistory);
     dashboardCache.invalidate(getWorkspaces);
 
+    // Reset preloading state so ClusterTable can fetch fresh data immediately
+    setPreloadingComplete(false);
+    
+    // Trigger a new preload cycle
+    cachePreloader.preloadForPage('clusters', { force: true }).then(() => {
+      setPreloadingComplete(true);
+    });
+
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
@@ -460,6 +474,7 @@ export function Clusters() {
           setIsVSCodeModalOpen(true);
         }}
         setOptionValues={setOptionValues}
+        preloadingComplete={preloadingComplete}
       />
 
       {/* SSH Instructions Modal */}
@@ -487,6 +502,7 @@ export function ClusterTable({
   onOpenSSHModal,
   onOpenVSCodeModal,
   setOptionValues,
+  preloadingComplete,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -529,6 +545,7 @@ export function ClusterTable({
     setLocalLoading(true);
 
     try {
+      // Use cached data if available, which should have been preloaded by cache preloader
       const activeClusters = await dashboardCache.get(getClusters);
 
       if (showHistory) {
@@ -648,19 +665,26 @@ export function ClusterTable({
     setData([]);
     let isCurrent = true;
 
-    fetchData();
+    // Only start fetching data after preloading is complete
+    if (preloadingComplete) {
+      fetchData();
 
-    const interval = setInterval(() => {
-      if (isCurrent) {
-        fetchData();
-      }
-    }, refreshInterval);
+      const interval = setInterval(() => {
+        if (isCurrent) {
+          fetchData();
+        }
+      }, refreshInterval);
+
+      return () => {
+        isCurrent = false;
+        clearInterval(interval);
+      };
+    }
 
     return () => {
       isCurrent = false;
-      clearInterval(interval);
     };
-  }, [refreshInterval, fetchData]);
+  }, [refreshInterval, fetchData, preloadingComplete]);
 
   // Reset to first page when data changes
   useEffect(() => {
