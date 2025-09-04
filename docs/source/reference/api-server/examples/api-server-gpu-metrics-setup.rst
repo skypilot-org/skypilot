@@ -23,6 +23,49 @@ requirements:
 * **DCGM-Exporter** is running on the cluster and exposes metrics on
   port ``9400``.  Most GPU Operator installations already deploy DCGM-Exporter for you.
 
+.. dropdown:: Service for the DCGM-Exporter Pods
+
+    Ensure that a Kubernetes Service for DCGM-Exporter exists and includes the following annotations so Prometheus can scrape its metrics:
+
+    .. code-block:: bash
+
+        annotations:
+          prometheus.io/port: 9400
+          prometheus.io/path: /metrics
+          prometheus.io/scrape: true
+
+    If the service is not created, you can deploy it using the following yaml and command.
+
+    ``dcgm_service.yaml``:
+
+    .. code-block:: yaml
+
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: dcgm-exporter
+          labels:
+            app: dcgm-exporter
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "9400"
+            prometheus.io/path: "/metrics"
+        spec:
+          selector:
+            app.kubernetes.io/name: dcgm-exporter
+          ports:
+          - name: metrics
+            port: 9400
+            targetPort: 9400
+            protocol: TCP
+          type: ClusterIP
+
+    .. code-block:: bash
+
+        kubectl create -f dcgm_service.yaml -n $NAMESPACE
+
+    ``$NAMESPACE`` is the namespace where the DCGM-Exporter is deployed.
+
 If this is the Kubernetes cluster you will be deploying the SkyPilot API server on, these
 are the only prerequisites. Otherwise, make sure to also helm install the SkyPilot Prometheus
 server using the following command:
