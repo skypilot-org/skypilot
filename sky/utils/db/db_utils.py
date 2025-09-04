@@ -325,7 +325,6 @@ class SQLiteConn(threading.local):
                     # initialization like setting the WAL mode, so we do not
                     # duplicate that logic here.
                     self._async_conn = await aiosqlite.connect(self.db_path)
-                    self._async_conn.daemon = True
         return self._async_conn
 
     async def execute_and_commit_async(self,

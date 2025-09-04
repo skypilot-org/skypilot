@@ -91,6 +91,7 @@ def cleanup_db_conn():
     if requests_lib._DB is not None:
         asyncio.run(requests_lib._DB.close())
 
+
 @pytest.fixture(scope='session', autouse=True)
 def enable_asyncio_debug():
     """Enable asyncio debug."""
