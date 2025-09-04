@@ -37,6 +37,7 @@ _GOOFYS_WRAPPER = ('$(if [ -S /dev/log ] ; then '
                    'echo "goofys --log-file $(mktemp -t goofys.XXXX.log)"; '
                    'fi)')
 
+
 def get_rclone_install_cmd() -> str:
     """ RClone installation for both apt-get and rpm.
     This would be common command.
@@ -58,6 +59,7 @@ def get_rclone_install_cmd() -> str:
         f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
         f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
     return install_cmd
+
 
 def get_s3_mount_install_cmd() -> str:
     """Returns command for basic S3 mounting (goofys by default, rclone for
@@ -400,7 +402,6 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # produce any output, so we aren't dropping any logs.
         '> /dev/null 2>&1')
     return mount_cmd
-
 
 
 def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,

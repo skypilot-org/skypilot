@@ -75,23 +75,6 @@ def test_file_mounts(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.aws
-def test_aws_arm64_file_mounts():
-    name = smoke_tests_utils.get_cluster_name()
-    test_commands = [
-        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        f'sky launch -y -c {name} --infra aws/us-west-2 --image-id ami-03ac43540bf1c63c0 -t t4g.large examples/using_file_mounts.yaml',
-        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-    ]
-    test = smoke_tests_utils.Test(
-        'aws_arm64_using_file_mounts',
-        test_commands,
-        f'sky down -y {name}',
-        timeout=20 * 60,  # 20 mins
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
 @pytest.mark.scp
 def test_scp_file_mounts():
     name = smoke_tests_utils.get_cluster_name()
@@ -231,7 +214,6 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
 
 
 @pytest.mark.aws
-@pytest.mark.skip(reason='Skip due to AWS AMI selection issue')
 def test_aws_storage_mounts_arm64():
     """Test S3 storage mounting on ARM64 architecture using rclone."""
     name = smoke_tests_utils.get_cluster_name()
@@ -249,7 +231,10 @@ def test_aws_storage_mounts_arm64():
             if cmd.startswith('sky launch') and '--infra aws' in cmd:
                 # Insert ARM64 instance type before the YAML file path
                 test_commands[i] = cmd.replace(
-                    'sky launch', 'sky launch --instance-type m6g.large')
+                    'sky launch', 'sky launch --instance-type m6g.large'
+                ).replace(
+                    '--infra aws',
+                    '--infra aws/us-west-2 --image-id ami-03ac43540bf1c63c0')
                 break
 
         # Add ARM64-specific verification
