@@ -44,6 +44,7 @@ from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
+from sky.provision.primeintellect import utils as primeintellect_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
@@ -583,6 +584,26 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Set up auth section for Ray template
     config.setdefault('auth', {})
     config['auth']['ssh_user'] = 'ubuntu'
+    config['auth']['ssh_public_key'] = public_key_path
+
+    return configure_ssh_info(config)
+
+
+def setup_primeintellect_authentication(
+        config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Prime Intellect.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's Prime Intellect account.
+    """
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    # Add the public key to Prime Intellect account
+    client = primeintellect_utils.PrimeIntellectAPIClient()
+    client.get_or_add_ssh_key(public_key)
+
+    config.setdefault('auth', {})
     config['auth']['ssh_public_key'] = public_key_path
 
     return configure_ssh_info(config)
