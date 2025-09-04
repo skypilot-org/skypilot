@@ -2,10 +2,12 @@
 import asyncio
 import contextlib
 import enum
+import os
+import pathlib
 import sqlite3
 import threading
 import typing
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 
 import aiosqlite
 import aiosqlite.context
@@ -13,6 +15,7 @@ import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 
 from sky import sky_logging
+from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 if typing.TYPE_CHECKING:
@@ -346,3 +349,52 @@ class SQLiteConn(threading.local):
                                     ) -> Iterable[sqlite3.Row]:
         conn = await self._get_async_conn()
         return await conn.execute_fetchall(sql, parameters)
+
+
+_max_connections = 0
+_postgres_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
+_sqlite_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
+
+_db_creation_lock = threading.Lock()
+
+
+def set_max_connections(max_connections: int):
+    global _max_connections
+    _max_connections = max_connections
+
+
+def get_max_connections():
+    return _max_connections
+
+
+def get_engine(db_name: str):
+    conn_string = None
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
+    if conn_string:
+        with _db_creation_lock:
+            if conn_string not in _postgres_engine_cache:
+                if _max_connections == 0:
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy.create_engine(
+                            conn_string, poolclass=sqlalchemy.pool.NullPool))
+                elif _max_connections == 1:
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy.create_engine(
+                            conn_string, poolclass=sqlalchemy.pool.StaticPool))
+                else:
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy.create_engine(
+                            conn_string,
+                            poolclass=sqlalchemy.pool.QueuePool,
+                            size=_max_connections,
+                            max_overflow=0))
+            engine = _postgres_engine_cache[conn_string]
+    else:
+        db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
+        pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
+        if db_path not in _sqlite_engine_cache:
+            _sqlite_engine_cache[db_path] = sqlalchemy.create_engine(
+                'sqlite:///' + db_path)
+        engine = _sqlite_engine_cache[db_path]
+    return engine
