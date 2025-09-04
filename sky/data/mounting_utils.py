@@ -96,7 +96,9 @@ def get_s3_mount_cmd(bucket_name: str,
     rclone_mount = (
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
-        '--daemon --allow-other')
+        # Have to add --s3-env-auth=true to allow rclone to access private
+        # buckets.
+        '--daemon --allow-other --s3-env-auth=true')
     goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
