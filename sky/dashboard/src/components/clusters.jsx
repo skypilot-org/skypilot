@@ -378,7 +378,7 @@ export function Clusters() {
 
     // Reset preloading state so ClusterTable can fetch fresh data immediately
     setPreloadingComplete(false);
-    
+
     // Trigger a new preload cycle
     cachePreloader.preloadForPage('clusters', { force: true }).then(() => {
       setPreloadingComplete(true);
