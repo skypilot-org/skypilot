@@ -234,6 +234,9 @@ def test_aws_storage_mounts_arm64():
                     'sky launch', 'sky launch --instance-type m6g.large'
                 ).replace(
                     '--infra aws',
+                    # Use ARM64 AMI to make sure the launch succeeds.
+                    # The image ID is retrieved with:
+                    # aws ec2 describe-images --owners amazon --filters "Name=name,Values=Deep Learning ARM64 Base OSS*Ubuntu 22.04*" --region $REGION --query "Images | sort_by(@, &CreationDate) | [-1].{Name:Name,ImageId:ImageId}" --output text | cat
                     '--infra aws/us-west-2 --image-id ami-03ac43540bf1c63c0')
                 break
 
