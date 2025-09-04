@@ -704,7 +704,7 @@ class TestBackwardCompatibility:
             commands = [
                 # Create volume in base version
                 f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
-                f'sky volumes apply -y -n {volume_name} --type k8s-pvc --size 2GB',
+                f'sky volumes apply -y -n {volume_name} --infra k8s --type k8s-pvc --size 1Gi',
                 f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{volume_name}"',
 
                 # Use volume in current version
