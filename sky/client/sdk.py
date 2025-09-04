@@ -847,7 +847,8 @@ def tail_logs(
     tail: int = 0,
     output_stream: Optional['io.TextIOBase'] = None,
     *,  # keyword only separator
-    preload_content: bool = True
+    preload_content: bool = True,
+    credentials: Optional[Dict[str, Any]] = None
 ) -> Union[int, Iterator[Optional[str]]]:
     """Tails the logs of a job.
 
@@ -863,6 +864,7 @@ def tail_logs(
             the logs without the function blocking on the retrieval of entire
             log. Iterator returns None when the log has been completely
             streamed. Default True. Cannot be used with output_stream.
+        credentials: Cloud credentials to use for this operation.
 
     Returns:
         If preload_content is True:
@@ -894,6 +896,7 @@ def tail_logs(
         job_id=job_id,
         follow=follow,
         tail=tail,
+        credentials=credentials,
     )
     response = server_common.make_authenticated_request(
         'POST',
@@ -972,12 +975,15 @@ def tail_provision_logs(cluster_name: str,
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def download_logs(cluster_name: str,
-                  job_ids: Optional[List[str]]) -> Dict[str, str]:
+                  job_ids: Optional[List[str]],
+                  *,
+                  credentials: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
     """Downloads the logs of jobs.
 
     Args:
         cluster_name: (str) name of the cluster.
         job_ids: (List[str]) job ids.
+        credentials: Cloud credentials to use for this operation.
 
     Returns:
         The request ID of the download_logs request.
@@ -998,6 +1004,7 @@ def download_logs(cluster_name: str,
     body = payloads.ClusterJobsDownloadLogsBody(
         cluster_name=cluster_name,
         job_ids=job_ids,
+        credentials=credentials,
     )
     response = server_common.make_authenticated_request(
         'POST', '/download_logs', json=json.loads(body.model_dump_json()))
@@ -1293,13 +1300,15 @@ def autostop(
 @annotations.client_api
 def queue(cluster_name: str,
           skip_finished: bool = False,
-          all_users: bool = False) -> server_common.RequestId[List[dict]]:
+          all_users: bool = False,
+          credentials: Optional[Dict[str, Any]] = None) -> server_common.RequestId[List[dict]]:
     """Gets the job queue of a cluster.
 
     Args:
         cluster_name: name of the cluster.
         skip_finished: if True, skip finished jobs.
         all_users: if True, return jobs from all users.
+        credentials: Cloud credentials to use for this operation.
 
 
     Returns:
@@ -1341,6 +1350,7 @@ def queue(cluster_name: str,
         cluster_name=cluster_name,
         skip_finished=skip_finished,
         all_users=all_users,
+        credentials=credentials,
     )
     response = server_common.make_authenticated_request(
         'POST', '/queue', json=json.loads(body.model_dump_json()))

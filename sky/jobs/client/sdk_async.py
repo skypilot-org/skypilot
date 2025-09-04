@@ -87,7 +87,9 @@ async def tail_logs(cluster_name: str,
                     job_id: Optional[int],
                     follow: bool,
                     tail: int = 0,
-                    output_stream: Optional['io.TextIOBase'] = None) -> int:
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    *,
+                    credentials: Optional[Dict[str, Any]] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
     return await context_utils.to_thread(
         sdk.tail_logs,
@@ -96,6 +98,7 @@ async def tail_logs(cluster_name: str,
         follow,
         tail,
         output_stream,
+        credentials=credentials,
     )
 
 
@@ -105,10 +108,13 @@ async def download_logs(
         job_id: Optional[int],
         refresh: bool,
         controller: bool,
-        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
+        local_dir: str = constants.SKY_LOGS_DIRECTORY,
+        *,
+        credentials: Optional[Dict[str, Any]] = None) -> Dict[int, str]:
     """Async version of download_logs() that syncs down logs of managed jobs."""
     return await context_utils.to_thread(sdk.download_logs, name, job_id,
-                                         refresh, controller, local_dir)
+                                         refresh, controller, local_dir,
+                                         credentials=credentials)
 
 
 @usage_lib.entrypoint

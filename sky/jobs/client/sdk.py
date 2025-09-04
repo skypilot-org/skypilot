@@ -129,7 +129,8 @@ def queue(
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
-    job_ids: Optional[List[int]] = None
+    job_ids: Optional[List[int]] = None,
+    credentials: Optional[Dict[str, Any]] = None
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
     """Gets statuses of managed jobs.
 
@@ -140,6 +141,7 @@ def queue(
         skip_finished: Whether to skip finished jobs.
         all_users: Whether to show all users' jobs.
         job_ids: IDs of the managed jobs to show.
+        credentials: Cloud credentials to use for this operation.
 
     Returns:
         The request ID of the queue request.
@@ -177,6 +179,7 @@ def queue(
         skip_finished=skip_finished,
         all_users=all_users,
         job_ids=job_ids,
+        credentials=credentials,
     )
     response = server_common.make_authenticated_request(
         'POST',
@@ -243,7 +246,9 @@ def tail_logs(name: Optional[str] = None,
               controller: bool = False,
               refresh: bool = False,
               tail: Optional[int] = None,
-              output_stream: Optional['io.TextIOBase'] = None) -> Optional[int]:
+              output_stream: Optional['io.TextIOBase'] = None,
+              *,
+              credentials: Optional[Dict[str, Any]] = None) -> Optional[int]:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID to tail logs. If both are not
@@ -258,6 +263,7 @@ def tail_logs(name: Optional[str] = None,
         tail: Number of lines to tail from the end of the log file.
         output_stream: The stream to write the logs to. If None, print to the
             console.
+        credentials: Cloud credentials to use for this operation.
 
     Returns:
         Exit code based on success or failure of the job. 0 if success,
@@ -277,6 +283,7 @@ def tail_logs(name: Optional[str] = None,
         controller=controller,
         refresh=refresh,
         tail=tail,
+        credentials=credentials,
     )
     response = server_common.make_authenticated_request(
         'POST',
@@ -302,7 +309,9 @@ def download_logs(
         job_id: Optional[int],
         refresh: bool,
         controller: bool,
-        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
+        local_dir: str = constants.SKY_LOGS_DIRECTORY,
+        *,
+        credentials: Optional[Dict[str, Any]] = None) -> Dict[int, str]:
     """Sync down logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
@@ -313,6 +322,7 @@ def download_logs(
         refresh: Whether to restart the jobs controller if it is stopped.
         controller: Whether to sync down logs from the jobs controller.
         local_dir: Local directory to sync down logs.
+        credentials: Cloud credentials to use for this operation.
 
     Returns:
         A dictionary mapping job ID to the local path.
@@ -328,6 +338,7 @@ def download_logs(
         refresh=refresh,
         controller=controller,
         local_dir=local_dir,
+        credentials=credentials,
     )
     response = server_common.make_authenticated_request(
         'POST',
