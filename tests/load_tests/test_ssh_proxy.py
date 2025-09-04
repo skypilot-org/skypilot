@@ -10,9 +10,15 @@ import time
 from typing import List, Tuple
 
 from sky import sky_logging
+import logging
 
 logger = sky_logging.init_logger(__name__)
-
+logger.handlers.clear()
+logger.propagate = False
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.flush = sys.stdout.flush  # type: ignore
+stream_handler.setFormatter(sky_logging.FORMATTER)
+logger.addHandler(stream_handler)
 
 class SSHClient:
     """A persistent SSH client for executing commands."""
@@ -100,8 +106,8 @@ class SSHClient:
                     return time.time() - start_time, False, str(e)
 
         except BrokenPipeError as e:
-            # The connection has been disconnected.
-            raise
+            # Cannot write the packet, continue to retry
+            return 0.0, False, "BrokenPipeError"
 
         except Exception as e:
             logger.error(f'Error executing command {command}: {e}')
