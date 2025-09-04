@@ -45,7 +45,7 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
         with open(abs_catalog_path) as f:
             content_on_disk = f.read()
         assert content_on_disk == DUMMY_CSV
-        pd.testing.assert_frame_equal(df._df, pd.read_csv(abs_catalog_path))
+        pd.testing.assert_frame_equal(df._load_df_ephemeral(), pd.read_csv(abs_catalog_path))
 
         # Modify the file's mtime to be 2 hours ago.
         new_time = time.time() - 60 * 60 * 2
@@ -59,7 +59,7 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
         # should not be called, i.e. the file on disk and
         # DataFrame should not be updated.
         df.head()
-        pd.testing.assert_frame_equal(df._df, pd.read_csv(abs_catalog_path))
+        pd.testing.assert_frame_equal(df._load_df_ephemeral(), pd.read_csv(abs_catalog_path))
 
         # Clear the cache.
         annotations.clear_request_level_cache()
@@ -70,7 +70,7 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
         with open(abs_catalog_path) as f:
             content_on_disk = f.read()
         assert content_on_disk == NEW_DUMMY_CSV
-        pd.testing.assert_frame_equal(df._df, pd.read_csv(abs_catalog_path))
+        pd.testing.assert_frame_equal(df._load_df_ephemeral(), pd.read_csv(abs_catalog_path))
     finally:
         if os.path.exists(abs_catalog_path):
             os.remove(abs_catalog_path)
