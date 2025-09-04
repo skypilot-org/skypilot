@@ -640,6 +640,8 @@ class RayCodeGen:
         rclone_flush_script = textwrap.dedent(f"""\
 
         # Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)
+        # findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses
+        # rclone for normal mounts as well.
         if [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] && \
            [ -d {constants.RCLONE_MOUNT_CACHED_LOG_DIR} ] && \
            [ "$(ls -A {constants.RCLONE_MOUNT_CACHED_LOG_DIR})" ]; then
