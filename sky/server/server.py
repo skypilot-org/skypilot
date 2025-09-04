@@ -715,7 +715,7 @@ async def realtime_kubernetes_gpu_availability(
         request_name='realtime_kubernetes_gpu_availability',
         request_body=realtime_gpu_availability_body,
         func=core.realtime_kubernetes_gpu_availability,
-        schedule_type=requests_lib.ScheduleType.SHORT,
+        schedule_type=requests_lib.ScheduleType.SHORT_WITH_CATALOG,
     )
 
 
@@ -756,7 +756,7 @@ async def list_accelerators(
         request_name='list_accelerators',
         request_body=list_accelerator_counts_body,
         func=catalog.list_accelerators,
-        schedule_type=requests_lib.ScheduleType.SHORT,
+        schedule_type=requests_lib.ScheduleType.SHORT_WITH_CATALOG,
     )
 
 
@@ -771,7 +771,7 @@ async def list_accelerator_counts(
         request_name='list_accelerator_counts',
         request_body=list_accelerator_counts_body,
         func=catalog.list_accelerator_counts,
-        schedule_type=requests_lib.ScheduleType.SHORT,
+        schedule_type=requests_lib.ScheduleType.SHORT_WITH_CATALOG,
     )
 
 
@@ -786,6 +786,9 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     # in each step, which may be an expensive operation. We should consolidate
     # these into a single call or have a TTL cache for (task, admin_policy)
     # pairs.
+
+    # TODO: this request needs catalog access. We should run this in a
+    # separate worker using SHORT_WITH_CATALOG executor.
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
     context.initialize()
@@ -1094,7 +1097,7 @@ async def status(
         func=core.status,
         schedule_type=(requests_lib.ScheduleType.LONG if
                        status_body.refresh != common_lib.StatusRefreshMode.NONE
-                       else requests_lib.ScheduleType.SHORT),
+                       else requests_lib.ScheduleType.SHORT_WITH_CATALOG),
     )
 
 
@@ -1372,7 +1375,7 @@ async def cost_report(request: fastapi.Request,
         request_name='cost_report',
         request_body=cost_report_body,
         func=core.cost_report,
-        schedule_type=requests_lib.ScheduleType.SHORT,
+        schedule_type=requests_lib.ScheduleType.SHORT_WITH_CATALOG,
     )
 
 

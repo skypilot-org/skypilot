@@ -3007,6 +3007,7 @@ def get_clusters(
         """Add resource str to record"""
         for record in _get_records_with_handle(records):
             handle = record['handle']
+            # info: get_readable_resources_repr requires catalog access.
             record[
                 'resources_str'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=True)
