@@ -154,27 +154,50 @@ class CachePreloader {
 
     this.isPreloading = true;
 
-    // Get all pages except current
-    const otherPages = Object.keys(DASHBOARD_CACHE_FUNCTIONS.pages).filter(
-      (page) => page !== currentPage
+    // Get functions already loaded for current page
+    const currentPageFunctions = new Set(
+      DASHBOARD_CACHE_FUNCTIONS.pages[currentPage]
     );
+
+    // Get all unique functions needed by other pages, excluding current page functions
+    const allOtherFunctions = new Set();
+    Object.keys(DASHBOARD_CACHE_FUNCTIONS.pages)
+      .filter((page) => page !== currentPage)
+      .forEach((page) => {
+        DASHBOARD_CACHE_FUNCTIONS.pages[page].forEach((functionName) => {
+          if (!currentPageFunctions.has(functionName)) {
+            allOtherFunctions.add(functionName);
+          }
+        });
+      });
 
     console.log(
-      `[CachePreloader] Background preloading pages: ${otherPages.join(', ')}`
+      `[CachePreloader] Background preloading ${allOtherFunctions.size} unique functions: ${Array.from(allOtherFunctions).join(', ')}`
     );
 
-    // Preload all pages immediately in parallel
-    const preloadPromises = otherPages.map(async (page) => {
-      try {
-        await this._loadPageData(page, false);
-        console.log(`[CachePreloader] Background loaded: ${page}`);
-      } catch (error) {
-        console.error(
-          `[CachePreloader] Background load failed for ${page}:`,
-          error
-        );
+    // Load each unique function once
+    const preloadPromises = Array.from(allOtherFunctions).map(
+      async (functionName) => {
+        try {
+          if (DASHBOARD_CACHE_FUNCTIONS.base[functionName]) {
+            // Base function (no arguments)
+            const { fn, args } = DASHBOARD_CACHE_FUNCTIONS.base[functionName];
+            await dashboardCache.get(fn, args);
+          } else if (functionName === 'getEnabledClouds') {
+            // Dynamic function that requires workspace data
+            await this._loadEnabledCloudsForAllWorkspaces(false);
+          }
+          console.log(
+            `[CachePreloader] Background loaded function: ${functionName}`
+          );
+        } catch (error) {
+          console.error(
+            `[CachePreloader] Background load failed for function ${functionName}:`,
+            error
+          );
+        }
       }
-    });
+    );
 
     // Wait for all preloading to complete
     Promise.allSettled(preloadPromises).then(() => {
