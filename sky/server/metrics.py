@@ -64,6 +64,19 @@ SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
              60.0, float('inf')),
 )
 
+SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
+    'sky_apiserver_websocket_connections',
+    'Number of websocket connections',
+    ['pid'],
+    multiprocess_mode='livesum',
+)
+
+SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_closed_total',
+    'Number of websocket closed',
+    ['pid', 'reason'],
+)
+
 metrics_app = fastapi.FastAPI()
 
 
