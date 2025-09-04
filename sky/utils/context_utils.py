@@ -1,7 +1,6 @@
 """Utilities for SkyPilot context."""
 import asyncio
 import contextvars
-import concurrent.futures
 import functools
 import io
 import multiprocessing
@@ -174,15 +173,6 @@ def cancellation_guard(func: F) -> F:
     return typing.cast(F, wrapper)
 
 
-# Use a shared thread pool each process to avoid creating too many threads.
-# Threads in the pool are initialized lazily, so it is safe to create this in
-# advance.
-# The max_workers are taken from the default pool size of loop.run_in_executor,
-# we just make it shared.
-_THREAD_POOL = concurrent.futures.ThreadPoolExecutor(
-    max_workers=min(32, os.cpu_count() + 4))
-
-
 # TODO(aylei): replace this with asyncio.to_thread once we drop support for
 # python 3.8
 def to_thread(func, /, *args, **kwargs):
@@ -194,4 +184,4 @@ def to_thread(func, /, *args, **kwargs):
     # This is critical to pass the current coroutine context to the new thread
     pyctx = contextvars.copy_context()
     func_call = functools.partial(pyctx.run, func, *args, **kwargs)
-    return loop.run_in_executor(_THREAD_POOL, func_call)
+    return loop.run_in_executor(None, func_call)

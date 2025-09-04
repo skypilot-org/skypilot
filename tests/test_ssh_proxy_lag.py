@@ -14,12 +14,14 @@ import tempfile
 import time
 from typing import Any, Callable, Dict
 from unittest import mock
-import fastapi.exceptions
 
+import fastapi.exceptions
 import pytest
 
 # Add parent directory to path
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
+
+import concurrent.futures
 
 from sky import global_user_state
 from sky.data import storage_utils
@@ -84,6 +86,12 @@ class SSHLatencyMonitor:
 
 
 # ========== FIXTURES ==========
+
+
+@pytest.fixture(scope='session', autouse=True)
+def enable_asyncio_debug():
+    """Enable asyncio debug."""
+    os.environ['PYTHONASYNCIODEBUG'] = '1'
 
 
 @pytest.fixture
@@ -202,6 +210,10 @@ async def run_endpoint_test(
         num_concurrent: int = 100,
         expected_degradation_threshold: float = 10.0) -> Dict[str, Any]:
     """Run performance test for a single endpoint."""
+    loop = asyncio.get_running_loop()
+    if loop._default_executor is None:
+        loop.set_default_executor(
+            concurrent.futures.ThreadPoolExecutor(max_workers=8))
     # Initialize baseline if not already done
     if monitor.baseline is None:
         baseline = await monitor.measure_baseline()
@@ -216,7 +228,9 @@ async def run_endpoint_test(
         task = asyncio.create_task(endpoint_func())
         test_tasks.append(task)
 
-    results = await asyncio.gather(*test_tasks, ssh_task, return_exceptions=True)
+    results = await asyncio.gather(*test_tasks,
+                                   ssh_task,
+                                   return_exceptions=True)
     for result in results:
         if isinstance(result, Exception):
             raise result
@@ -489,10 +503,6 @@ async def test_endpoint_completion_cluster(monitor):
     """Test /api/completion/cluster_name endpoint for blocking operations."""
     print("\n🔍 Testing: /api/completion/cluster_name")
 
-    # The first time to_thread is called, it will init a thread pool which
-    # may influence the result of the test. We call it in advance.
-    context_utils.to_thread(time.time)
-
     async def test_func():
         # Mock the actual blocking DB call
         with mock.patch.object(global_user_state,
@@ -513,8 +523,6 @@ async def test_endpoint_completion_cluster(monitor):
 async def test_endpoint_completion_storage(monitor):
     """Test /api/completion/storage_name endpoint for blocking operations."""
     print("\n🔍 Testing: /api/completion/storage_name")
-
-    context_utils.to_thread(time.time)
 
     async def test_func():
         # Mock the actual blocking DB call
@@ -541,8 +549,6 @@ async def test_endpoint_provision_logs(monitor):
     """Test /provision_logs endpoint for blocking operations."""
     print("\n🔍 Testing: /provision_logs")
 
-    context_utils.to_thread(time.time)
-
     async def test_func():
         # Mock the actual blocking DB calls
         with mock.patch.object(global_user_state,
@@ -555,7 +561,9 @@ async def test_endpoint_provision_logs(monitor):
                                        None, delay=0.02)):
                 try:
                     body = payloads.ClusterNameBody(cluster_name='test')
-                    await _run_endpoint_func(server.provision_logs, body, follow=False)
+                    await _run_endpoint_func(server.provision_logs,
+                                             body,
+                                             follow=False)
                 except fastapi.HTTPException:
                     # The cluster provision log will not be actually found
                     pass
@@ -614,8 +622,8 @@ async def test_endpoint_users_service_tokens(monitor):
         with mock.patch('sky.global_user_state.get_all_service_account_tokens',
                         side_effect=create_blocking_mock([], delay=0.02)):
             from sky.users import server as users_server
-            await _run_endpoint_func(
-                users_server.get_service_account_tokens, mock_req)
+            await _run_endpoint_func(users_server.get_service_account_tokens,
+                                     mock_req)
 
     result = await run_endpoint_test(test_func, monitor)
     assert not result[
@@ -690,11 +698,11 @@ async def test_endpoint_ssh_node_pools_list(monitor):
 
     async def test_func():
         from sky.ssh_node_pools import server as ssh_pools_server
+
         # Whatever, we think get_all_pools might be blocking.
         with mock.patch('sky.ssh_node_pools.core.get_all_pools',
                         side_effect=create_blocking_mock({}, delay=0.01)):
-            await _run_endpoint_func(ssh_pools_server.get_ssh_node_pools
-                                    )
+            await _run_endpoint_func(ssh_pools_server.get_ssh_node_pools)
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=20)
     assert not result[
