@@ -75,6 +75,8 @@ from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
 
+import traceback
+
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
     from typing import ParamSpec
@@ -1745,7 +1747,9 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                     writer.write(message)
                     await writer.drain()
             except fastapi.WebSocketDisconnect:
-                pass
+                logger.info('WebSocket connection closed')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error in websocket_to_ssh: {e}, {traceback.format_exc()}')
             writer.close()
 
         async def ssh_to_websocket():
@@ -1755,8 +1759,8 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                     if not data:
                         break
                     await websocket.send_bytes(data)
-            except Exception:  # pylint: disable=broad-except
-                pass
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error in ssh_to_websocket: {e}, {traceback.format_exc()}')
             await websocket.close()
 
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
