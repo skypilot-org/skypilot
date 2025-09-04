@@ -1,11 +1,13 @@
 """Tests for volume class."""
 
+import pickle
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
 
 from sky import exceptions
+from sky import models
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.volumes import volume as volume_lib
@@ -687,3 +689,26 @@ class TestVolume:
             volume_lib.Volume.from_yaml_config(cfg)
         assert 'RunPod network volume size must be at least' in str(
             exc_info.value)
+
+
+class TestVolumeConfigModel:
+
+    def test_pickle_unpickle(self):
+        config = models.VolumeConfig(name='test',
+                                     type='k8s-pvc',
+                                     size='100Gi',
+                                     cloud='kubernetes',
+                                     region=None,
+                                     zone=None,
+                                     name_on_cloud='test-pvc')
+        pickled_config = pickle.dumps(config)
+        unpickled_config = pickle.loads(pickled_config)
+        assert unpickled_config.name == 'test'
+        assert unpickled_config.type == 'k8s-pvc'
+        assert unpickled_config.size == '100Gi'
+        assert unpickled_config.cloud == 'kubernetes'
+        assert unpickled_config.region is None
+        assert unpickled_config.zone is None
+        assert unpickled_config.name_on_cloud == 'test-pvc'
+        assert unpickled_config.id_on_cloud is None
+        assert unpickled_config._version == models.VolumeConfig._VERSION
