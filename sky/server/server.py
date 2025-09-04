@@ -1770,6 +1770,8 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                 logger.error(f'Error in ssh_to_websocket: {e}, {traceback.format_exc()}')
             try:
                 await websocket.close()
+            except Exception as e:  # pylint: disable=broad-except
+                pass
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
     finally:
         proc.terminate()
