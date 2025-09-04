@@ -329,11 +329,11 @@ class RayCodeGen:
             from sky.utils import subprocess_utils
 
             @ray.remote
-            def run_bash_command_with_log_and_return_context(bash_command: str,
-                                                            log_path: str,
-                                                            env_vars: Optional[Dict[str, str]] = None,
-                                                            stream_logs: bool = False,
-                                                            with_ray: bool = False):
+            def run_bash_command_with_log_and_return_pid(bash_command: str,
+                                                         log_path: str,
+                                                         env_vars: Optional[Dict[str, str]] = None,
+                                                         stream_logs: bool = False,
+                                                         with_ray: bool = False):
                 return_code = run_bash_command_with_log(bash_command, log_path, env_vars, stream_logs, with_ray)
                 return {{"return_code": return_code, "pid": os.getpid()}}
 
@@ -519,7 +519,7 @@ class RayCodeGen:
                 total_num_nodes = len(ray.nodes())
                 setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
                 setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
-                setup_workers = [run_bash_command_with_log_and_return_context \\
+                setup_workers = [run_bash_command_with_log_and_return_pid \\
                     .options(
                         name='setup',
                         num_cpus=_SETUP_CPUS,
@@ -720,7 +720,7 @@ class RayCodeGen:
 
             sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
 
-            futures.append(run_bash_command_with_log \\
+            futures.append(run_bash_command_with_log_and_return_pid \\
                     .options(name=name_str, {options_str}) \\
                     .remote(
                         script,
