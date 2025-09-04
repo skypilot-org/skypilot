@@ -22,7 +22,6 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 import psutil
-import yaml
 
 from sky import backends
 from sky import catalog
@@ -66,6 +65,7 @@ from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import directory_utils
 from sky.utils import env_options
+from sky.utils import lock_events
 from sky.utils import locks
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -77,6 +77,7 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import grpc
@@ -640,7 +641,12 @@ class RayCodeGen:
         # CACHED_MOUNT mode is uploaded to remote.
         rclone_flush_script = textwrap.dedent(f"""\
 
-        if [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ]; then
+        # Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)
+        # findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses
+        # rclone for normal mounts as well.
+        if [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] && \
+           [ -d {constants.RCLONE_MOUNT_CACHED_LOG_DIR} ] && \
+           [ "$(ls -A {constants.RCLONE_MOUNT_CACHED_LOG_DIR})" ]; then
             flushed=0
             # extra second on top of --vfs-cache-poll-interval to
             # avoid race condition between rclone log line creation and this check.
@@ -649,7 +655,7 @@ class RayCodeGen:
                 # sleep for the same interval as --vfs-cache-poll-interval
                 sleep {constants.RCLONE_CACHE_REFRESH_INTERVAL}
                 flushed=1
-                for file in {constants.RCLONE_LOG_DIR}/*; do
+                for file in {constants.RCLONE_MOUNT_CACHED_LOG_DIR}/*; do
                     exitcode=0
                     tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?
                     if [ $exitcode -ne 0 ]; then
@@ -1974,7 +1980,7 @@ class RetryingVmProvisioner(object):
                 ray_config = global_user_state.get_cluster_yaml_dict(
                     cluster_config_file)
                 ray_config['upscaling_speed'] = 0
-                common_utils.dump_yaml(cluster_config_file, ray_config)
+                yaml_utils.dump_yaml(cluster_config_file, ray_config)
                 start = time.time()
                 returncode, stdout, stderr = ray_up()
                 logger.debug(
@@ -2353,7 +2359,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # If the cluster yaml is not available,
                 # we skip updating the cluster info.
                 return
-            config = yaml.safe_load(yaml_str)
+            config = yaml_utils.safe_load(yaml_str)
             try:
                 cluster_info = provision_lib.get_cluster_info(
                     provider_name,
@@ -2500,7 +2506,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.stable_internal_external_ips = stable_internal_external_ips
 
     @context_utils.cancellation_guard
-    @annotations.lru_cache(scope='global')
+    # we expect different request to be acting on different clusters
+    # (= different handles) so we have no real expectation of cache hit
+    # across requests.
+    # Do not change this cache to global scope
+    # without understanding https://github.com/skypilot-org/skypilot/pull/6908
+    @annotations.lru_cache(scope='request', maxsize=10)
     @timeline.event
     def get_command_runners(self,
                             force_cached: bool = False,
@@ -2856,7 +2867,12 @@ class LocalResourcesHandle(CloudVmRayResourceHandle):
         self.is_grpc_enabled = False
 
     @context_utils.cancellation_guard
-    @annotations.lru_cache(scope='global')
+    # we expect different request to be acting on different clusters
+    # (= different handles) so we have no real expectation of cache hit
+    # across requests.
+    # Do not change this cache to global scope
+    # without understanding https://github.com/skypilot-org/skypilot/pull/6908
+    @annotations.lru_cache(scope='request', maxsize=10)
     @timeline.event
     def get_command_runners(self,
                             force_cached: bool = False,
@@ -3114,7 +3130,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
     ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
-        with timeline.DistributedLockEvent(lock_id, _CLUSTER_LOCK_TIMEOUT):
+        with lock_events.DistributedLockEvent(lock_id, _CLUSTER_LOCK_TIMEOUT):
+            # Reset spinner message to remove any mention of being blocked
+            # by other requests.
+            rich_utils.force_update_status(
+                ux_utils.spinner_message('Launching'))
+
             # Try to launch the exiting cluster first. If no existing
             # cluster, this function will create a to_provision_config
             # with required resources.
@@ -3210,8 +3231,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             global_user_state.ClusterEventType.STATUS_CHANGE,
                             nop_if_duplicate=True)
                         global_user_state.remove_cluster(cluster_name,
-                                                         terminate=True,
-                                                         remove_events=False)
+                                                         terminate=True)
                         usage_lib.messages.usage.update_final_cluster_status(
                             None)
                     logger.error(
@@ -4013,8 +4033,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _teardown(self,
                   handle: CloudVmRayResourceHandle,
                   terminate: bool,
-                  purge: bool = False,
-                  explicitly_requested: bool = False):
+                  purge: bool = False):
         """Tear down or stop the cluster.
 
         Args:
@@ -4089,8 +4108,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # ClusterOwnerIdentityMismatchError. The argument/flag
                         # `purge` should bypass such ID mismatch errors.
                         refresh_cluster_status=(
-                            not is_identity_mismatch_and_purge),
-                        explicitly_requested=explicitly_requested)
+                            not is_identity_mismatch_and_purge))
                 if terminate:
                     lock.force_unlock()
                 break
@@ -4479,8 +4497,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          purge: bool = False,
                          post_teardown_cleanup: bool = True,
                          refresh_cluster_status: bool = True,
-                         remove_from_db: bool = True,
-                         explicitly_requested: bool = False) -> None:
+                         remove_from_db: bool = True) -> None:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -4544,8 +4561,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                            f'provision yaml so it '
                            'has not been provisioned. Skipped.')
             global_user_state.remove_cluster(handle.cluster_name,
-                                             terminate=terminate,
-                                             remove_events=False)
+                                             terminate=terminate)
             return
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
@@ -4602,12 +4618,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise
 
             if post_teardown_cleanup:
-                self.post_teardown_cleanup(
-                    handle,
-                    terminate,
-                    purge,
-                    remove_from_db,
-                    explicitly_requested=explicitly_requested)
+                self.post_teardown_cleanup(handle, terminate, purge,
+                                           remove_from_db)
             return
 
         if (isinstance(cloud, clouds.IBM) and terminate and
@@ -4651,7 +4663,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                              prefix='sky_',
                                              delete=False,
                                              suffix='.yml') as f:
-                common_utils.dump_yaml(f.name, config)
+                yaml_utils.dump_yaml(f.name, config)
                 f.flush()
 
                 teardown_verb = 'Terminating' if terminate else 'Stopping'
@@ -4707,8 +4719,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               terminate: bool,
                               purge: bool = False,
                               remove_from_db: bool = True,
-                              failover: bool = False,
-                              explicitly_requested: bool = False) -> None:
+                              failover: bool = False) -> None:
         """Cleanup local configs/caches and delete TPUs after teardown.
 
         This method will handle the following cleanup steps:
@@ -4886,8 +4897,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if not terminate or remove_from_db:
             global_user_state.remove_cluster(handle.cluster_name,
-                                             terminate=terminate,
-                                             remove_events=explicitly_requested)
+                                             terminate=terminate)
 
     def remove_cluster_config(self, handle: CloudVmRayResourceHandle) -> None:
         """Remove the YAML config of a cluster."""
@@ -5154,6 +5164,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Take a random resource in order to get resource info that applies
             # to all resources.
             one_task_resource = list(task.resources)[0]
+
             # Assume resources share the same ports.
             for resource in task.resources:
                 assert resource.ports == one_task_resource.ports
@@ -5194,6 +5205,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if one_task_resource.docker_login_config is not None:
                 to_provision = to_provision.copy(
                     _docker_login_config=one_task_resource.docker_login_config)
+
+            # cluster_config_overrides should be the same for all resources.
+            for resource in task.resources:
+                assert (resource.cluster_config_overrides ==
+                        one_task_resource.cluster_config_overrides)
+            if isinstance(to_provision.cloud, clouds.Kubernetes):
+                # Warn users if the Kubernetes pod config is different
+                # from the existing cluster.
+                cluster_yaml_str = global_user_state.get_cluster_yaml_str(
+                    cluster_name)
+                actual_cluster_yaml_obj = yaml_utils.safe_load(cluster_yaml_str)
+                desired_cluster_yaml_obj = (
+                    kubernetes_utils.combine_pod_config_fields_and_metadata(
+                        actual_cluster_yaml_obj,
+                        cluster_config_overrides=one_task_resource.
+                        cluster_config_overrides,
+                        cloud=to_provision.cloud,
+                        context=to_provision.region))
+
+                def _get_pod_config(yaml_obj: Dict[str, Any]) -> Dict[str, Any]:
+                    return (yaml_obj.get('available_node_types',
+                                         {}).get('ray_head_default',
+                                                 {}).get('node_config', {}))
+
+                if _get_pod_config(desired_cluster_yaml_obj) != _get_pod_config(
+                        actual_cluster_yaml_obj):
+                    # pylint: disable=line-too-long
+                    logger.warning(
+                        f'{colorama.Fore.YELLOW}WARNING: Kubernetes pod config mismatch detected. Task requires different '
+                        f'pod config than the existing cluster. The existing '
+                        f'cluster will be used with its current pod config.'
+                        f'To apply use your task\'s new pod config:\n'
+                        f'  • Use a new cluster'
+                        f'  • Or restart this cluster: sky down {cluster_name}; sky launch -c {cluster_name} ...'
+                        f'{colorama.Style.RESET_ALL}')
+
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,

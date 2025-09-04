@@ -26,6 +26,7 @@ import re
 import tempfile
 import time
 
+import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
 from smoke_tests import test_mount_and_storage
@@ -38,6 +39,7 @@ from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import yaml_utils
 
 
 # ---------- Testing managed job ----------
@@ -152,37 +154,48 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
 def test_job_pipeline(generic_cloud: str):
     """Test a job pipeline."""
     name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test(
-        'job_pipeline',
-        [
-            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/pipeline.yaml -y -d',
-            # Need to wait for setup and job initialization.
-            'sleep 30',
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
-            # `grep -A 4 {name}` finds the job with {name} and the 4 lines
-            # after it, i.e. the 4 tasks within the job.
-            # `sed -n 2p` gets the second line of the 4 lines, i.e. the first
-            # task within the job.
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "STARTING\|RUNNING"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "PENDING"',
+
+    # Use Jinja templating to generate the pipeline YAML with the specific cloud
+    template_str = pathlib.Path('tests/test_yamls/pipeline.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(cloud=generic_cloud)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'job_pipeline',
+            [
+                f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} {file_path} -y -d',
+                # Need to wait for setup and job initialization.
+                'sleep 30',
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
+                # `grep -A 4 {name}` finds the job with {name} and the 4 lines
+                # after it, i.e. the 4 tasks within the job.
+                # `sed -n 2p` gets the second line of the 4 lines, i.e. the first
+                # task within the job.
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "STARTING\|RUNNING"',
+                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "PENDING"',
+                f'sky jobs cancel -y -n {name}',
+                'sleep 5',
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLING\|CANCELLED"',
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLING\|CANCELLED"',
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLING\|CANCELLED"',
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLING\|CANCELLED"',
+                'sleep 200',
+                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLED"',
+                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLED"',
+                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLED"',
+                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
+            ],
             f'sky jobs cancel -y -n {name}',
-            'sleep 5',
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLING\|CANCELLED"',
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLING\|CANCELLED"',
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLING\|CANCELLED"',
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLING\|CANCELLED"',
-            'sleep 200',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLED"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLED"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLED"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
-        ],
-        f'sky jobs cancel -y -n {name}',
-        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
-        # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
-        timeout=30 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  #fluidstack does not support spot instances
@@ -781,13 +794,13 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
         timeout *= 2
     name = smoke_tests_utils.get_cluster_name()
     yaml_path = 'tests/test_yamls/test_managed_jobs_retry.yaml'
-    yaml_config = common_utils.read_yaml_all(yaml_path)
+    yaml_config = yaml_utils.read_yaml_all(yaml_path)
     for task_config in yaml_config:
         task_config['resources'] = task_config.get('resources', {})
         task_config['resources']['cloud'] = generic_cloud
 
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as yaml_file:
-        common_utils.dump_yaml(yaml_file.name, yaml_config)
+        yaml_utils.dump_yaml(yaml_file.name, yaml_config)
         yaml_path = yaml_file.name
         with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
             test = smoke_tests_utils.Test(
@@ -1145,7 +1158,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
             # Test that logs are still available after the job finishes.
             'unset SKYPILOT_DEBUG; s=$(sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
             # Make sure we skip the unnecessary logs.
-            'echo "$s" | head -n1 | grep "Waiting for"',
+            'echo "$s" | head -n2 | grep "Waiting for"',
         ],
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -1208,15 +1221,32 @@ def test_managed_jobs_logs_sync_down(generic_cloud: str):
 def _get_ha_kill_test(name: str, generic_cloud: str,
                       status: sky.ManagedJobStatus, first_timeout: int,
                       second_timeout: int) -> smoke_tests_utils.Test:
+    skypilot_config_path = 'tests/test_yamls/managed_jobs_ha_config.yaml'
+
+    pytest_config_file_override = smoke_tests_utils.pytest_config_file_override(
+    )
+    if pytest_config_file_override is not None:
+        with open(pytest_config_file_override, 'r') as f:
+            base_config = f.read()
+        with open(skypilot_config_path, 'r') as f:
+            ha_config = f.read()
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                         delete=False) as f:
+            f.write(base_config)
+            f.write(ha_config)
+            f.flush()
+            skypilot_config_path = f.name
+
     return smoke_tests_utils.Test(
         f'test-managed-jobs-ha-kill-{status.value.lower()}',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(generic_cloud, name),
             f'sky jobs launch -n {name} --infra {generic_cloud} '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}', job_status=[status], timeout=first_timeout),
-            smoke_tests_utils.kill_and_wait_controller('jobs'),
+            smoke_tests_utils.kill_and_wait_controller(name, 'jobs'),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}',
@@ -1226,9 +1256,7 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "SUCCEEDED"',
         ],
         f'sky jobs cancel -y -n {name}',
-        env={
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/managed_jobs_ha_config.yaml'
-        },
+        env={skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_path},
         timeout=20 * 60,
     )
 

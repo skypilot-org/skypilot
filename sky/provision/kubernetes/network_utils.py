@@ -13,13 +13,12 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import directory_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import jinja2
-    import yaml
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
-    yaml = adaptors_common.LazyImport('yaml')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -108,7 +107,7 @@ def fill_loadbalancer_template(namespace: str, context: Optional[str],
         annotations=annotations,
         labels=labels,
     )
-    content = yaml.safe_load(cont)
+    content = yaml_utils.safe_load(cont)
     return content
 
 
@@ -147,7 +146,7 @@ def fill_ingress_template(namespace: str, context: Optional[str],
         annotations=annotations,
         labels=labels,
     )
-    content = yaml.safe_load(cont)
+    content = yaml_utils.safe_load(cont)
 
     # Return a dictionary containing both specs
     return {

@@ -7,6 +7,7 @@ import fastapi
 import pytest
 
 from sky import models
+from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import rbac
@@ -49,7 +50,7 @@ class TestUsersEndpoints:
         ]
 
         # Execute
-        result = await server.users()
+        result = server.users()
 
         # Verify
         assert len(result) == 3
@@ -89,7 +90,7 @@ class TestUsersEndpoints:
         mock_get_all_users.return_value = []
 
         # Execute
-        result = await server.users()
+        result = server.users()
 
         # Verify
         assert result == []
@@ -107,7 +108,7 @@ class TestUsersEndpoints:
         mock_get_user_roles.return_value = ['admin']
 
         # Execute
-        result = await server.get_current_user_role(mock_request)
+        result = server.get_current_user_role(mock_request)
 
         # Verify
         assert result == {
@@ -128,7 +129,7 @@ class TestUsersEndpoints:
         mock_get_user_roles.return_value = []
 
         # Execute
-        result = await server.get_current_user_role(mock_request)
+        result = server.get_current_user_role(mock_request)
 
         # Verify
         assert result == {'id': 'test_user', 'name': 'Test User', 'role': ''}
@@ -141,7 +142,7 @@ class TestUsersEndpoints:
         mock_request.state.auth_user = None
 
         # Execute
-        result = await server.get_current_user_role(mock_request)
+        result = server.get_current_user_role(mock_request)
 
         # Verify - should return admin role when no auth user
         assert result == {
@@ -168,7 +169,7 @@ class TestUsersEndpoints:
         update_body = payloads.UserUpdateBody(user_id='test_user', role='admin')
 
         # Execute
-        result = await server.user_update(mock_request, update_body)
+        result = server.user_update(mock_request, update_body)
 
         # Verify
         assert result is None  # Function returns None on success
@@ -191,13 +192,14 @@ class TestUsersEndpoints:
                                 password='old_password')
         mock_get_user.return_value = test_user
         mock_request.state.auth_user = None
+        new_password = 'new_password'
 
         update_body = payloads.UserUpdateBody(user_id='test_user',
                                               role='admin',
-                                              password='new_password')
+                                              password=new_password)
 
         # Execute
-        result = await server.user_update(mock_request, update_body)
+        result = server.user_update(mock_request, update_body)
 
         # Verify
         assert result is None  # Function returns None on success
@@ -208,7 +210,8 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert user_obj.password.startswith('$apr1$')
+        assert server_common.crypt_ctx.identify(user_obj.password) is not None
+        assert user_obj.password != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @pytest.mark.asyncio
@@ -224,7 +227,7 @@ class TestUsersEndpoints:
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(mock_request, update_body)
+            server.user_update(mock_request, update_body)
 
         assert exc_info.value.status_code == 400
         assert 'Invalid role: invalid_role' in str(exc_info.value.detail)
@@ -247,7 +250,7 @@ class TestUsersEndpoints:
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(mock_request, update_body)
+            server.user_update(mock_request, update_body)
 
         assert exc_info.value.status_code == 400
         assert 'User nonexistent_user does not exist' in str(
@@ -275,7 +278,7 @@ class TestUsersEndpoints:
 
         # Execute & Verify
         with pytest.raises(Exception) as exc_info:
-            await server.user_update(mock_request, update_body)
+            server.user_update(mock_request, update_body)
 
         assert 'Database error' in str(exc_info.value)
         mock_get_supported_roles.assert_called_once()
@@ -299,7 +302,7 @@ class TestUsersEndpoints:
         ]
 
         # Execute
-        result = await server.users()
+        result = server.users()
 
         # Verify - should return the first role in the list
         assert len(result) == 3
@@ -334,7 +337,7 @@ class TestUsersEndpoints:
         mock_get_user_roles.return_value = ['admin', 'user', 'viewer']
 
         # Execute
-        result = await server.get_current_user_role(mock_request)
+        result = server.get_current_user_role(mock_request)
 
         # Verify - should return the first role in the list
         assert result == {
@@ -360,12 +363,13 @@ class TestUsersEndpoints:
         mock_get_user_by_name.return_value = None
         mock_get_supported_roles.return_value = ['admin', 'user']
         mock_get_default_role.return_value = 'user'
+        password = 'pw123'
         create_body = payloads.UserCreateBody(username='alice',
-                                              password='pw123',
+                                              password=password,
                                               role=None)
 
         # Execute
-        result = await server.user_create(create_body)
+        result = server.user_create(create_body)
 
         # Verify
         assert result is None
@@ -377,7 +381,8 @@ class TestUsersEndpoints:
         args, kwargs = mock_add_or_update_user.call_args
         user_obj = args[0]
         assert user_obj.name == 'alice'
-        assert user_obj.password.startswith('$apr1$')
+        assert server_common.crypt_ctx.identify(user_obj.password) is not None
+        assert user_obj.password != password
 
     @mock.patch('sky.global_user_state.get_user_by_name')
     @pytest.mark.asyncio
@@ -391,7 +396,7 @@ class TestUsersEndpoints:
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_create(create_body)
+            server.user_create(create_body)
         assert exc_info.value.status_code == 400
         assert 'already exists' in str(exc_info.value.detail)
         mock_get_user_by_name.assert_called_once_with('alice')
@@ -411,7 +416,7 @@ class TestUsersEndpoints:
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_create(create_body)
+            server.user_create(create_body)
         assert exc_info.value.status_code == 400
         assert 'Invalid role' in str(exc_info.value.detail)
         mock_get_supported_roles.assert_called_once()
@@ -424,7 +429,7 @@ class TestUsersEndpoints:
                                               password='pw123',
                                               role=None)
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_create(create_body)
+            server.user_create(create_body)
         assert exc_info.value.status_code == 400
         assert 'Username and password are required' in str(
             exc_info.value.detail)
@@ -434,7 +439,7 @@ class TestUsersEndpoints:
                                               password='',
                                               role=None)
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_create(create_body)
+            server.user_create(create_body)
         assert exc_info.value.status_code == 400
         assert 'Username and password are required' in str(
             exc_info.value.detail)
@@ -452,7 +457,7 @@ class TestUsersEndpoints:
         delete_body = payloads.UserDeleteBody(user_id='test_user')
 
         # Execute
-        result = await server.user_delete(delete_body)
+        result = server.user_delete(delete_body)
 
         # Verify
         assert result is None
@@ -470,7 +475,7 @@ class TestUsersEndpoints:
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_delete(delete_body)
+            server.user_delete(delete_body)
         assert exc_info.value.status_code == 400
         assert 'does not exist' in str(exc_info.value.detail)
         mock_get_user.assert_called_once_with('nonexistent_user')
@@ -494,12 +499,13 @@ class TestUsersEndpoints:
         mock_request.state.auth_user = models.User(id='admin_user',
                                                    name='Admin')
         mock_get_user_roles.return_value = ['admin']
+        new_password = 'new_password'
 
         update_body = payloads.UserUpdateBody(user_id='test_user',
-                                              password='new_password')
+                                              password=new_password)
 
         # Execute
-        result = await server.user_update(mock_request, update_body)
+        result = server.user_update(mock_request, update_body)
 
         # Verify
         assert result is None
@@ -510,7 +516,8 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert user_obj.password.startswith('$apr1$')
+        assert server_common.crypt_ctx.identify(user_obj.password) is not None
+        assert user_obj.password != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
@@ -530,12 +537,13 @@ class TestUsersEndpoints:
         # Mock current user as the same user
         mock_request.state.auth_user = test_user
         mock_get_user_roles.return_value = ['user']
+        new_password = 'new_password'
 
         update_body = payloads.UserUpdateBody(user_id='test_user',
-                                              password='new_password')
+                                              password=new_password)
 
         # Execute
-        result = await server.user_update(mock_request, update_body)
+        result = server.user_update(mock_request, update_body)
 
         # Verify
         assert result is None
@@ -546,7 +554,8 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert user_obj.password.startswith('$apr1$')
+        assert server_common.crypt_ctx.identify(user_obj.password) is not None
+        assert user_obj.password != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
@@ -570,7 +579,7 @@ class TestUsersEndpoints:
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(mock_request, update_body)
+            server.user_update(mock_request, update_body)
 
         assert exc_info.value.status_code == 403
         assert 'Only admin can update password for other users' in str(
@@ -599,7 +608,7 @@ class TestUsersEndpoints:
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(mock_request, update_body)
+            server.user_update(mock_request, update_body)
 
         assert exc_info.value.status_code == 403
         assert 'Invalid user' in str(exc_info.value.detail)
@@ -627,7 +636,7 @@ class TestUsersEndpoints:
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(mock_request, update_body)
+            server.user_update(mock_request, update_body)
 
         assert exc_info.value.status_code == 403
         assert 'Only admin can update user role' in str(exc_info.value.detail)
@@ -651,13 +660,14 @@ class TestUsersEndpoints:
         mock_request.state.auth_user = models.User(id='admin_user',
                                                    name='Admin')
         mock_get_user_roles.return_value = ['admin']
+        new_password = 'new_password'
 
         update_body = payloads.UserUpdateBody(user_id='test_user',
                                               role='user',
-                                              password='new_password')
+                                              password=new_password)
 
         # Execute
-        result = await server.user_update(mock_request, update_body)
+        result = server.user_update(mock_request, update_body)
 
         # Verify
         assert result is None
@@ -669,7 +679,8 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert user_obj.password.startswith('$apr1$')
+        assert server_common.crypt_ctx.identify(user_obj.password) is not None
+        assert user_obj.password != new_password
 
     @mock.patch('sky.global_user_state.get_user')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
@@ -688,7 +699,7 @@ class TestUsersEndpoints:
         update_body = payloads.UserUpdateBody(user_id=common.SERVER_ID,
                                               role='user')
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(mock_request, update_body)
+            server.user_update(mock_request, update_body)
         assert exc_info.value.status_code == 400
         assert 'Cannot update role for internal API server user' in str(
             exc_info.value.detail)
@@ -699,7 +710,7 @@ class TestUsersEndpoints:
         update_body = payloads.UserUpdateBody(
             user_id=constants.SKYPILOT_SYSTEM_USER_ID, role='user')
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(mock_request, update_body)
+            server.user_update(mock_request, update_body)
         assert exc_info.value.status_code == 400
         assert 'Cannot update role for internal API server user' in str(
             exc_info.value.detail)
@@ -707,7 +718,7 @@ class TestUsersEndpoints:
         update_body = payloads.UserUpdateBody(
             user_id=constants.SKYPILOT_SYSTEM_USER_ID, password='pw')
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(mock_request, update_body)
+            server.user_update(mock_request, update_body)
         assert exc_info.value.status_code == 400
         assert 'Cannot update password for internal API server user' in str(
             exc_info.value.detail)
@@ -726,7 +737,7 @@ class TestUsersEndpoints:
         mock_get_user.return_value = server_user
         delete_body = payloads.UserDeleteBody(user_id=common.SERVER_ID)
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_delete(delete_body)
+            server.user_delete(delete_body)
         assert exc_info.value.status_code == 400
         assert 'Cannot delete internal API server user' in str(
             exc_info.value.detail)
@@ -737,7 +748,7 @@ class TestUsersEndpoints:
         delete_body = payloads.UserDeleteBody(
             user_id=constants.SKYPILOT_SYSTEM_USER_ID)
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_delete(delete_body)
+            server.user_delete(delete_body)
         assert exc_info.value.status_code == 400
         assert 'Cannot delete internal API server user' in str(
             exc_info.value.detail)
@@ -767,7 +778,7 @@ charlie,pw789,"""
         import_body = payloads.UserImportBody(csv_content=csv_content)
 
         # Execute
-        result = await server.user_import(import_body)
+        result = server.user_import(import_body)
 
         # Verify
         assert result['success_count'] == 3
@@ -809,7 +820,7 @@ charlie,pw789,invalid_role"""
         import_body = payloads.UserImportBody(csv_content=csv_content)
 
         # Execute
-        result = await server.user_import(import_body)
+        result = server.user_import(import_body)
 
         # Verify
         assert result['success_count'] == 1
@@ -828,7 +839,7 @@ charlie,pw789,invalid_role"""
 alice,pw123"""
         import_body = payloads.UserImportBody(csv_content=csv_content)
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_import(import_body)
+            server.user_import(import_body)
         assert exc_info.value.status_code == 400
         assert 'Missing required columns' in str(exc_info.value.detail)
 
@@ -836,7 +847,7 @@ alice,pw123"""
         csv_content = ""
         import_body = payloads.UserImportBody(csv_content=csv_content)
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_import(import_body)
+            server.user_import(import_body)
         assert exc_info.value.status_code == 400
         assert 'CSV content is required' in str(exc_info.value.detail)
 
@@ -844,7 +855,7 @@ alice,pw123"""
         csv_content = "username,password,role"
         import_body = payloads.UserImportBody(csv_content=csv_content)
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_import(import_body)
+            server.user_import(import_body)
         assert exc_info.value.status_code == 400
         assert 'CSV must have at least a header row and one data row' in str(
             exc_info.value.detail)
@@ -871,7 +882,7 @@ alice,pw123"""
         ]
 
         # Execute
-        result = await server.user_export()
+        result = server.user_export()
 
         # Verify
         assert result['user_count'] == 3
@@ -894,7 +905,7 @@ alice,pw123"""
         mock_get_all_users.return_value = []
 
         # Execute
-        result = await server.user_export()
+        result = server.user_export()
 
         # Verify
         assert result['user_count'] == 0
@@ -914,7 +925,7 @@ alice,pw123"""
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_export()
+            server.user_export()
         assert exc_info.value.status_code == 500
         assert 'Failed to export users' in str(exc_info.value.detail)
         mock_get_all_users.assert_called_once()
@@ -938,7 +949,7 @@ alice,,admin
 bob,pw456,user
 """
         import_body = payloads.UserImportBody(csv_content=csv_content)
-        result = await server.user_import(import_body)
+        result = server.user_import(import_body)
         # Only bob is imported
         assert result['success_count'] == 1
         assert result['error_count'] == 0
@@ -956,7 +967,7 @@ bob,pw456,user
 """
         import_body = payloads.UserImportBody(csv_content=csv_content)
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_import(import_body)
+            server.user_import(import_body)
         assert exc_info.value.status_code == 400
         assert 'No valid users found. Errors:' in str(exc_info.value.detail)
         assert 'Username and password are required' in str(
@@ -983,7 +994,7 @@ alice,pw123,admin
 bob,pw456,user
 """
         import_body = payloads.UserImportBody(csv_content=csv_content)
-        result = await server.user_import(import_body)
+        result = server.user_import(import_body)
         assert result['success_count'] == 2
         assert result['error_count'] == 0
         assert result['total_processed'] == 2
@@ -1009,7 +1020,7 @@ bob,pw456,user,extra_column
 charlie,pw789,user
 """
         import_body = payloads.UserImportBody(csv_content=csv_content)
-        result = await server.user_import(import_body)
+        result = server.user_import(import_body)
         # Only alice and charlie are imported, bob's row is invalid
         assert result['success_count'] == 2
         assert result['error_count'] == 0

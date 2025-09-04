@@ -19,6 +19,12 @@ def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
 @pytest.mark.no_shadeform  # Shadeform does not support multi-tenant jobs
 def test_multi_tenant(generic_cloud: str):
+    if smoke_tests_utils.services_account_token_configured_in_env_file():
+        pytest.skip(
+            'Skipping multi-tenant test because a service account token is '
+            'configured. The service account token represents a unique user, '
+            'so USER_ENV_VAR cannot be used to simulate multiple users.')
+
     name = smoke_tests_utils.get_cluster_name()
     user_1 = 'abcdef12'
     user_1_name = 'user1'
@@ -103,6 +109,12 @@ def test_multi_tenant(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
 @pytest.mark.no_shadeform  # Shadeform does not support multi-tenant jobs
 def test_multi_tenant_managed_jobs(generic_cloud: str):
+    if smoke_tests_utils.services_account_token_configured_in_env_file():
+        pytest.skip(
+            'Skipping multi-tenant test because a service account token is '
+            'configured. The service account token represents a unique user, '
+            'so USER_ENV_VAR cannot be used to simulate multiple users.')
+
     name = smoke_tests_utils.get_cluster_name()
     user_1 = 'abcdef12'
     user_1_name = 'user1'
