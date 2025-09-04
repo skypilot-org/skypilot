@@ -503,3 +503,332 @@ async def test_get_request_async_race_condition(isolated_database):
                                user_id='test-user')
         reqs.append(asyncio.create_task(write_then_read(req)))
     await asyncio.gather(*reqs)
+
+
+@pytest.mark.asyncio
+async def test_get_request_tasks_async(isolated_database):
+    """Test async version of get_request_tasks with basic filtering."""
+    current_time = time.time()
+
+    # Create test requests
+    test_requests = [
+        requests.Request(request_id='async-req-1',
+                         name='async-test-1',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.PENDING,
+                         created_at=current_time - 30,
+                         user_id='async-user1',
+                         cluster_name='async-cluster1'),
+        requests.Request(request_id='async-req-2',
+                         name='async-test-2',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 20,
+                         user_id='async-user1',
+                         cluster_name='async-cluster2'),
+        requests.Request(request_id='async-req-3',
+                         name='async-test-3',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.SUCCEEDED,
+                         created_at=current_time - 10,
+                         finished_at=current_time - 5,
+                         user_id='async-user2',
+                         cluster_name='async-cluster1'),
+    ]
+
+    # Create all requests synchronously for setup
+    for req in test_requests:
+        requests.create_if_not_exists(req)
+
+    # Test 1: Get all requests (no filter) - async
+    all_requests = await requests.get_request_tasks_async(
+        requests.RequestTaskFilter())
+    assert len(all_requests) == 3
+    # Should be ordered by created_at DESC
+    assert all_requests[0].request_id == 'async-req-3'  # newest
+    assert all_requests[-1].request_id == 'async-req-1'  # oldest
+
+    # Test 2: Filter by status - async
+    pending_requests = await requests.get_request_tasks_async(
+        requests.RequestTaskFilter(status=[RequestStatus.PENDING]))
+    assert len(pending_requests) == 1
+    assert pending_requests[0].request_id == 'async-req-1'
+
+    # Test 3: Filter by user_id - async
+    user1_requests = await requests.get_request_tasks_async(
+        requests.RequestTaskFilter(user_id='async-user1'))
+    assert len(user1_requests) == 2
+    assert all(req.user_id == 'async-user1' for req in user1_requests)
+
+    # Test 4: Filter by cluster_names - async
+    cluster1_requests = await requests.get_request_tasks_async(
+        requests.RequestTaskFilter(cluster_names=['async-cluster1']))
+    assert len(cluster1_requests) == 2
+    assert all(
+        req.cluster_name == 'async-cluster1' for req in cluster1_requests)
+
+    # Test 5: Complex combined filtering - async
+    combined_requests = await requests.get_request_tasks_async(
+        requests.RequestTaskFilter(
+            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+            user_id='async-user1'))
+    assert len(combined_requests) == 2
+    assert all(req.user_id == 'async-user1' and
+               req.status in [RequestStatus.PENDING, RequestStatus.RUNNING]
+               for req in combined_requests)
+
+
+@pytest.mark.asyncio
+async def test_get_request_tasks_async_empty_results(isolated_database):
+    """Test async version with filters that return no results."""
+    # Test with empty database
+    empty_results = await requests.get_request_tasks_async(
+        requests.RequestTaskFilter())
+    assert len(empty_results) == 0
+
+    # Create one test request
+    test_request = requests.Request(request_id='async-test-req',
+                                    name='async-test-name',
+                                    entrypoint=dummy,
+                                    request_body=payloads.RequestBody(),
+                                    status=RequestStatus.PENDING,
+                                    created_at=time.time(),
+                                    user_id='async-test-user')
+    requests.create_if_not_exists(test_request)
+
+    # Test filtering that returns no results
+    empty_results = await requests.get_request_tasks_async(
+        requests.RequestTaskFilter(status=[RequestStatus.CANCELLED]))
+    assert len(empty_results) == 0
+
+    # Test filtering with non-existent user
+    empty_results = await requests.get_request_tasks_async(
+        requests.RequestTaskFilter(user_id='nonexistent-async-user'))
+    assert len(empty_results) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_request_tasks_async_consistency(isolated_database):
+    """Test that async and sync versions return consistent results."""
+    current_time = time.time()
+
+    # Create test requests
+    test_requests = [
+        requests.Request(request_id='consistency-req-1',
+                         name='consistency-test-1',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.PENDING,
+                         created_at=current_time - 30,
+                         user_id='consistency-user',
+                         cluster_name='consistency-cluster'),
+        requests.Request(request_id='consistency-req-2',
+                         name='consistency-test-2',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 20,
+                         user_id='consistency-user',
+                         cluster_name='consistency-cluster'),
+    ]
+
+    # Create all requests
+    for req in test_requests:
+        requests.create_if_not_exists(req)
+
+    # Test that sync and async versions return identical results
+    filter_obj = requests.RequestTaskFilter(user_id='consistency-user')
+
+    sync_results = requests.get_request_tasks(filter_obj)
+    async_results = await requests.get_request_tasks_async(filter_obj)
+
+    assert len(sync_results) == len(async_results)
+    assert len(sync_results) == 2
+
+    # Compare each request (order should be the same - created_at DESC)
+    for sync_req, async_req in zip(sync_results, async_results):
+        assert sync_req.request_id == async_req.request_id
+        assert sync_req.name == async_req.name
+        assert sync_req.status == async_req.status
+        assert sync_req.user_id == async_req.user_id
+        assert sync_req.cluster_name == async_req.cluster_name
+        assert sync_req.created_at == async_req.created_at
+
+
+@pytest.mark.asyncio
+async def test_get_request_tasks_concurrent_access(isolated_database):
+    """Test concurrent access to get_request_tasks_async."""
+    current_time = time.time()
+
+    # Create multiple test requests
+    test_requests = []
+    for i in range(10):
+        req = requests.Request(
+            request_id=f'concurrent-req-{i}',
+            name=f'concurrent-test-{i}',
+            entrypoint=dummy,
+            request_body=payloads.RequestBody(),
+            status=RequestStatus.PENDING if i %
+            2 == 0 else RequestStatus.RUNNING,
+            created_at=current_time - i,
+            user_id=f'user-{i % 3}',  # 3 different users
+            cluster_name=f'cluster-{i % 2}'  # 2 different clusters
+        )
+        test_requests.append(req)
+        requests.create_if_not_exists(req)
+
+    # Define concurrent query functions
+    async def query_all():
+        return await requests.get_request_tasks_async(
+            requests.RequestTaskFilter())
+
+    async def query_by_status():
+        return await requests.get_request_tasks_async(
+            requests.RequestTaskFilter(status=[RequestStatus.PENDING]))
+
+    async def query_by_user(user_id):
+        return await requests.get_request_tasks_async(
+            requests.RequestTaskFilter(user_id=user_id))
+
+    async def query_by_cluster(cluster_name):
+        return await requests.get_request_tasks_async(
+            requests.RequestTaskFilter(cluster_names=[cluster_name]))
+
+    # Run multiple queries concurrently
+    results = await asyncio.gather(query_all(),
+                                   query_by_status(),
+                                   query_by_user('user-0'),
+                                   query_by_user('user-1'),
+                                   query_by_user('user-2'),
+                                   query_by_cluster('cluster-0'),
+                                   query_by_cluster('cluster-1'),
+                                   return_exceptions=True)
+
+    # Verify all queries completed successfully
+    assert all(not isinstance(result, Exception) for result in results)
+
+    all_results, pending_results, user0_results, user1_results, user2_results, cluster0_results, cluster1_results = results
+
+    # Verify result counts
+    assert len(all_results) == 10
+    assert len(pending_results) == 5  # Even numbered requests are PENDING
+    assert len(user0_results) >= 3  # Users 0, 3, 6, 9
+    assert len(user1_results) >= 3  # Users 1, 4, 7
+    assert len(user2_results) >= 3  # Users 2, 5, 8
+    assert len(cluster0_results) == 5  # Even numbered clusters
+    assert len(cluster1_results) == 5  # Odd numbered clusters
+
+    # Verify ordering (should be by created_at DESC)
+    for result_set in [
+            all_results, pending_results, user0_results, user1_results,
+            user2_results, cluster0_results, cluster1_results
+    ]:
+        if len(result_set) > 1:
+            for i in range(len(result_set) - 1):
+                assert result_set[i].created_at >= result_set[i + 1].created_at
+
+
+def test_requests_filter():
+    """Test RequestTaskFilter.build_query() generates correct SQL."""
+
+    # Test empty filter - should return base query with no WHERE clause
+    filter_empty = requests.RequestTaskFilter()
+    sql, params = filter_empty.build_query()
+    expected_columns = ', '.join(requests.REQUEST_COLUMNS)
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []
+
+    # Test status filter
+    filter_status = requests.RequestTaskFilter(
+        status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+    sql, params = filter_status.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE status IN (\'PENDING\',\'RUNNING\') '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []
+
+    # Test cluster_names filter
+    filter_clusters = requests.RequestTaskFilter(
+        cluster_names=['cluster1', 'cluster2'])
+    sql, params = filter_clusters.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE cluster_name IN (\'cluster1\',\'cluster2\') '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []
+
+    # Test user_id filter (uses parameterized query)
+    filter_user = requests.RequestTaskFilter(user_id='test-user-123')
+    sql, params = filter_user.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE user_id = ? ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == ['test-user-123']
+
+    # Test exclude_request_names filter
+    filter_exclude = requests.RequestTaskFilter(
+        exclude_request_names=['request1', 'request2'])
+    sql, params = filter_exclude.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE name NOT IN (\'request1\',\'request2\') '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []
+
+    # Test include_request_names filter
+    filter_include = requests.RequestTaskFilter(
+        include_request_names=['request3', 'request4'])
+    sql, params = filter_include.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE name IN (\'request3\',\'request4\') '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []
+
+    # Test finished_before filter (uses parameterized query)
+    timestamp = 1234567890.0
+    filter_finished = requests.RequestTaskFilter(finished_before=timestamp)
+    sql, params = filter_finished.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE finished_at < ? ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == [timestamp]
+
+    # Test combined filters
+    filter_combined = requests.RequestTaskFilter(
+        status=[RequestStatus.SUCCEEDED, RequestStatus.FAILED],
+        cluster_names=['prod-cluster'],
+        user_id='admin-user',
+        exclude_request_names=['internal-task'],
+        finished_before=9876543210.0)
+    sql, params = filter_combined.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE status IN (\'SUCCEEDED\',\'FAILED\') AND '
+                    'name NOT IN (\'internal-task\') AND '
+                    'cluster_name IN (\'prod-cluster\') AND '
+                    'user_id = ? AND finished_at < ? '
+                    'ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == ['admin-user', 9876543210.0]
+
+    # Test mutually exclusive filters raise ValueError
+    with pytest.raises(ValueError, match='Only one of exclude_request_names'):
+        requests.RequestTaskFilter(exclude_request_names=['req1'],
+                                   include_request_names=['req2'])
+
+    # Test special characters in names are properly escaped with repr()
+    filter_special_chars = requests.RequestTaskFilter(
+        cluster_names=['cluster\'with\'quotes', 'cluster\"with\"double'])
+    sql, params = filter_special_chars.build_query()
+    # repr() should properly escape the quotes
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE cluster_name IN (\"cluster\'with\'quotes\",'
+                    '\'cluster\"with\"double\') ORDER BY created_at DESC')
+    assert sql == expected_sql
+    assert params == []

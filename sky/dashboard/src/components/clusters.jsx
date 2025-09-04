@@ -33,7 +33,6 @@ import {
 } from '@/components/ui/table';
 import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
-import { getUsers } from '@/data/connectors/users';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
@@ -195,6 +194,7 @@ export function Clusters() {
     workspace: [],
     infra: [],
   }); /// Option values for properties
+  const [preloadingComplete, setPreloadingComplete] = useState(false);
 
   // Handle URL query parameters for workspace and user filtering and show history
   useEffect(() => {
@@ -249,8 +249,7 @@ export function Clusters() {
           finalWorkspaces.add(wsName)
         );
 
-        // Fetch users for the filter dropdown
-        const fetchedUsers = await dashboardCache.get(getUsers);
+        // Get unique users from cluster data for filter dropdown
         const uniqueClusterUsers = [
           ...new Set(
             allClusters
@@ -262,11 +261,9 @@ export function Clusters() {
           ).values(),
         ];
 
-        // Combine fetched users with unique cluster users
+        // Process users for filtering - only use cluster users
         const finalUsers = new Map();
-
-        // Add fetched users first
-        fetchedUsers.forEach((user) => {
+        uniqueClusterUsers.forEach((user) => {
           finalUsers.set(user.userId, {
             userId: user.userId,
             username: user.username,
@@ -274,18 +271,12 @@ export function Clusters() {
           });
         });
 
-        // Add any cluster users not in the fetched list
-        uniqueClusterUsers.forEach((user) => {
-          if (!finalUsers.has(user.userId)) {
-            finalUsers.set(user.userId, {
-              userId: user.userId,
-              username: user.username,
-              display: formatUserDisplay(user.username, user.userId),
-            });
-          }
-        });
+        // Signal that preloading is complete
+        setPreloadingComplete(true);
       } catch (error) {
         console.error('Error fetching data for filters:', error);
+        // Still signal completion even on error so the table can load
+        setPreloadingComplete(true);
       }
     };
 
@@ -384,7 +375,14 @@ export function Clusters() {
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getClusterHistory);
     dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidate(getUsers);
+
+    // Reset preloading state so ClusterTable can fetch fresh data immediately
+    setPreloadingComplete(false);
+
+    // Trigger a new preload cycle
+    cachePreloader.preloadForPage('clusters', { force: true }).then(() => {
+      setPreloadingComplete(true);
+    });
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
@@ -476,6 +474,7 @@ export function Clusters() {
           setIsVSCodeModalOpen(true);
         }}
         setOptionValues={setOptionValues}
+        preloadingComplete={preloadingComplete}
       />
 
       {/* SSH Instructions Modal */}
@@ -503,6 +502,7 @@ export function ClusterTable({
   onOpenSSHModal,
   onOpenVSCodeModal,
   setOptionValues,
+  preloadingComplete,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -545,6 +545,7 @@ export function ClusterTable({
     setLocalLoading(true);
 
     try {
+      // Use cached data if available, which should have been preloaded by cache preloader
       const activeClusters = await dashboardCache.get(getClusters);
 
       if (showHistory) {
@@ -664,19 +665,26 @@ export function ClusterTable({
     setData([]);
     let isCurrent = true;
 
-    fetchData();
+    // Only start fetching data after preloading is complete
+    if (preloadingComplete) {
+      fetchData();
 
-    const interval = setInterval(() => {
-      if (isCurrent) {
-        fetchData();
-      }
-    }, refreshInterval);
+      const interval = setInterval(() => {
+        if (isCurrent) {
+          fetchData();
+        }
+      }, refreshInterval);
+
+      return () => {
+        isCurrent = false;
+        clearInterval(interval);
+      };
+    }
 
     return () => {
       isCurrent = false;
-      clearInterval(interval);
     };
-  }, [refreshInterval, fetchData]);
+  }, [refreshInterval, fetchData, preloadingComplete]);
 
   // Reset to first page when data changes
   useEffect(() => {

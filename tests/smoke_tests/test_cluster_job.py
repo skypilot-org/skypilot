@@ -894,6 +894,29 @@ def test_task_labels_kubernetes():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Services on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_services_on_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    service_check = smoke_tests_utils.run_cloud_cmd_on_cluster(
+        name,
+        f'services=$(kubectl get svc -o name | grep -F {name} | grep -v -- "-cloud-cmd" || true); '
+        'echo "[$services]"; '
+        'if [ -n "$services" ]; then echo "services found"; exit 1; else echo "services not found"; fi'
+    )
+    test = smoke_tests_utils.Test(
+        'services_on_kubernetes',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # Launch Kubernetes cluster with three nodes.
+            f'sky launch -y -c {name} --num-nodes 3 --cpus=0.1+ --infra kubernetes',
+        ],
+        f'sky down -y {name} && {service_check} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Pod Annotations on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_add_pod_annotations_for_autodown_with_launch():
@@ -973,6 +996,23 @@ def test_add_and_remove_pod_annotations_with_autostop():
         ],
         f'sky down -y {name} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Volumes on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_volumes_on_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'volumes_on_kubernetes',
+        [
+            f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
+            f'sky volumes ls | grep "pvc0"',
+            f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name} && sky volumes delete pvc0 -y && (vol=$(sky volumes ls | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi)',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -2049,7 +2089,7 @@ def test_remote_server_api_login():
             # Backup existing config file if it exists
             f'if [ -f {config_path} ]; then cp {config_path} {backup_path}; fi',
             # Run sky api login
-            f'sky api login -e {endpoint}',
+            f'unset {constants.SKY_API_SERVER_URL_ENV_VAR} && sky api login -e {endpoint}',
             # Echo the config file content to see what was written
             f'echo "Config file content after sky api login:" && cat {config_path}',
             # Verify the config file is updated with the endpoint
