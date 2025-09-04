@@ -849,4 +849,5 @@ def _cleanup():
     if _DB is not None:
         asyncio.run(_DB.close())
 
+
 atexit.register(_cleanup)
