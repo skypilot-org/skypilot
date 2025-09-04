@@ -109,6 +109,9 @@ class ScheduleType(enum.Enum):
     LONG = 'long'
     # Queue for requests that should be executed quickly for a quick response.
     SHORT = 'short'
+    # Queue for requests that should be executed quickly for a quick response,
+    # and needs to access the catalog.
+    SHORT_WITH_CATALOG = 'short_with_catalog'
 
 
 @dataclasses.dataclass

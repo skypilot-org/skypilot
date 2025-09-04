@@ -644,4 +644,11 @@ def start(
                                  config=config.short_worker_config)
     short_worker.run_in_background()
     workers.append(short_worker)
+
+    # Start a worker for short catalog requests.
+    short_catalog_worker = RequestWorker(schedule_type=api_requests.ScheduleType.SHORT_WITH_CATALOG,
+                                         config=config.short_catalog_worker_config)
+    short_catalog_worker.run_in_background()
+    workers.append(short_catalog_worker)
+
     return queue_server, workers

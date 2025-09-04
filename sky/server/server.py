@@ -685,7 +685,7 @@ async def check(request: fastapi.Request,
         request_name='check',
         request_body=check_body,
         func=sky_check.check,
-        schedule_type=requests_lib.ScheduleType.SHORT,
+        schedule_type=requests_lib.ScheduleType.SHORT_WITH_CATALOG,
     )
 
 
@@ -829,7 +829,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
         request_body=optimize_body,
         ignore_return_value=True,
         func=core.optimize,
-        schedule_type=requests_lib.ScheduleType.SHORT,
+        schedule_type=requests_lib.ScheduleType.SHORT_WITH_CATALOG,
     )
 
 

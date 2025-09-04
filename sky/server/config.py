@@ -19,8 +19,11 @@ from sky.utils import common_utils
 # TODO(aylei): maintaining these constants is error-prone, we may need to
 # automatically tune parallelism at runtime according to system usage stats
 # in the future.
-_LONG_WORKER_MEM_GB = 0.4
+_LONG_WORKER_MEM_GB = 0.6
 _SHORT_WORKER_MEM_GB = 0.25
+# Memory for short catalog workers.
+# Since catalog requests are relatively heavy, we reserve more memory for them.
+_SHORT_CATALOG_WORKER_MEM_GB = _LONG_WORKER_MEM_GB
 # To control the number of long workers.
 _CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
 # Limit the number of long workers of local API server, since local server is
@@ -38,6 +41,8 @@ _MIN_LONG_WORKERS = 1
 # Minimal number of short workers, there is a daemon task running on short
 # workers so at least 2 workers are needed to ensure responsiveness.
 _MIN_SHORT_WORKERS = 2
+# Minimal number of short catalog workers to ensure responsiveness.
+_MIN_SHORT_CATALOG_WORKERS = 1
 
 # Default number of burstable workers for local API server. A heuristic number
 # that is large enough for most local cases.
@@ -70,6 +75,7 @@ class ServerConfig:
     num_server_workers: int
     long_worker_config: WorkerConfig
     short_worker_config: WorkerConfig
+    short_catalog_worker_config: WorkerConfig
     num_db_connections_per_worker: int
     queue_backend: QueueBackend
 
@@ -116,9 +122,12 @@ def compute_server_config(deploy: bool,
                                                        local=not deploy)
     max_parallel_for_short = _max_short_worker_parallism(
         mem_size_gb, max_parallel_for_long)
+    max_parallel_for_short_catalog = _max_short_catalog_worker_parallism(
+        mem_size_gb, max_parallel_for_long, max_parallel_for_short)
     queue_backend = QueueBackend.MULTIPROCESSING
     burstable_parallel_for_long = 0
     burstable_parallel_for_short = 0
+    burstable_parallel_for_short_catalog = 0
     # if num_db_connections_per_worker is 0, server will use NullPool
     # to conserve the number of concurrent db connections.
     # This could lead to performance degradation.
@@ -128,7 +137,7 @@ def compute_server_config(deploy: bool,
     # +1 for the event loop running the main process
     # and gc daemons in the '__main__' body of sky/server/server.py
     max_parallel_all_workers = (max_parallel_for_long + max_parallel_for_short +
-                                num_server_workers + 1)
+                                max_parallel_for_short_catalog + num_server_workers + 1)
 
     if not deploy:
         # For local mode, use local queue backend since we only run 1 uvicorn
@@ -138,6 +147,7 @@ def compute_server_config(deploy: bool,
         # Enable burstable workers for local API server.
         burstable_parallel_for_long = _BURSTABLE_WORKERS_FOR_LOCAL
         burstable_parallel_for_short = _BURSTABLE_WORKERS_FOR_LOCAL
+        burstable_parallel_for_short_catalog = _BURSTABLE_WORKERS_FOR_LOCAL
         # Runs in low resource mode if the available memory is less than
         # server_constants.MIN_AVAIL_MEM_GB.
         if not deploy and mem_size_gb < server_constants.MIN_AVAIL_MEM_GB:
@@ -151,6 +161,7 @@ def compute_server_config(deploy: bool,
             # permanently because it never exits.
             max_parallel_for_long = 0
             max_parallel_for_short = 0
+            max_parallel_for_short_catalog = 0
             logger.warning(
                 'SkyPilot API server will run in low resource mode because '
                 'the available memory is less than '
@@ -169,7 +180,8 @@ def compute_server_config(deploy: bool,
         f'SkyPilot API server will start {num_server_workers} server processes '
         f'with {max_parallel_for_long} background workers for long requests '
         f'and will allow at max {max_parallel_for_short} short requests in '
-        f'parallel.')
+        f'parallel and will allow at max {max_parallel_for_short_catalog} '
+        f'short catalog requests in parallel.')
     return ServerConfig(
         num_server_workers=num_server_workers,
         queue_backend=queue_backend,
@@ -180,6 +192,10 @@ def compute_server_config(deploy: bool,
         short_worker_config=WorkerConfig(
             garanteed_parallelism=max_parallel_for_short,
             burstable_parallelism=burstable_parallel_for_short,
+            num_db_connections_per_worker=num_db_connections_per_worker),
+        short_catalog_worker_config=WorkerConfig(
+            garanteed_parallelism=max_parallel_for_short_catalog,
+            burstable_parallelism=burstable_parallel_for_short_catalog,
             num_db_connections_per_worker=num_db_connections_per_worker),
         num_db_connections_per_worker=num_db_connections_per_worker,
     )
@@ -207,6 +223,20 @@ def _max_short_worker_parallism(mem_size_gb: float,
     # Reserve memory for long workers and min available memory.
     reserved_mem = server_constants.MIN_AVAIL_MEM_GB + (long_worker_parallism *
                                                         _LONG_WORKER_MEM_GB)
-    available_mem = max(0, mem_size_gb - reserved_mem)
+    # divide by 2 to reserve memory for short catalog workers
+    available_mem = max(0, mem_size_gb - reserved_mem) / 2
     n = max(_MIN_SHORT_WORKERS, int(available_mem / _SHORT_WORKER_MEM_GB))
+    return n
+
+def _max_short_catalog_worker_parallism(mem_size_gb: float,
+                                        long_worker_parallism: int,
+                                        short_worker_parallism: int) -> int:
+    """Max parallelism for short catalog workers."""
+    # Reserve memory for long workers and min available memory.
+    reserved_mem = server_constants.MIN_AVAIL_MEM_GB
+    reserved_mem += (long_worker_parallism * _LONG_WORKER_MEM_GB)
+    reserved_mem += (short_worker_parallism * _SHORT_WORKER_MEM_GB)
+    # divide by 2 to reserve memory for regular short workers
+    available_mem = max(0, mem_size_gb - reserved_mem) / 2
+    n = max(_MIN_SHORT_CATALOG_WORKERS, int(available_mem / _SHORT_CATALOG_WORKER_MEM_GB))
     return n
