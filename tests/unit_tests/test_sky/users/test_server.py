@@ -50,7 +50,7 @@ class TestUsersEndpoints:
         ]
 
         # Execute
-        result = await server.users()
+        result = server.users()
 
         # Verify
         assert len(result) == 3
@@ -90,7 +90,7 @@ class TestUsersEndpoints:
         mock_get_all_users.return_value = []
 
         # Execute
-        result = await server.users()
+        result = server.users()
 
         # Verify
         assert result == []
@@ -302,7 +302,7 @@ class TestUsersEndpoints:
         ]
 
         # Execute
-        result = await server.users()
+        result = server.users()
 
         # Verify - should return the first role in the list
         assert len(result) == 3
