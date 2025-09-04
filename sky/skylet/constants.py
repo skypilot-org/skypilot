@@ -505,3 +505,6 @@ COST_REPORT_DEFAULT_DAYS = 30
 
 # The directory for file locks.
 SKY_LOCKS_DIR = os.path.expanduser('~/.sky/locks')
+
+ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
+                                 'DEBUG_LOOP_LAG_THRESHOLD_MS')

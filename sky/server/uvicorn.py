@@ -24,6 +24,7 @@ from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
 from sky.utils import env_options
+from sky.utils import perf_utils
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -145,7 +146,8 @@ class Server(uvicorn.Server):
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-            reqs = requests_lib.get_request_tasks(status=statuses)
+            reqs = requests_lib.get_request_tasks(
+                req_filter=requests_lib.RequestTaskFilter(status=statuses))
             if not reqs:
                 break
             logger.info(f'{len(reqs)} on-going requests '
@@ -198,6 +200,12 @@ class Server(uvicorn.Server):
         context_utils.hijack_sys_attrs()
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
+        lag_threshold = perf_utils.get_loop_lag_threshold()
+        if lag_threshold is not None:
+            event_loop = asyncio.get_event_loop()
+            # Same as set PYTHONASYNCIODEBUG=1, but with custom threshold.
+            event_loop.set_debug(True)
+            event_loop.slow_callback_duration = lag_threshold
         with self.capture_signals():
             asyncio.run(self.serve(*args, **kwargs))
 

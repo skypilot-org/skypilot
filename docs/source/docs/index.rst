@@ -370,6 +370,6 @@ Read the research:
    CLI <../reference/cli>
    ../reference/api
    ../reference/config
-   SkyPilot State <../reference/architecture/state>
+   SkyPilot Internals <../reference/architecture/internals>
    ../developers/index
 

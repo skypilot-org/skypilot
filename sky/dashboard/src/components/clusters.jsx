@@ -33,7 +33,6 @@ import {
 } from '@/components/ui/table';
 import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
-import { getUsers } from '@/data/connectors/users';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
@@ -249,8 +248,7 @@ export function Clusters() {
           finalWorkspaces.add(wsName)
         );
 
-        // Fetch users for the filter dropdown
-        const fetchedUsers = await dashboardCache.get(getUsers);
+        // Get unique users from cluster data for filter dropdown
         const uniqueClusterUsers = [
           ...new Set(
             allClusters
@@ -262,27 +260,14 @@ export function Clusters() {
           ).values(),
         ];
 
-        // Combine fetched users with unique cluster users
+        // Process users for filtering - only use cluster users
         const finalUsers = new Map();
-
-        // Add fetched users first
-        fetchedUsers.forEach((user) => {
+        uniqueClusterUsers.forEach((user) => {
           finalUsers.set(user.userId, {
             userId: user.userId,
             username: user.username,
             display: formatUserDisplay(user.username, user.userId),
           });
-        });
-
-        // Add any cluster users not in the fetched list
-        uniqueClusterUsers.forEach((user) => {
-          if (!finalUsers.has(user.userId)) {
-            finalUsers.set(user.userId, {
-              userId: user.userId,
-              username: user.username,
-              display: formatUserDisplay(user.username, user.userId),
-            });
-          }
         });
       } catch (error) {
         console.error('Error fetching data for filters:', error);
@@ -384,7 +369,6 @@ export function Clusters() {
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getClusterHistory);
     dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidate(getUsers);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();

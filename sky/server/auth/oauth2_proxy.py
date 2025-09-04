@@ -12,9 +12,11 @@ import aiohttp
 import fastapi
 import starlette.middleware.base
 
+from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.server.auth import authn
+from sky.users import permission
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -149,6 +151,10 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                 'return user info, check your oauth2-proxy'
                                 'setup.'
                         })
+                newly_added = global_user_state.add_or_update_user(auth_user)
+                if newly_added:
+                    permission.permission_service.add_user_if_not_exists(
+                        auth_user.id)
                 request.state.auth_user = auth_user
                 await authn.override_user_info_in_request_body(
                     request, auth_user)

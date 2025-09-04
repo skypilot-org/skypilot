@@ -75,8 +75,10 @@ async def log_streamer(request_id: Optional[str],
         last_waiting_msg = ''
         waiting_msg = (f'Waiting for {request_task.name!r} request to be '
                        f'scheduled: {request_id}')
-        while request_task.status < requests_lib.RequestStatus.RUNNING:
-            if request_task.status_msg is not None:
+        req_status = request_task.status
+        req_msg = request_task.status_msg
+        while req_status < requests_lib.RequestStatus.RUNNING:
+            if req_msg is not None:
                 waiting_msg = request_task.status_msg
             if show_request_waiting_spinner:
                 yield status_msg.update(f'[dim]{waiting_msg}[/dim]')
@@ -91,7 +93,10 @@ async def log_streamer(request_id: Optional[str],
             # polling the DB, which can be a bottleneck for high-concurrency
             # requests.
             await asyncio.sleep(0.1)
-            request_task = await requests_lib.get_request_async(request_id)
+            status_with_msg = await requests_lib.get_request_status_async(
+                request_id, include_msg=True)
+            req_status = status_with_msg.status
+            req_msg = status_with_msg.status_msg
             if not follow:
                 break
         if show_request_waiting_spinner:
@@ -153,10 +158,13 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
         line: Optional[bytes] = await f.readline()
         if not line:
             if request_id is not None:
-                request_task = await requests_lib.get_request_async(request_id)
-                if request_task.status > requests_lib.RequestStatus.RUNNING:
-                    if (request_task.status ==
+                req_status = await requests_lib.get_request_status_async(
+                    request_id)
+                if req_status.status > requests_lib.RequestStatus.RUNNING:
+                    if (req_status.status ==
                             requests_lib.RequestStatus.CANCELLED):
+                        request_task = await requests_lib.get_request_async(
+                            request_id)
                         if request_task.should_retry:
                             buffer.append(
                                 message_utils.encode_payload(

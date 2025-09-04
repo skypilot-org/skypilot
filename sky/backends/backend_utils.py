@@ -810,6 +810,7 @@ def write_cluster_config(
                 'name': vol.volume_name,
                 'path': vol.path,
                 'volume_name_on_cloud': vol.volume_config.name_on_cloud,
+                'volume_id_on_cloud': vol.volume_config.id_on_cloud,
             })
 
     runcmd = skypilot_config.get_effective_region_config(
@@ -928,19 +929,19 @@ def write_cluster_config(
     # Add kubernetes config fields from ~/.sky/config
     if isinstance(cloud, clouds.Kubernetes):
         cluster_config_overrides = to_provision.cluster_config_overrides
-        kubernetes_utils.combine_pod_config_fields(
-            tmp_yaml_path,
+        with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
+            tmp_yaml_str = f.read()
+        cluster_yaml_obj = yaml_utils.safe_load(tmp_yaml_str)
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields_and_metadata(
+            cluster_yaml_obj,
             cluster_config_overrides=cluster_config_overrides,
             cloud=cloud,
             context=region.name)
-        kubernetes_utils.combine_metadata_fields(
-            tmp_yaml_path,
-            cluster_config_overrides=cluster_config_overrides,
-            context=region.name)
-        yaml_obj = yaml_utils.read_yaml(tmp_yaml_path)
-        pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
-            'ray_head_default']['node_config']
+        # Write the updated YAML back to the file
+        yaml_utils.dump_yaml(tmp_yaml_path, combined_yaml_obj)
 
+        pod_config: Dict[str, Any] = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']
         # Check pod spec only. For high availability controllers, we deploy pvc & deployment for the controller. Read kubernetes-ray.yml.j2 for more details.
         pod_config.pop('deployment_spec', None)
         pod_config.pop('pvc_spec', None)
@@ -2929,6 +2930,7 @@ def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
+    include_credentials: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -2941,17 +2943,14 @@ def get_clusters(
     of the clusters.
 
     Args:
-        include_controller: Whether to include controllers, e.g. jobs controller
-            or sky serve controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
-        cloud_filter: Sets which clouds to filer through from the global user
-            state. Supports three values, 'all' for all clouds, 'public' for
-            public clouds only, and 'local' for only local clouds.
         cluster_names: If provided, only return records for the given cluster
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
+        include_credentials: If True, include cluster ssh credentials in the
+            return value.
         _include_is_managed: Whether to force include clusters created by the
             controller.
 
@@ -2995,29 +2994,34 @@ def get_clusters(
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
 
-    def _update_records_with_credentials_and_resources_str(
+    def _get_records_with_handle(
+            records: List[Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Filter for records that have a handle"""
+        return [
+            record for record in records
+            if record is not None and record['handle'] is not None
+        ]
+
+    def _update_records_with_resources_str(
             records: List[Optional[Dict[str, Any]]]) -> None:
-        """Add the credentials to the record.
-
-        This is useful for the client side to setup the ssh config of the
-        cluster.
-        """
-        records_with_handle = []
-
-        # only act on records that have a handle
-        for record in records:
-            if record is None:
-                continue
+        """Add resource str to record"""
+        for record in _get_records_with_handle(records):
             handle = record['handle']
-            if handle is None:
-                continue
             record[
                 'resources_str'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=True)
             record[
                 'resources_str_full'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=False)
-            records_with_handle.append(record)
+
+    def _update_records_with_credentials(
+            records: List[Optional[Dict[str, Any]]]) -> None:
+        """Add the credentials to the record.
+
+        This is useful for the client side to setup the ssh config of the
+        cluster.
+        """
+        records_with_handle = _get_records_with_handle(records)
         if len(records_with_handle) == 0:
             return
 
@@ -3050,12 +3054,8 @@ def get_clusters(
     def _update_records_with_resources(
             records: List[Optional[Dict[str, Any]]]) -> None:
         """Add the resources to the record."""
-        for record in records:
-            if record is None:
-                continue
+        for record in _get_records_with_handle(records):
             handle = record['handle']
-            if handle is None:
-                continue
             record['nodes'] = handle.launched_nodes
             if handle.launched_resources is None:
                 continue
@@ -3072,7 +3072,9 @@ def get_clusters(
                 if handle.launched_resources.accelerators else None)
 
     # Add auth_config to the records
-    _update_records_with_credentials_and_resources_str(records)
+    _update_records_with_resources_str(records)
+    if include_credentials:
+        _update_records_with_credentials(records)
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
         _update_records_with_resources(records)
@@ -3097,9 +3099,10 @@ def get_clusters(
         # Refactor this to use some other info to
         # determine if a launch is in progress.
         request = requests_lib.get_request_tasks(
-            status=[requests_lib.RequestStatus.RUNNING],
-            cluster_names=[cluster_name],
-            include_request_names=['sky.launch'])
+            req_filter=requests_lib.RequestTaskFilter(
+                status=[requests_lib.RequestStatus.RUNNING],
+                cluster_names=[cluster_name],
+                include_request_names=['sky.launch']))
         if len(request) > 0:
             # There is an active launch request on the cluster,
             # so we don't want to update the cluster status until
@@ -3112,7 +3115,9 @@ def get_clusters(
                 cluster_name,
                 force_refresh_statuses=force_refresh_statuses,
                 acquire_per_cluster_status_lock=True)
-            _update_records_with_credentials_and_resources_str([record])
+            _update_records_with_resources_str([record])
+            if include_credentials:
+                _update_records_with_credentials([record])
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:

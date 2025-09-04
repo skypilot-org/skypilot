@@ -146,6 +146,25 @@ SSH access is only available for :ref:`clusters <dev-cluster>` (designed for int
 
 Executing a distributed Ray program
 ------------------------------------
+
+.. note::
+
+   **Important**: Always start your own Ray cluster for user workloads. SkyPilot uses Ray internally on port 6380 for cluster management. The example below starts a separate Ray cluster on port 6379.
+   
+   **Best practices for Ray on SkyPilot:**
+   
+   - **Do:** Run ``ray start`` with explicit port (e.g., ``--port 6379``)
+   - **Do:** Use ``ray.init(address="localhost:6379")`` for explicit connection
+   - **Avoid:** ``ray.init(address="auto")`` - While it typically connects to your user cluster when available, the behavior can be unpredictable
+   - **Never:** Call ``ray stop`` - It may interfere with SkyPilot operations
+   
+   **To kill your Ray cluster**, use `ray.shutdown() <https://docs.ray.io/en/latest/ray-core/api/doc/ray.shutdown.html>`_ in Python or kill the Ray processes directly:
+   
+   .. code-block:: bash
+
+      # Kill specific Ray head process started on port 6379 (user's Ray cluster)
+      pkill -f "ray start --head --port 6379"
+
 To execute a distributed Ray program on many nodes, you can download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `job yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
 
 .. code-block:: console

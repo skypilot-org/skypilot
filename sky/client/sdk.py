@@ -1426,6 +1426,8 @@ def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
+    *,
+    _include_credentials: bool = False,
 ) -> server_common.RequestId[List[responses.StatusResponse]]:
     """Gets cluster statuses.
 
@@ -1474,6 +1476,8 @@ def status(
             provider(s).
         all_users: whether to include all users' clusters. By default, only
             the current user's clusters are included.
+        _include_credentials: (internal) whether to include cluster ssh
+            credentials in the response (default: False).
 
     Returns:
         The request ID of the status request.
@@ -1508,6 +1512,7 @@ def status(
         cluster_names=cluster_names,
         refresh=refresh,
         all_users=all_users,
+        include_credentials=_include_credentials,
     )
     response = server_common.make_authenticated_request(
         'POST', '/status', json=json.loads(body.model_dump_json()))
@@ -2361,7 +2366,10 @@ def _clear_api_server_config() -> None:
 
         config = skypilot_config.get_user_config()
         config = dict(config)
-        del config['api_server']
+        if 'api_server' in config:
+            # We might not have set the endpoint in the config file, so we
+            # need to check before deleting.
+            del config['api_server']
 
         yaml_utils.dump_yaml(str(config_path), config, blank=True)
         skypilot_config.reload_config()
@@ -2376,6 +2384,20 @@ def _validate_endpoint(endpoint: Optional[str]) -> str:
             not endpoint.startswith('https://')):
         raise click.BadParameter('Endpoint must be a valid URL.')
     return endpoint.rstrip('/')
+
+
+def _check_endpoint_in_env_var(is_login: bool) -> None:
+    # If the user has set the endpoint via the environment variable, we should
+    # not do anything as we can't disambiguate between the env var and the
+    # config file.
+    """Check if the endpoint is set in the environment variable."""
+    if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
+        with ux_utils.print_exception_no_traceback():
+            action = 'login to' if is_login else 'logout of'
+            raise RuntimeError(f'Cannot {action} API server when the endpoint '
+                               'is set via the environment variable. Run unset '
+                               f'{constants.SKY_API_SERVER_URL_ENV_VAR} to '
+                               'clear the environment variable.')
 
 
 @usage_lib.entrypoint
@@ -2400,6 +2422,8 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
+    _check_endpoint_in_env_var(is_login=True)
+
     # Validate and normalize endpoint
     endpoint = _validate_endpoint(endpoint)
 
@@ -2634,6 +2658,8 @@ def api_logout() -> None:
     """Logout of the API server.
 
     Clears all cookies and settings stored in ~/.sky/config.yaml"""
+    _check_endpoint_in_env_var(is_login=False)
+
     if server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Local api server cannot be logged out. '
