@@ -134,7 +134,7 @@ def main():
                 f'--name {en}')
             output_remote = f'{cluster}:{output}'
             met = f'{output_remote}/metric/{en}.json'
-            scps.append(f'scp {met} {output_local}'
+            scps.append(f'scp -o LogLevel=ERROR {met} {output_local}'
                         f'/metric/{en}/{cluster}.json')
 
     script_path = Path(output_local) / 'scripts' / f'{args.exp_name}.bash'
