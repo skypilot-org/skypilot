@@ -66,16 +66,26 @@ def add_timestamp_prefix_for_server_logs() -> None:
     # Add date prefix to the log message printed by loggers under
     # server.
     stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setLevel(logging.DEBUG)
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stream_handler.setLevel(logging.DEBUG)
+    else:
+        stream_handler.setLevel(logging.INFO)
     stream_handler.flush = sys.stdout.flush  # type: ignore
     stream_handler.setFormatter(sky_logging.FORMATTER)
     server_logger.addHandler(stream_handler)
     # Add date prefix to the log message printed by uvicorn.
-    for name in ['uvicorn', 'uvicorn.access', 'uvicorn.error', 'websockets.server', 'websockets.protocol']:
+    for name in ['uvicorn', 'uvicorn.access']:
         uvicorn_logger = logging.getLogger(name)
         uvicorn_logger.handlers.clear()
         uvicorn_logger.addHandler(stream_handler)
         uvicorn_logger.setLevel(logging.DEBUG)
+    debug_logger = logging.getLogger('uvicorn.error')
+    debug_logger.setLevel(logging.DEBUG)
+    debugf = open('/tmp/uvicorn.log', 'w')
+    handler = logging.StreamHandler(debugf)
+    handler.setFormatter(sky_logging.FORMATTER)
+    handler.setLevel(logging.DEBUG)
+    debug_logger.addHandler(handler)
 
 
 class Server(uvicorn.Server):
