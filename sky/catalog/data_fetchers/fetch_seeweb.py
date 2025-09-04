@@ -59,6 +59,13 @@ def is_tenstorrent_gpu_name(gpu_name: Optional[str]) -> bool:
     return 'TENSTORRENT' in upper or 'GRAYSKULL' in upper
 
 
+def is_mi300x_gpu_name(gpu_name: Optional[str]) -> bool:
+    """Return True if the given GPU name refers to AMD MI300X."""
+    if not gpu_name:
+        return False
+    return 'MI300X' in str(gpu_name).upper()
+
+
 def get_api_key(path: Optional[str] = None) -> str:
     """Get API key from config file or environment variable."""
     # Step 1: Try to get from config file
@@ -216,6 +223,10 @@ def fetch_seeweb_data(api_key: str) -> List[Dict]:
 
                 if is_tenstorrent_gpu_name(parsed.get('gpu_name')):
                     print(f'Skipping Tenstorrent plan {plan.name}')
+                    continue
+
+                if is_mi300x_gpu_name(parsed.get('gpu_name')):
+                    print(f'Skipping MI300X plan {plan.name}')
                     continue
 
                 print(f'Fetching regions available for {plan.name}')
