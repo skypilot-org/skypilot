@@ -6,7 +6,7 @@ import { apiClient } from '@/data/connectors/client';
 export async function getCloudInfrastructure(
   clusters,
   jobs,
-  forceRefresh = false
+  forceRefresh = true
 ) {
   try {
     // Get enabled clouds

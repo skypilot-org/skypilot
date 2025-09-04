@@ -1460,7 +1460,7 @@ export function GPUs() {
         // Use the shared getInfraData function
         // If forceRefresh is true, call getInfraData directly to bypass cache
         const infraData = forceRefresh
-          ? await getInfraData(true)
+          ? await getInfraData()
           : await dashboardCache.get(getInfraData);
 
         const { gpuData, cloudData } = infraData || {};
