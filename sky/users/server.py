@@ -33,8 +33,12 @@ USER_LOCK_TIMEOUT_SECONDS = 20
 router = fastapi.APIRouter()
 
 
+# All handlers in user handler are sync to get fastAPI run it in a
+# ThreadPoolExecutor to avoid blocking the async event loop.
+# TODO(aylei): make these async once we have the global_user_state async
+# support.
 @router.get('')
-async def users() -> List[Dict[str, Any]]:
+def users() -> List[Dict[str, Any]]:
     """Gets all users."""
     all_users = []
     user_list = global_user_state.get_all_users()
@@ -54,7 +58,7 @@ async def users() -> List[Dict[str, Any]]:
 
 
 @router.get('/role')
-async def get_current_user_role(request: fastapi.Request):
+def get_current_user_role(request: fastapi.Request):
     """Get current user's role."""
     # TODO(hailong): is there a reliable way to get the user
     # hash for the request without 'X-Auth-Request-Email' header?
@@ -70,7 +74,7 @@ async def get_current_user_role(request: fastapi.Request):
 
 
 @router.post('/create')
-async def user_create(user_create_body: payloads.UserCreateBody) -> None:
+def user_create(user_create_body: payloads.UserCreateBody) -> None:
     username = user_create_body.username
     password = user_create_body.password
     role = user_create_body.role
@@ -100,8 +104,8 @@ async def user_create(user_create_body: payloads.UserCreateBody) -> None:
 
 
 @router.post('/update')
-async def user_update(request: fastapi.Request,
-                      user_update_body: payloads.UserUpdateBody) -> None:
+def user_update(request: fastapi.Request,
+                user_update_body: payloads.UserUpdateBody) -> None:
     """Updates the user role."""
     user_id = user_update_body.user_id
     role = user_update_body.role
@@ -181,14 +185,13 @@ def _delete_user(user_id: str) -> None:
 
 
 @router.post('/delete')
-async def user_delete(user_delete_body: payloads.UserDeleteBody) -> None:
+def user_delete(user_delete_body: payloads.UserDeleteBody) -> None:
     user_id = user_delete_body.user_id
     _delete_user(user_id)
 
 
 @router.post('/import')
-async def user_import(
-        user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
+def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
     """Import users from CSV content."""
     csv_content = user_import_body.csv_content
 
@@ -305,7 +308,7 @@ async def user_import(
 
 
 @router.get('/export')
-async def user_export() -> Dict[str, Any]:
+def user_export() -> Dict[str, Any]:
     """Export all users as CSV content."""
     try:
         # Get all users
@@ -369,7 +372,7 @@ def _user_lock(user_id: str) -> Generator[None, None, None]:
 
 
 @router.get('/service-account-tokens')
-async def get_service_account_tokens(
+def get_service_account_tokens(
         request: fastapi.Request) -> List[Dict[str, Any]]:
     """Get service account tokens. All users can see all tokens."""
     auth_user = request.state.auth_user
@@ -420,7 +423,7 @@ def _generate_service_account_user_id() -> str:
 
 
 @router.post('/service-account-tokens')
-async def create_service_account_token(
+def create_service_account_token(
         request: fastapi.Request,
         token_body: payloads.ServiceAccountTokenCreateBody) -> Dict[str, Any]:
     """Create a new service account token."""
@@ -508,7 +511,7 @@ async def create_service_account_token(
 
 
 @router.post('/service-account-tokens/delete')
-async def delete_service_account_token(
+def delete_service_account_token(
         request: fastapi.Request,
         token_body: payloads.ServiceAccountTokenDeleteBody) -> Dict[str, str]:
     """Delete a service account token.
@@ -549,7 +552,7 @@ async def delete_service_account_token(
 
 
 @router.post('/service-account-tokens/get-role')
-async def get_service_account_role(
+def get_service_account_role(
         request: fastapi.Request,
         role_body: payloads.ServiceAccountTokenRoleBody) -> Dict[str, Any]:
     """Get the role of a service account."""
@@ -585,7 +588,7 @@ async def get_service_account_role(
 
 
 @router.post('/service-account-tokens/update-role')
-async def update_service_account_role(
+def update_service_account_role(
         request: fastapi.Request,
         role_body: payloads.ServiceAccountTokenUpdateRoleBody
 ) -> Dict[str, str]:
@@ -628,7 +631,7 @@ async def update_service_account_role(
 
 
 @router.post('/service-account-tokens/rotate')
-async def rotate_service_account_token(
+def rotate_service_account_token(
         request: fastapi.Request,
         token_body: payloads.ServiceAccountTokenRotateBody) -> Dict[str, Any]:
     """Rotate a service account token.

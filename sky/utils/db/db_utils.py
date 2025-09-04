@@ -350,6 +350,11 @@ class SQLiteConn(threading.local):
         conn = await self._get_async_conn()
         return await conn.execute_fetchall(sql, parameters)
 
+    async def close(self):
+        if self._async_conn is not None:
+            await self._async_conn.close()
+        self.conn.close()
+
 
 _max_connections = 0
 _postgres_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}

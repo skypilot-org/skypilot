@@ -1,5 +1,6 @@
 """Utilities for REST API."""
 import asyncio
+import atexit
 import contextlib
 import dataclasses
 import enum
@@ -842,3 +843,11 @@ async def requests_gc_daemon():
         # Run the daemon at most once every hour to avoid too frequent
         # cleanup.
         await asyncio.sleep(max(retention_seconds, 3600))
+
+
+def _cleanup():
+    if _DB is not None:
+        asyncio.run(_DB.close())
+
+
+atexit.register(_cleanup)
