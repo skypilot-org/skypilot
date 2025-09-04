@@ -894,6 +894,29 @@ def test_task_labels_kubernetes():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Services on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_services_on_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    service_check = smoke_tests_utils.run_cloud_cmd_on_cluster(
+        name,
+        f'services=$(kubectl get svc -o name | grep -F {name} | grep -v -- "-cloud-cmd" || true); '
+        'echo "[$services]"; '
+        'if [ -n "$services" ]; then echo "services found"; exit 1; else echo "services not found"; fi'
+    )
+    test = smoke_tests_utils.Test(
+        'services_on_kubernetes',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # Launch Kubernetes cluster with three nodes.
+            f'sky launch -y -c {name} --num-nodes 3 --cpus=0.1+ --infra kubernetes',
+        ],
+        f'sky down -y {name} && {service_check} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Pod Annotations on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_add_pod_annotations_for_autodown_with_launch():
