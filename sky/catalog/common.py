@@ -139,6 +139,11 @@ class LazyDataFrame:
 
     @annotations.lru_cache(scope='request')
     def _load_df(self) -> 'pd.DataFrame':
+        # This function is currently unused as self._df is never
+        # cleared, leading to memory-leak like behavior on
+        # executors.
+        # TODO: explore a singleton catalog service / cache
+        # that stores all catalog data for other processes.
         if self._update_if_stale_func() or self._df is None:
             try:
                 self._df = pd.read_csv(self._filename)
@@ -150,16 +155,31 @@ class LazyDataFrame:
                     raise e
         return self._df
 
+    @annotations.lru_cache(scope='request')
+    def _load_df_ephemeral(self) -> 'pd.DataFrame':
+        # This function is used to load the catalog data for each request.
+        # Unlike _load_df(), the result is not cached in the class object.
+        # The LRU cache still ensures that the catalog data is reused within
+        # the same request.
+        try:
+            return pd.read_csv(self._filename)
+        except Exception as e:  # pylint: disable=broad-except
+            # As users can manually modify the catalog, read_csv can fail.
+            logger.error(f'Failed to read {self._filename}. '
+                            'To fix: delete the csv file and try again.')
+            with ux_utils.print_exception_no_traceback():
+                raise e
+
     def __getattr__(self, name: str):
-        return getattr(self._load_df(), name)
+        return getattr(self._load_df_ephemeral(), name)
 
     def __getitem__(self, key):
         # Delegate the indexing operation to the underlying DataFrame
-        return self._load_df()[key]
+        return self._load_df_ephemeral()[key]
 
     def __setitem__(self, key, value):
         # Delegate the set operation to the underlying DataFrame
-        self._load_df()[key] = value
+        self._load_df_ephemeral()[key] = value
 
 
 def read_catalog(filename: str,
