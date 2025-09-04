@@ -33,10 +33,6 @@ setup: |
   # Install system dependencies
   sudo apt-get update && sudo apt-get install -y jq
   
-  # Install uv for fast Python package management
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.cargo/bin:$PATH"
-  
   # Create virtual environment and install dependencies
   uv venv --python 3.10 --seed
   source .venv/bin/activate
