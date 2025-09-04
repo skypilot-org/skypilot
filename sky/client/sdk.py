@@ -2366,7 +2366,10 @@ def _clear_api_server_config() -> None:
 
         config = skypilot_config.get_user_config()
         config = dict(config)
-        del config['api_server']
+        if 'api_server' in config:
+            # We might not have set the endpoint in the config file, so we
+            # need to check before deleting.
+            del config['api_server']
 
         yaml_utils.dump_yaml(str(config_path), config, blank=True)
         skypilot_config.reload_config()
@@ -2381,6 +2384,20 @@ def _validate_endpoint(endpoint: Optional[str]) -> str:
             not endpoint.startswith('https://')):
         raise click.BadParameter('Endpoint must be a valid URL.')
     return endpoint.rstrip('/')
+
+
+def _check_endpoint_in_env_var(is_login: bool) -> None:
+    # If the user has set the endpoint via the environment variable, we should
+    # not do anything as we can't disambiguate between the env var and the
+    # config file.
+    """Check if the endpoint is set in the environment variable."""
+    if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
+        with ux_utils.print_exception_no_traceback():
+            action = 'login to' if is_login else 'logout of'
+            raise RuntimeError(f'Cannot {action} API server when the endpoint '
+                               'is set via the environment variable. Run unset '
+                               f'{constants.SKY_API_SERVER_URL_ENV_VAR} to '
+                               'clear the environment variable.')
 
 
 @usage_lib.entrypoint
@@ -2405,6 +2422,8 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
+    _check_endpoint_in_env_var(is_login=True)
+
     # Validate and normalize endpoint
     endpoint = _validate_endpoint(endpoint)
 
@@ -2639,6 +2658,8 @@ def api_logout() -> None:
     """Logout of the API server.
 
     Clears all cookies and settings stored in ~/.sky/config.yaml"""
+    _check_endpoint_in_env_var(is_login=False)
+
     if server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Local api server cannot be logged out. '

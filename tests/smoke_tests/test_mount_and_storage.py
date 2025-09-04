@@ -214,7 +214,6 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
 
 
 @pytest.mark.aws
-@pytest.mark.skip(reason='Skip due to AWS AMI selection issue')
 def test_aws_storage_mounts_arm64():
     """Test S3 storage mounting on ARM64 architecture using rclone."""
     name = smoke_tests_utils.get_cluster_name()
@@ -232,7 +231,13 @@ def test_aws_storage_mounts_arm64():
             if cmd.startswith('sky launch') and '--infra aws' in cmd:
                 # Insert ARM64 instance type before the YAML file path
                 test_commands[i] = cmd.replace(
-                    'sky launch', 'sky launch --instance-type m6g.large')
+                    'sky launch', 'sky launch --instance-type m6g.large'
+                ).replace(
+                    '--infra aws',
+                    # Use ARM64 AMI to make sure the launch succeeds.
+                    # The image ID is retrieved with:
+                    # aws ec2 describe-images --owners amazon --filters "Name=name,Values=Deep Learning ARM64 Base OSS*Ubuntu 22.04*" --region $REGION --query "Images | sort_by(@, &CreationDate) | [-1].{Name:Name,ImageId:ImageId}" --output text | cat
+                    '--infra aws/us-west-2 --image-id ami-03ac43540bf1c63c0')
                 break
 
         # Add ARM64-specific verification

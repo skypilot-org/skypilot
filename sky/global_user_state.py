@@ -299,9 +299,7 @@ def create_table(engine: sqlalchemy.engine.Engine):
 # a session has already been created with _SQLALCHEMY_ENGINE = e1,
 # and then another thread overwrites _SQLALCHEMY_ENGINE = e2
 # which could result in e1 being garbage collected unexpectedly.
-def initialize_and_get_db(
-    pg_pool_class: Optional[sqlalchemy.pool.Pool] = None
-) -> sqlalchemy.engine.Engine:
+def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
 
     if _SQLALCHEMY_ENGINE is not None:
@@ -310,8 +308,7 @@ def initialize_and_get_db(
         if _SQLALCHEMY_ENGINE is not None:
             return _SQLALCHEMY_ENGINE
         # get an engine to the db
-        engine = migration_utils.get_engine('state',
-                                            pg_pool_class=pg_pool_class)
+        engine = db_utils.get_engine('state')
 
         # run migrations if needed
         create_table(engine)
@@ -2315,3 +2312,18 @@ def set_system_config(config_key: str, config_value: str) -> None:
             })
         session.execute(upsert_stmnt)
         session.commit()
+
+
+@_init_db
+def get_max_db_connections() -> Optional[int]:
+    """Get the maximum number of connections for the engine."""
+    assert _SQLALCHEMY_ENGINE is not None
+    if (_SQLALCHEMY_ENGINE.dialect.name ==
+            db_utils.SQLAlchemyDialect.SQLITE.value):
+        return None
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        max_connections = session.execute(
+            sqlalchemy.text('SHOW max_connections')).scalar()
+        if max_connections is None:
+            return None
+        return int(max_connections)
