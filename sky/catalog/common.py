@@ -161,7 +161,7 @@ class LazyDataFrame:
         # Unlike _load_df(), the result is not cached in the class object.
         # The LRU cache still ensures that the catalog data is reused within
         # the same request.
-        self.update_if_stale_func()
+        self._update_if_stale_func()
         try:
             return pd.read_csv(self._filename)
         except Exception as e:  # pylint: disable=broad-except
