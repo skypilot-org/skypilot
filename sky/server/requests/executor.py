@@ -21,6 +21,7 @@ See the [README.md](../README.md) for detailed architecture of the executor.
 import asyncio
 import concurrent.futures
 import contextlib
+import gc
 import multiprocessing
 import os
 import queue as queue_lib
@@ -31,6 +32,7 @@ import time
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
+import psutil
 import setproctitle
 
 from sky import exceptions
@@ -434,6 +436,28 @@ def _request_execution_wrapper(request_id: str,
                 request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
+        gc.collect()
+
+        def is_running_pytest() -> bool:
+            return 'PYTEST_CURRENT_TEST' in os.environ
+
+        if not is_running_pytest():
+            # pytest environment can be using more memory, so we only check
+            # the RSS in production environment.
+            pid = os.getpid()
+            rss = psutil.Process(pid).memory_info().rss
+            rss_gb = rss / (1024 * 1024 * 1024)
+            logger.debug(f'RSS after request {request_id}: {rss_gb} GB')
+            # TODO(this PR): we need to pass in this number based on if
+            # the executor is long or short.
+            mem_limit = server_config._SHORT_WORKER_MEM_GB
+            if rss_gb > mem_limit:
+                logger.warning(
+                    f'Request {request_id} used more memory than the limit. '
+                    f'RSS: {rss_gb:.3f} GB. '
+                    f'Limit: {mem_limit} GB. '
+                    f'OOMKilling the executor (pid {pid}).')
+                sys.exit(1)
 
 
 async def execute_request_coroutine(request: api_requests.Request):
