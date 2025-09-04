@@ -34,18 +34,27 @@ resources:
 
 ## Quick Start
 
-If you have a centralized SkyPilot API server, the eval head can auto-discover game servers:
+Deploy a [SkyPilot remote API server](https://docs.skypilot.co/en/latest/reference/api-server/api-server.html#remote-api-server-multi-user-teams) and create a [service account](https://docs.skypilot.co/en/latest/reference/auth.html#optional-service-accounts) for the evaluation system to use.
+
+Set your API server endpoint and service account token for the evaluation system to use:
+
+```bash
+export SKYPILOT_API_SERVER_ENDPOINT=https://your-api-server.com
+export SKYPILOT_API_SERVER_SERVICE_ACCOUNT_TOKEN=your-service-account-token
+```
+
+
+Start the evaluation head and game servers:
 
 ```bash
 # Launch the evaluation head with API server credentials
-export SKYPILOT_API_SERVER_ENDPOINT=https://your-api-server.com
-export SKYPILOT_API_SERVER_SERVICE_ACCOUNT_TOKEN=your-service-account-token
 sky launch -c eval-head configs/eval_head.yaml \
   --env GAME_SERVER_PREFIX=game \
   --secret SKYPILOT_API_SERVER_ENDPOINT \
   --secret SKYPILOT_API_SERVER_SERVICE_ACCOUNT_TOKEN
 
 # Launch game servers (eval head will auto-discover them)
+ # Note their name prefix is matched by the eval head (GAME_SERVER_PREFIX).
 sky launch -c game-1 configs/game_server.yaml
 sky launch -c game-2 configs/game_server.yaml
 ```
@@ -100,7 +109,6 @@ Check the example dashboard page at beginning of this README.
 - **Spot Instances**: Enabled by default for cost savings
 - **Environment Variables**:
   - `EVAL_HEAD_ENDPOINT`: URL of the evaluation head (required)
-- **Auto-connects** to evaluation head using the provided endpoint
 
 ## Scaling
 
@@ -233,10 +241,3 @@ The configs use `uv` for fast Python package management:
    - Add more game servers for parallel processing
    - Check CPU/memory usage in dashboard
 
-## Advanced Usage
-
-See the [advanced/](advanced/) directory for:
-- Custom model integration
-- Production deployment guides
-- Performance tuning
-- Monitoring and logging setup
