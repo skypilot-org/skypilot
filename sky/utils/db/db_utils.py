@@ -322,6 +322,7 @@ class SQLiteConn(threading.local):
                     # initialization like setting the WAL mode, so we do not
                     # duplicate that logic here.
                     self._async_conn = await aiosqlite.connect(self.db_path)
+                    self._async_conn.daemon = True
         return self._async_conn
 
     async def execute_and_commit_async(self,
@@ -346,3 +347,8 @@ class SQLiteConn(threading.local):
                                     ) -> Iterable[sqlite3.Row]:
         conn = await self._get_async_conn()
         return await conn.execute_fetchall(sql, parameters)
+
+    async def close(self):
+        if self._async_conn is not None:
+            await self._async_conn.close()
+        self.conn.close()

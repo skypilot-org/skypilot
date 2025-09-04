@@ -21,8 +21,6 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 
-import concurrent.futures
-
 from sky import global_user_state
 from sky.data import storage_utils
 from sky.server import server
@@ -86,7 +84,12 @@ class SSHLatencyMonitor:
 
 
 # ========== FIXTURES ==========
-
+@pytest.fixture(scope='session', autouse=True)
+def cleanup_db_conn():
+    """Ensure proper cleanup of db conn after tests."""
+    yield
+    if requests_lib._DB is not None:
+        asyncio.run(requests_lib._DB.close())
 
 @pytest.fixture(scope='session', autouse=True)
 def enable_asyncio_debug():
@@ -210,10 +213,6 @@ async def run_endpoint_test(
         num_concurrent: int = 100,
         expected_degradation_threshold: float = 10.0) -> Dict[str, Any]:
     """Run performance test for a single endpoint."""
-    loop = asyncio.get_running_loop()
-    if loop._default_executor is None:
-        loop.set_default_executor(
-            concurrent.futures.ThreadPoolExecutor(max_workers=8))
     # Initialize baseline if not already done
     if monitor.baseline is None:
         baseline = await monitor.measure_baseline()
