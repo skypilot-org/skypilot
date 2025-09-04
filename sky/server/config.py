@@ -137,7 +137,8 @@ def compute_server_config(deploy: bool,
     # +1 for the event loop running the main process
     # and gc daemons in the '__main__' body of sky/server/server.py
     max_parallel_all_workers = (max_parallel_for_long + max_parallel_for_short +
-                                max_parallel_for_short_catalog + num_server_workers + 1)
+                                max_parallel_for_short_catalog +
+                                num_server_workers + 1)
 
     if not deploy:
         # For local mode, use local queue backend since we only run 1 uvicorn
@@ -228,15 +229,17 @@ def _max_short_worker_parallism(mem_size_gb: float,
     n = max(_MIN_SHORT_WORKERS, int(available_mem / _SHORT_WORKER_MEM_GB))
     return n
 
+
 def _max_short_catalog_worker_parallism(mem_size_gb: float,
                                         long_worker_parallism: int,
                                         short_worker_parallism: int) -> int:
     """Max parallelism for short catalog workers."""
     # Reserve memory for long workers and min available memory.
-    reserved_mem = server_constants.MIN_AVAIL_MEM_GB
+    reserved_mem: float = server_constants.MIN_AVAIL_MEM_GB
     reserved_mem += (long_worker_parallism * _LONG_WORKER_MEM_GB)
     reserved_mem += (short_worker_parallism * _SHORT_WORKER_MEM_GB)
     # divide by 2 to reserve memory for regular short workers
     available_mem = max(0, mem_size_gb - reserved_mem) / 2
-    n = max(_MIN_SHORT_CATALOG_WORKERS, int(available_mem / _SHORT_CATALOG_WORKER_MEM_GB))
+    n = max(_MIN_SHORT_CATALOG_WORKERS,
+            int(available_mem / _SHORT_CATALOG_WORKER_MEM_GB))
     return n
