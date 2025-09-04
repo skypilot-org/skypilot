@@ -34,6 +34,7 @@ def test_endpoint_output_basic(generic_cloud: str):
                                   teardown=f'sky down -y {name}')
     smoke_tests_utils.run_one_test(test)
 
+
 @pytest.mark.no_remote_server
 def test_endpoint_output_config(generic_cloud: str):
     """Test that sky api info endpoint output is correct when config is set."""
@@ -63,6 +64,7 @@ def test_endpoint_output_config(generic_cloud: str):
                                       })
 
         smoke_tests_utils.run_one_test(test, check_sky_status=False)
+
 
 @pytest.mark.no_remote_server
 def test_endpoint_output_env(generic_cloud: str):
