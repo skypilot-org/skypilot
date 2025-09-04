@@ -1563,20 +1563,18 @@ export function GPUs() {
       }
 
       try {
-        const clustersData = await dashboardCache.get(getClusters);
-        const clusters = clustersData || [];
-
-        async function fetchKubeAndSshData() {
-          await fetchKubernetesData(clusters);
+        async function fetchKubeAndSshData(forceRefresh) {
+          await fetchKubernetesData(forceRefresh);
           // Fetch SSH Node Pools after Kubernetes data is loaded
           // because it relies on it for gpu info.
-          await fetchSSHNodePools();
+          await fetchSSHNodePools(forceRefresh);
         }
 
         // Fetch all data in parallel
         await Promise.all([
-          fetchKubeAndSshData(),
-          fetchCloudData(clusters, forceRefresh),
+          fetchKubeAndSshData(forceRefresh),
+          fetchCloudData(forceRefresh),
+          fetchManagedJobsData(forceRefresh),
         ]);
       } catch (error) {
         console.error('Error in fetchData:', error);
@@ -1615,9 +1613,11 @@ export function GPUs() {
     [isInitialLoad]
   );
 
-  const fetchKubernetesData = async (clusters) => {
+  const fetchKubernetesData = async (forceRefresh) => {
     try {
-      const gpuData = await getGPUs(clusters);
+      const gpuData = forceRefresh
+        ? await getGPUs()
+        : await dashboardCache.get(getGPUs);
       if (gpuData) {
         const {
           allContextNames: fetchedAllKubeContextNames,
@@ -1655,19 +1655,26 @@ export function GPUs() {
     }
   };
 
-  const fetchCloudData = async (clusters, forceRefresh) => {
+  const fetchManagedJobsData = async (forceRefresh) => {
     try {
-      const jobsData = await dashboardCache.get(getManagedJobs, [
-        { allUsers: true },
-      ]);
+      const jobsData = forceRefresh
+        ? await getManagedJobs({ allUsers: true })
+        : await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
       const jobs = jobsData?.jobs || [];
       setSshAndKubeJobsData(await getContextJobs(jobs));
       setSshAndKubeJobsDataLoading(false);
-      const cloudData = await getCloudInfrastructure(
-        clusters,
-        jobs,
-        forceRefresh
-      );
+    } catch (error) {
+      console.error('Error in fetchManagedJobsData:', error);
+      setSshAndKubeJobsData({});
+      setSshAndKubeJobsDataLoading(false);
+    }
+  };
+
+  const fetchCloudData = async (forceRefresh) => {
+    try {
+      const cloudData = forceRefresh
+        ? await getCloudInfrastructure(forceRefresh)
+        : await dashboardCache.get(getCloudInfrastructure, [forceRefresh]);
 
       // Set cloud data with defensive checks
       if (cloudData) {
@@ -1688,15 +1695,15 @@ export function GPUs() {
       setTotalClouds(0);
       setEnabledClouds(0);
       setCloudDataLoaded(true);
-      setSshAndKubeJobsData({});
-      setSshAndKubeJobsDataLoading(false);
     }
   };
 
   // SSH Node Pool data fetching
-  const fetchSSHNodePools = async () => {
+  const fetchSSHNodePools = async (forceRefresh) => {
     try {
-      const pools = await getSSHNodePools();
+      const pools = forceRefresh
+        ? await getSSHNodePools()
+        : await dashboardCache.get(getSSHNodePools);
       setSshNodePools(pools);
       setSshLoading(false);
     } catch (error) {
@@ -1814,6 +1821,9 @@ export function GPUs() {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getGPUs);
+    dashboardCache.invalidate(getCloudInfrastructure, [false]);
+    dashboardCache.invalidate(getSSHNodePools);
 
     if (refreshDataRef.current) {
       refreshDataRef.current({

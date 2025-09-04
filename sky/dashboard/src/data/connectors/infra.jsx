@@ -3,12 +3,17 @@ import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 // Importing from the same directory
 import { apiClient } from '@/data/connectors/client';
 
-export async function getCloudInfrastructure(
-  clusters,
-  jobs,
-  forceRefresh = false
-) {
+export async function getCloudInfrastructure(forceRefresh = false) {
+  const dashboardCache = (await import('@/lib/cache')).default;
+  const { getClusters } = await import('@/data/connectors/clusters');
+  const { getManagedJobs } = await import('@/data/connectors/jobs');
   try {
+    const jobsData = await dashboardCache.get(getManagedJobs, [
+      { allUsers: true },
+    ]);
+    const jobs = jobsData?.jobs || [];
+    const clustersData = await dashboardCache.get(getClusters);
+    const clusters = clustersData || [];
     // Get enabled clouds
     let enabledCloudsList = [];
     try {
@@ -116,82 +121,13 @@ export async function getCloudInfrastructure(
   }
 }
 
-export async function getGPUs(clusters) {
+export async function getGPUs() {
+  const dashboardCache = (await import('@/lib/cache')).default;
+  const { getClusters } = await import('@/data/connectors/clusters');
+  const clustersData = await dashboardCache.get(getClusters);
+  const clusters = clustersData || [];
   const gpus = await getKubernetesGPUs(clusters);
   return gpus;
-}
-
-async function getKubernetesContextGPUs() {
-  try {
-    const response = await apiClient.post(
-      `/realtime_kubernetes_gpu_availability`,
-      {
-        context: null,
-        name_filter: null,
-        quantity_filter: null,
-      }
-    );
-
-    if (!response.ok) {
-      console.error(
-        `Error fetching Kubernetes context GPUs (in getKubernetesContextGPUs): ${response.status} ${response.statusText}`
-      );
-      return [];
-    }
-
-    const id =
-      response.headers.get('X-Skypilot-Request-ID') ||
-      response.headers.get('x-request-id');
-
-    if (!id) {
-      console.error(
-        'No request ID returned for Kubernetes GPU availability (in getKubernetesContextGPUs)'
-      );
-      return [];
-    }
-
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    const rawText = await fetchedData.text();
-
-    if (fetchedData.status === 500) {
-      try {
-        const errorData = JSON.parse(rawText);
-        if (errorData.detail && errorData.detail.error) {
-          try {
-            const errorDetail = JSON.parse(errorData.detail.error);
-            console.error(
-              '[infra.jsx] getKubernetesContextGPUs: Server error detail:',
-              errorDetail.message
-            );
-          } catch (jsonError) {
-            console.error(
-              '[infra.jsx] getKubernetesContextGPUs: Error parsing server error JSON:',
-              jsonError,
-              'Original error text:',
-              errorData.detail.error
-            );
-          }
-        }
-      } catch (parseError) {
-        console.error(
-          '[infra.jsx] getKubernetesContextGPUs: Error parsing 500 error response JSON:',
-          parseError,
-          'Raw text was:',
-          rawText
-        );
-      }
-      return [];
-    }
-    const data = JSON.parse(rawText);
-    const contextGPUs = data.return_value ? JSON.parse(data.return_value) : [];
-    return contextGPUs;
-  } catch (error) {
-    console.error(
-      '[infra.jsx] Outer error in getKubernetesContextGPUs:',
-      error
-    );
-    return [];
-  }
 }
 
 async function getAllContexts() {
@@ -311,7 +247,6 @@ export async function getContextClusters(clusters) {
   try {
     // Count clusters per k8s context/ssh node pool
     const contextStats = {};
-
     clusters.forEach((cluster) => {
       let contextKey = null;
 
