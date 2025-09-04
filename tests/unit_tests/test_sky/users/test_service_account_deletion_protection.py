@@ -64,7 +64,7 @@ class TestServiceAccountDeletionProtection:
             token_id='token123')
 
         # Execute deletion
-        result = await users_server.delete_service_account_token(
+        result = users_server.delete_service_account_token(
             mock_request, delete_body)
 
         # Verify deletion flow
@@ -110,7 +110,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect it to fail
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await users_server.delete_service_account_token(
+            users_server.delete_service_account_token(
                 mock_request, delete_body)
 
         # Verify error details
@@ -158,7 +158,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect it to fail
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await users_server.delete_service_account_token(
+            users_server.delete_service_account_token(
                 mock_request, delete_body)
 
         # Verify error details
@@ -202,7 +202,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect it to fail
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await users_server.delete_service_account_token(
+            users_server.delete_service_account_token(
                 mock_request, delete_body)
 
         # Verify error details
@@ -232,7 +232,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect permission error
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await users_server.delete_service_account_token(
+            users_server.delete_service_account_token(
                 mock_request, delete_body)
 
         # Verify permission error
@@ -253,7 +253,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect not found error
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await users_server.delete_service_account_token(
+            users_server.delete_service_account_token(
                 mock_request, delete_body)
 
         # Verify not found error
@@ -273,7 +273,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect authentication error
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await users_server.delete_service_account_token(
+            users_server.delete_service_account_token(
                 request, delete_body)
 
         # Verify authentication error
@@ -304,7 +304,7 @@ class TestServiceAccountDeletionProtection:
 
         # Execute deletion and expect DB error
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await users_server.delete_service_account_token(
+            users_server.delete_service_account_token(
                 mock_request, delete_body)
 
         # Verify database error
