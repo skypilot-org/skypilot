@@ -1606,6 +1606,8 @@ async def api_status(
         False, description='Get finished requests as well.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
+    import time
+    time.sleep(30)
     if request_ids is None:
         statuses = None
         if not all_status:
