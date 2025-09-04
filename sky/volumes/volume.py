@@ -1,10 +1,18 @@
 """Volume types and access modes."""
 from typing import Any, Dict, Optional
 
+from sky import clouds
 from sky.utils import common_utils
 from sky.utils import infra_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.utils import volume as volume_lib
+
+VOLUME_TYPE_TO_CLOUD = {
+    volume_lib.VolumeType.PVC: clouds.Kubernetes(),
+    volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME: clouds.RunPod(),
+}
 
 
 class Volume:
@@ -16,6 +24,7 @@ class Volume:
             type: Optional[str] = None,  # pylint: disable=redefined-builtin
             infra: Optional[str] = None,
             size: Optional[str] = None,
+            labels: Optional[Dict[str, str]] = None,
             resource_name: Optional[str] = None,
             config: Optional[Dict[str, Any]] = None):
         """Initialize a Volume instance.
@@ -25,12 +34,14 @@ class Volume:
             type: Volume type (e.g., 'k8s-pvc')
             infra: Infrastructure specification
             size: Volume size
+            labels: Volume labels
             config: Additional configuration
         """
         self.name = name
         self.type = type
         self.infra = infra
         self.size = size
+        self.labels = labels or {}
         self.resource_name = resource_name
         self.config = config or {}
 
@@ -38,23 +49,49 @@ class Volume:
         self.region: Optional[str] = None
         self.zone: Optional[str] = None
 
-    @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> 'Volume':
-        """Create a Volume instance from a dictionary."""
-        return cls(name=config_dict.get('name'),
-                   type=config_dict.get('type'),
-                   infra=config_dict.get('infra'),
-                   size=config_dict.get('size'),
-                   resource_name=config_dict.get('resource_name'),
-                   config=config_dict.get('config', {}))
+        self._normalize_config()
 
-    def to_dict(self) -> Dict[str, Any]:
+    @classmethod
+    def from_yaml_config(cls, config: Dict[str, Any]) -> 'Volume':
+        """Create a Volume subclass instance from a dictionary via factory."""
+        vol_type_val = config.get('type')
+        try:
+            vt = (volume_lib.VolumeType(vol_type_val)
+                  if vol_type_val is not None else None)
+        except Exception:  # pylint: disable=broad-except
+            vt = None
+
+        if vt is None:
+            raise ValueError(f'Invalid volume type: {vol_type_val}')
+
+        if vt == volume_lib.VolumeType.PVC:
+            return PVCVolume(name=config.get('name'),
+                             type=vol_type_val,
+                             infra=config.get('infra'),
+                             size=config.get('size'),
+                             labels=config.get('labels'),
+                             resource_name=config.get('resource_name'),
+                             config=config.get('config', {}))
+        if vt == volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME:
+            return RunpodNetworkVolume(
+                name=config.get('name'),
+                type=vol_type_val,
+                infra=config.get('infra'),
+                size=config.get('size'),
+                labels=config.get('labels'),
+                resource_name=config.get('resource_name'),
+                config=config.get('config', {}))
+
+        raise ValueError(f'Invalid volume type: {vol_type_val}')
+
+    def to_yaml_config(self) -> Dict[str, Any]:
         """Convert the Volume to a dictionary."""
         return {
             'name': self.name,
             'type': self.type,
             'infra': self.infra,
             'size': self.size,
+            'labels': self.labels,
             'resource_name': self.resource_name,
             'config': self.config,
             'cloud': self.cloud,
@@ -62,46 +99,24 @@ class Volume:
             'zone': self.zone,
         }
 
-    def normalize_config(
-            self,
-            name: Optional[str] = None,
-            infra: Optional[str] = None,
-            type: Optional[str] = None,  # pylint: disable=redefined-builtin
-            size: Optional[str] = None) -> None:
-        """Override the volume config with CLI options,
-           adjust and validate the config.
-
-        Args:
-            name: Volume name to override
-            infra: Infrastructure to override
-            type: Volume type to override
-            size: Volume size to override
-        """
-        if name is not None:
-            self.name = name
-        if infra is not None:
-            self.infra = infra
-        if type is not None:
-            self.type = type
-        if size is not None:
-            self.size = size
-
+    def _normalize_config(self) -> None:
+        """Adjust and validate the config."""
         # Validate schema
-        common_utils.validate_schema(self.to_dict(),
+        common_utils.validate_schema(self.to_yaml_config(),
                                      schemas.get_volume_schema(),
                                      'Invalid volumes config: ')
 
         # Adjust the volume config (e.g., parse size)
         self._adjust_config()
 
-        # Validate the volume config
-        self._validate_config()
-
         # Resolve the infrastructure options to cloud, region, zone
         infra_info = infra_utils.InfraInfo.from_str(self.infra)
         self.cloud = infra_info.cloud
         self.region = infra_info.region
         self.zone = infra_info.zone
+
+        # Validate the volume config
+        self._validate_config()
 
     def _adjust_config(self) -> None:
         """Adjust the volume config (e.g., parse size)."""
@@ -119,7 +134,70 @@ class Volume:
 
     def _validate_config(self) -> None:
         """Validate the volume config."""
+        cloud_obj_from_type = VOLUME_TYPE_TO_CLOUD.get(
+            volume_lib.VolumeType(self.type))
+        if self.cloud:
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
+            assert cloud_obj is not None
+            if not cloud_obj.is_same_cloud(cloud_obj_from_type):
+                raise ValueError(
+                    f'Invalid cloud {self.cloud} for volume type {self.type}')
+        else:
+            self.cloud = str(cloud_obj_from_type)
+            cloud_obj = cloud_obj_from_type
+            assert cloud_obj is not None
+
+        self.region, self.zone = cloud_obj.validate_region_zone(
+            self.region, self.zone)
+
+        valid, err_msg = cloud_obj.is_volume_name_valid(self.name)
+        if not valid:
+            raise ValueError(f'Invalid volume name: {err_msg}')
+
         if not self.resource_name and not self.size:
             raise ValueError('Size is required for new volumes. '
                              'Please specify the size in the YAML file or '
                              'use the --size flag.')
+        if self.labels:
+            for key, value in self.labels.items():
+                valid, err_msg = cloud_obj.is_label_valid(key, value)
+                if not valid:
+                    raise ValueError(f'{err_msg}')
+
+        # Extra, type-specific validations
+        self._validate_config_extra()
+
+    # Hook methods for subclasses
+    def _validate_config_extra(self) -> None:
+        """Additional type-specific validation.
+
+        Subclasses can override to enforce stricter rules.
+        """
+        return
+
+
+class PVCVolume(Volume):
+    """Kubernetes PVC-backed volume."""
+    pass
+
+
+class RunpodNetworkVolume(Volume):
+    """RunPod Network Volume."""
+
+    def _validate_config_extra(self) -> None:
+        if self.size is not None:
+            try:
+                size_int = int(self.size)
+                if size_int < volume_lib.MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB:
+                    raise ValueError(
+                        f'RunPod network volume size must be at least '
+                        f'{volume_lib.MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB}GB.')
+            except Exception as e:  # pylint: disable=broad-except
+                raise ValueError(f'Invalid volume size {self.size!r}: '
+                                 f'{e}') from e
+        if not self.zone:
+            raise ValueError(
+                'RunPod DataCenterId is required to create a network '
+                'volume. Set the zone in the infra field.')
+
+        return

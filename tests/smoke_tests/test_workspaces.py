@@ -12,6 +12,7 @@ from sky import skypilot_config
 
 
 # ---------- Test workspace switching ----------
+@pytest.mark.no_remote_server
 def test_workspace_switching(generic_cloud: str):
     # Test switching between workspaces by modifying .sky.yaml.
     #
@@ -26,8 +27,11 @@ def test_workspace_switching(generic_cloud: str):
             'Skipping workspace switching test when not in Buildkite environment'
         )
     if smoke_tests_utils.is_remote_server_test():
-        pytest.skip('Skipping workspace switching test since we do not support '
-                    'restarting clusters in remote server')
+        pytest.skip(
+            'This test requires a local API server and needs to restart the server during execution. '
+            'If the API server endpoint is set in the environment file, restarting is not supported, '
+            'so the test will be skipped.')
+
     ws1_name = 'ws-1'
     ws2_name = 'ws-2'
     server_config_content = textwrap.dedent(f"""\

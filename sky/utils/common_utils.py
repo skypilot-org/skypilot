@@ -6,7 +6,6 @@ import functools
 import getpass
 import hashlib
 import inspect
-import io
 import os
 import platform
 import random
@@ -28,20 +27,17 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
-from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 
 if typing.TYPE_CHECKING:
     import jinja2
     import psutil
-    import yaml
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     psutil = adaptors_common.LazyImport('psutil')
-    yaml = adaptors_common.LazyImport('yaml')
 
-_USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
 
 # We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
@@ -131,19 +127,24 @@ def get_user_hash() -> str:
         assert user_hash is not None
         return user_hash
 
-    if os.path.exists(_USER_HASH_FILE):
+    if os.path.exists(USER_HASH_FILE):
         # Read from cached user hash file.
-        with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
+        with open(USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
             user_hash = f.read().strip()
         if is_valid_user_hash(user_hash):
             return user_hash
 
     user_hash = generate_user_hash()
-    os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
-        f.write(user_hash)
+    set_user_hash_locally(user_hash)
     return user_hash
+
+
+def set_user_hash_locally(user_hash: str) -> None:
+    """Sets the user hash to local file."""
+    os.makedirs(os.path.dirname(USER_HASH_FILE), exist_ok=True)
+    with open(USER_HASH_FILE, 'w', encoding='utf-8') as f:
+        f.write(user_hash)
 
 
 def base36_encode(hex_str: str) -> str:
@@ -343,7 +344,7 @@ def get_current_user() -> 'models.User':
 
 def get_current_user_name() -> str:
     """Returns the current user name."""
-    name = common_utils.get_current_user().name
+    name = get_current_user().name
     assert name is not None
     return name
 
@@ -567,74 +568,6 @@ def user_and_hostname_hash() -> str:
     """
     hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
     return f'{getpass.getuser()}-{hostname_hash}'
-
-
-def read_yaml(path: Optional[str]) -> Dict[str, Any]:
-    if path is None:
-        raise ValueError('Attempted to read a None YAML.')
-    with open(path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
-    return config
-
-
-def read_yaml_all_str(yaml_str: str) -> List[Dict[str, Any]]:
-    stream = io.StringIO(yaml_str)
-    config = yaml.safe_load_all(stream)
-    configs = list(config)
-    if not configs:
-        # Empty YAML file.
-        return [{}]
-    return configs
-
-
-def read_yaml_all(path: str) -> List[Dict[str, Any]]:
-    with open(path, 'r', encoding='utf-8') as f:
-        return read_yaml_all_str(f.read())
-
-
-def dump_yaml(path: str,
-              config: Union[List[Dict[str, Any]], Dict[str, Any]],
-              blank: bool = False) -> None:
-    """Dumps a YAML file.
-
-    Args:
-        path: the path to the YAML file.
-        config: the configuration to dump.
-    """
-    with open(path, 'w', encoding='utf-8') as f:
-        contents = dump_yaml_str(config)
-        if blank and isinstance(config, dict) and len(config) == 0:
-            # when dumping to yaml, an empty dict will go in as {}.
-            contents = ''
-        f.write(contents)
-
-
-def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
-    """Dumps a YAML string.
-
-    Args:
-        config: the configuration to dump.
-
-    Returns:
-        The YAML string.
-    """
-
-    # https://github.com/yaml/pyyaml/issues/127
-    class LineBreakDumper(yaml.SafeDumper):
-
-        def write_line_break(self, data=None):
-            super().write_line_break(data)
-            if len(self.indents) == 1:
-                super().write_line_break()
-
-    if isinstance(config, list):
-        dump_func = yaml.dump_all  # type: ignore
-    else:
-        dump_func = yaml.dump  # type: ignore
-    return dump_func(config,
-                     Dumper=LineBreakDumper,
-                     sort_keys=False,
-                     default_flow_style=False)
 
 
 def make_decorator(cls, name_or_fn: Union[str, Callable],
@@ -886,7 +819,7 @@ def get_cleaned_username(username: str = '') -> str:
     Returns:
       A cleaned username.
     """
-    username = username or common_utils.get_current_user_name()
+    username = username or get_current_user_name()
     username = username.lower()
     username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)

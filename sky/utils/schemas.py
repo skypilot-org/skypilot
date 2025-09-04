@@ -432,7 +432,7 @@ def get_volume_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': ['name', 'type', 'infra'],
+        'required': ['name', 'type'],
         'additionalProperties': False,
         'properties': {
             'name': {
@@ -481,6 +481,7 @@ def get_volume_schema():
                     },
                 },
             },
+            **_LABELS_SCHEMA,
         }
     }
 
@@ -667,8 +668,24 @@ def get_service_schema():
                         'minimum': 0,
                     },
                     'target_qps_per_replica': {
-                        'type': 'number',
-                        'minimum': 0,
+                        'anyOf': [
+                            {
+                                'type': 'number',
+                                'minimum': 0,
+                            },
+                            {
+                                'type': 'object',
+                                'patternProperties': {
+                                    # Pattern for accelerator types like
+                                    # "H100:1", "A100:1", "H100", "A100"
+                                    '^[A-Z0-9]+(?::[0-9]+)?$': {
+                                        'type': 'number',
+                                        'minimum': 0,
+                                    }
+                                },
+                                'additionalProperties': False,
+                            }
+                        ]
                     },
                     'dynamic_ondemand_fallback': {
                         'type': 'boolean',
@@ -1402,6 +1419,9 @@ def get_config_schema():
                 **_NETWORK_CONFIG_SCHEMA, 'tenant_id': {
                     'type': 'string',
                 },
+                'domain': {
+                    'type': 'string',
+                },
                 'region_configs': {
                     'type': 'object',
                     'required': [],
@@ -1547,6 +1567,9 @@ def get_config_schema():
             'cluster_event_retention_hours': {
                 'type': 'number',
             },
+            'cluster_debug_event_retention_hours': {
+                'type': 'number',
+            },
         }
     }
 
@@ -1655,6 +1678,9 @@ def get_config_schema():
                             'type': 'string',
                         },
                         'tenant_id': {
+                            'type': 'string',
+                        },
+                        'domain': {
                             'type': 'string',
                         },
                         'disabled': {
