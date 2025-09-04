@@ -1687,6 +1687,13 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         user=user if user is not None else None,
     )
 
+@app.get('/api/debug')
+async def debug(request: fastapi.Request) -> fastapi.Response:
+    """Returns the debug information."""
+    import time
+    time.sleep(30)
+    return fastapi.Response(content='Debug information', media_type='text/plain')
+
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
 async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
@@ -1761,7 +1768,11 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                     await websocket.send_bytes(data)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in ssh_to_websocket: {e}, {traceback.format_exc()}')
-            await websocket.close()
+            try:
+                await websocket.close()
+            except Exception as e:
+                # Connection may have already been closed by client
+                pass
 
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
     finally:
