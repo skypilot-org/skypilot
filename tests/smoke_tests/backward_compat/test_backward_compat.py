@@ -711,13 +711,15 @@ class TestBackwardCompatibility:
                 f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
                 f'sky volumes ls | grep "{volume_name}"',
                 # Launch new task with volume
-                f'{self.ACTIVATE_CURRENT} && sky launch -y -c {cluster_name} --infra kubernetes {task_yaml_path}',
+                f'{self.ACTIVATE_CURRENT} && sky launch -y -c {cluster_name} --infra k8s {task_yaml_path}',
                 f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
 
-                # Test volume deletion from current version
+                # Down the cluster first before deleting volume
+                f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y',
+                # Test volume deletion
                 f'{self.ACTIVATE_CURRENT} && sky volumes delete {volume_name} -y',
                 f'{self.ACTIVATE_CURRENT} && (vol=$(sky volumes ls | grep "{volume_name}" || true); if [ -n "$vol" ]; then echo "Volume not deleted" && exit 1; else echo "Volume deleted successfully"; fi)',
             ]
-            teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y && sky volumes delete {volume_name} -y || true'
+            teardown = f'{self.ACTIVATE_CURRENT} && (sky down {cluster_name} -y || true) && (sky volumes delete {volume_name} -y || true)'
             self.run_compatibility_test(f'{volume_name}-compat', commands,
                                         teardown)
