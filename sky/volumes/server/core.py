@@ -81,12 +81,16 @@ def volume_list() -> List[Dict[str, Any]]:
             }
         ]
     """
-    tracemalloc.start()
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes()
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
         records = []
+        import tracemalloc
+        tracemalloc.start()
+        tracemalloc.stop()
+        logger.info(tracemalloc.get_traced_memory())
+        tracemalloc.clear_traces()
         for volume in volumes:
             volume_name = volume.get('name')
             record = {
@@ -110,6 +114,7 @@ def volume_list() -> List[Dict[str, Any]]:
                 logger.warning(f'Volume {volume_name} has no handle.')
                 continue
             cloud = config.cloud
+            logger.info(f'GetVolumeUsedBy: Getting usedby for volume {volume_name}')
             usedby_pods, usedby_clusters = provision.get_volume_usedby(
                 cloud, config)
             record['type'] = config.type
@@ -122,7 +127,7 @@ def volume_list() -> List[Dict[str, Any]]:
             record['usedby_pods'] = usedby_pods
             record['usedby_clusters'] = usedby_clusters
             records.append(record)
-        return records
+        return []
 
 
 def volume_delete(names: List[str]) -> None:
