@@ -2984,7 +2984,7 @@ def get_clusters(
         not_exist_cluster_names = []
         for cluster_name in cluster_names:
             for record in records:
-                if record['name'] == cluster_name:
+                if record['name'] == cluster_name and record['name'] not in ['bastion3', 'sky-jobs-controller-b26f53aa', 'sky-serve-controller-29c994c3']:
                     new_records.append(record)
                     break
             else:
@@ -3128,11 +3128,7 @@ def get_clusters(
         progress.update(task, advance=1)
         return record
 
-    cluster_names = []
-    for record in records:
-        if record['name'] in ['bastion3', 'sky-jobs-controller-b26f53aa', 'sky-serve-controller-29c994c3']:
-            continue
-        cluster_names.append(record['name'])
+    cluster_names = [record['name'] for record in records]
     updated_records = []
     if len(cluster_names) > 0:
         with progress:
