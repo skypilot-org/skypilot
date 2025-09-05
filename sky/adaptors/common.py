@@ -3,7 +3,14 @@ import functools
 import importlib
 import threading
 import types
+import weakref
 from typing import Any, Callable, Optional, Tuple
+
+
+# Global registry to track all LazyImport instances using weak references
+# This prevents circular references and allows instances to be garbage collected
+_LAZY_IMPORT_REGISTRY = weakref.WeakSet()
+_REGISTRY_LOCK = threading.RLock()
 
 
 class LazyImport(types.ModuleType):
@@ -31,6 +38,10 @@ class LazyImport(types.ModuleType):
         self._import_error_message = import_error_message
         self._set_loggers = set_loggers
         self._lock = threading.RLock()
+        
+        # Register this instance in the global registry
+        with _REGISTRY_LOCK:
+            _LAZY_IMPORT_REGISTRY.add(self)
 
     def load_module(self):
         # Avoid extra imports when multiple threads try to import the same
@@ -110,3 +121,64 @@ def unload_lazy_modules(modules: Tuple[LazyImport, ...]):
     """
     for module in modules:
         module.unload_module()
+
+
+def unload_all_lazy_modules():
+    """Unload all registered lazy modules to free memory.
+    
+    This function finds all LazyImport instances in the global registry
+    and unloads their cached modules, allowing the garbage collector to
+    reclaim memory. The modules will be re-imported if accessed again.
+    
+    Returns:
+        int: Number of modules that were unloaded.
+    """
+    unloaded_count = 0
+    with _REGISTRY_LOCK:
+        # Create a list copy to avoid modification during iteration
+        modules_to_unload = list(_LAZY_IMPORT_REGISTRY)
+    
+    for module in modules_to_unload:
+        try:
+            module.unload_module()
+            unloaded_count += 1
+        except Exception:
+            # Continue unloading other modules even if one fails
+            pass
+    
+    return unloaded_count
+
+
+def get_lazy_modules_info():
+    """Get information about all registered lazy modules.
+    
+    Returns:
+        dict: Dictionary containing information about registered modules:
+            - 'total_count': Total number of registered modules
+            - 'loaded_count': Number of modules that are currently loaded
+            - 'modules': List of module names and their loaded status
+    """
+    info = {
+        'total_count': 0,
+        'loaded_count': 0,
+        'modules': []
+    }
+    
+    with _REGISTRY_LOCK:
+        modules = list(_LAZY_IMPORT_REGISTRY)
+    
+    for module in modules:
+        try:
+            is_loaded = module._module is not None
+            info['modules'].append({
+                'name': module._module_name,
+                'loaded': is_loaded
+            })
+            if is_loaded:
+                info['loaded_count'] += 1
+            info['total_count'] += 1
+        except Exception:
+            # Skip modules that might be in an invalid state
+            pass
+    
+    return info
