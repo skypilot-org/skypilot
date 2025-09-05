@@ -20,6 +20,7 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Oct 13, 2024:
    Support more OS types additional to ubuntu for OCI resources.
 """
+from importlib import util as importlib_util
 import logging
 import os
 import typing
@@ -454,13 +455,22 @@ class OCI(clouds.Cloud):
             f'{cls._INDENT_PREFIX}  region=us-sanjose-1\n'
             f'{cls._INDENT_PREFIX}  key_file=~/.oci/oci_api_key.pem')
 
+        dependency_error_msg = (
+            '`oci` is not installed. Install it with: '
+            'pip install oci\n'
+            f'{cls._INDENT_PREFIX}{short_credential_help_str}')
         try:
             # pylint: disable=import-outside-toplevel,unused-import
-            import oci
-        except ImportError:
-            return False, ('`oci` is not installed. Install it with: '
-                           'pip install oci\n'
-                           f'{cls._INDENT_PREFIX}{short_credential_help_str}')
+            oci_spec = importlib_util.find_spec('oci')
+            if oci_spec is None:
+                return False, dependency_error_msg
+        except ValueError:
+            # docstring of importlib_util.find_spec:
+            # First, sys.modules is checked to see if the module was alread
+            # imported.
+            # If so, then sys.modules[name].__spec__ is returned.
+            # If that happens to be set to None, then ValueError is raised.
+            return False, dependency_error_msg
 
         conf_file = oci_adaptor.get_config_file()
 
