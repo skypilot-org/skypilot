@@ -38,6 +38,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -402,6 +403,7 @@ def _request_execution_wrapper(request_id: str,
                                          group='request_execution'):
                     return_value = func(**request_body.to_kwargs())
                 f.flush()
+                adaptors_common.unload_all_lazy_modules()
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
             # Kill all children processes related to this request.

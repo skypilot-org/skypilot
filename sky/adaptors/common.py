@@ -1,6 +1,7 @@
 """Lazy import for modules to avoid import error when not used."""
 import functools
 import importlib
+import sys
 import threading
 import types
 import weakref
@@ -68,14 +69,11 @@ class LazyImport(types.ModuleType):
         re-imported if accessed again.
         """
         with self._lock:
-            self._module = None
-            # Clear any cached submodules
-            attrs_to_remove = []
-            for attr_name, attr_value in self.__dict__.items():
+            for _, attr_value in self.__dict__.items():
                 if isinstance(attr_value, LazyImport):
-                    attrs_to_remove.append(attr_name)
-            for attr_name in attrs_to_remove:
-                delattr(self, attr_name)
+                    attr_value.unload_module()
+            self._module = None
+            del sys.modules[self._module_name]
 
     def __getattr__(self, name: str) -> Any:
         # Attempt to access the attribute, if it fails, assume it's a submodule
