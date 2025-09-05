@@ -187,6 +187,9 @@
                         },
                         "session-store-type": {
                             "type": "string"
+                        },
+                        "use-https": {
+                            "type": "boolean"
                         }
                     }
                 },
