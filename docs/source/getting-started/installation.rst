@@ -28,6 +28,7 @@ Install SkyPilot using pip:
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
           pip install "skypilot[oci]"
+          pip install "skypilot[nebius]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
           pip install "skypilot[fluidstack]"
