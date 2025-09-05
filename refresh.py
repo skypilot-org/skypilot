@@ -45,6 +45,6 @@ for i in range(count):
     print(rss())
     mem_usage = parse_smaps()
     for k, v in sorted(mem_usage.items(), key=lambda x: -x[1]):
-        if v < 1024:
+        if v < 1024 * 1024:
             break
         print(f"{k:40} {v/1024/1024:.2f} MB")
