@@ -6,6 +6,7 @@ import tempfile
 import textwrap
 from typing import Sequence
 
+import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
 
@@ -682,3 +683,43 @@ class TestBackwardCompatibility:
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} down --cluster-name {cluster_name}'
         self.run_compatibility_test(cluster_name, commands, teardown)
+
+    @pytest.mark.kubernetes
+    def test_volume_compatibility(self):
+        """Test volume operations across versions"""
+        volume_name = f'vol-{smoke_tests_utils.get_cluster_name()}'
+        cluster_name = smoke_tests_utils.get_cluster_name()
+
+        template_str = pathlib.Path(
+            'tests/test_yamls/test_volume.yaml.j2').read_text()
+        template = jinja2.Template(template_str)
+        content = template.render(volume_name=volume_name)
+
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                         delete=False) as f:
+            f.write(content)
+            f.flush()
+            task_yaml_path = f.name
+
+            commands = [
+                # Create volume in base version
+                f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+                f'sky volumes apply -y -n {volume_name} --infra k8s --type k8s-pvc --size 1Gi',
+                f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{volume_name}"',
+
+                # Use volume in current version
+                f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+                f'sky volumes ls | grep "{volume_name}"',
+                # Launch new task with volume
+                f'{self.ACTIVATE_CURRENT} && sky launch -y -c {cluster_name} --infra k8s {task_yaml_path}',
+                f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
+
+                # Down the cluster first before deleting volume
+                f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y',
+                # Test volume deletion
+                f'{self.ACTIVATE_CURRENT} && sky volumes delete {volume_name} -y',
+                f'{self.ACTIVATE_CURRENT} && (vol=$(sky volumes ls | grep "{volume_name}" || true); if [ -n "$vol" ]; then echo "Volume not deleted" && exit 1; else echo "Volume deleted successfully"; fi)',
+            ]
+            teardown = f'{self.ACTIVATE_CURRENT} && (sky down {cluster_name} -y || true) && (sky volumes delete {volume_name} -y || true)'
+            self.run_compatibility_test(f'{volume_name}-compat', commands,
+                                        teardown)
