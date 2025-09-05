@@ -139,7 +139,7 @@ def unload_all_lazy_modules():
         try:
             module.unload_module()
             unloaded_count += 1
-        except Exception:
+        except (ImportError, KeyError, AttributeError):
             # Continue unloading other modules even if one fails
             pass
 
@@ -162,15 +162,17 @@ def get_lazy_modules_info():
 
     for module in modules:
         try:
-            is_loaded = module._module is not None
+            is_loaded = (hasattr(module, '_module') and
+                         getattr(module, '_module', None) is not None)
+            module_name = getattr(module, '_module_name', '<unknown>')
             info['modules'].append({
-                'name': module._module_name,
+                'name': module_name,
                 'loaded': is_loaded
             })
             if is_loaded:
                 info['loaded_count'] += 1
             info['total_count'] += 1
-        except Exception:
+        except (AttributeError, TypeError):
             # Skip modules that might be in an invalid state
             pass
 
