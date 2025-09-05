@@ -1,11 +1,11 @@
 """Azure."""
+from importlib import util as importlib_util
 import os
 import re
 import subprocess
 import textwrap
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
-from importlib import util as importlib_util
 
 import colorama
 from packaging import version as pversion
@@ -552,8 +552,7 @@ class Azure(clouds.Cloud):
             'Azure dependencies are not installed. '
             'Run the following commands:'
             f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
-            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
-        )
+            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set.')
         # Check if the azure blob storage dependencies are installed.
         try:
             # pylint: disable=redefined-outer-name, import-outside-toplevel, unused-import
@@ -563,7 +562,7 @@ class Azure(clouds.Cloud):
             msgraph_spec = importlib_util.find_spec('msgraph')
             if msgraph_spec is None:
                 return False, dependency_installation_hints
-        except ValueError as e:
+        except ValueError:
             # docstring of importlib_util.find_spec:
             # First, sys.modules is checked to see if the module was alread
             # imported.

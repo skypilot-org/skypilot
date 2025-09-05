@@ -1,4 +1,5 @@
 """Cudo Compute"""
+from importlib import util as importlib_util
 import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
@@ -289,8 +290,16 @@ class Cudo(clouds.Cloud):
         Cudo's compute service."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
-            from cudo_compute import cudo_api
-        except (ImportError, subprocess.CalledProcessError) as e:
+            cudo_api_spec = importlib_util.find_spec('cudo_api')
+            if cudo_api_spec is None:
+                return False, (f'{cls._DEPENDENCY_HINT}\n'
+                               f'{cls._INDENT_PREFIX}')
+        except ValueError as e:
+            # docstring of importlib_util.find_spec:
+            # First, sys.modules is checked to see if the module was alread
+            # imported.
+            # If so, then sys.modules[name].__spec__ is returned.
+            # If that happens to be set to None, then ValueError is raised.
             return False, (
                 f'{cls._DEPENDENCY_HINT}\n'
                 f'{cls._INDENT_PREFIX}'
