@@ -2984,7 +2984,7 @@ def get_clusters(
         not_exist_cluster_names = []
         for cluster_name in cluster_names:
             for record in records:
-                if record['name'] == cluster_name and record['name'] not in ['bastion3', 'sky-jobs-controller-b26f53aa', 'sky-serve-controller-29c994c3']:
+                if record['name'] == cluster_name:
                     new_records.append(record)
                     break
             else:
@@ -2993,6 +2993,12 @@ def get_clusters(
             clusters_str = ', '.join(not_exist_cluster_names)
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
+    
+    nn_records = []
+    for record in records:
+        if record['name'] not in ['bastion3', 'sky-jobs-controller-b26f53aa', 'sky-serve-controller-29c994c3']:
+            nn_records.append(record)
+    records = nn_records
 
     def _get_records_with_handle(
             records: List[Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
