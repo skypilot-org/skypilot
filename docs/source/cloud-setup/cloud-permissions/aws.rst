@@ -59,7 +59,7 @@ Using AWS Systems Manager (SSM)
 
 `AWS Systems Manager Session Manager <https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html>`_ provides secure shell access to EC2 instances without requiring direct network access through SSH ports or bastion hosts.
 
-SkyPilot can be configured to use SSM for SSH connections by setting the ``ssh_proxy_command`` in your :ref:`config.yaml <config-yaml>` file.
+SkyPilot can be configured to use SSM for SSH connections by setting ``use_ssm`` to true in your :ref:`config.yaml <config-yaml>` file under the ``aws`` section.
 
 Prerequisites
 ~~~~~~~~~~~~~
@@ -92,14 +92,10 @@ Add the following to your ``~/.sky/config.yaml`` file:
 .. code-block:: yaml
 
     aws:
-      ssh_proxy_command:
-        us-east-1: aws ssm start-session --target "$(aws ec2 describe-instances --filter Name=ip-address,Values=%h --region us-east-1 --profile sky | jq -r '.Reservations[].Instances[]|.InstanceId')" --region us-east-1 --profile sky --document-name AWS-StartSSHSession --parameters portNumber=%p
-        us-east-2: aws ssm start-session --target "$(aws ec2 describe-instances --filter Name=ip-address,Values=%h --region us-east-2 --profile sky | jq -r '.Reservations[].Instances[]|.InstanceId')" --region us-east-2 --profile sky --document-name AWS-StartSSHSession --parameters portNumber=%p
+        use_ssm: true
 
 .. note::
 
-    - Replace ``sky`` with your actual AWS profile name if different.
-    - Add additional regions as needed following the same pattern.
     - The ``jq`` command-line JSON processor must be installed on your system.
 
 Once configured, SkyPilot will automatically use SSM for all SSH connections to your AWS instances in the specified regions.
