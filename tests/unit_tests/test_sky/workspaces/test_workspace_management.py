@@ -44,7 +44,7 @@ class TestWorkspaceManagement(unittest.TestCase):
 
     @mock.patch('sky.skypilot_config.get_user_config_path')
     @mock.patch('sky.skypilot_config.to_dict')
-    @mock.patch('sky.utils.common_utils.dump_yaml')
+    @mock.patch('sky.utils.yaml_utils.dump_yaml')
     @mock.patch('sky.skypilot_config.reload_config')
     def test_internal_update_workspaces_config(self, mock_reload_config,
                                                mock_dump_yaml, mock_to_dict,

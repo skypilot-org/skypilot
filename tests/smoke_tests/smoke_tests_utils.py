@@ -18,6 +18,7 @@ import requests
 from smoke_tests.docker import docker_utils
 
 import sky
+from sky import clouds
 from sky import serve
 from sky import skypilot_config
 from sky.client import sdk
@@ -32,7 +33,9 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
+from sky.utils import registry
 from sky.utils import subprocess_utils
+from sky.utils import yaml_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_managed_jobs_recovery to make sure the
@@ -393,7 +396,13 @@ def override_sky_config(
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
     echo = Test.echo_without_prefix if test is None else test.echo
     env_before_override: Optional[Dict[str, Any]] = None
-    override_sky_config_dict = skypilot_config.config_utils.Config()
+    config_file_override = pytest_config_file_override()
+    if config_file_override:
+        override_sky_config_dict = (
+            skypilot_config.parse_and_validate_config_file(config_file_override)
+        )
+    else:
+        override_sky_config_dict = (skypilot_config.config_utils.Config())
 
     if env_dict is None:
         env_dict = os.environ
@@ -403,7 +412,7 @@ def override_sky_config(
         override_sky_config_dict.update(config_dict)
 
     if is_remote_server_test():
-        endpoint = docker_utils.get_api_server_endpoint_inside_docker()
+        endpoint = get_api_server_url()
         override_sky_config_dict.set_nested(('api_server', 'endpoint'),
                                             endpoint)
         # For test that use SDK, not subprocess, the python process already
@@ -418,6 +427,18 @@ def override_sky_config(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
         )
+        if services_account_token_configured_in_env_file():
+            config_file = pytest_config_file_override()
+            config = skypilot_config.parse_and_validate_config_file(config_file)
+            service_account_token = config.get_nested(
+                ('api_server', 'service_account_token'), 'UNKNOWN')
+            override_sky_config_dict.set_nested(
+                ('api_server', 'service_account_token'), service_account_token)
+            env_dict[
+                constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR] = service_account_token
+            echo(
+                f'Overriding service account token {service_account_token[:4]}...'
+            )
     if pytest_controller_cloud():
         cloud = pytest_controller_cloud()
         override_sky_config_dict.set_nested(
@@ -444,7 +465,7 @@ def override_sky_config(
         original_config = skypilot_config.config_utils.Config()
     overlay_config = skypilot_config.overlay_skypilot_config(
         original_config, override_sky_config_dict)
-    temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
+    temp_config_file.write(yaml_utils.dump_yaml_str(dict(overlay_config)))
     temp_config_file.flush()
     # Update the environment variable to use the temporary file
     env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG] = temp_config_file.name
@@ -648,6 +669,12 @@ _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 # without cloud credentials or cloud dependencies locally. To do this, we run
 # the cloud commands required in tests on a separate remote cluster with the
 # cloud credentials and dependencies setup.
+#
+# Set `skip_remote_server_check=True` to opt-in to using the remote helper
+# cluster regardless of whether the API server is local or remote. This is
+# useful for running cloud commands while the cluster being tested is
+# stopped and you need to run cloud commands.
+#
 # Example usage:
 # Test(
 #     'mytest',
@@ -660,10 +687,13 @@ _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 #     ],
 #     f'sky down -y mytest-cluster && {down_cluster_for_cloud_cmd('mytest-cluster')}',
 # )
-def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
+def launch_cluster_for_cloud_cmd(cloud: str,
+                                 test_cluster_name: str,
+                                 skip_remote_server_check: bool = False) -> str:
     """Launch the cluster for cloud commands asynchronously."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local() and not is_remote_server_test():
+    if not skip_remote_server_check and sky.server.common.is_api_server_local(
+    ) and not is_remote_server_test():
         # We need is_remote_server_test() because we override the SKY_API_SERVER_URL_ENV_VAR
         # in the middle of the test, which is after the test is launched, so the
         # is_api_server_local() already cached and returned True but we're actually
@@ -678,10 +708,12 @@ def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
 def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              cmd: str,
                              envs: Set[str] = None,
-                             timeout: int = 180) -> str:
+                             timeout: int = 180,
+                             skip_remote_server_check: bool = False) -> str:
     """Run the cloud command on the remote cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local() and not is_remote_server_test():
+    if not skip_remote_server_check and sky.server.common.is_api_server_local(
+    ) and not is_remote_server_test():
         return cmd
     else:
         cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cmd}'
@@ -698,10 +730,12 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
                 f'sky logs {cluster_name} --status')
 
 
-def down_cluster_for_cloud_cmd(test_cluster_name: str) -> str:
+def down_cluster_for_cloud_cmd(test_cluster_name: str,
+                               skip_remote_server_check: bool = False) -> str:
     """Down the cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local() and not is_remote_server_test():
+    if not skip_remote_server_check and sky.server.common.is_api_server_local(
+    ) and not is_remote_server_test():
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
@@ -745,7 +779,9 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
 
 
 def is_remote_server_test() -> bool:
-    return 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ
+    return os.environ.get(
+        'PYTEST_SKYPILOT_REMOTE_SERVER_TEST',
+        None) is not None or api_server_endpoint_configured_in_env_file()
 
 
 def pytest_controller_cloud() -> Optional[str]:
@@ -760,7 +796,30 @@ def is_grpc_enabled_test() -> bool:
     return os.environ.get('PYTEST_SKYPILOT_GRPC_ENABLED', None) is not None
 
 
-def override_env_config(config: Dict[str, str]):
+def pytest_config_file_override() -> Optional[str]:
+    return os.environ.get('PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE', None)
+
+
+def api_server_endpoint_configured_in_env_file() -> bool:
+    file_path = pytest_config_file_override()
+    if file_path is not None:
+        with open(file_path, 'r') as f:
+            content = f.read()
+            return 'endpoint' in content
+    return False
+
+
+def services_account_token_configured_in_env_file() -> bool:
+    file_path = pytest_config_file_override()
+    if file_path is not None:
+        with open(file_path, 'r') as f:
+            content = f.read()
+            print(content, file=sys.stderr, flush=True)
+            return 'service_account_token' in content
+    return False
+
+
+def pytest_override_env_config_file(config: Dict[str, str]):
     """Override the environment variable for the test."""
     for key, value in config.items():
         os.environ[key] = value
@@ -769,25 +828,40 @@ def override_env_config(config: Dict[str, str]):
 def get_api_server_url() -> str:
     """Get the API server URL in the test environment."""
     if is_remote_server_test():
-        return docker_utils.get_api_server_endpoint_inside_docker()
+        if api_server_endpoint_configured_in_env_file():
+            config_file = pytest_config_file_override()
+            config = skypilot_config.parse_and_validate_config_file(config_file)
+            return config.get_nested(('api_server', 'endpoint'), 'UNKNOWN')
+        else:
+            return docker_utils.get_api_server_endpoint_inside_docker()
     return server_common.get_server_url()
+
+
+def is_non_docker_remote_api_server() -> bool:
+    if is_remote_server_test():
+        return 'host.docker.internal' not in get_api_server_url()
+    return False
 
 
 def get_dashboard_cluster_status_request_id() -> str:
     """Get the status of the cluster from the dashboard."""
     body = payloads.StatusBody(all_users=True,)
-    response = requests.post(
-        f'{get_api_server_url()}/internal/dashboard/status',
-        json=json.loads(body.model_dump_json()))
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/internal/dashboard/status',
+        json=json.loads(body.model_dump_json()),
+        server_url=get_api_server_url())
     return server_common.get_request_id(response)
 
 
 def get_dashboard_jobs_queue_request_id() -> str:
     """Get the jobs queue from the dashboard."""
     body = payloads.JobsQueueBody(all_users=True,)
-    response = requests.post(
-        f'{get_api_server_url()}/internal/dashboard/jobs/queue',
-        json=json.loads(body.model_dump_json()))
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/internal/dashboard/jobs/queue',
+        json=json.loads(body.model_dump_json()),
+        server_url=get_api_server_url())
     return server_common.get_request_id(response)
 
 
@@ -806,8 +880,10 @@ def get_response_from_request_id(request_id: str) -> Any:
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
-    response = requests.get(
-        f'{get_api_server_url()}/internal/dashboard/api/get?request_id={request_id}',
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/internal/dashboard/api/get?request_id={request_id}',
+        server_url=get_api_server_url(),
         timeout=15)
     request_task = None
     if response.status_code == 200:
@@ -830,11 +906,13 @@ def _get_controller_pod_name(controller_name: str) -> str:
         f'awk \'$2 ~ /sky-{controller_name}-controller/ {{print $1; exit}}\'')
 
 
-def kill_and_wait_controller(controller_name: str) -> str:
+def kill_and_wait_controller(test_cluster_name: str,
+                             controller_name: str) -> str:
     """Kill the controller pod and wait for a new one to be ready."""
     assert controller_name in ['serve', 'jobs'
                               ], (f'Invalid controller name: {controller_name}')
-    return (
+    return run_cloud_cmd_on_cluster(
+        test_cluster_name,
         f'initial_controller_pod=$({_get_controller_pod_name(controller_name)}); '
         f'echo "Killing {controller_name} controller pod: $initial_controller_pod"; '
         'kubectl delete pod $initial_controller_pod; '
@@ -862,7 +940,8 @@ def server_side_is_consolidation_mode() -> bool:
         # even if they are specified.
         # (TODO: zeping) support this in the future.
         return False
-    response = requests.get(f'{get_api_server_url()}/workspaces/config')
+    response = server_common.make_authenticated_request(
+        'GET', '/workspaces/config', server_url=get_api_server_url())
     request_id = server_common.get_request_id(response)
     config = config_utils.Config.from_dict(sdk.get(request_id))
     config = skypilot_config.overlay_skypilot_config(
@@ -874,3 +953,51 @@ def server_side_is_consolidation_mode() -> bool:
 def is_in_buildkite_env() -> bool:
     """Check if the test is running in the Buildkite environment."""
     return env_options.Options.RUNNING_IN_BUILDKITE.get()
+
+
+def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
+    """Get the available GPUs for K8s."""
+    if is_remote_server_test():
+        prefix = ''
+        env_file = pytest_config_file_override()
+        if env_file is not None:
+            prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
+        command = f'{prefix} sky show-gpus --infra kubernetes | grep -A1 "^GPU" | tail -1 | awk "{{print \$1}}"'
+        Test.echo_without_prefix(command)
+        result = subprocess_utils.run(command,
+                                      shell=True,
+                                      check=True,
+                                      capture_output=True,
+                                      text=True)
+        gpu_name = result.stdout.strip()
+        return gpu_name
+    return default_gpu
+
+
+def get_enabled_cloud_storages() -> List[clouds.Cloud]:
+    """Get the enabled cloud storages."""
+    if is_remote_server_test():
+        prefix = ''
+        env_file = pytest_config_file_override()
+        if env_file is not None:
+            prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
+        command = f'{prefix} sky check | grep enabled | grep storage | awk "{{print \\$2}}"'
+        Test.echo_without_prefix(command)
+        result = subprocess_utils.run(command,
+                                      shell=True,
+                                      check=True,
+                                      capture_output=True,
+                                      text=True)
+        cloud_names = result.stdout.strip().split('\n')
+        enabled_clouds = []
+        for cloud_name in cloud_names:
+            if cloud_name:
+                cloud_name = cloud_name.rstrip(':')
+                try:
+                    cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
+                    if cloud_obj is not None:
+                        enabled_clouds.append(cloud_obj)
+                except ValueError:
+                    pass
+        return enabled_clouds
+    return [clouds.AWS()]

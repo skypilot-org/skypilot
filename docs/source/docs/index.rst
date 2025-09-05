@@ -34,6 +34,11 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 .. image:: ../images/skypilot-abstractions-long-2.png
     :width: 90%
     :align: center
+    :class: only-light
+.. image:: ../images/skypilot-abstractions-long-2-dark.png
+    :width: 90%
+    :align: center
+    :class: only-dark
 
 .. grid:: 1 1 1 1
     :gutter: 3
@@ -204,9 +209,9 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
-RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
-VMware vSphere, Nebius.
+Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Nebius, Lambda Cloud, RunPod, Fluidstack,
+Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
+VMware vSphere.
 
 .. raw:: html
 
@@ -365,6 +370,6 @@ Read the research:
    CLI <../reference/cli>
    ../reference/api
    ../reference/config
-   SkyPilot State <../reference/architecture/state>
+   SkyPilot Internals <../reference/architecture/internals>
    ../developers/index
 

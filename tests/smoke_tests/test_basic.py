@@ -36,6 +36,7 @@ from sky import skypilot_config
 from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import common_utils
+from sky.utils import yaml_utils
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
@@ -282,7 +283,7 @@ def test_aws_stale_job_manual_restart():
         'aws_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            f'sky launch -y -c {name} --infra aws/us-east-2 {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -309,6 +310,60 @@ def test_aws_stale_job_manual_restart():
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_vast
+@pytest.mark.aws
+def test_aws_manual_restart_recovery():
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.AWS.max_cluster_name_length())
+    region = 'us-east-2'
+    test = smoke_tests_utils.Test(
+        'test_aws_manual_restart_recovery',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                'aws', name, skip_remote_server_check=True),
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky autostop {name} -y -i 1',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=180),
+            # Restart the cluster manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=(
+                    f'id=`aws ec2 describe-instances --region {region} --filters '
+                    f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+                    f'--query Reservations[].Instances[].InstanceId '
+                    f'--output text` && '
+                    # Wait for the instance to be stopped before restarting.
+                    f'aws ec2 wait instance-stopped --region {region} '
+                    f'--instance-ids $id && '
+                    # Start the instance.
+                    f'aws ec2 start-instances --region {region} '
+                    f'--instance-ids $id && '
+                    # Wait for the instance to be running.
+                    f'aws ec2 wait instance-running --region {region} '
+                    f'--instance-ids $id'),
+                skip_remote_server_check=True),
+            # Status refresh should time out, as the restarted
+            # instance would get a new IP address.
+            # We should see a warning message on how to recover
+            # from this state.
+            f'sky status -r {name} | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            # Recover the cluster.
+            f'sky start -y {name}',
+            # Wait for the cluster to be up.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=300),
+        ],
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -571,7 +626,7 @@ class TestYamlSpecs:
 
     def _check_equivalent(self, yaml_path):
         """Check if the yaml is equivalent after load and dump again."""
-        origin_task_config = common_utils.read_yaml(yaml_path)
+        origin_task_config = yaml_utils.read_yaml(yaml_path)
 
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()
@@ -692,10 +747,14 @@ def unreachable_context():
     to it. So this must be session scoped that the kubeconfig is modified before
     the local API server starts.
     """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        yield
+        return
     # Get kubeconfig path from environment variable or use default
     kubeconfig_path = os.environ.get('KUBECONFIG',
                                      os.path.expanduser('~/.kube/config'))
     if not os.path.exists(kubeconfig_path):
+        yield
         return
     import shutil
 
@@ -750,6 +809,11 @@ def test_kubernetes_context_failover(unreachable_context):
       # Set the namespace to test-namespace
       kubectl config set-context kind-skypilot --namespace=test-namespace --context kind-skypilot
     """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip('Skipping test because the Kubernetes configs and '
+                    'credentials are located on the remote API server '
+                    'and not the machine where the test is running')
+
     # Get context that is not kind-skypilot
     contexts = subprocess.check_output('kubectl config get-contexts -o name',
                                        shell=True).decode('utf-8').split('\n')
@@ -1201,8 +1265,8 @@ def test_cli_output(generic_cloud: str):
 @pytest.mark.aws
 def test_sky_down_with_multiple_sgs():
     """Test that sky down works with multiple security groups.
-    
-    The goal is to ensure that when we run sky down we get the typical 
+
+    The goal is to ensure that when we run sky down we get the typical
     terminating output with no extra output. If the output changes please
     update the test.
     """

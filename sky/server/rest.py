@@ -34,9 +34,26 @@ F = TypeVar('F', bound=Callable[..., Any])
 _RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
 
 _session = requests.Session()
+# Tune connection pool size, otherwise the default max is just 10.
+adapter = requests.adapters.HTTPAdapter(
+    pool_connections=50,
+    pool_maxsize=200,
+    # We handle retries by ourselves in SDK.
+    max_retries=0,
+)
+_session.mount('http://', adapter)
+_session.mount('https://', adapter)
+
 _session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
 _session.headers[constants.VERSION_HEADER] = (
     versions.get_local_readable_version())
+
+# Enumerate error types that might be transient and can be addressed by
+# retrying.
+_transient_errors = [
+    requests.exceptions.RequestException,
+    ConnectionError,
+]
 
 
 class RetryContext:
@@ -77,14 +94,10 @@ def retry_transient_errors(max_retries: int = 3,
         if isinstance(e, requests.exceptions.HTTPError):
             # Only server error is considered as transient.
             return e.response.status_code >= 500
-        if isinstance(e, exceptions.ClientError):
-            return False
-        # It is hard to enumerate all other errors that are transient, e.g.
-        # broken pipe, connection refused, etc. Instead, it is safer to assume
-        # all other errors might be transient since we only retry for 3 times
-        # by default. For permanent errors that we do not know now, we can
-        # exclude them here in the future.
-        return True
+        for error in _transient_errors:
+            if isinstance(e, error):
+                return True
+        return False
 
     def decorator(func: F) -> F:
 
