@@ -83,7 +83,7 @@ def volume_list() -> List[Dict[str, Any]]:
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes()
-        cloud_to_configs = {}
+        cloud_to_configs: Dict[str, List[models.VolumeConfig]] = {}
         for volume in volumes:
             config = volume.get('handle')
             if config is None:
@@ -97,7 +97,8 @@ def volume_list() -> List[Dict[str, Any]]:
 
         cloud_to_used_by_pods, cloud_to_used_by_clusters = {}, {}
         for cloud, configs in cloud_to_configs.items():
-            used_by_pods, used_by_clusters = provision.get_all_volumes_usedby(cloud, configs)
+            used_by_pods, used_by_clusters = provision.get_all_volumes_usedby(
+                cloud, configs)
             cloud_to_used_by_pods[cloud] = used_by_pods
             cloud_to_used_by_clusters[cloud] = used_by_clusters
 
@@ -127,9 +128,12 @@ def volume_list() -> List[Dict[str, Any]]:
                 logger.warning(f'Volume {volume_name} has no handle.')
                 continue
             cloud = config.cloud
-            # usedby_pods, usedby_clusters = provision.get_volume_usedby(
-            #     cloud, config)
-            usedby_pods, usedby_clusters = provision.map_all_volumes_usedby(cloud, cloud_to_used_by_pods[cloud], cloud_to_used_by_clusters[cloud], config)
+            usedby_pods, usedby_clusters = provision.map_all_volumes_usedby(
+                cloud,
+                cloud_to_used_by_pods[cloud],
+                cloud_to_used_by_clusters[cloud],
+                config,
+            )
             record['type'] = config.type
             record['cloud'] = config.cloud
             record['region'] = config.region

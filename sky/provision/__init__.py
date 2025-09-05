@@ -140,12 +140,12 @@ def get_volume_usedby(
 
 @_route_to_cloud_impl
 def get_all_volumes_usedby(
-    provider_name: str,
-    configs: List[models.VolumeConfig]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    provider_name: str, configs: List[models.VolumeConfig]
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Get the usedby of a volume.
 
     Returns:
-        usedby_pods: List of dictionaries, each containing the config keys for 
+        usedby_pods: List of dictionaries, each containing the config keys for
                      a volume and a key containing pods using the volume.
                      These may include pods not created by SkyPilot.
         usedby_clusters: List of dictionaries, each containing the config keys
@@ -154,12 +154,12 @@ def get_all_volumes_usedby(
     """
     raise NotImplementedError
 
+
 @_route_to_cloud_impl
 def map_all_volumes_usedby(
-    provider_name: str,
-    used_by_pods: Dict[str, Any],
-    used_by_clusters: Dict[str, Any],
-    config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
+        provider_name: str, used_by_pods: Dict[str, Any],
+        used_by_clusters: Dict[str, Any],
+        config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
     """Map the usedby resources of a volume."""
     raise NotImplementedError
 

@@ -1,5 +1,5 @@
 """Kubernetes pvc provisioning."""
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import global_user_state
 from sky import models
@@ -159,24 +159,27 @@ def get_volume_usedby(
     pvc_name = config.name_on_cloud
     return _get_volume_usedby(context, namespace, pvc_name)
 
+
 def get_all_volumes_usedby(
-    configs: List[models.VolumeConfig],) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    configs: List[models.VolumeConfig],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Gets the usedby resources of all volumes."""
     field_selector = ','.join([
         f'status.phase!={phase}'
         for phase in k8s_constants.PVC_NOT_HOLD_POD_PHASES
     ])
-    context_to_namespaces = {}
+    context_to_namespaces: Dict[str, Set[str]] = {}
     pvc_names = set()
     for config in configs:
         context, namespace = _get_context_namespace(config)
         if context not in context_to_namespaces:
-            context_to_namespaces[context] = []
-        context_to_namespaces[context].append(namespace)
+            context_to_namespaces[context] = set()
+        context_to_namespaces[context].add(namespace)
         pvc_names.add(config.name_on_cloud)
     cloud_to_name_map = _get_cluster_name_on_cloud_to_cluster_name_map()
     # Get all pods in the namespace
-    used_by_pods, used_by_clusters = {}, {}
+    used_by_pods: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
+    used_by_clusters: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
     contexts = kubernetes_utils.get_all_kube_context_names()
     for context in contexts:
         used_by_pods[context] = {}
@@ -197,7 +200,8 @@ def get_all_volumes_usedby(
                         continue
                     if volume_name not in used_by_pods[context][namespace]:
                         used_by_pods[context][namespace][volume_name] = []
-                    used_by_pods[context][namespace][volume_name].append(pod.metadata.name)
+                    used_by_pods[context][namespace][volume_name].append(
+                        pod.metadata.name)
                     cluster_name_on_cloud = pod.metadata.labels.get(
                         k8s_constants.TAG_SKYPILOT_CLUSTER_NAME)
                     if cluster_name_on_cloud is None:
@@ -207,18 +211,21 @@ def get_all_volumes_usedby(
                         continue
                     if cluster_name not in used_by_clusters[context][namespace]:
                         used_by_clusters[context][namespace][cluster_name] = []
-                    used_by_clusters[context][namespace][cluster_name].append(cluster_name)
+                    used_by_clusters[context][namespace][cluster_name].append(
+                        cluster_name)
     return used_by_pods, used_by_clusters
 
-def map_all_volumes_usedby(used_by_pods: Dict[str, Any],
-                           used_by_clusters: Dict[str, Any],
-                           config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
+
+def map_all_volumes_usedby(
+        used_by_pods: Dict[str, Any], used_by_clusters: Dict[str, Any],
+        config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
     """Maps the usedby resources of a volume."""
     context, namespace = _get_context_namespace(config)
     pvc_name = config.name_on_cloud
-    
+
     return (used_by_pods.get(context, {}).get(namespace, {}).get(pvc_name, []),
-            used_by_clusters.get(context, {}).get(namespace, {}).get(pvc_name, []))
+            used_by_clusters.get(context, {}).get(namespace,
+                                                  {}).get(pvc_name, []))
 
 
 def create_persistent_volume_claim(namespace: str, context: Optional[str],
