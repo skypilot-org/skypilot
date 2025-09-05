@@ -162,12 +162,10 @@ def get_volume_usedby(
 def get_all_volumes_usedby(
     configs: List[models.VolumeConfig],) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Gets the usedby resources of all volumes."""
-    logger.warning(f'LLOYD: get_all_volumes_usedby configs: {configs}')
     field_selector = ','.join([
         f'status.phase!={phase}'
         for phase in k8s_constants.PVC_NOT_HOLD_POD_PHASES
     ])
-    logger.warning(f'LLOYD: get_all_volumes_usedby configs: {configs}')
     context_to_namespaces = {}
     pvc_names = set()
     for config in configs:
