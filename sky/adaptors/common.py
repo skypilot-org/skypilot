@@ -4,13 +4,12 @@ import importlib
 import sys
 import threading
 import types
-import weakref
 from typing import Any, Callable, Optional, Tuple
-
+import weakref
 
 # Global registry to track all LazyImport instances using weak references
 # This prevents circular references and allows instances to be garbage collected
-_LAZY_IMPORT_REGISTRY = weakref.WeakSet()
+_LAZY_IMPORT_REGISTRY: weakref.WeakSet['LazyImport'] = weakref.WeakSet()
 _REGISTRY_LOCK = threading.RLock()
 
 
@@ -39,7 +38,7 @@ class LazyImport(types.ModuleType):
         self._import_error_message = import_error_message
         self._set_loggers = set_loggers
         self._lock = threading.RLock()
-        
+
         # Register this instance in the global registry
         with _REGISTRY_LOCK:
             _LAZY_IMPORT_REGISTRY.add(self)
@@ -62,10 +61,10 @@ class LazyImport(types.ModuleType):
 
     def unload_module(self):
         """Unload the cached module to free memory.
-        
+
         This method clears the cached module and any dynamically created
         submodules, allowing the garbage collector to reclaim memory.
-        Note that this only clears the cache - the module will be 
+        Note that this only clears the cache - the module will be
         re-imported if accessed again.
         """
         with self._lock:
@@ -109,10 +108,10 @@ def load_lazy_modules(modules: Tuple[LazyImport, ...]):
 
 def unload_lazy_modules(modules: Tuple[LazyImport, ...]):
     """Unload multiple lazy modules to free memory.
-    
+
     Args:
         modules: Tuple of LazyImport instances to unload.
-    
+
     This function clears the cached modules from all provided LazyImport
     instances, allowing the garbage collector to reclaim memory. The modules
     will be re-imported if accessed again.
@@ -123,11 +122,11 @@ def unload_lazy_modules(modules: Tuple[LazyImport, ...]):
 
 def unload_all_lazy_modules():
     """Unload all registered lazy modules to free memory.
-    
+
     This function finds all LazyImport instances in the global registry
     and unloads their cached modules, allowing the garbage collector to
     reclaim memory. The modules will be re-imported if accessed again.
-    
+
     Returns:
         int: Number of modules that were unloaded.
     """
@@ -135,7 +134,7 @@ def unload_all_lazy_modules():
     with _REGISTRY_LOCK:
         # Create a list copy to avoid modification during iteration
         modules_to_unload = list(_LAZY_IMPORT_REGISTRY)
-    
+
     for module in modules_to_unload:
         try:
             module.unload_module()
@@ -143,28 +142,24 @@ def unload_all_lazy_modules():
         except Exception:
             # Continue unloading other modules even if one fails
             pass
-    
+
     return unloaded_count
 
 
 def get_lazy_modules_info():
     """Get information about all registered lazy modules.
-    
+
     Returns:
         dict: Dictionary containing information about registered modules:
             - 'total_count': Total number of registered modules
             - 'loaded_count': Number of modules that are currently loaded
             - 'modules': List of module names and their loaded status
     """
-    info = {
-        'total_count': 0,
-        'loaded_count': 0,
-        'modules': []
-    }
-    
+    info = {'total_count': 0, 'loaded_count': 0, 'modules': []}
+
     with _REGISTRY_LOCK:
         modules = list(_LAZY_IMPORT_REGISTRY)
-    
+
     for module in modules:
         try:
             is_loaded = module._module is not None
@@ -178,5 +173,5 @@ def get_lazy_modules_info():
         except Exception:
             # Skip modules that might be in an invalid state
             pass
-    
+
     return info
