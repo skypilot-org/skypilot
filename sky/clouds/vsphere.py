@@ -1,4 +1,5 @@
 """Vsphere cloud implementation."""
+from importlib import util as importlib_util
 import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
@@ -278,19 +279,23 @@ class Vsphere(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         vSphere's compute service."""
-
+        dependency_error_msg = (
+            'vSphere dependencies are not installed. '
+            'Run the following commands:'
+            f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[vSphere]'
+            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
+            'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
+        )
         try:
             # pylint: disable=import-outside-toplevel,unused-import
             # Check pyVmomi installation.
-            import pyVmomi
+            pyvmomi_spec = importlib_util.find_spec('pyVmomi')
+            if pyvmomi_spec is None:
+                return False, dependency_error_msg
         except (ImportError, subprocess.CalledProcessError) as e:
             return False, (
-                'vSphere dependencies are not installed. '
-                'Run the following commands:'
-                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[vSphere]'
-                f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
-                'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+                dependency_error_msg +
+                f' {common_utils.format_exception(e, use_bracket=True)}')
 
         required_keys = ['name', 'username', 'password', 'clusters']
         skip_key = 'skip_verification'
