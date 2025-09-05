@@ -1,4 +1,6 @@
 """Lazy import for modules to avoid import error when not used."""
+from __future__ import annotations
+
 import functools
 import importlib
 import sys
@@ -9,7 +11,7 @@ import weakref
 
 # Global registry to track all LazyImport instances using weak references
 # This prevents circular references and allows instances to be garbage collected
-_LAZY_IMPORT_REGISTRY: weakref.WeakSet['LazyImport'] = weakref.WeakSet()
+_LAZY_IMPORT_REGISTRY: weakref.WeakSet[LazyImport] = weakref.WeakSet()
 _REGISTRY_LOCK = threading.RLock()
 
 
