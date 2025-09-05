@@ -52,7 +52,7 @@ Prerequisites
     apiGroup: rbac.authorization.k8s.io
 
 .. note::
-    Currently, high availability mode is only supported for Kubernetes. Support for other clouds (e.g., AWS, GCP, Azure VMs) is under development.
+    Currently, high availability mode is only supported for Kubernetes. Support for other clouds (e.g., AWS, GCP, Azure VMs) is under development (see `GitHub PR #7032 <https://github.com/skypilot-org/skypilot/pull/7032>`_).
 
 How to enable high availability mode
 -------------------------------------
