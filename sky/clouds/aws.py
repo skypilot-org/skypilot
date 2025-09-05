@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import time
+from importlib import util as importlib_util
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
@@ -790,9 +791,18 @@ class AWS(clouds.Cloud):
         try:
             # Checks if aws boto is installed properly
             # pylint: disable=import-outside-toplevel, unused-import
-            import boto3
-            import botocore
-        except ImportError:
+            boto3_spec = importlib_util.find_spec('boto3')
+            if boto3_spec is None:
+                return False, dependency_installation_hints
+            botocore_spec = importlib_util.find_spec('botocore')
+            if botocore_spec is None:
+                return False, dependency_installation_hints
+        except ValueError:
+            # docstring of importlib_util.find_spec:
+            # First, sys.modules is checked to see if the module was alread
+            # imported.
+            # If so, then sys.modules[name].__spec__ is returned.
+            # If that happens to be set to None, then ValueError is raised.
             return False, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.
