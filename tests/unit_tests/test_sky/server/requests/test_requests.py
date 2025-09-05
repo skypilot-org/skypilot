@@ -172,7 +172,8 @@ async def test_clean_finished_requests_with_retention_no_old_requests(
 
 
 @pytest.mark.asyncio
-async def test_clean_finished_requests_with_retention_all_statuses(isolated_database):
+async def test_clean_finished_requests_with_retention_all_statuses(
+        isolated_database):
     """Test cleanup works for all finished statuses."""
     current_time = time.time()
     retention_seconds = 60
@@ -211,7 +212,8 @@ async def test_clean_finished_requests_with_retention_all_statuses(isolated_data
 
     with mock.patch.object(pathlib.Path, 'unlink'):
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
-            await requests.clean_finished_requests_with_retention(retention_seconds)
+            await requests.clean_finished_requests_with_retention(
+                retention_seconds)
 
     # Verify all finished requests were deleted
     assert requests.get_request('old-succeeded-1') is None
