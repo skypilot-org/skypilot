@@ -437,8 +437,6 @@ def _usable_subnets(
         utils.handle_boto_error(exc,
                                 'Failed to fetch available subnets from AWS.')
         raise exc
-    except Exception as e:
-        raise e
 
     if _are_user_subnets_pruned(subnets):
         _skypilot_log_error_and_exit_for_failover(
