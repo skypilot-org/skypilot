@@ -285,7 +285,7 @@ def override_request_env_and_config(
     # affecting client requests. If set on the client side, it will be
     # overridden by the request body.
     os.environ.pop('SKYPILOT_DEBUG', None)
-    # Remove the db connection uri from client supplied env vars, as the 
+    # Remove the db connection uri from client supplied env vars, as the
     # client should not set the db string on server side.
     request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
     os.environ.update(request_body.env_vars)

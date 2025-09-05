@@ -86,8 +86,8 @@ def request_body_env_vars() -> dict:
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
-    # Remove the db connection uri, as the client should not set the db string
-    # on server side.
+    # Remove the config related env vars, as the client config override
+    # should be passed in the request body.
     env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
     return env_vars
 
