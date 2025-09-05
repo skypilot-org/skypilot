@@ -25,6 +25,8 @@ from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -33,6 +35,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -81,6 +84,7 @@ def optimize(
     # policy in the optimizer, but that will require some refactoring.
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag, request_options=request_options) as dag:
+        dag.resolve_and_validate_volumes()
         return optimizer.Optimizer.optimize(dag=dag,
                                             minimize=minimize,
                                             blocked_resources=blocked_resources,
@@ -92,7 +96,8 @@ def status(
     cluster_names: Optional[Union[str, List[str]]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
-) -> List[Dict[str, Any]]:
+    include_credentials: bool = False,
+) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
 
@@ -159,16 +164,22 @@ def status(
             provided, all clusters will be queried.
         refresh: whether to query the latest cluster statuses from the cloud
             provider(s).
+        include_credentials: whether to fetch ssh credentials for cluster
+            (credentials field in responses.StatusResponse)
 
     Returns:
         A list of dicts, with each dict containing the information of a
         cluster. If a cluster is found to be terminated or not found, it will
         be omitted from the returned list.
     """
-    clusters = backend_utils.get_clusters(refresh=refresh,
-                                          cluster_names=cluster_names,
-                                          all_users=all_users)
-    return clusters
+    clusters = backend_utils.get_clusters(
+        refresh=refresh,
+        cluster_names=cluster_names,
+        all_users=all_users,
+        include_credentials=include_credentials)
+    return [
+        responses.StatusResponse.model_validate(cluster) for cluster in clusters
+    ]
 
 
 def status_kubernetes(
@@ -261,22 +272,23 @@ def endpoints(cluster: str,
         port: The port number to get the endpoint for. If None, endpoints
             for all ports are returned..
 
-    Returns: A dictionary of port numbers to endpoints. If endpoint is None,
+    Returns: A dictionary of port numbers to endpoints. If port is None,
         the dictionary will contain all ports:endpoints exposed on the cluster.
 
     Raises:
-        ValueError: if the cluster is not UP or the endpoint is not exposed.
+    ValueError: if the cluster is not UP or the endpoint is not exposed.
         RuntimeError: if the cluster has no ports to be exposed or no endpoints
             are exposed yet.
     """
     with rich_utils.safe_status(
             ux_utils.spinner_message(
                 f'Fetching endpoints for cluster {cluster}')):
-        return backend_utils.get_endpoints(cluster=cluster, port=port)
+        result = backend_utils.get_endpoints(cluster=cluster, port=port)
+        return result
 
 
 @usage_lib.entrypoint
-def cost_report() -> List[Dict[str, Any]]:
+def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -294,6 +306,13 @@ def cost_report() -> List[Dict[str, Any]]:
             'cluster_hash': (str) unique hash identifying cluster,
             'usage_intervals': (List[Tuple[int, int]]) cluster usage times,
             'total_cost': (float) cost given resources and usage intervals,
+            'cloud': (str) cloud of the cluster,
+            'region': (str) region of the cluster,
+            'cpus': (str) number of vCPUs of the cluster,
+            'memory': (str) memory of the cluster,
+            'accelerators': (str) accelerators of the cluster,
+            'resources_str': (str) resources string of the cluster,
+            'resources_str_full': (str) full resources string of the cluster,
         }
 
     The estimated cost column indicates price for the cluster based on the type
@@ -303,32 +322,99 @@ def cost_report() -> List[Dict[str, Any]]:
     cache of the cluster status, and may not be accurate for the cluster with
     autostop/use_spot set or terminated/stopped on the cloud console.
 
+    Args:
+        days: Number of days to look back from now. Active clusters are always
+            included. Historical clusters are only included if they were last
+            used within the past 'days' days. Defaults to 30 days.
+
     Returns:
         A list of dicts, with each dict containing the cost information of a
         cluster.
     """
-    cluster_reports = global_user_state.get_clusters_from_history()
+    if days is None:
+        days = constants.COST_REPORT_DEFAULT_DAYS
 
-    def get_total_cost(cluster_report: dict) -> float:
-        duration = cluster_report['duration']
-        launched_nodes = cluster_report['num_nodes']
-        launched_resources = cluster_report['resources']
+    cluster_reports = global_user_state.get_clusters_from_history(days=days)
+    logger.debug(
+        f'{len(cluster_reports)} clusters found from history with {days} days.')
 
-        cost = (launched_resources.get_cost(duration) * launched_nodes)
-        return cost
+    def _process_cluster_report(
+            cluster_report: Dict[str, Any]) -> Dict[str, Any]:
+        """Process cluster report by calculating cost and adding fields."""
+        # Make a copy to avoid modifying the original
+        report = cluster_report.copy()
 
-    for cluster_report in cluster_reports:
-        cluster_report['total_cost'] = get_total_cost(cluster_report)
-        cluster_report['cloud'] = str(cluster_report['resources'].cloud)
-        cluster_report['accelerators'] = cluster_report[
-            'resources'].accelerators
+        def get_total_cost(cluster_report: dict) -> float:
+            duration = cluster_report['duration']
+            launched_nodes = cluster_report['num_nodes']
+            launched_resources = cluster_report['resources']
 
-    return cluster_reports
+            cost = (launched_resources.get_cost(duration) * launched_nodes)
+            return cost
+
+        def _update_record_with_resources(record: Dict[str, Any]) -> None:
+            """Add resource fields for dashboard compatibility."""
+            if record is None:
+                return
+            resources = record.get('resources')
+            if resources is None:
+                return
+            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+            for field in fields:
+                try:
+                    record[field] = str(getattr(resources, field))
+                except Exception as e:  # pylint: disable=broad-except
+                    # Ok to skip the fields as this is just for display
+                    # purposes.
+                    logger.debug(f'Failed to get resources.{field} for cluster '
+                                 f'{record["name"]}: {str(e)}')
+                    record[field] = None
+
+            # Add resources_str and resources_str_full for dashboard
+            # compatibility
+            num_nodes = record.get('num_nodes', 1)
+            try:
+                resource_str_simple = resources_utils.format_resource(
+                    resources, simplify=True)
+                resource_str_full = resources_utils.format_resource(
+                    resources, simplify=False)
+                record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
+                record[
+                    'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to get resources_str for cluster '
+                             f'{record["name"]}: {str(e)}')
+                for field in fields:
+                    record[field] = None
+                record['resources_str'] = '-'
+                record['resources_str_full'] = '-'
+
+        try:
+            report['total_cost'] = get_total_cost(report)
+        except Exception as e:  # pylint: disable=broad-except
+            # Ok to skip the total cost as this is just for display purposes.
+            logger.warning(f'Failed to get total cost for cluster '
+                           f'{report["name"]}: {str(e)}')
+            report['total_cost'] = 0.0
+
+        _update_record_with_resources(report)
+        return report
+
+    # Process clusters in parallel
+    if not cluster_reports:
+        return []
+
+    processed_reports = subprocess_utils.run_in_parallel(
+        _process_cluster_report, cluster_reports)
+
+    return processed_reports
 
 
 def _start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = (
+        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR),
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -399,7 +485,7 @@ def _start(
                              all_file_mounts=None,
                              storage_mounts=storage_mounts)
     if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop, down=down)
+        backend.set_autostop(handle, idle_minutes_to_autostop, wait_for, down)
     return handle
 
 
@@ -407,6 +493,8 @@ def _start(
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = (
+        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR),
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -461,6 +549,7 @@ def start(
             '`idle_minutes_to_autostop` must be set if `down` is True.')
     return _start(cluster_name,
                   idle_minutes_to_autostop,
+                  wait_for,
                   retry_until_up,
                   down,
                   force=force)
@@ -550,6 +639,11 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
 
+    global_user_state.add_cluster_event(
+        cluster_name, status_lib.ClusterStatus.STOPPED,
+        'Cluster was stopped by user.',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
+
     backend = backend_utils.get_backend_from_handle(handle)
 
     if isinstance(backend, backends.CloudVmRayBackend):
@@ -577,6 +671,8 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 def autostop(
         cluster_name: str,
         idle_minutes: int,
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = autostop_lib.
+    DEFAULT_AUTOSTOP_WAIT_FOR,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -666,7 +762,7 @@ def autostop(
                 f'see reason above.') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.set_autostop(handle, idle_minutes, down)
+    backend.set_autostop(handle, idle_minutes, wait_for, down)
 
 
 # ==================
@@ -804,8 +900,10 @@ def cancel(
         f'handle for cluster {cluster_name!r} should not be None')
 
     backend = backend_utils.get_backend_from_handle(handle)
+    user_hash: Optional[str] = common_utils.get_current_user().id
 
     if all_users:
+        user_hash = None
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling all users\' jobs on cluster {cluster_name!r}...'
@@ -830,7 +928,7 @@ def cancel(
     backend.cancel_jobs(handle,
                         job_ids,
                         cancel_all=all or all_users,
-                        user_hash=common_utils.get_current_user().id)
+                        user_hash=user_hash)
 
 
 @usage_lib.entrypoint
@@ -868,7 +966,12 @@ def tail_logs(cluster_name: str,
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    return backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    # Although tail_logs returns an int when require_outputs=False (default),
+    # we need to check returnval as an int to avoid type checking errors.
+    returnval = backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    assert isinstance(returnval,
+                      int), (f'returnval must be an int, but got {returnval}')
+    return returnval
 
 
 @usage_lib.entrypoint
@@ -1231,6 +1334,26 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
         cleanup=cleanup,
         infra=infra,
     )
+
+
+@usage_lib.entrypoint
+def ssh_status(context_name: str) -> Tuple[bool, str]:
+    """Check the status of an SSH Node Pool context.
+
+    Args:
+        context_name: The SSH context name (e.g., 'ssh-my-cluster')
+
+    Returns:
+        Tuple[bool, str]: (is_ready, reason)
+            - is_ready: True if the SSH Node Pool is ready, False otherwise
+            - reason: Explanation of the status
+    """
+    try:
+        is_ready, reason = clouds.SSH.check_single_context(context_name)
+        return is_ready, reason
+    except Exception as e:  # pylint: disable=broad-except
+        return False, ('Failed to check SSH context: '
+                       f'{common_utils.format_exception(e)}')
 
 
 def get_all_contexts() -> List[str]:

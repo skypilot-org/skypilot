@@ -17,38 +17,51 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { formatDuration, REFRESH_INTERVAL } from '@/components/utils';
-import { getManagedJobs } from '@/data/connectors/jobs';
-import { getClusters } from '@/data/connectors/clusters';
+import {
+  formatDuration,
+  REFRESH_INTERVAL,
+  JobStatusBadges as SharedJobStatusBadges,
+  InfraBadges as SharedInfraBadges,
+  renderPoolLink,
+} from '@/components/utils';
+import { UI_CONFIG } from '@/lib/config';
+import {
+  getManagedJobs,
+  getManagedJobsWithClientPagination,
+  getPoolStatus,
+} from '@/data/connectors/jobs';
+import jobsCacheManager from '@/lib/jobs-cache-manager';
+import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
-import { Layout } from '@/components/elements/layout';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
-  relativeTime,
-  formatDateTime,
+  TimestampWithTooltip,
 } from '@/components/utils';
 import {
   FileSearchIcon,
   RotateCwIcon,
   MonitorPlay,
   RefreshCcw,
+  Download,
 } from 'lucide-react';
-import { handleJobAction } from '@/data/connectors/jobs';
+import {
+  handleJobAction,
+  downloadManagedJobLogs,
+} from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
-import cachePreloader from '@/lib/cache-preloader';
+import {
+  FilterDropdown,
+  Filters,
+  updateURLParams as sharedUpdateURLParams,
+  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+} from '@/components/shared/FilterSystem';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -71,11 +84,25 @@ export const statusGroups = {
   ],
 };
 
-// Define constant for "All Workspaces" like in clusters.jsx
-const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__';
-
-// Define constant for "All Users"
-const ALL_USERS_VALUE = '__ALL_USERS__';
+// Define filter options for the filter dropdown
+const PROPERTY_OPTIONS = [
+  {
+    label: 'Name',
+    value: 'name',
+  },
+  {
+    label: 'User',
+    value: 'user',
+  },
+  {
+    label: 'Workspace',
+    value: 'workspace',
+  },
+  {
+    label: 'Pool',
+    value: 'pool',
+  },
+];
 
 // Helper function to filter jobs by name
 export function filterJobsByName(jobs, nameFilter) {
@@ -95,7 +122,7 @@ export function filterJobsByName(jobs, nameFilter) {
 // Helper function to filter jobs by workspace
 export function filterJobsByWorkspace(jobs, workspaceFilter) {
   // If no workspace filter or set to "All Workspaces", return all jobs
-  if (!workspaceFilter || workspaceFilter === ALL_WORKSPACES_VALUE) {
+  if (!workspaceFilter || workspaceFilter === 'ALL_WORKSPACES') {
     return jobs;
   }
 
@@ -109,7 +136,7 @@ export function filterJobsByWorkspace(jobs, workspaceFilter) {
 // Helper function to filter jobs by user
 export function filterJobsByUser(jobs, userFilter) {
   // If no user filter or set to "All Users", return all jobs
-  if (!userFilter || userFilter === ALL_USERS_VALUE) {
+  if (!userFilter || userFilter === 'ALL_USERS') {
     return jobs;
   }
 
@@ -120,28 +147,22 @@ export function filterJobsByUser(jobs, userFilter) {
   });
 }
 
-// Helper function to format username for display (reuse from clusters.jsx)
-const formatUserDisplay = (username, userId) => {
-  if (username && username.includes('@')) {
-    const emailPrefix = username.split('@')[0];
-    // Show email prefix with userId if they're different
-    if (userId && userId !== emailPrefix) {
-      return `${emailPrefix} (${userId})`;
-    }
-    return emailPrefix;
-  }
-  // If no email, show username with userId in parentheses only if they're different
-  const usernameBase = username || userId || 'N/A';
-
-  // Skip showing userId if it's the same as username
-  if (userId && userId !== usernameBase) {
-    return `${usernameBase} (${userId})`;
+// Helper function to filter jobs by pool
+export function filterJobsByPool(jobs, poolFilter) {
+  // If no pool filter, return all jobs
+  if (!poolFilter || poolFilter.trim() === '') {
+    return jobs;
   }
 
-  return usernameBase;
-};
+  // Filter jobs by the pool filter (case-insensitive partial match)
+  const filterLower = poolFilter.toLowerCase().trim();
+  return jobs.filter((job) => {
+    const jobPool = job.pool || '';
+    return jobPool.toLowerCase().includes(filterLower);
+  });
+}
 
-// Helper function to format submitted time with abbreviated units
+// Helper function to format submitted time with abbreviated units (now uses TimestampWithTooltip)
 const formatSubmittedTime = (timestamp) => {
   if (!timestamp) return '-';
 
@@ -149,451 +170,136 @@ const formatSubmittedTime = (timestamp) => {
   const date =
     timestamp instanceof Date ? timestamp : new Date(timestamp * 1000);
 
-  // Get the original timeString from relativeTime
-  let timeString = relativeTime(date);
-
-  // If relativeTime returns a React element, extract the string from its props
-  if (
-    React.isValidElement(timeString) &&
-    timeString.props &&
-    timeString.props.children
-  ) {
-    // The actual string is nested within the Tooltip
-    if (
-      React.isValidElement(timeString.props.children) &&
-      timeString.props.children.props &&
-      timeString.props.children.props.children
-    ) {
-      timeString = timeString.props.children.props.children;
-    } else {
-      timeString = timeString.props.children;
-    }
-  }
-
-  // Ensure we have a string before proceeding
-  if (typeof timeString !== 'string') {
-    return timeString; // Return as is if not a string after extraction
-  }
-
-  // Apply the same shortening logic
-  const shortenedTime = shortenTimeForJobs(timeString);
-
-  // Return with tooltip functionality like relativeTime does
-  const now = new Date();
-  const differenceInDays =
-    (now.getTime() - date.getTime()) / (1000 * 3600 * 24);
-
-  if (Math.abs(differenceInDays) < 7) {
-    return (
-      <Tooltip
-        content={formatDateTime(date)}
-        className="capitalize text-sm text-muted-foreground"
-      >
-        {shortenedTime}
-      </Tooltip>
-    );
-  } else {
-    return (
-      <Tooltip
-        content={formatDateTime(date)}
-        className="text-sm text-muted-foreground"
-      >
-        {shortenedTime}
-      </Tooltip>
-    );
-  }
+  return <TimestampWithTooltip date={date} />;
 };
-
-// Helper function to shorten time strings for jobs
-function shortenTimeForJobs(timeString) {
-  if (!timeString || typeof timeString !== 'string') {
-    return timeString;
-  }
-
-  // Handle "just now" case
-  if (timeString === 'just now') {
-    return 'now';
-  }
-
-  // Handle "less than a minute ago" case
-  if (timeString.toLowerCase() === 'less than a minute ago') {
-    return 'Less than a minute ago';
-  }
-
-  // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "1h ago"
-  const aboutMatch = timeString.match(/^About\s+(\d+)\s+(\w+)\s+ago$/);
-  if (aboutMatch) {
-    const num = aboutMatch[1];
-    const unit = aboutMatch[2];
-    const unitMap = {
-      second: 's',
-      seconds: 's',
-      minute: 'm',
-      minutes: 'm',
-      hour: 'h',
-      hours: 'h',
-      day: 'd',
-      days: 'd',
-      month: 'mo',
-      months: 'mo',
-      year: 'yr',
-      years: 'yr',
-    };
-    if (unitMap[unit]) {
-      return `${num}${unitMap[unit]} ago`;
-    }
-  }
-
-  // Handle "a minute ago", "an hour ago", etc.
-  const singleUnitMatch = timeString.match(/^a[n]?\s+(\w+)\s+ago$/);
-  if (singleUnitMatch) {
-    const unit = singleUnitMatch[1];
-    const unitMap = {
-      second: 's',
-      minute: 'm',
-      hour: 'h',
-      day: 'd',
-      month: 'mo',
-      year: 'yr',
-    };
-    if (unitMap[unit]) {
-      return `1${unitMap[unit]} ago`;
-    }
-  }
-
-  // Handle "X units ago"
-  const multiUnitMatch = timeString.match(/^(\d+)\s+(\w+)\s+ago$/);
-  if (multiUnitMatch) {
-    const num = multiUnitMatch[1];
-    const unit = multiUnitMatch[2];
-    const unitMap = {
-      second: 's',
-      seconds: 's',
-      minute: 'm',
-      minutes: 'm',
-      hour: 'h',
-      hours: 'h',
-      day: 'd',
-      days: 'd',
-      month: 'mo',
-      months: 'mo',
-      year: 'yr',
-      years: 'yr',
-    };
-    if (unitMap[unit]) {
-      return `${num}${unitMap[unit]} ago`;
-    }
-  }
-
-  // Fallback if no specific regex match (e.g., for dates beyond 7 days or other formats)
-  return timeString;
-}
 
 export function ManagedJobs() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const refreshDataRef = React.useRef(null);
-  const [confirmationModal, setConfirmationModal] = useState({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: null,
-  });
-  const isMobile = useMobile();
-  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
-  const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
-  const [nameFilter, setNameFilter] = useState('');
-  const [workspaces, setWorkspaces] = useState([]);
-  const [users, setUsers] = useState([]);
+  const [poolsLoading, setPoolsLoading] = useState(true); // Start as true for initial load
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const jobsRefreshRef = React.useRef(null);
+  const poolsRefreshRef = React.useRef(null);
+  const [poolsData, setPoolsData] = useState([]);
+  const [filters, setFilters] = useState([]);
 
-  // Handle URL query parameters for workspace and user filtering
+  const fetchData = async (isRefreshButton = false) => {
+    setLoading(true);
+    // Only set poolsLoading on initial load, not on refresh button clicks
+    if (!isRefreshButton && isInitialLoad) {
+      setPoolsLoading(true);
+    }
+    try {
+      const [poolsResponse] = await Promise.all([
+        dashboardCache.get(getPoolStatus, [{}]),
+      ]);
+      setPoolsData(poolsResponse.pools || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+      if (!isRefreshButton && isInitialLoad) {
+        setPoolsLoading(false);
+        setIsInitialLoad(false);
+      }
+    }
+  };
+
   useEffect(() => {
-    if (router.isReady) {
-      if (router.query.workspace) {
-        const workspaceParam = Array.isArray(router.query.workspace)
-          ? router.query.workspace[0]
-          : router.query.workspace;
-        setWorkspaceFilter(workspaceParam);
-      }
-      if (router.query.user) {
-        const userParam = Array.isArray(router.query.user)
-          ? router.query.user[0]
-          : router.query.user;
-        setUserFilter(userParam);
-      }
-      if (router.query.name) {
-        const nameParam = Array.isArray(router.query.name)
-          ? router.query.name[0]
-          : router.query.name;
-        setNameFilter(nameParam);
-      }
-    }
-  }, [
-    router.isReady,
-    router.query.workspace,
-    router.query.user,
-    router.query.name,
-  ]);
-
-  // Helper function to update URL query parameters
-  const updateURLParams = (newWorkspace, newUser, newName) => {
-    const query = { ...router.query };
-
-    // Update workspace parameter
-    if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
-      query.workspace = newWorkspace;
-    } else {
-      delete query.workspace;
-    }
-
-    // Update user parameter
-    if (newUser && newUser !== ALL_USERS_VALUE) {
-      query.user = newUser;
-    } else {
-      delete query.user;
-    }
-
-    // Update name parameter
-    if (newName && newName.trim() !== '') {
-      query.name = newName.trim();
-    } else {
-      delete query.name;
-    }
-
-    // Use replace to avoid adding to browser history for filter changes
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
-
-  // Handle workspace filter change
-  const handleWorkspaceFilterChange = (newWorkspace) => {
-    setWorkspaceFilter(newWorkspace);
-    updateURLParams(newWorkspace, userFilter, nameFilter);
-  };
-
-  // Handle user filter change
-  const handleUserFilterChange = (newUser) => {
-    setUserFilter(newUser);
-    updateURLParams(workspaceFilter, newUser, nameFilter);
-  };
-
-  // Handle name filter change
-  const handleNameFilterChange = (newName) => {
-    setNameFilter(newName);
-    updateURLParams(workspaceFilter, userFilter, newName);
-  };
-
-  // Fetch workspaces and users for filter dropdown
-  useEffect(() => {
-    const fetchFilterData = async () => {
-      try {
-        // Trigger cache preloading for jobs page and background preload other pages
-        await cachePreloader.preloadForPage('jobs');
-
-        // Fetch configured workspaces for the filter dropdown
-        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
-        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
-
-        // Fetch all jobs to see if 'default' workspace is implicitly used
-        const jobsResponse = await dashboardCache.get(getManagedJobs, [
-          { allUsers: true },
-        ]);
-        const allJobs = jobsResponse.jobs || [];
-        const uniqueJobWorkspaces = [
-          ...new Set(
-            allJobs.map((job) => job.workspace || 'default').filter((ws) => ws)
-          ),
-        ];
-
-        // Combine configured workspaces with any actively used workspaces
-        const finalWorkspaces = new Set(configuredWorkspaceNames);
-        uniqueJobWorkspaces.forEach((wsName) => finalWorkspaces.add(wsName));
-
-        setWorkspaces(Array.from(finalWorkspaces).sort());
-
-        // Fetch users for the filter dropdown
-        const fetchedUsers = await dashboardCache.get(getUsers);
-        const uniqueJobUsers = [
-          ...new Set(
-            allJobs
-              .map((job) => ({
-                userId: job.user_hash || job.user,
-                username: job.user,
-              }))
-              .filter((user) => user.userId)
-          ).values(),
-        ];
-
-        // Combine fetched users with unique job users
-        const finalUsers = new Map();
-
-        // Add fetched users first
-        fetchedUsers.forEach((user) => {
-          finalUsers.set(user.userId, {
-            userId: user.userId,
-            username: user.username,
-            display: formatUserDisplay(user.username, user.userId),
-          });
-        });
-
-        // Add any job users not in the fetched list
-        uniqueJobUsers.forEach((user) => {
-          if (!finalUsers.has(user.userId)) {
-            finalUsers.set(user.userId, {
-              userId: user.userId,
-              username: user.username,
-              display: formatUserDisplay(user.username, user.userId),
-            });
-          }
-        });
-
-        setUsers(
-          Array.from(finalUsers.values()).sort((a, b) =>
-            a.display.localeCompare(b.display)
-          )
-        );
-      } catch (error) {
-        console.error('Error fetching data for filters:', error);
-        setWorkspaces(['default']); // Fallback or error state
-        setUsers([]); // Fallback or error state
-      }
-    };
-    fetchFilterData();
+    fetchData();
   }, []);
 
   const handleRefresh = () => {
-    // Invalidate cache to ensure fresh data is fetched
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    // Invalidate cache to ensure fresh data is fetched for both jobs and pools
+    jobsCacheManager.invalidateCache();
+    dashboardCache.invalidate(getPoolStatus, [{}]);
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
 
-    if (refreshDataRef.current) {
-      refreshDataRef.current();
+    // Refresh parent component data (including poolsData for link matching)
+    fetchData(true); // Pass true to indicate it's a refresh button click
+
+    // Trigger a re-fetch in both tables via their refreshDataRef
+    if (jobsRefreshRef.current) {
+      jobsRefreshRef.current();
+    }
+    if (poolsRefreshRef.current) {
+      poolsRefreshRef.current();
     }
   };
 
+  // Helper function to update URL query parameters
+  const updateURLParams = (filters) => {
+    sharedUpdateURLParams(router, filters);
+  };
+
+  const updateFiltersByURLParams = React.useCallback(() => {
+    const propertyMap = new Map();
+    propertyMap.set('', '');
+    propertyMap.set('status', 'Status');
+    propertyMap.set('name', 'Name');
+    propertyMap.set('user', 'User');
+    propertyMap.set('workspace', 'Workspace');
+    propertyMap.set('pool', 'Pool');
+
+    const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
+    setFilters(urlFilters);
+  }, [router, setFilters]);
+
+  // Handle URL query parameters for tab selection and filters
+  useEffect(() => {
+    if (router.isReady) {
+      updateFiltersByURLParams();
+    }
+  }, [router.isReady, router.query.tab, updateFiltersByURLParams]);
+
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base flex items-center">
+      {/* Jobs section */}
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <div className="text-base">
           <Link
             href="/jobs"
             className="text-sky-blue hover:underline leading-none"
           >
             Managed Jobs
           </Link>
-          <div className="relative ml-4 mr-2">
-            <input
-              type="text"
-              placeholder="Filter by job name"
-              value={nameFilter}
-              onChange={(e) => handleNameFilterChange(e.target.value)}
-              className="h-8 w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-            />
-            {nameFilter && (
-              <button
-                onClick={() => handleNameFilterChange('')}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                title="Clear filter"
-              >
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            )}
-          </div>
-          <Select
-            value={workspaceFilter}
-            onValueChange={handleWorkspaceFilterChange}
-          >
-            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
-              <SelectValue placeholder="Filter by workspace...">
-                {workspaceFilter === ALL_WORKSPACES_VALUE
-                  ? 'All Workspaces'
-                  : workspaceFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_WORKSPACES_VALUE}>
-                All Workspaces
-              </SelectItem>
-              {workspaces.map((ws) => (
-                <SelectItem key={ws} value={ws}>
-                  {ws}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={userFilter} onValueChange={handleUserFilterChange}>
-            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
-              <SelectValue placeholder="Filter by user...">
-                {userFilter === ALL_USERS_VALUE
-                  ? 'All Users'
-                  : users.find((u) => u.userId === userFilter)?.display ||
-                    userFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
-              {users.map((user) => (
-                <SelectItem key={user.userId} value={user.userId}>
-                  {user.display}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
-        <div className="flex items-center space-x-2">
-          {loading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-            title="Refresh"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
+        <div className="w-full sm:w-auto">
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={{}}
+            setFilters={setFilters}
+            updateURLParams={updateURLParams}
+            placeholder="Filter jobs"
+          />
         </div>
       </div>
+
+      <Filters
+        filters={filters}
+        setFilters={setFilters}
+        updateURLParams={updateURLParams}
+      />
+
       <ManagedJobsTable
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
-        refreshDataRef={refreshDataRef}
-        workspaceFilter={workspaceFilter}
-        userFilter={userFilter}
-        nameFilter={nameFilter}
+        refreshDataRef={jobsRefreshRef}
+        filters={filters}
+        onRefresh={handleRefresh}
+        poolsData={poolsData}
+        poolsLoading={poolsLoading}
       />
-      <ConfirmationModal
-        isOpen={confirmationModal.isOpen}
-        onClose={() =>
-          setConfirmationModal({ ...confirmationModal, isOpen: false })
-        }
-        onConfirm={confirmationModal.onConfirm}
-        title={confirmationModal.title}
-        message={confirmationModal.message}
-      />
+
+      {/* Pools table - always visible */}
+      <div className="mb-4">
+        <PoolsTable
+          refreshInterval={REFRESH_INTERVAL}
+          setLoading={setLoading}
+          refreshDataRef={poolsRefreshRef}
+        />
+      </div>
     </>
   );
 }
@@ -602,11 +308,14 @@ export function ManagedJobsTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
-  workspaceFilter,
-  userFilter,
-  nameFilter,
+  filters,
+  onRefresh,
+  poolsData,
+  poolsLoading,
 }) {
   const [data, setData] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalNoFilter, setTotalNoFilter] = useState(0);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -619,6 +328,7 @@ export function ManagedJobsTable({
   const expandedRowRef = useRef(null);
   const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [statusCounts, setStatusCounts] = useState({});
+  const [apiStatusCounts, setApiStatusCounts] = useState({});
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -630,6 +340,7 @@ export function ManagedJobsTable({
     message: '',
     onConfirm: null,
   });
+  const isMobile = useMobile();
 
   const handleRestartController = async () => {
     setConfirmationModal({
@@ -653,50 +364,133 @@ export function ManagedJobsTable({
     });
   };
 
-  const fetchData = React.useCallback(async () => {
-    setLocalLoading(true);
-    setLoading(true); // Set parent loading state
-    try {
-      // Fetch both jobs and clusters data in parallel
-      const [jobsResponse, clustersData] = await Promise.all([
-        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
-        dashboardCache.get(getClusters),
-      ]);
+  const fetchData = React.useCallback(
+    async (options = {}) => {
+      const includeStatus = options.includeStatus !== false;
+      setLocalLoading(true);
+      setLoading(true); // Set parent loading state
+      try {
+        // Build server-side filter params from UI filters
+        const getFilterValue = (prop) => {
+          const f = (filters || []).find(
+            (fi) => (fi.property || '').toLowerCase() === prop
+          );
+          return f && f.value ? String(f.value) : undefined;
+        };
+        // Determine statuses parameter based on current state
+        let statusesParam = undefined;
 
-      // Always process the response, even if it's null
-      const { jobs = [], controllerStopped = false } = jobsResponse || {};
+        // If specific statuses are selected, use those
+        if (selectedStatuses.length > 0) {
+          statusesParam = selectedStatuses;
+        } else if (!showAllMode) {
+          // If not in "show all" mode but no specific statuses selected, show no jobs
+          statusesParam = [];
+        } else if (activeTab === 'active') {
+          // Show all active jobs
+          statusesParam = statusGroups.active;
+        } else if (activeTab === 'finished') {
+          // Show all finished jobs
+          statusesParam = statusGroups.finished;
+        }
+        // For activeTab === 'all' and showAllMode === true, don't set statuses (show all jobs)
 
-      // for the clusters, check if there is a cluster that `isJobController`
-      const jobControllerCluster = clustersData?.find((c) =>
-        isJobController(c.cluster)
-      );
-      const jobControllerClusterStatus = jobControllerCluster
-        ? jobControllerCluster.status
-        : 'NOT_FOUND';
-      let isControllerStopped = false;
-      if (jobControllerClusterStatus == 'STOPPED' && controllerStopped) {
-        isControllerStopped = true;
+        const params = {
+          allUsers: true,
+          nameMatch: getFilterValue('name'),
+          userMatch: getFilterValue('user'),
+          workspaceMatch: getFilterValue('workspace'),
+          poolMatch: getFilterValue('pool'),
+          statuses: statusesParam,
+          page: currentPage, // page index starting from 1
+          limit: pageSize,
+        };
+
+        let jobsResponse;
+        let clustersData = null;
+
+        // Check cache status before making requests
+        const isDataCached = jobsCacheManager.isDataCached(params);
+        const isDataLoading = jobsCacheManager.isDataLoading(params);
+
+        if (includeStatus) {
+          const [jr, cd] = await Promise.all([
+            jobsCacheManager.getPaginatedJobs(params),
+            dashboardCache.get(getClusters),
+          ]);
+          jobsResponse = jr;
+          clustersData = cd;
+        } else {
+          jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
+        }
+
+        // Always process the response, even if it's null
+        const {
+          jobs = [],
+          total = 0,
+          totalNoFilter = 0,
+          controllerStopped = false,
+          cacheStatus = 'unknown',
+          statusCounts = {},
+        } = jobsResponse || {};
+
+        let isControllerStopped = false;
+        let isLaunching = false;
+        if (includeStatus && clustersData) {
+          const jobControllerCluster = clustersData?.find((c) =>
+            isJobController(c.cluster)
+          );
+          const jobControllerClusterStatus = jobControllerCluster
+            ? jobControllerCluster.status
+            : 'NOT_FOUND';
+          if (jobControllerClusterStatus == 'STOPPED' && controllerStopped) {
+            isControllerStopped = true;
+          }
+          if (jobControllerClusterStatus == 'LAUNCHING') {
+            isLaunching = true;
+          }
+        }
+
+        setData(jobs);
+        setTotalCount(total || 0);
+        setTotalNoFilter(totalNoFilter || 0);
+        setControllerStopped(!!isControllerStopped);
+        setControllerLaunching(!!isLaunching);
+        setApiStatusCounts(statusCounts);
+        setIsInitialLoad(false);
+
+        // Log cache status for debugging
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Jobs cache status:', {
+            cacheStatus,
+            isDataCached,
+            isDataLoading,
+            jobCount: jobs.length,
+            totalCount: total,
+            totalNoFilter: totalNoFilter,
+          });
+        }
+      } catch (err) {
+        console.error('Error fetching data:', err);
+        // Still set data to empty array on error to show proper UI
+        setData([]);
+        setControllerStopped(false);
+        setIsInitialLoad(false);
+      } finally {
+        setLocalLoading(false);
+        setLoading(false); // Clear parent loading state
       }
-      if (jobControllerClusterStatus == 'LAUNCHING') {
-        setControllerLaunching(true);
-      } else {
-        setControllerLaunching(false);
-      }
-
-      setData(jobs);
-      setControllerStopped(isControllerStopped);
-      setIsInitialLoad(false);
-    } catch (err) {
-      console.error('Error fetching data:', err);
-      // Still set data to empty array on error to show proper UI
-      setData([]);
-      setControllerStopped(false);
-      setIsInitialLoad(false);
-    } finally {
-      setLocalLoading(false);
-      setLoading(false); // Clear parent loading state
-    }
-  }, [setLoading]);
+    },
+    [
+      setLoading,
+      filters,
+      currentPage,
+      pageSize,
+      selectedStatuses,
+      showAllMode,
+      activeTab,
+    ]
+  );
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -705,30 +499,55 @@ export function ManagedJobsTable({
     }
   }, [refreshDataRef, fetchData]);
 
+  // Keep a ref to latest fetchData to avoid stale closures in interval
+  const fetchDataRef = React.useRef(fetchData);
+  React.useEffect(() => {
+    fetchDataRef.current = fetchData;
+  }, [fetchData]);
+
+  // Initial load
+  React.useEffect(() => {
+    fetchData({ includeStatus: true });
+  }, []);
+
+  // Fetch on pagination (page) changes without status request
+  React.useEffect(() => {
+    fetchData({ includeStatus: false });
+  }, [currentPage]);
+
+  // Fetch on filters or page size changes with status request
+  React.useEffect(() => {
+    fetchData({ includeStatus: true });
+  }, [filters, pageSize]);
+
+  // Fetch on status filter changes (activeTab, selectedStatuses, showAllMode)
+  React.useEffect(() => {
+    fetchData({ includeStatus: true });
+  }, [activeTab, selectedStatuses, showAllMode]);
+
   useEffect(() => {
-    setData([]);
-    let isCurrent = true;
-
-    fetchData();
-
     const interval = setInterval(() => {
-      if (isCurrent) {
-        fetchData();
+      if (fetchDataRef.current) {
+        fetchDataRef.current({ includeStatus: true });
       }
     }, refreshInterval);
 
     return () => {
-      isCurrent = false;
       clearInterval(interval);
       // Don't invalidate cache on component unmount - this causes premature cache invalidation
       // Cache should only be invalidated on manual refresh or TTL expiration
     };
-  }, [refreshInterval, fetchData]);
+  }, [refreshInterval]);
 
-  // Reset to first page when activeTab changes or when data changes
+  // Reset to first page when activeTab changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, data?.length]);
+  }, [activeTab]);
+
+  // Reset to first page when filters or page size changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters, pageSize]);
 
   // Reset status filter when activeTab changes
   useEffect(() => {
@@ -779,44 +598,10 @@ export function ManagedJobsTable({
     return statusGroups[activeTab].includes(status);
   };
 
-  // Filter data based on selected statuses and active tab
+  // Server already applied all filters including status filtering
   const filteredData = React.useMemo(() => {
-    // First apply workspace filter
-    let filtered = filterJobsByWorkspace(data, workspaceFilter);
-
-    // Then apply user filter
-    filtered = filterJobsByUser(filtered, userFilter);
-
-    // Then apply name filter
-    filtered = filterJobsByName(filtered, nameFilter);
-
-    // If specific statuses are selected, show jobs with any of those statuses
-    if (selectedStatuses.length > 0) {
-      return filtered.filter((item) => selectedStatuses.includes(item.status));
-    }
-
-    // If no statuses are selected but we're in "show all" mode
-    if (showAllMode) {
-      // Show all jobs if activeTab is 'all', otherwise filter by active/finished
-      if (activeTab === 'all') {
-        return filtered; // Show all jobs regardless of status
-      }
-      return filtered.filter((item) =>
-        statusGroups[activeTab].includes(item.status)
-      );
-    }
-
-    // If no statuses are selected and we're not in "show all" mode, show no jobs
-    return [];
-  }, [
-    data,
-    activeTab,
-    selectedStatuses,
-    showAllMode,
-    workspaceFilter,
-    userFilter,
-    nameFilter,
-  ]);
+    return data;
+  }, [data]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -833,11 +618,12 @@ export function ManagedJobsTable({
     });
   }, [filteredData, sortConfig]);
 
-  // Calculate pagination based on sorted data
-  const totalPages = Math.ceil(sortedData.length / pageSize);
+  // Pagination is performed server-side; derive display indices and end-of-list
   const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedData = sortedData.slice(startIndex, endIndex);
+  const paginatedData = sortedData; // already paginated by server
+  const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
+  const endIndexDisplay =
+    totalCount > 0 ? Math.min(startIndex + sortedData.length, totalCount) : 0;
 
   // Handle status selection
   const handleStatusClick = (status) => {
@@ -862,17 +648,15 @@ export function ManagedJobsTable({
       // We're not in "show all" mode if there are specific statuses selected
       setShowAllMode(false);
     }
+
+    // Reset to first page when changing status filters
+    setCurrentPage(1);
   };
 
-  // Update status counts when data changes
+  // Update status counts from API data
   useEffect(() => {
-    const safeData = data || [];
-    const counts = safeData.reduce((acc, job) => {
-      acc[job.status] = (acc[job.status] || 0) + 1;
-      return acc;
-    }, {});
-    setStatusCounts(counts);
-  }, [data]);
+    setStatusCounts(apiStatusCounts);
+  }, [apiStatusCounts]);
 
   // Page navigation handlers
   const goToPreviousPage = () => {
@@ -880,7 +664,9 @@ export function ManagedJobsTable({
   };
 
   const goToNextPage = () => {
-    setCurrentPage((page) => Math.min(page + 1, totalPages));
+    if (totalPages > 0 && currentPage < totalPages) {
+      setCurrentPage((page) => page + 1);
+    }
   };
 
   const handlePageSizeChange = (e) => {
@@ -893,430 +679,560 @@ export function ManagedJobsTable({
     <div className="relative">
       <div className="flex flex-col space-y-1 mb-1">
         {/* Combined Status Filter */}
-        <div className="flex flex-wrap items-center text-sm mb-1">
-          <span className="mr-2 text-sm font-medium">Statuses:</span>
-          <div className="flex flex-wrap gap-2 items-center">
-            {!loading && (!data || data.length === 0) && !isInitialLoad && (
-              <span className="text-gray-500 mr-2">No jobs found</span>
-            )}
-            {Object.entries(statusCounts).map(([status, count]) => (
-              <button
-                key={status}
-                onClick={() => handleStatusClick(status)}
-                className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                  isStatusHighlighted(status) ||
-                  selectedStatuses.includes(status)
-                    ? getBadgeStyle(status)
-                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <span>{status}</span>
-                <span
-                  className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                >
-                  {count}
-                </span>
-              </button>
-            ))}
-            {data && data.length > 0 && (
-              <div className="flex items-center ml-2 gap-2">
-                <span className="text-gray-500">(</span>
+        <div className="flex flex-wrap items-center justify-between text-sm mb-1">
+          <div className="flex flex-wrap items-center">
+            <span className="mr-2 text-sm font-medium">Statuses:</span>
+            <div className="flex flex-wrap gap-2 items-center">
+              {!loading && totalNoFilter === 0 && !isInitialLoad && (
+                <span className="text-gray-500 mr-2">No jobs found</span>
+              )}
+              {Object.entries(statusCounts).map(([status, count]) => (
                 <button
-                  onClick={() => {
-                    // When showing all jobs, clear all selected statuses
-                    setActiveTab('all');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'all' && showAllMode
-                      ? 'text-purple-700 underline'
-                      : 'text-gray-600 hover:text-purple-700 hover:underline'
+                  key={status}
+                  onClick={() => handleStatusClick(status)}
+                  className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
+                    isStatusHighlighted(status) ||
+                    selectedStatuses.includes(status)
+                      ? getBadgeStyle(status)
+                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                   }`}
                 >
-                  show all jobs
+                  <span>{status}</span>
+                  <span
+                    className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                  >
+                    {count}
+                  </span>
                 </button>
-                <span className="text-gray-500 mx-1">|</span>
-                <button
-                  onClick={() => {
-                    // When showing all active jobs, clear all selected statuses
-                    setActiveTab('active');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'active' && showAllMode
-                      ? 'text-green-700 underline'
-                      : 'text-gray-600 hover:text-green-700 hover:underline'
-                  }`}
-                >
-                  show all active jobs
-                </button>
-                <span className="text-gray-500 mx-1">|</span>
-                <button
-                  onClick={() => {
-                    // When showing all finished jobs, clear all selected statuses
-                    setActiveTab('finished');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'finished' && showAllMode
-                      ? 'text-blue-700 underline'
-                      : 'text-gray-600 hover:text-blue-700 hover:underline'
-                  }`}
-                >
-                  show all finished jobs
-                </button>
-                <span className="text-gray-500">)</span>
+              ))}
+              {totalNoFilter > 0 && (
+                <div className="flex items-center ml-2 gap-2">
+                  <span className="text-gray-500">(</span>
+                  <button
+                    onClick={() => {
+                      // When showing all jobs, clear all selected statuses
+                      // Use React.startTransition to batch state updates
+                      React.startTransition(() => {
+                        setActiveTab('all');
+                        setSelectedStatuses([]);
+                        setShowAllMode(true);
+                        setCurrentPage(1);
+                      });
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'all' && showAllMode
+                        ? 'text-purple-700 underline'
+                        : 'text-gray-600 hover:text-purple-700 hover:underline'
+                    }`}
+                  >
+                    show all jobs
+                  </button>
+                  <span className="text-gray-500 mx-1">|</span>
+                  <button
+                    onClick={() => {
+                      // When showing all active jobs, clear all selected statuses
+                      // Use React.startTransition to batch state updates
+                      React.startTransition(() => {
+                        setActiveTab('active');
+                        setSelectedStatuses([]);
+                        setShowAllMode(true);
+                        setCurrentPage(1);
+                      });
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'active' && showAllMode
+                        ? 'text-green-700 underline'
+                        : 'text-gray-600 hover:text-green-700 hover:underline'
+                    }`}
+                  >
+                    show all active jobs
+                  </button>
+                  <span className="text-gray-500 mx-1">|</span>
+                  <button
+                    onClick={() => {
+                      // When showing all finished jobs, clear all selected statuses
+                      // Use React.startTransition to batch state updates
+                      React.startTransition(() => {
+                        setActiveTab('finished');
+                        setSelectedStatuses([]);
+                        setShowAllMode(true);
+                        setCurrentPage(1);
+                      });
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'finished' && showAllMode
+                        ? 'text-blue-700 underline'
+                        : 'text-gray-600 hover:text-blue-700 hover:underline'
+                    }`}
+                  >
+                    show all finished jobs
+                  </button>
+                  <span className="text-gray-500">)</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {loading && (
+              <div className="flex items-center">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
               </div>
             )}
+            <button
+              onClick={() => {
+                // Call the refresh function passed from parent
+                if (onRefresh) {
+                  onRefresh();
+                }
+                // Also call the local refresh function to ensure loading state is set
+                if (refreshDataRef && refreshDataRef.current) {
+                  refreshDataRef.current();
+                }
+              }}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              <span>Refresh</span>
+            </button>
           </div>
         </div>
       </div>
 
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('id')}
-              >
-                ID{getSortDirection('id')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('name')}
-              >
-                Name{getSortDirection('name')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('user')}
-              >
-                User{getSortDirection('user')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('workspace')}
-              >
-                Workspace{getSortDirection('workspace')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('submitted_at')}
-              >
-                Submitted{getSortDirection('submitted_at')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('job_duration')}
-              >
-                Duration{getSortDirection('job_duration')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('status')}
-              >
-                Status{getSortDirection('status')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('priority')}
-              >
-                Priority{getSortDirection('priority')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources_str')}
-              >
-                Requested{getSortDirection('resources_str')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('infra')}
-              >
-                Infra{getSortDirection('infra')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('cluster')}
-              >
-                Resources{getSortDirection('cluster')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('recoveries')}
-              >
-                Recoveries{getSortDirection('recoveries')}
-              </TableHead>
-              <TableHead>Details</TableHead>
-              <TableHead>Logs</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading || isInitialLoad ? (
-              <TableRow>
-                <TableCell
-                  colSpan={13}
-                  className="text-center py-6 text-gray-500"
-                >
-                  <div className="flex justify-center items-center">
-                    <CircularProgress size={20} className="mr-2" />
-                    <span>Loading...</span>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : paginatedData.length > 0 ? (
-              <>
-                {paginatedData.map((item) => (
-                  <React.Fragment key={item.id}>
-                    <TableRow>
-                      <TableCell>
-                        <Link
-                          href={`/jobs/${item.id}`}
-                          className="text-blue-600"
-                        >
-                          {item.id}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          href={`/jobs/${item.id}`}
-                          className="text-blue-600"
-                        >
-                          {item.name}
-                        </Link>
-                      </TableCell>
-                      <TableCell>{item.user}</TableCell>
-                      <TableCell>
-                        <Link
-                          href="/workspaces"
-                          className="text-blue-600 hover:underline"
-                        >
-                          {item.workspace || 'default'}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        {formatSubmittedTime(item.submitted_at)}
-                      </TableCell>
-                      <TableCell>{formatDuration(item.job_duration)}</TableCell>
-                      <TableCell>
-                        <StatusBadge status={item.status} />
-                      </TableCell>
-                      <TableCell>{item.priority}</TableCell>
-                      <TableCell>{item.requested_resources}</TableCell>
-                      <TableCell>
-                        {item.infra && item.infra !== '-' ? (
-                          <NonCapitalizedTooltip
-                            content={item.full_infra || item.infra}
-                            className="text-sm text-muted-foreground"
-                          >
-                            <span>
-                              <Link
-                                href="/infra"
-                                className="text-blue-600 hover:underline"
-                              >
-                                {item.cloud || item.infra.split('(')[0].trim()}
-                              </Link>
-                              {item.infra.includes('(') && (
-                                <span>
-                                  {' ' +
-                                    item.infra.substring(
-                                      item.infra.indexOf('(')
-                                    )}
-                                </span>
-                              )}
-                            </span>
-                          </NonCapitalizedTooltip>
-                        ) : (
-                          <span>{item.infra || '-'}</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <NonCapitalizedTooltip
-                          content={
-                            item.resources_str_full || item.resources_str
-                          }
-                          className="text-sm text-muted-foreground"
-                        >
-                          <span>{item.resources_str}</span>
-                        </NonCapitalizedTooltip>
-                      </TableCell>
-                      <TableCell>{item.recoveries}</TableCell>
-                      <TableCell>
-                        {item.details ? (
-                          <TruncatedDetails
-                            text={item.details}
-                            rowId={item.id}
-                            expandedRowId={expandedRowId}
-                            setExpandedRowId={setExpandedRowId}
-                          />
-                        ) : (
-                          '-'
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Status2Actions
-                          jobParent="/jobs"
-                          jobId={item.id}
-                          managed={true}
-                        />
-                      </TableCell>
-                    </TableRow>
-                    {expandedRowId === item.id && (
-                      <ExpandedDetailsRow
-                        text={item.details}
-                        colSpan={13}
-                        innerRef={expandedRowRef}
-                      />
-                    )}
-                  </React.Fragment>
-                ))}
-              </>
-            ) : (
-              <TableRow>
-                <TableCell colSpan={13} className="text-center py-6">
-                  <div className="flex flex-col items-center space-y-4">
-                    {controllerLaunching && (
-                      <div className="flex flex-col items-center space-y-2">
-                        <p className="text-gray-700">
-                          The managed job controller is launching. It will be
-                          ready shortly.
-                        </p>
-                        <div className="flex items-center">
-                          <CircularProgress size={12} className="mr-2" />
-                          <span className="text-gray-500">Launching...</span>
-                        </div>
-                      </div>
-                    )}
-                    {!controllerStopped && !controllerLaunching && (
-                      <p className="text-gray-500">No active jobs</p>
-                    )}
-                    {controllerStopped && (
-                      <div className="flex flex-col items-center space-y-2">
-                        <p className="text-gray-700">
-                          The managed job controller has been stopped. Restart
-                          to check the latest job status.
-                        </p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleRestartController}
-                          className="text-sky-blue hover:text-sky-blue-bright"
-                          disabled={loading || isRestarting}
-                        >
-                          {isRestarting ? (
-                            <>
-                              <CircularProgress size={12} className="mr-2" />
-                              Restarting...
-                            </>
-                          ) : (
-                            <>
-                              <RefreshCcw className="h-4 w-4 mr-2" />
-                              Restart Controller
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-
-      {/* Pagination controls */}
-      {sortedData && sortedData.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center">
-              <span className="mr-2">Rows per page:</span>
-              <div className="relative inline-block">
-                <select
-                  value={pageSize}
-                  onChange={handlePageSizeChange}
-                  className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-                  style={{ minWidth: '40px' }}
-                >
-                  <option value={10}>10</option>
-                  <option value={30}>30</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={200}>200</option>
-                </select>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </div>
-            </div>
-            <div>
-              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
-              {sortedData.length}
-            </div>
-            <div className="flex items-center space-x-2">
+      {/* Mobile-specific controller stopped message outside table */}
+      {isMobile &&
+        controllerStopped &&
+        paginatedData.length === 0 &&
+        !loading &&
+        !isInitialLoad && (
+          <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
+            <div className="flex flex-col items-center space-y-3">
+              <p className="text-gray-700 text-center text-sm">
+                Job controller stopped.
+                <br />
+                Restart to check status.
+              </p>
               <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToPreviousPage}
-                disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
+                variant="outline"
+                size="sm"
+                onClick={handleRestartController}
+                className="text-sky-blue hover:text-sky-blue-bright"
+                disabled={loading || isRestarting}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-left"
-                >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToNextPage}
-                disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-right"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
+                {isRestarting ? (
+                  <>
+                    <CircularProgress size={12} className="mr-2" />
+                    Restarting...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCcw className="h-4 w-4 mr-2" />
+                    Restart
+                  </>
+                )}
               </Button>
             </div>
           </div>
+        )}
+
+      <Card>
+        <div className="overflow-x-auto rounded-lg">
+          <Table className="min-w-full">
+            <TableHeader>
+              <TableRow>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('id')}
+                >
+                  ID{getSortDirection('id')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('name')}
+                >
+                  Name{getSortDirection('name')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('user')}
+                >
+                  User{getSortDirection('user')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('workspace')}
+                >
+                  Workspace{getSortDirection('workspace')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('submitted_at')}
+                >
+                  Submitted{getSortDirection('submitted_at')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('job_duration')}
+                >
+                  Duration{getSortDirection('job_duration')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('status')}
+                >
+                  Status{getSortDirection('status')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('resources_str')}
+                >
+                  Requested{getSortDirection('resources_str')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('infra')}
+                >
+                  Infra{getSortDirection('infra')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('cluster')}
+                >
+                  Resources{getSortDirection('cluster')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('recoveries')}
+                >
+                  Recoveries{getSortDirection('recoveries')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('pool')}
+                >
+                  Worker Pool{getSortDirection('pool')}
+                </TableHead>
+
+                <TableHead>Details</TableHead>
+                <TableHead>Logs</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading && isInitialLoad ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={12}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    <div className="flex justify-center items-center">
+                      <CircularProgress size={20} className="mr-2" />
+                      <span>Loading...</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : paginatedData.length > 0 ? (
+                <>
+                  {paginatedData.map((item) => (
+                    <React.Fragment key={item.task_job_id}>
+                      <TableRow>
+                        <TableCell>
+                          <Link
+                            href={`/jobs/${item.id}`}
+                            className="text-blue-600"
+                          >
+                            {item.id}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            href={`/jobs/${item.id}`}
+                            className="text-blue-600"
+                          >
+                            {item.name}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <UserDisplay
+                            username={item.user}
+                            userHash={item.user_hash}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            href="/workspaces"
+                            className="text-gray-700 hover:text-blue-600 hover:underline"
+                          >
+                            {item.workspace || 'default'}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          {formatSubmittedTime(item.submitted_at)}
+                        </TableCell>
+                        <TableCell>
+                          {formatDuration(item.job_duration)}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={item.status} />
+                        </TableCell>
+                        <TableCell>{item.requested_resources}</TableCell>
+                        <TableCell>
+                          {item.infra && item.infra !== '-' ? (
+                            <NonCapitalizedTooltip
+                              content={item.full_infra || item.infra}
+                              className="text-sm text-muted-foreground"
+                            >
+                              <span>
+                                <Link
+                                  href="/infra"
+                                  className="text-blue-600 hover:underline"
+                                >
+                                  {item.cloud ||
+                                    item.infra.split('(')[0].trim()}
+                                </Link>
+                                {item.infra.includes('(') && (
+                                  <span>
+                                    {' ' +
+                                      (() => {
+                                        const NAME_TRUNCATE_LENGTH =
+                                          UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                                        const fullRegionPart =
+                                          item.infra.substring(
+                                            item.infra.indexOf('(')
+                                          );
+                                        const regionContent =
+                                          fullRegionPart.substring(
+                                            1,
+                                            fullRegionPart.length - 1
+                                          );
+
+                                        if (
+                                          regionContent.length <=
+                                          NAME_TRUNCATE_LENGTH
+                                        ) {
+                                          return fullRegionPart;
+                                        }
+
+                                        const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                                        return `(${truncatedRegion})`;
+                                      })()}
+                                  </span>
+                                )}
+                              </span>
+                            </NonCapitalizedTooltip>
+                          ) : (
+                            <span>{item.infra || '-'}</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <NonCapitalizedTooltip
+                            content={
+                              item.resources_str_full || item.resources_str
+                            }
+                            className="text-sm text-muted-foreground"
+                          >
+                            <span>{item.resources_str}</span>
+                          </NonCapitalizedTooltip>
+                        </TableCell>
+                        <TableCell>{item.recoveries}</TableCell>
+                        <TableCell>
+                          <div
+                            className={
+                              poolsLoading
+                                ? 'blur-sm transition-all duration-300'
+                                : ''
+                            }
+                          >
+                            {poolsLoading
+                              ? '-'
+                              : renderPoolLink(
+                                  item.pool,
+                                  item.pool_hash,
+                                  poolsData
+                                )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {item.details ? (
+                            <TruncatedDetails
+                              text={item.details}
+                              rowId={item.id}
+                              expandedRowId={expandedRowId}
+                              setExpandedRowId={setExpandedRowId}
+                            />
+                          ) : (
+                            '-'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Status2Actions
+                            jobParent="/jobs"
+                            jobId={item.id}
+                            managed={true}
+                            workspace={item.workspace}
+                          />
+                        </TableCell>
+                      </TableRow>
+                      {expandedRowId === item.id && (
+                        <ExpandedDetailsRow
+                          text={item.details}
+                          colSpan={13}
+                          innerRef={expandedRowRef}
+                        />
+                      )}
+                    </React.Fragment>
+                  ))}
+                </>
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={13} className="text-center py-6">
+                    <div className="flex flex-col items-center space-y-4">
+                      {controllerLaunching && (
+                        <div className="flex flex-col items-center space-y-2">
+                          <p className="text-gray-700">
+                            The managed job controller is launching. It will be
+                            ready shortly.
+                          </p>
+                          <div className="flex items-center">
+                            <CircularProgress size={12} className="mr-2" />
+                            <span className="text-gray-500">Launching...</span>
+                          </div>
+                        </div>
+                      )}
+                      {!controllerStopped && !controllerLaunching && (
+                        <p className="text-gray-500">No active jobs</p>
+                      )}
+                      {/* Desktop controller stopped message stays in table */}
+                      {!isMobile && controllerStopped && (
+                        <div className="flex flex-col items-center space-y-3 px-4">
+                          <p className="text-gray-700 text-center text-sm sm:text-base max-w-md">
+                            The managed job controller has been stopped. Restart
+                            to check the latest job status.
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleRestartController}
+                            className="text-sky-blue hover:text-sky-blue-bright"
+                            disabled={loading || isRestarting}
+                          >
+                            {isRestarting ? (
+                              <>
+                                <CircularProgress size={12} className="mr-2" />
+                                Restarting...
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCcw className="h-4 w-4 mr-2" />
+                                Restart Controller
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </div>
-      )}
+      </Card>
+
+      {/* Pagination controls - always show for visual separation */}
+      <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center">
+            <span className="mr-2">Rows per page:</span>
+            <div className="relative inline-block">
+              <select
+                value={pageSize}
+                onChange={handlePageSizeChange}
+                className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
+                style={{ minWidth: '40px' }}
+              >
+                <option value={10}>10</option>
+                <option value={30}>30</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+              </select>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </div>
+          </div>
+          <div>
+            {totalCount > 0
+              ? `${startIndex + 1} – ${endIndexDisplay} of ${totalCount}`
+              : '0 – 0 of 0'}
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={goToPreviousPage}
+              disabled={
+                currentPage === 1 || !sortedData || sortedData.length === 0
+              }
+              className="text-gray-500 h-8 w-8 p-0"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="chevron-left"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={goToNextPage}
+              disabled={
+                totalPages === 0 ||
+                currentPage >= totalPages ||
+                !sortedData ||
+                sortedData.length === 0
+              }
+              className="text-gray-500 h-8 w-8 p-0"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="chevron-right"
+              >
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </Button>
+          </div>
+        </div>
+      </div>
 
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -1342,6 +1258,7 @@ export function Status2Actions({
   jobParent,
   jobId,
   managed,
+  workspace = 'default',
 }) {
   const router = useRouter();
 
@@ -1354,8 +1271,32 @@ export function Status2Actions({
     });
   };
 
+  const handleDownloadLogs = (e, controller = false) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (managed) {
+      // For managed jobs
+      downloadManagedJobLogs({
+        jobId: parseInt(jobId),
+        controller: controller,
+      });
+    } else {
+      // For cluster jobs, extract cluster name from jobParent
+      const clusterNameMatch = jobParent.match(/\/clusters\/(.+)/);
+      if (clusterNameMatch) {
+        const clusterName = clusterNameMatch[1];
+        downloadJobLogs({
+          clusterName: clusterName,
+          jobIds: [jobId],
+          workspace: workspace,
+        });
+      }
+    }
+  };
+
   return (
-    <div className="flex items-center space-x-4">
+    <div className="flex items-center space-x-2">
       <Tooltip
         key="logs"
         content="View Job Logs"
@@ -1369,21 +1310,19 @@ export function Status2Actions({
           {withLabel && <span className="ml-1.5">Logs</span>}
         </button>
       </Tooltip>
-      {managed && (
-        <Tooltip
-          key="controllerlogs"
-          content="View Controller Logs"
-          className="capitalize text-sm text-muted-foreground"
+      <Tooltip
+        key="downloadlogs"
+        content="Download Job Logs"
+        className="capitalize text-sm text-muted-foreground"
+      >
+        <button
+          onClick={(e) => handleDownloadLogs(e, false)}
+          className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
         >
-          <button
-            onClick={(e) => handleLogsClick(e, 'controllerlogs')}
-            className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
-          >
-            <MonitorPlay className="w-4 h-4" />
-            {withLabel && <span className="ml-2">Controller Logs</span>}
-          </button>
-        </Tooltip>
-      )}
+          <Download className="w-4 h-4" />
+          {withLabel && <span className="ml-1.5">Download</span>}
+        </button>
+      </Tooltip>
     </div>
   );
 }
@@ -1395,6 +1334,7 @@ export function ClusterJobs({
   refreshClusterJobsOnly,
   userFilter = null,
   nameFilter = null,
+  workspace = 'default',
 }) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
@@ -1426,7 +1366,7 @@ export function ClusterJobs({
     let filtered = clusterJobData || [];
 
     // Apply user filter if provided
-    if (userFilter && userFilter !== ALL_USERS_VALUE) {
+    if (userFilter && userFilter !== 'ALL_USERS') {
       filtered = filterJobsByUser(filtered, userFilter);
     }
 
@@ -1608,11 +1548,16 @@ export function ClusterJobs({
                         />
                       </Link>
                     </TableCell>
-                    <TableCell>{item.user}</TableCell>
+                    <TableCell>
+                      <UserDisplay
+                        username={item.user}
+                        userHash={item.user_hash}
+                      />
+                    </TableCell>
                     <TableCell>
                       <Link
                         href="/workspaces"
-                        className="text-blue-600 hover:underline"
+                        className="text-gray-700 hover:text-blue-600 hover:underline"
                       >
                         {item.workspace || 'default'}
                       </Link>
@@ -1630,6 +1575,7 @@ export function ClusterJobs({
                         jobParent={`/clusters/${clusterName}`}
                         jobId={item.id}
                         managed={false}
+                        workspace={workspace}
                       />
                     </TableCell>
                   </TableRow>
@@ -1800,5 +1746,257 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
         </button>
       )}
     </div>
+  );
+}
+
+function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
+  const [data, setData] = useState([]);
+  const [sortConfig, setSortConfig] = useState({
+    key: null,
+    direction: 'ascending',
+  });
+  const [loading, setLocalLoading] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const fetchData = React.useCallback(async () => {
+    setLocalLoading(true);
+    setLoading(true);
+    try {
+      const poolsResponse = await dashboardCache.get(getPoolStatus, [{}]);
+      const { pools = [] } = poolsResponse || {};
+      setData(pools);
+      setIsInitialLoad(false);
+    } catch (err) {
+      console.error('Error fetching pools data:', err);
+      setData([]);
+      setIsInitialLoad(false);
+    } finally {
+      setLocalLoading(false);
+      setLoading(false);
+    }
+  }, [setLoading]);
+
+  // Expose fetchData to parent component
+  React.useEffect(() => {
+    if (refreshDataRef) {
+      refreshDataRef.current = fetchData;
+    }
+  }, [refreshDataRef, fetchData]);
+
+  useEffect(() => {
+    setData([]);
+    let isCurrent = true;
+
+    fetchData();
+
+    const interval = setInterval(() => {
+      if (isCurrent) {
+        fetchData();
+      }
+    }, refreshInterval);
+
+    return () => {
+      isCurrent = false;
+      clearInterval(interval);
+    };
+  }, [refreshInterval, fetchData]);
+
+  const requestSort = (key) => {
+    let direction = 'ascending';
+    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+      direction = 'descending';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortDirection = (key) => {
+    if (sortConfig.key === key) {
+      return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
+    }
+    return '';
+  };
+
+  // Sort the data
+  const sortedData = React.useMemo(() => {
+    if (!sortConfig.key) return data;
+
+    return [...data].sort((a, b) => {
+      if (a[sortConfig.key] < b[sortConfig.key]) {
+        return sortConfig.direction === 'ascending' ? -1 : 1;
+      }
+      if (a[sortConfig.key] > b[sortConfig.key]) {
+        return sortConfig.direction === 'ascending' ? 1 : -1;
+      }
+      return 0;
+    });
+  }, [data, sortConfig]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(sortedData.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const paginatedData = sortedData.slice(startIndex, endIndex);
+
+  // Page navigation handlers
+  const goToPreviousPage = () => {
+    setCurrentPage((page) => Math.max(page - 1, 1));
+  };
+
+  const goToNextPage = () => {
+    setCurrentPage((page) => Math.min(page + 1, totalPages));
+  };
+
+  const handlePageSizeChange = (e) => {
+    const newSize = parseInt(e.target.value, 10);
+    setPageSize(newSize);
+    setCurrentPage(1);
+  };
+
+  const getWorkersCount = (pool) => {
+    if (!pool || !pool.replica_info || pool.replica_info.length === 0)
+      return '0 (target: 0)';
+
+    const readyWorkers = pool.replica_info.filter(
+      (worker) => worker.status === 'READY'
+    ).length;
+    const targetWorkers = pool.target_num_replicas || 0;
+    return `${readyWorkers} (target: ${targetWorkers})`;
+  };
+
+  const JobStatusBadges = ({ jobCounts }) => {
+    return (
+      <SharedJobStatusBadges
+        jobCounts={jobCounts}
+        getStatusStyle={getStatusStyle}
+      />
+    );
+  };
+
+  const InfraBadges = ({ replicaInfo }) => {
+    return <SharedInfraBadges replicaInfo={replicaInfo} />;
+  };
+
+  return (
+    <Card>
+      <div className="overflow-x-auto rounded-lg">
+        <Table className="min-w-full table-fixed">
+          <TableHeader>
+            <TableRow>
+              <TableHead
+                className="sortable whitespace-nowrap w-32"
+                onClick={() => requestSort('name')}
+              >
+                Pool{getSortDirection('name')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-40"
+                onClick={() => requestSort('job_counts')}
+              >
+                Jobs{getSortDirection('job_counts')}
+              </TableHead>
+              <TableHead className="whitespace-nowrap w-20">Workers</TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-36"
+                onClick={() => requestSort('requested_resources_str')}
+              >
+                Worker Details{getSortDirection('requested_resources_str')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-40"
+                onClick={() => requestSort('requested_resources_str')}
+              >
+                Worker Resources{getSortDirection('requested_resources_str')}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading && isInitialLoad ? (
+              <TableRow>
+                <TableCell
+                  colSpan={5}
+                  className="text-center py-6 text-gray-500"
+                >
+                  <div className="flex justify-center items-center">
+                    <CircularProgress size={20} className="mr-2" />
+                    <span>Loading...</span>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : paginatedData.length > 0 ? (
+              paginatedData.map((pool) => (
+                <TableRow key={pool.name}>
+                  <TableCell>
+                    <Link
+                      href={`/jobs/pools/${pool.name}`}
+                      className="text-blue-600 hover:text-blue-800"
+                    >
+                      {pool.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <JobStatusBadges jobCounts={pool.jobCounts} />
+                  </TableCell>
+                  <TableCell>{getWorkersCount(pool)}</TableCell>
+                  <TableCell>
+                    <InfraBadges replicaInfo={pool.replica_info} />
+                  </TableCell>
+                  <TableCell>{pool.requested_resources_str || '-'}</TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell
+                  colSpan={5}
+                  className="text-center py-6 text-gray-500"
+                >
+                  No pools found
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Pagination */}
+      {paginatedData.length > 0 && totalPages > 1 && (
+        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-700">Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={handlePageSizeChange}
+              className="border border-gray-300 rounded px-2 py-1 text-sm"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-700">
+              {startIndex + 1}-{Math.min(endIndex, sortedData.length)} of{' '}
+              {sortedData.length}
+            </span>
+            <button
+              onClick={goToPreviousPage}
+              disabled={currentPage === 1}
+              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={goToNextPage}
+              disabled={currentPage === totalPages}
+              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

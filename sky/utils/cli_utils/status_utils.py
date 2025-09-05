@@ -6,8 +6,8 @@ import click
 import colorama
 
 from sky import backends
+from sky.schemas.api import responses
 from sky.utils import common_utils
-from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
@@ -45,7 +45,7 @@ class StatusColumn:
         return val
 
 
-def show_status_table(cluster_records: List[_ClusterRecord],
+def show_status_table(cluster_records: List[responses.StatusResponse],
                       show_all: bool,
                       show_user: bool,
                       query_clusters: Optional[List[str]] = None,
@@ -82,6 +82,7 @@ def show_status_table(cluster_records: List[_ClusterRecord],
                          _get_command,
                          truncate=not show_all,
                          show_by_default=False),
+            StatusColumn('LAST_EVENT', _get_last_event, show_by_default=False),
         ]
 
     columns = []
@@ -137,7 +138,8 @@ def get_total_cost_of_displayed_records(
 
 def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                            show_all: bool,
-                           controller_name: Optional[str] = None):
+                           controller_name: Optional[str] = None,
+                           days: Optional[int] = None):
     """Compute cluster table values and display for cost report.
 
     For each cluster, this shows: cluster name, resources, launched time,
@@ -200,23 +202,21 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         cluster_table.add_row(row)
 
     if cluster_records:
+        controller_record = cluster_records[0]
         if controller_name is not None:
-            controller = controller_utils.Controllers.from_name(controller_name)
-            if controller is None:
-                raise ValueError(f'Controller {controller_name} not found.')
-            controller_handle: backends.CloudVmRayResourceHandle = (
-                cluster_records[0]['handle'])
-            autostop_config = (
-                controller_handle.launched_resources.autostop_config)
-            if autostop_config is not None:
+            autostop = controller_record.get('autostop', None)
+            autostop_str = ''
+            if autostop is not None:
                 autostop_str = (f'{colorama.Style.DIM} (will be autostopped if '
-                                f'idle for {autostop_config.idle_minutes}min)'
+                                f'idle for {autostop}min)'
                                 f'{colorama.Style.RESET_ALL}')
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{controller_name}{colorama.Style.RESET_ALL}'
                        f'{autostop_str}')
         else:
-            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+            days_str = '' if days is None else f' (last {days} days)'
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Clusters{days_str}'
                        f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
 
@@ -316,6 +316,14 @@ def _get_head_ip(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
     return handle.head_ip
 
 
+def _get_last_event(cluster_record: _ClusterRecord,
+                    truncate: bool = True) -> str:
+    del truncate
+    if cluster_record.get('last_event', None) is None:
+        return 'No recorded events.'
+    return cluster_record['last_event']
+
+
 def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
     # autostop < 0 means nothing scheduled.
     return cluster_record['autostop'] >= 0 and _get_status(
@@ -345,7 +353,9 @@ def _get_infra(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
 
 
 def _get_status_value_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord) -> int:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> int:
+    del truncate
     status = cluster_cost_report_record['status']
     if status is None:
         return -1
@@ -353,7 +363,9 @@ def _get_status_value_for_cost_report(
 
 
 def _get_status_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
+    del truncate
     status = cluster_cost_report_record['status']
     if status is None:
         return f'{colorama.Style.DIM}TERMINATED{colorama.Style.RESET_ALL}'
@@ -361,7 +373,9 @@ def _get_status_for_cost_report(
 
 
 def _get_resources_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
+    del truncate
     launched_nodes = cluster_cost_report_record['num_nodes']
     launched_resources = cluster_cost_report_record['resources']
 
@@ -373,7 +387,9 @@ def _get_resources_for_cost_report(
 
 
 def _get_price_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
+    del truncate
     launched_nodes = cluster_cost_report_record['num_nodes']
     launched_resources = cluster_cost_report_record['resources']
 
@@ -383,7 +399,9 @@ def _get_price_for_cost_report(
 
 
 def _get_estimated_cost_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
+    del truncate
     cost = cluster_cost_report_record['total_cost']
 
     if not cost:
@@ -393,7 +411,7 @@ def _get_estimated_cost_for_cost_report(
 
 
 def show_kubernetes_cluster_status_table(
-        clusters: List['kubernetes_utils.KubernetesSkyPilotClusterInfo'],
+        clusters: List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
         show_all: bool) -> None:
     """Compute cluster table values and display for Kubernetes clusters."""
     status_columns = [

@@ -18,6 +18,12 @@ def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
 # ---------- Test multi-tenant ----------
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
 def test_multi_tenant(generic_cloud: str):
+    if smoke_tests_utils.services_account_token_configured_in_env_file():
+        pytest.skip(
+            'Skipping multi-tenant test because a service account token is '
+            'configured. The service account token represents a unique user, '
+            'so USER_ENV_VAR cannot be used to simulate multiple users.')
+
     name = smoke_tests_utils.get_cluster_name()
     user_1 = 'abcdef12'
     user_1_name = 'user1'
@@ -101,28 +107,24 @@ def test_multi_tenant(generic_cloud: str):
 
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
 def test_multi_tenant_managed_jobs(generic_cloud: str):
+    if smoke_tests_utils.services_account_token_configured_in_env_file():
+        pytest.skip(
+            'Skipping multi-tenant test because a service account token is '
+            'configured. The service account token represents a unique user, '
+            'so USER_ENV_VAR cannot be used to simulate multiple users.')
+
     name = smoke_tests_utils.get_cluster_name()
     user_1 = 'abcdef12'
     user_1_name = 'user1'
     user_2 = 'abcdef13'
     user_2_name = 'user2'
 
-    test = smoke_tests_utils.Test(
-        'test_multi_tenant_managed_jobs',
-        [
-            'echo "==== Test multi-tenant managed jobs ===="',
-            *set_user(user_1, user_1_name, [
-                f'sky jobs launch -n {name}-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml -y',
-                f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-1 | grep SUCCEEDED',
-                f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep {name}-1 | grep SUCCEEDED',
-            ]),
-            *set_user(user_2, user_2_name, [
-                f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
-                f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep {name}-1 | grep SUCCEEDED',
-                f'sky jobs launch -n {name}-2 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml -y',
-                f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-2 | grep SUCCEEDED',
-                f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep {name}-2 | grep SUCCEEDED',
-            ]),
+    controller_related_test_cmds = []
+    # Only enable controller related tests for non-consolidation mode.
+    # For consolidation mode, the controller is the same with API server,
+    # hence no `sky status` output is available nor controller down is supported.
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        controller_related_test_cmds = [
             'echo "==== Test jobs controller cluster user ===="',
             f's=$(sky status -u) && echo "$s" && echo "$s" | grep sky-jobs-controller- | grep -v {user_1_name} | grep -v {user_2_name}',
             'echo "==== Test controller down blocked by other users ===="',
@@ -143,6 +145,25 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                 f'controller=$(sky status -u | grep sky-jobs-controller- | awk \'{{print $1}}\') && echo "$controller" && echo delete | sky down "$controller" && exit 1 || true',
                 f'sky jobs cancel -y -n {name}-3',
             ]),
+        ]
+
+    test = smoke_tests_utils.Test(
+        'test_multi_tenant_managed_jobs',
+        [
+            'echo "==== Test multi-tenant managed jobs ===="',
+            *set_user(user_1, user_1_name, [
+                f'sky jobs launch -n {name}-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml -y',
+                f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-1 | grep SUCCEEDED',
+                f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep {name}-1 | grep SUCCEEDED',
+            ]),
+            *set_user(user_2, user_2_name, [
+                f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
+                f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep {name}-1 | grep SUCCEEDED',
+                f'sky jobs launch -n {name}-2 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml -y',
+                f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-2 | grep SUCCEEDED',
+                f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep {name}-2 | grep SUCCEEDED',
+            ]),
+            *controller_related_test_cmds,
         ],
         f'sky jobs cancel -y -n {name}-1; sky jobs cancel -y -n {name}-2; sky jobs cancel -y -n {name}-3',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,

@@ -14,25 +14,29 @@ on:
 jobs:
   helm-unittest:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Set up Helm
       uses: azure/setup-helm@v4
       with:
         version: '3.14.0'
-        
+
     - name: Install helm unittest plugin
       run: |
         helm plugin install https://github.com/helm-unittest/helm-unittest.git
-        
+
     - name: Update chart dependencies
       run: |
         cd charts/skypilot
         helm dependency update
-        
+
+    - name: Run helm lint
+      run: |
+        helm lint charts/skypilot
+
     - name: Run helm unit tests
       run: |
-        helm unittest -f charts/skypilot/unittests/*.yaml charts/skypilot
+        helm unittest charts/skypilot

@@ -25,7 +25,6 @@ import re
 import socket
 import subprocess
 import sys
-import typing
 from typing import Any, Dict, Optional, Tuple
 import uuid
 
@@ -37,7 +36,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
@@ -51,6 +49,7 @@ from sky.utils import config_utils
 from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -66,11 +65,6 @@ MAX_TRIALS = 64
 # because ssh key pair need to persist across API server restarts, while
 # the former dir is empheral.
 _SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
-
-if typing.TYPE_CHECKING:
-    import yaml
-else:
-    yaml = adaptors_common.LazyImport('yaml')
 
 
 def get_ssh_key_and_lock_path(
@@ -204,12 +198,12 @@ def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
-    config_str = common_utils.dump_yaml_str(config)
+    config_str = yaml_utils.dump_yaml_str(config)
     config_str = config_str.replace('skypilot:ssh_user',
                                     config['auth']['ssh_user'])
     config_str = config_str.replace('skypilot:ssh_public_key_content',
                                     public_key)
-    config = yaml.safe_load(config_str)
+    config = yaml_utils.safe_load(config_str)
     return config
 
 
@@ -289,7 +283,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         os_login_username = None
         if proc.returncode == 0:
             try:
-                profile = yaml.safe_load(proc.stdout)
+                profile = yaml_utils.safe_load(proc.stdout)
                 username = profile['posixAccounts'][0]['username']
                 if username:
                     os_login_username = username
@@ -419,12 +413,17 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    context = kubernetes_utils.get_context_from_config(config['provider'])
+
     # Default ssh session is established with kubectl port-forwarding with
     # ClusterIP service.
     nodeport_mode = kubernetes_enums.KubernetesNetworkingMode.NODEPORT
     port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_nested(('kubernetes', 'networking'),
-                                                  port_forward_mode.value)
+    network_mode_str = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('networking',),
+        default_value=port_forward_mode.value)
     try:
         network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
             network_mode_str)
@@ -439,7 +438,6 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Add the user's public key to the SkyPilot cluster.
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
-    context = kubernetes_utils.get_context_from_config(config['provider'])
     namespace = kubernetes_utils.get_namespace_from_config(config['provider'])
     k8s = kubernetes.kubernetes
     with open(public_key_path, 'r', encoding='utf-8') as f:
@@ -454,8 +452,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 'parent': 'skypilot'
             }
         }
-        custom_metadata = skypilot_config.get_nested(
-            ('kubernetes', 'custom_metadata'), {})
+        custom_metadata = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('custom_metadata',),
+            default_value={})
         config_utils.merge_k8s_configs(secret_metadata, custom_metadata)
 
         secret = k8s.client.V1Secret(

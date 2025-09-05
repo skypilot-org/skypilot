@@ -15,6 +15,7 @@ from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.skylet import autostop_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
@@ -23,6 +24,7 @@ from sky.utils import dag_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
+from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -172,13 +174,11 @@ def _execute(
     """
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     for task in dag.tasks:
-        if task.storage_mounts is not None:
-            for storage in task.storage_mounts.values():
-                # Ensure the storage is constructed.
-                storage.construct()
         for resource in task.resources:
             # For backward compatibility, we need to override the autostop
-            # config at server-side for legacy clients.
+            # config at server-side for legacy clients. This should be set
+            # before admin policy to make the admin policy get the final
+            # value of autostop config.
             # TODO(aylei): remove this after we bump the API version.
             resource.override_autostop_config(
                 down=down, idle_minutes=idle_minutes_to_autostop)
@@ -193,6 +193,16 @@ def _execute(
                 down=down,
                 dryrun=dryrun,
             )) as dag:
+        dag.resolve_and_validate_volumes()
+        if (not _is_launched_by_jobs_controller and
+                not _is_launched_by_sky_serve_controller):
+            # Only process pre-mount operations on API server.
+            dag.pre_mount_volumes()
+        for task in dag.tasks:
+            if task.storage_mounts is not None:
+                for storage in task.storage_mounts.values():
+                    # Ensure the storage is constructed.
+                    storage.construct()
         return _execute_dag(
             dag,
             dryrun=dryrun,
@@ -303,11 +313,13 @@ def _execute_dag(
 
         idle_minutes_to_autostop: Optional[int] = None
         down = False
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
                     resource_autostop_config.idle_minutes)
                 down = resource_autostop_config.down
+                wait_for = resource_autostop_config.wait_for
             else:
                 # Autostop is explicitly disabled, so cancel it if it's
                 # already set.
@@ -344,12 +356,13 @@ def _execute_dag(
         task = _maybe_clone_disk_from_cluster(clone_disk_from, cluster_name,
                                               task)
 
+    is_managed = (_is_launched_by_jobs_controller or
+                  _is_launched_by_sky_serve_controller)
+
     if not cluster_exists:
         # If spot is launched on serve or jobs controller, we don't need to
         # print out the hint.
-        if (Stage.PROVISION in stages and task.use_spot and
-                not _is_launched_by_jobs_controller and
-                not _is_launched_by_sky_serve_controller):
+        if (Stage.PROVISION in stages and task.use_spot and not is_managed):
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
             reset = colorama.Style.RESET_ALL
@@ -388,7 +401,8 @@ def _execute_dag(
         # That's because we want to do commands in task.setup and task.run again
         # after K8S pod recovers from a crash.
         # See `kubernetes-ray.yml.j2` for more details.
-        dump_final_script=is_controller_high_availability_supported)
+        dump_final_script=is_controller_high_availability_supported,
+        is_managed=is_managed)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -425,9 +439,19 @@ def _execute_dag(
             logger.info(ux_utils.starting_message('Syncing files.'))
 
         if do_workdir:
-            backend.sync_workdir(handle, task.workdir)
+            if cluster_name is not None:
+                global_user_state.add_cluster_event(
+                    cluster_name, status_lib.ClusterStatus.INIT,
+                    'Syncing files to cluster',
+                    global_user_state.ClusterEventType.STATUS_CHANGE)
+            backend.sync_workdir(handle, task.workdir, task.envs_and_secrets)
 
         if do_file_mounts:
+            if cluster_name is not None:
+                global_user_state.add_cluster_event(
+                    cluster_name, status_lib.ClusterStatus.UP,
+                    'Syncing file mounts',
+                    global_user_state.ClusterEventType.STATUS_CHANGE)
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
@@ -438,15 +462,19 @@ def _execute_dag(
                 logger.debug('Unnecessary provisioning was skipped, so '
                              'skipping setup as well.')
             else:
+                if cluster_name is not None:
+                    global_user_state.add_cluster_event(
+                        cluster_name, status_lib.ClusterStatus.UP,
+                        'Running setup commands to install dependencies',
+                        global_user_state.ClusterEventType.STATUS_CHANGE)
                 backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
-                backend.set_autostop(handle,
-                                     idle_minutes_to_autostop,
-                                     down=down)
+                backend.set_autostop(handle, idle_minutes_to_autostop, wait_for,
+                                     down)
 
         if Stage.EXEC in stages:
             try:
@@ -471,6 +499,9 @@ def _execute_dag(
 
 @timeline.event
 @usage_lib.entrypoint
+# A launch routine will share tempfiles between steps, so we init a tempdir
+# for the launch routine and gc the entire dir after launch.
+@tempstore.with_tempdir
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,

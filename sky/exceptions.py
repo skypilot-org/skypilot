@@ -6,11 +6,12 @@ import types
 import typing
 from typing import Any, Dict, List, Optional, Sequence
 
+from sky.backends import backend
 from sky.utils import env_options
+from sky.utils import serialize_utils
 
 if typing.TYPE_CHECKING:
     from sky import jobs as managed_jobs
-    from sky.backends import backend
     from sky.skylet import job_lib
     from sky.utils import status_lib
 
@@ -92,6 +93,10 @@ def serialize_exception(e: BaseException) -> Dict[str, Any]:
         attr_v = attributes[attr_k]
         if isinstance(attr_v, types.TracebackType):
             attributes[attr_k] = traceback.format_tb(attr_v)
+        if isinstance(attr_v, backend.ResourceHandle):
+            attributes[attr_k] = (
+                serialize_utils.prepare_handle_for_backwards_compatibility(
+                    attr_v))
 
     data = {
         'type': e.__class__.__name__,
@@ -175,6 +180,18 @@ class KubeAPIUnreachableError(ResourcesUnavailableError):
     pass
 
 
+class KubernetesValidationError(Exception):
+    """Raised when the Kubernetes validation fails.
+
+    It stores a list of strings that represent the path to the field which
+    caused the validation error.
+    """
+
+    def __init__(self, path: List[str], message: str):
+        super().__init__(message)
+        self.path = path
+
+
 class InvalidCloudConfigs(Exception):
     """Raised when invalid configurations are provided for a given cloud."""
     pass
@@ -187,6 +204,12 @@ class InvalidCloudCredentials(Exception):
 
 class InconsistentHighAvailabilityError(Exception):
     """Raised when the high availability property in the user config
+    is inconsistent with the actual cluster."""
+    pass
+
+
+class InconsistentConsolidationModeError(Exception):
+    """Raised when the consolidation mode property in the user config
     is inconsistent with the actual cluster."""
     pass
 
@@ -381,6 +404,7 @@ class FetchClusterInfoError(Exception):
     class Reason(enum.Enum):
         HEAD = 'HEAD'
         WORKER = 'WORKER'
+        UNKNOWN = 'UNKNOWN'
 
     def __init__(self, reason: Reason) -> None:
         super().__init__()
@@ -503,6 +527,11 @@ class APIVersionMismatchError(RuntimeError):
     pass
 
 
+class APINotSupportedError(RuntimeError):
+    """Raised when the API is not supported by the remote peer."""
+    pass
+
+
 class JobExitCode(enum.IntEnum):
     """Job exit code enum.
 
@@ -605,4 +634,50 @@ class RequestAlreadyExistsError(Exception):
 
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
+    pass
+
+
+class VolumeNotFoundError(Exception):
+    """Raised when a volume is not found."""
+    pass
+
+
+class VolumeTopologyConflictError(Exception):
+    """Raised when the there is conflict in the volumes and compute topology"""
+    pass
+
+
+class ServerTemporarilyUnavailableError(Exception):
+    """Raised when the server is temporarily unavailable."""
+    pass
+
+
+class RestfulPolicyError(Exception):
+    """Raised when failed to call a RESTful policy."""
+    pass
+
+
+class GitError(Exception):
+    """Raised when a git operation fails."""
+    pass
+
+
+class RequestInterruptedError(Exception):
+    """Raised when a request is interrupted by the server.
+    Client is expected to retry the request immediately when
+    this error is raised.
+    """
+    pass
+
+
+class SkyletInternalError(Exception):
+    """Raised when a Skylet internal error occurs."""
+    pass
+
+
+class ClientError(Exception):
+    """Raised when a there is a client error occurs.
+
+    If a request encounters a ClientError, it will not be retried to the server.
+    """
     pass

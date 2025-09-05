@@ -3,6 +3,7 @@ import unittest
 
 import jsonschema
 
+from sky.skylet import constants
 from sky.utils import schemas
 
 
@@ -140,10 +141,10 @@ class TestResourcesSchema(unittest.TestCase):
         # Invalid priority configurations
         invalid_priority_configs = [
             {
-                'priority': -1
+                'priority': constants.MIN_PRIORITY - 1
             },  # Below minimum
             {
-                'priority': 1001
+                'priority': constants.MAX_PRIORITY + 1
             },  # Above maximum
             {
                 'priority': 'high'
@@ -420,6 +421,25 @@ class TestWorkspaceSchema(unittest.TestCase):
                     msg=f"Uppercase cloud config {config} should be rejected"):
                 jsonschema.validate(instance=config,
                                     schema=self.workspaces_schema)
+
+
+class TestKubernetesSchema(unittest.TestCase):
+    """Tests for the kubernetes schema in schemas.py."""
+
+    def setUp(self):
+        self.config_schema = schemas.get_config_schema()
+        self.k8s_schema = self.config_schema['properties']['kubernetes']
+
+    def test_context_configs_allows_remote_identity(self):
+        """Test that context_configs allows remote_identity."""
+        valid_config = {
+            'context_configs': {
+                'my-context': {
+                    'remote_identity': 'my-service-account'
+                }
+            }
+        }
+        jsonschema.validate(instance=valid_config, schema=self.k8s_schema)
 
 
 if __name__ == "__main__":

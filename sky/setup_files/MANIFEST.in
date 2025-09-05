@@ -9,6 +9,7 @@ include sky/skylet/providers/ibm/*
 include sky/skylet/providers/scp/*
 include sky/skylet/providers/*.py
 include sky/skylet/ray_patches/*.patch
+include sky/skylet/ray_patches/*.diff
 include sky/jobs/dashboard/*
 include sky/jobs/dashboard/templates/*
 include sky/jobs/dashboard/static/*
@@ -17,3 +18,6 @@ include sky/utils/kubernetes/*
 include sky/server/html/*
 recursive-include sky/dashboard/out *
 include sky/users/*.conf
+include sky/utils/*.sh
+include sky/setup_files/alembic.ini
+recursive-include sky/schemas/db *

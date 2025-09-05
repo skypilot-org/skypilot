@@ -37,20 +37,37 @@ _image_df = common.read_catalog('gcp/images.csv',
 _quotas_df = common.read_catalog('gcp/accelerator_quota_mapping.csv',
                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
-# We will select from the following three CPU instance families:
+# We will select from the following six CPU instance families:
 _DEFAULT_INSTANCE_FAMILY = [
-    # This is the latest general-purpose instance family as of Mar 2023.
-    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # This is a widely used general-purpose instance family as of July 2025.
+    # CPU: Primarily Intel Ice Lake (3rd Gen Intel Xeon Scalable Processors)
+    #  or Cascade Lake (2nd Gen Intel Xeon Scalable Processors).
     # Memory: 4 GiB RAM per 1 vCPU;
     'n2-standard',
-    # This is the latest memory-optimized instance family as of Mar 2023.
-    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # This is a memory-optimized instance family as of July 2025.
+    # CPU: Primarily Intel Ice Lake (3rd Gen Intel Xeon Scalable Processors)
+    # or Cascade Lake (2nd Gen Intel Xeon Scalable Processors).
     # Memory: 8 GiB RAM per 1 vCPU;
     'n2-highmem',
-    # This is the latest compute-optimized instance family as of Mar 2023.
-    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # This is a compute-optimized instance family as of July 2025.
+    # CPU: Primarily Intel Ice Lake (3rd Gen Intel Xeon Scalable Processors)
+    #  or Cascade Lake (2nd Gen Intel Xeon Scalable Processors).
     # Memory: 1 GiB RAM per 1 vCPU;
     'n2-highcpu',
+    # This is the latest general-purpose instance family as of July 2025.
+    # CPU: Intel 5th Gen Xeon Scalable processor (Emerald Rapids).
+    # Memory: 4 GiB RAM per 1 vCPU;
+    'n4-standard',
+    # This is the latest general-purpose instance family
+    # with a higher vCPU to memory ratio as of July 2025.
+    # CPU: Intel 5th Gen Xeon Scalable processor (Emerald Rapids).
+    # Memory: 2 GiB RAM per 1 vCPU;
+    'n4-highcpu',
+    # This is the latest general-purpose instance family
+    # with a lower vCPU to memory ratio as of July 2025.
+    # CPU: Intel 5th Gen Xeon Scalable processor (Emerald Rapids).
+    # Memory: 8 GiB RAM per 1 vCPU;
+    'n4-highmem',
 ]
 # n2 is not allowed for launching GPUs for now.
 _DEFAULT_HOST_VM_FAMILY = (
@@ -262,10 +279,12 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[
+                                  resources_utils.DiskTier] = None,
+                              region: Optional[str] = None,
+                              zone: Optional[str] = None) -> Optional[str]:
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
     if memory is None:
@@ -283,7 +302,8 @@ def get_default_instance_type(
 
     df = df.loc[df['InstanceType'].apply(_filter_disk_type)]
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
-                                                      memory_gb_or_ratio)
+                                                      memory_gb_or_ratio,
+                                                      region, zone)
 
 
 def get_accelerators_from_instance_type(

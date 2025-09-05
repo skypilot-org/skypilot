@@ -1,7 +1,8 @@
 """Nebius cloud adaptor."""
+import asyncio
 import os
 import threading
-from typing import List, Optional
+from typing import Any, Awaitable, List, Optional
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -9,7 +10,48 @@ from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import ux_utils
 
+# Default read timeout for nebius SDK
+READ_TIMEOUT = 10
+
 logger = sky_logging.init_logger(__name__)
+
+_loop_lock = threading.Lock()
+_loop = None
+
+
+def _get_event_loop() -> asyncio.AbstractEventLoop:
+    """Get event loop for nebius sdk."""
+    global _loop
+
+    if _loop is not None:
+        return _loop
+
+    with _loop_lock:
+        if _loop is None:
+            # Create a new event loop in a dedicated thread
+            _loop = asyncio.new_event_loop()
+            threading.Thread(target=_loop.run_forever, daemon=True).start()
+
+        return _loop
+
+
+def sync_call(awaitable: Awaitable[Any]) -> Any:
+    """Synchronously run an awaitable in coroutine.
+
+    This wrapper is used to workaround:
+    https://github.com/nebius/pysdk/issues/76
+
+    Uses a dedicated background event loop to avoid conflicts
+    with existing asyncio contexts and prevent BlockingIOError.
+    """
+    loop = _get_event_loop()
+    future = asyncio.run_coroutine_threadsafe(_coro(awaitable), loop)
+    return future.result()
+
+
+async def _coro(awaitable: Awaitable[Any]) -> Any:
+    """Wrapper coroutine for awaitable."""
+    return await awaitable
 
 
 def tenant_id_path() -> str:
@@ -18,6 +60,10 @@ def tenant_id_path() -> str:
 
 def iam_token_path() -> str:
     return '~/.nebius/NEBIUS_IAM_TOKEN.txt'
+
+
+def domain_path() -> str:
+    return '~/.nebius/NEBIUS_DOMAIN.txt'
 
 
 def credentials_path() -> str:
@@ -38,6 +84,22 @@ def _get_workspace_credentials_path() -> Optional[str]:
 def _get_default_credentials_path() -> str:
     """Get the default credentials path."""
     return '~/.nebius/credentials.json'
+
+
+def api_domain() -> Optional[str]:
+    domain_in_ws_config = skypilot_config.get_workspace_cloud('nebius').get(
+        'domain', None)
+    if domain_in_ws_config is not None:
+        return domain_in_ws_config
+    domain_in_config = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=None, keys=('domain',), default_value=None)
+    if domain_in_config is not None:
+        return domain_in_config
+    try:
+        with open(os.path.expanduser(domain_path()), encoding='utf-8') as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        return None
 
 
 DEFAULT_REGION = 'eu-north1'
@@ -89,6 +151,12 @@ def iam():
     return iam_v1
 
 
+def billing():
+    # pylint: disable=import-outside-toplevel
+    from nebius.api.nebius.billing import v1alpha1 as billing_v1alpha1
+    return billing_v1alpha1
+
+
 def nebius_common():
     # pylint: disable=import-outside-toplevel
     from nebius.api.nebius.common import v1 as common_v1
@@ -120,8 +188,8 @@ def get_tenant_id():
         'tenant_id', None)
     if tenant_id_in_ws_config is not None:
         return tenant_id_in_ws_config
-    tenant_id_in_config = skypilot_config.get_nested(('nebius', 'tenant_id'),
-                                                     None)
+    tenant_id_in_config = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=None, keys=('tenant_id',), default_value=None)
     if tenant_id_in_config is not None:
         return tenant_id_in_config
     try:
@@ -167,10 +235,12 @@ def _sdk(token: Optional[str], cred_path: Optional[str]):
     # Exactly one of token or cred_path must be provided
     assert (token is None) != (cred_path is None), (token, cred_path)
     if token is not None:
-        return nebius.sdk.SDK(credentials=token)
+        return nebius.sdk.SDK(credentials=token, domain=api_domain())
     if cred_path is not None:
         return nebius.sdk.SDK(
-            credentials_file_name=os.path.expanduser(cred_path))
+            credentials_file_name=os.path.expanduser(cred_path),
+            domain=api_domain(),
+        )
     raise ValueError('Either token or credentials file path must be provided')
 
 

@@ -2,6 +2,7 @@
 """Example RESTful admin policy server for SkyPilot."""
 
 import argparse
+from typing import List
 
 import example_policy
 from fastapi import FastAPI
@@ -14,43 +15,39 @@ import sky
 app = FastAPI(title="Example Admin Policy Server", version="1.0.0")
 
 
-@app.post('/')
-async def apply_policy(request: Request) -> JSONResponse:
-    """Apply an admin policy loaded from external package to a user request"""
-    # Decode from request body
-    json_data = await request.json()
-    user_request = sky.UserRequest.decode(json_data)
-
-    # Apply validation and mutation using the loaded policy
-    mutated_request = request.app.state.policy_impl.apply(user_request)
-    return JSONResponse(content=mutated_request.encode())
-
-
-class SetAutostoPolicy(sky.AdminPolicy):
-    """Example: implement a policy at server."""
+class DoNothingPolicy(sky.AdminPolicy):
+    """Example policy: do nothing."""
 
     @classmethod
     def validate_and_mutate(
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
-        task = user_request.task
-        for r in task.resources:
-            r.override_autostop_config(idle_minutes=10)
-        return sky.MutatedUserRequest(
-            task=task, skypilot_config=user_request.skypilot_config)
+        """Returns the user request unchanged."""
+        return sky.MutatedUserRequest(user_request.task,
+                                      user_request.skypilot_config)
 
 
-@app.post('/set_autostop')
-async def set_autostop(request: Request) -> JSONResponse:
-    """Example: apply the above policy at the API handler."""
+@app.post('/')
+async def apply_policy(request: Request) -> JSONResponse:
+    """Apply an admin policy loaded from external package to a user request"""
+    # Decode
     json_data = await request.json()
     user_request = sky.UserRequest.decode(json_data)
-    mutated_request = SetAutostoPolicy.validate_and_mutate(user_request)
+    # Example: change the following list to apply different policies.
+    policies: List[sky.AdminPolicy] = [
+        # Example: policy that implemented in the server package.
+        DoNothingPolicy,
+        # Example: policy from third party packages.
+        example_policy.UseSpotForGpuPolicy,
+    ]
+    try:
+        for policy in policies:
+            mutated_request = policy.validate_and_mutate(user_request)
+            user_request.task = mutated_request.task
+            user_request.skypilot_config = mutated_request.skypilot_config
+    except Exception as e:  # pylint: disable=broad-except
+        return JSONResponse(content=str(e), status_code=400)
+
     return JSONResponse(content=mutated_request.encode())
-
-
-@app.get('/')
-async def health_check():
-    return 'OK'
 
 
 if __name__ == '__main__':
@@ -62,15 +59,7 @@ if __name__ == '__main__':
                         type=int,
                         default=8080,
                         help='Port to bind to (default: 8080)')
-    parser.add_argument('--policy',
-                        default='DoNothingPolicy',
-                        help='Policy to use (default: DoNothingPolicy)')
     args = parser.parse_args()
-    policy_class = getattr(example_policy, args.policy)
-    assert issubclass(
-        policy_class,
-        sky.AdminPolicy), f'Policy {args.policy} is not a valid admin policy'
-    app.state.policy_impl = policy_class()
     uvicorn.run(app,
                 workers=1,
                 host=args.host,

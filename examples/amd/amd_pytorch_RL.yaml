@@ -1,0 +1,32 @@
+name: amd-rocm-pytorch-RL
+
+resources:
+  cloud: kubernetes
+  image_id: docker:rocm/pytorch-training:v25.6
+  accelerators: MI300:2
+  cpus: 128
+  memory: 512+
+
+
+setup: |
+  echo " Reinforcement Learning example derived from https://github.com/pytorch/examples"
+  sleep 10
+  
+run: |
+  echo " rocm-smi smoke test:"
+  rocm-smi
+  # amd dockers can use their own conda environment
+  conda deactivate
+  
+  git clone https://github.com/pytorch/examples.git
+  cd examples/reinforcement_learning
+  # Install dependencies
+  pip install -r requirements.txt
+  sleep 5
+ 
+  echo "Running reinforce example..."
+  python3 reinforce.py
+
+  echo "Running actor_critic example..."
+  python3 actor_critic.py
+  rocm-smi

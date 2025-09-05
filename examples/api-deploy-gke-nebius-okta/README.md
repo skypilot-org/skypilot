@@ -27,7 +27,7 @@ More infra choices (AWS, Lambda Cloud, RunPod, SSH Node Pools, and more) are cov
 
 ## Prerequisites
 
-* Okta with SkyPilot API server configured as OIDC App (see [docs](https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#setting-up-oauth2-proxy-with-okta))
+* Okta with SkyPilot API server configured as OIDC App (see [docs](https://docs.skypilot.co/en/latest/reference/auth.html#okta-oidc-setup))
 * GCP credentials with access to a GKE cluster and permissions to create VMs ([service account with json key](https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html#service-account))
 * Nebius credentials ([service account with json key](https://docs.nebius.com/iam/service-accounts/authorized-keys#create))
 * An existing [Nebius Managed Kubernetes cluster](https://docs.nebius.com/kubernetes)
@@ -271,30 +271,12 @@ Some commands to try:
 
 To configure SkyPilot to use infiniband on Nebius:
 
-1. Set the following config in your SkyPilot task YAML to enable InfiniBand:
+Set `network_tier: best` in your SkyPilot task YAML resources to enable InfiniBand:
 
     ```yaml
-    config:
-      kubernetes:
-        pod_config:
-          spec:
-            containers:
-            - securityContext:
-                capabilities:
-                  add:
-                  - IPC_LOCK
+    resources:
+      network_tier: best
     ```
-
-2. Configure the environment variables in your SkyPilot task:
-
-    ```yaml
-    run: |
-      export NCCL_IB_HCA=mlx5
-      export UCX_NET_DEVICES=mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1
-      ... your own run script ...
-    ```
-
-> **💡 Tip:** Add the above config to the SkyPilot config (`~/.sky/config.yaml` [global config](https://docs.skypilot.co/en/latest/reference/config.html#config-yaml) or `.sky.yaml` [project config](https://docs.skypilot.co/en/latest/reference/config-sources.html#config-client-project-config)) to have Infiniband configured automatically for all your jobs.
 
 Refer to [Using InfiniBand in Nebius with SkyPilot](https://docs.skypilot.co/en/latest/examples/performance/nebius_infiniband.html)  and [NCCL test example](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl.yaml) for more details.
 

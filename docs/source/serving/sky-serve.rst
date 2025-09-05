@@ -37,11 +37,6 @@ How it works:
 .. features a simple YAML spec to describe your services (referred to as a *service
 .. YAML* in the following) and a centralized controller to manage the deployments.
 
-
-.. tip::
-
-  To get started with SkyServe, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
-
 Quick tour: LLM serving
 -----------------------
 

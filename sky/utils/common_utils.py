@@ -1,16 +1,17 @@
 """Utils shared between all of sky"""
 
 import difflib
+import enum
 import functools
 import getpass
 import hashlib
 import inspect
-import io
 import os
 import platform
 import random
 import re
 import socket
+import subprocess
 import sys
 import time
 import typing
@@ -32,13 +33,11 @@ from sky.utils import validator
 if typing.TYPE_CHECKING:
     import jinja2
     import psutil
-    import yaml
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     psutil = adaptors_common.LazyImport('psutil')
-    yaml = adaptors_common.LazyImport('yaml')
 
-_USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
 
 # We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
@@ -51,6 +50,25 @@ _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 _VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 
 logger = sky_logging.init_logger(__name__)
+
+
+class ProcessStatus(enum.Enum):
+    """Process status."""
+
+    # The process is scheduled to run, but not started yet.
+    SCHEDULED = 'SCHEDULED'
+
+    # The process is running
+    RUNNING = 'RUNNING'
+
+    # The process is finished and succeeded
+    SUCCEEDED = 'SUCCEEDED'
+
+    # The process is interrupted
+    INTERRUPTED = 'INTERRUPTED'
+
+    # The process failed
+    FAILED = 'FAILED'
 
 
 @annotations.lru_cache(scope='request')
@@ -70,11 +88,10 @@ def get_usage_run_id() -> str:
 def is_valid_user_hash(user_hash: Optional[str]) -> bool:
     if user_hash is None:
         return False
-    try:
-        int(user_hash, 16)
-    except (TypeError, ValueError):
-        return False
-    return len(user_hash) == USER_HASH_LENGTH
+    # Must start with a letter, followed by alphanumeric characters and hyphens
+    # This covers both old hex format (e.g., "abc123") and new service account
+    # format (e.g., "sa-abc123-token-xyz")
+    return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$', user_hash))
 
 
 def generate_user_hash() -> str:
@@ -85,6 +102,18 @@ def generate_user_hash() -> str:
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     return user_hash
+
+
+def get_git_commit(path: Optional[str] = None) -> Optional[str]:
+    try:
+        result = subprocess.run(['git', 'rev-parse', 'HEAD'],
+                                capture_output=True,
+                                text=True,
+                                cwd=path,
+                                check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
 
 
 def get_user_hash() -> str:
@@ -98,19 +127,24 @@ def get_user_hash() -> str:
         assert user_hash is not None
         return user_hash
 
-    if os.path.exists(_USER_HASH_FILE):
+    if os.path.exists(USER_HASH_FILE):
         # Read from cached user hash file.
-        with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
+        with open(USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
             user_hash = f.read().strip()
         if is_valid_user_hash(user_hash):
             return user_hash
 
     user_hash = generate_user_hash()
-    os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
-        f.write(user_hash)
+    set_user_hash_locally(user_hash)
     return user_hash
+
+
+def set_user_hash_locally(user_hash: str) -> None:
+    """Sets the user hash to local file."""
+    os.makedirs(os.path.dirname(USER_HASH_FILE), exist_ok=True)
+    with open(USER_HASH_FILE, 'w', encoding='utf-8') as f:
+        f.write(user_hash)
 
 
 def base36_encode(hex_str: str) -> str:
@@ -258,12 +292,13 @@ _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
 _using_remote_api_server: Optional[bool] = None
 _current_user: Optional['models.User'] = None
+_current_request_id: Optional[str] = None
 
 
 def set_request_context(client_entrypoint: Optional[str],
                         client_command: Optional[str],
                         using_remote_api_server: bool,
-                        user: Optional['models.User']):
+                        user: Optional['models.User'], request_id: str) -> None:
     """Override the current client entrypoint and command.
 
     This is useful when we are on the SkyPilot API server side and we have a
@@ -273,10 +308,19 @@ def set_request_context(client_entrypoint: Optional[str],
     global _current_client_entrypoint
     global _using_remote_api_server
     global _current_user
+    global _current_request_id
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
     _using_remote_api_server = using_remote_api_server
     _current_user = user
+    _current_request_id = request_id
+
+
+def get_current_request_id() -> str:
+    """Returns the current request id."""
+    if _current_request_id is not None:
+        return _current_request_id
+    return 'dummy-request-id'
 
 
 def get_current_command() -> str:
@@ -296,6 +340,13 @@ def get_current_user() -> 'models.User':
     if _current_user is not None:
         return _current_user
     return models.User.get_current_user()
+
+
+def get_current_user_name() -> str:
+    """Returns the current user name."""
+    name = get_current_user().name
+    assert name is not None
+    return name
 
 
 def set_current_user(user: 'models.User'):
@@ -343,30 +394,108 @@ def get_pretty_entrypoint_cmd() -> str:
         # things like 'examples/app.py'.
         argv[0] = basename
 
-    # Redact sensitive environment variable values
-    argv = _redact_env_values(argv)
+    # Redact sensitive values from secrets arguments
+    argv = _redact_secrets_values(argv)
 
     return ' '.join(argv)
 
 
-def _redact_env_values(argv: List[str]) -> List[str]:
-    """Redact sensitive values from --env arguments.
+def read_last_n_lines(file_path: str,
+                      n: int,
+                      chunk_size: int = 8192,
+                      encoding: str = 'utf-8',
+                      errors: str = 'replace') -> List[str]:
+    """Read the last N lines of a file.
+
+    Args:
+        file_path: Path to the file to read.
+        n: Number of lines to read from the end of the file.
+        chunk_size: Size of chunks in bytes.
+        encoding: Encoding to use when decoding binary chunks.
+        errors: Error handling for decode errors (e.g., 'replace', 'ignore').
+
+    Returns:
+        A list of the last N lines, preserving newlines where applicable.
+    """
+
+    assert n >= 0, f'n must be non-negative. Got {n}'
+    assert chunk_size > 0, f'chunk_size must be positive. Got {chunk_size}'
+    assert os.path.exists(file_path), f'File not found: {file_path}'
+
+    if n == 0:
+        return []
+
+    try:
+        with open(file_path, 'rb') as f:
+            # Start reading from the end of the file
+            f.seek(0, os.SEEK_END)
+            file_size = f.tell()
+            if file_size == 0:
+                return []
+
+            pos = file_size
+            lines_found = 0
+            chunks = []
+
+            # Read backwards in chunks until we've found at least n newlines
+            while pos > 0 and lines_found <= n:
+                read_size = min(chunk_size, pos)
+                pos -= read_size
+                f.seek(pos)
+                chunk = f.read(read_size)
+                chunks.append(chunk)
+                lines_found += chunk.count(b'\n')
+
+            # Combine all chunks in reverse order since we read backwards
+            full_bytes = b''.join(reversed(chunks))
+
+            # Split by newline byte. Note: this handles '\n' endings.
+            all_lines = full_bytes.split(b'\n')
+
+            # Handle edge case: if file ends with a newline, last element is b''
+            if all_lines and all_lines[-1] == b'':
+                result_bytes = all_lines[-n - 1:-1]
+            else:
+                result_bytes = all_lines[-n:]
+
+            # Decode each line and normalize CR/LF endings
+            decoded_lines = [
+                line.decode(encoding, errors=errors).rstrip('\r') + '\n'
+                for line in result_bytes[:-1]
+            ]
+
+            # Decode the final line — only add newline if it was present
+            last_line = result_bytes[-1].decode(encoding,
+                                                errors=errors).rstrip('\r')
+            decoded_lines.append(last_line)
+
+            return decoded_lines
+
+    except OSError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Failed to read last {n} lines from {file_path}: {e}') from e
+
+
+def _redact_secrets_values(argv: List[str]) -> List[str]:
+    """Redact sensitive values from --secret arguments.
 
     Args:
         argv: Command line arguments
 
     Returns:
-        Modified argv with redacted --env values, or original argv if any error
+        Modified argv with redacted --secret values, or original argv if any
+        error
 
     Examples:
-        ['sky', 'launch', '--env', 'HF_TOKEN=secret'] ->
-        ['sky', 'launch', '--env', 'HF_TOKEN=<redacted>']
+        ['sky', 'launch', '--secret', 'HF_TOKEN=secret'] ->
+        ['sky', 'launch', '--secret', 'HF_TOKEN=<redacted>']
 
-        ['sky', 'launch', '--env=HF_TOKEN=secret'] ->
-        ['sky', 'launch', '--env=HF_TOKEN=<redacted>']
+        ['sky', 'launch', '--secret=HF_TOKEN=secret'] ->
+        ['sky', 'launch', '--secret=HF_TOKEN=<redacted>']
 
-        ['sky', 'launch', '--env', 'HF_TOKEN'] ->
-        ['sky', 'launch', '--env', 'HF_TOKEN'] (no change)
+        ['sky', 'launch', '--secret', 'HF_TOKEN'] ->
+        ['sky', 'launch', '--secret', 'HF_TOKEN'] (no change)
     """
     try:
         if not argv:
@@ -384,7 +513,7 @@ def _redact_env_values(argv: List[str]) -> List[str]:
                 i += 1
                 continue
 
-            if arg == '--env' and i + 1 < len(argv):
+            if arg == '--secret' and i + 1 < len(argv):
                 result.append(arg)
                 next_arg = argv[i + 1]
                 # Ensure next_arg is a string and handle redaction safely
@@ -395,9 +524,10 @@ def _redact_env_values(argv: List[str]) -> List[str]:
                 else:
                     result.append(next_arg)
                 i += 2
-            elif arg.startswith('--env='):
+            elif arg.startswith('--secret='):
                 # Redact only if there's a value after the key
-                redacted = re.sub(r'^(--env=[^=]+)=.*', r'\1=<redacted>', arg)
+                redacted = re.sub(r'^(--secret=[^=]+)=.*', r'\1=<redacted>',
+                                  arg)
                 result.append(redacted)
                 i += 1
             else:
@@ -438,69 +568,6 @@ def user_and_hostname_hash() -> str:
     """
     hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
     return f'{getpass.getuser()}-{hostname_hash}'
-
-
-def read_yaml(path: Optional[str]) -> Dict[str, Any]:
-    if path is None:
-        raise ValueError('Attempted to read a None YAML.')
-    with open(path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
-    return config
-
-
-def read_yaml_all_str(yaml_str: str) -> List[Dict[str, Any]]:
-    stream = io.StringIO(yaml_str)
-    config = yaml.safe_load_all(stream)
-    configs = list(config)
-    if not configs:
-        # Empty YAML file.
-        return [{}]
-    return configs
-
-
-def read_yaml_all(path: str) -> List[Dict[str, Any]]:
-    with open(path, 'r', encoding='utf-8') as f:
-        return read_yaml_all_str(f.read())
-
-
-def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
-                                       Dict[str, Any]]) -> None:
-    """Dumps a YAML file.
-
-    Args:
-        path: the path to the YAML file.
-        config: the configuration to dump.
-    """
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(dump_yaml_str(config))
-
-
-def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
-    """Dumps a YAML string.
-
-    Args:
-        config: the configuration to dump.
-
-    Returns:
-        The YAML string.
-    """
-
-    # https://github.com/yaml/pyyaml/issues/127
-    class LineBreakDumper(yaml.SafeDumper):
-
-        def write_line_break(self, data=None):
-            super().write_line_break(data)
-            if len(self.indents) == 1:
-                super().write_line_break()
-
-    if isinstance(config, list):
-        dump_func = yaml.dump_all  # type: ignore
-    else:
-        dump_func = yaml.dump  # type: ignore
-    return dump_func(config,
-                     Dumper=LineBreakDumper,
-                     sort_keys=False,
-                     default_flow_style=False)
 
 
 def make_decorator(cls, name_or_fn: Union[str, Callable],
@@ -752,7 +819,7 @@ def get_cleaned_username(username: str = '') -> str:
     Returns:
       A cleaned username.
     """
-    username = username or getpass.getuser()
+    username = username or get_current_user_name()
     username = username.lower()
     username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)

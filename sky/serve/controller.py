@@ -4,6 +4,7 @@ Responsible for autoscaling and replica management.
 """
 import contextlib
 import logging
+import os
 import threading
 import time
 import traceback
@@ -26,11 +27,12 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
-class SuppressSuccessGetAccessLogsFilter(logging.Filter):
+class AutoscalerInfoFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        return not ('GET' in message and '200' in message)
+        return not ('GET' in message and '200' in message and
+                    '/autoscaler/info' in message)
 
 
 class SkyServeController:
@@ -60,6 +62,7 @@ class SkyServeController:
         uvicorn_access_logger = logging.getLogger('uvicorn.access')
         for handler in uvicorn_access_logger.handlers:
             handler.setFormatter(sky_logging.FORMATTER)
+            handler.addFilter(AutoscalerInfoFilter())
         yield
 
     def _run_autoscaler(self):
@@ -75,7 +78,11 @@ class SkyServeController:
                 assert record is not None, ('No service record found for '
                                             f'{self._service_name}')
                 active_versions = record['active_versions']
-                logger.info(f'All replica info: {replica_infos}')
+                logger.info(f'All replica info for autoscaler: {replica_infos}')
+
+                # Autoscaler now extracts GPU type info directly from
+                # replica_infos in generate_scaling_decisions method
+                # for better decoupling.
                 scaling_options = self._autoscaler.generate_scaling_decisions(
                     replica_infos, active_versions)
                 for scaling_option in scaling_options:
@@ -100,6 +107,11 @@ class SkyServeController:
 
     def run(self) -> None:
 
+        @self._app.get('/autoscaler/info')
+        async def get_autoscaler_info() -> fastapi.Response:
+            return responses.JSONResponse(content=self._autoscaler.info(),
+                                          status_code=200)
+
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(
                 request: fastapi.Request) -> fastapi.Response:
@@ -110,11 +122,37 @@ class SkyServeController:
             timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
-            return responses.JSONResponse(content={
-                'ready_replica_urls':
-                    self._replica_manager.get_active_replica_urls()
-            },
-                                          status_code=200)
+
+            # Get replica information for instance-aware load balancing
+            replica_infos = serve_state.get_replica_infos(self._service_name)
+            ready_replica_urls = self._replica_manager.get_active_replica_urls()
+
+            # Use URL-to-info mapping to avoid duplication
+            replica_info = {}
+            for info in replica_infos:
+                if info.url in ready_replica_urls:
+                    # Get GPU type from handle.launched_resources.accelerators
+                    gpu_type = 'unknown'
+                    handle = info.handle()
+                    if handle is not None:
+                        accelerators = handle.launched_resources.accelerators
+                        if accelerators and len(accelerators) > 0:
+                            # Get the first accelerator type
+                            gpu_type = list(accelerators.keys())[0]
+
+                    replica_info[info.url] = {'gpu_type': gpu_type}
+
+            # Check that all ready replica URLs are included in replica_info
+            missing_urls = set(ready_replica_urls) - set(replica_info.keys())
+            if missing_urls:
+                logger.warning(f'Ready replica URLs missing from replica_info: '
+                               f'{missing_urls}')
+                # fallback: add missing URLs with unknown GPU type
+                for url in missing_urls:
+                    replica_info[url] = {'gpu_type': 'unknown'}
+
+            return responses.JSONResponse(
+                content={'replica_info': replica_info}, status_code=200)
 
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request) -> fastapi.Response:
@@ -156,9 +194,13 @@ class SkyServeController:
                 return responses.JSONResponse(content={'message': 'Success'},
                                               status_code=200)
             except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error in update_service: '
-                             f'{common_utils.format_exception(e)}')
-                return responses.JSONResponse(content={'message': 'Error'},
+                exception_str = common_utils.format_exception(e)
+                logger.error(f'Error in update_service: {exception_str}')
+                return responses.JSONResponse(content={
+                    'message': 'Error',
+                    'exception': exception_str,
+                    'traceback': traceback.format_exc()
+                },
                                               status_code=500)
 
         @self._app.post('/controller/terminate_replica')
@@ -233,7 +275,7 @@ class SkyServeController:
         threading.Thread(target=self._run_autoscaler).start()
 
         logger.info('SkyServe Controller started on '
-                    f'http://{self._host}:{self._port}')
+                    f'http://{self._host}:{self._port}. PID: {os.getpid()}')
 
         uvicorn.run(self._app, host=self._host, port=self._port)
 

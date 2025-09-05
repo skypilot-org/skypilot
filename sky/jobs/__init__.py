@@ -5,6 +5,11 @@ from sky.jobs.client.sdk import cancel
 from sky.jobs.client.sdk import dashboard
 from sky.jobs.client.sdk import download_logs
 from sky.jobs.client.sdk import launch
+from sky.jobs.client.sdk import pool_apply
+from sky.jobs.client.sdk import pool_down
+from sky.jobs.client.sdk import pool_status
+from sky.jobs.client.sdk import pool_sync_down_logs
+from sky.jobs.client.sdk import pool_tail_logs
 from sky.jobs.client.sdk import queue
 from sky.jobs.client.sdk import tail_logs
 from sky.jobs.constants import JOBS_CLUSTER_NAME_PREFIX_LENGTH

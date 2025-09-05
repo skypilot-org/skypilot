@@ -1,7 +1,10 @@
 """Example prebuilt admin policies."""
 import subprocess
+from typing import List
 
 import sky
+from sky.schemas.api import responses
+from sky.utils import common
 
 
 class DoNothingPolicy(sky.AdminPolicy):
@@ -102,11 +105,16 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
 
         # Get the cluster record to operate on.
         cluster_name = request_options.cluster_name
-        cluster_records = []
+        cluster_records: List[responses.StatusResponse] = []
         if cluster_name is not None:
-            cluster_records = sky.status(cluster_name,
-                                         refresh=True,
-                                         all_users=True)
+            try:
+                cluster_records = sky.get(
+                    sky.status([cluster_name],
+                               refresh=common.StatusRefreshMode.AUTO,
+                               all_users=True))
+            except Exception as e:
+                raise RuntimeError('Failed to get cluster status for '
+                                   f'{cluster_name}: {e}') from None
 
         # Check if the user request should specify autostop settings.
         need_autostop = False
@@ -148,9 +156,11 @@ class SetMaxAutostopIdleMinutesPolicy(sky.AdminPolicy):
         for r in task.resources:
             disabled = (r.autostop_config is None or
                         not r.autostop_config.enabled)
-            too_long = (not disabled and
-                        r.autostop_config.idle_minutes is not None and
-                        r.autostop_config.idle_minutes > max_idle_minutes)
+            too_long = False
+            if not disabled:
+                assert r.autostop_config is not None
+                too_long = (r.autostop_config.idle_minutes is not None and
+                            r.autostop_config.idle_minutes > max_idle_minutes)
             if disabled or too_long:
                 r.override_autostop_config(idle_minutes=max_idle_minutes)
 
@@ -161,8 +171,8 @@ class SetMaxAutostopIdleMinutesPolicy(sky.AdminPolicy):
 def update_current_kubernetes_clusters_from_registry():
     """Mock implementation of updating kubernetes clusters from registry."""
     # All cluster names can be fetched from an organization's internal API.
-    NEW_CLUSTER_NAMES = ['my-cluster']
-    for cluster_name in NEW_CLUSTER_NAMES:
+    new_cluster_names = ['my-cluster']
+    for cluster_name in new_cluster_names:
         # Update the local kubeconfig with the new cluster credentials.
         subprocess.run(
             f'gcloud container clusters get-credentials {cluster_name} '
@@ -173,6 +183,7 @@ def update_current_kubernetes_clusters_from_registry():
 
 def get_allowed_contexts():
     """Mock implementation of getting allowed kubernetes contexts."""
+    # pylint: disable=import-outside-toplevel
     from sky.provision.kubernetes import utils
     contexts = utils.get_all_kube_context_names()
     return contexts[:2]
@@ -200,3 +211,20 @@ class DynamicKubernetesContextsUpdatePolicy(sky.AdminPolicy):
         config.set_nested(('kubernetes', 'allowed_contexts'), allowed_contexts)
         return sky.MutatedUserRequest(task=user_request.task,
                                       skypilot_config=config)
+
+
+class AddVolumesPolicy(sky.AdminPolicy):
+    """Example policy: add volumes to the task."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        task = user_request.task
+        if task.is_controller_task():
+            # Skip applying admin policy to job/serve controller
+            return sky.MutatedUserRequest(task, user_request.skypilot_config)
+        # Use `task.set_volumes` to set the volumes.
+        # Or use `task.update_volumes` to update in-place
+        # instead of overwriting.
+        task.set_volumes({'/mnt/data0': 'pvc0'})
+        return sky.MutatedUserRequest(task, user_request.skypilot_config)

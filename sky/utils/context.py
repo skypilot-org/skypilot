@@ -254,7 +254,9 @@ class Popen(subprocess.Popen):
     def __init__(self, *args, **kwargs):
         env = kwargs.pop('env', None)
         if env is None:
-            env = os.environ
+            # Pass a copy of current context.environ to avoid race condition
+            # when the context is updated after the Popen is created.
+            env = os.environ.copy()
         super().__init__(*args, env=env, **kwargs)
 
 

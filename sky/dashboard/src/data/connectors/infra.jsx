@@ -3,11 +3,41 @@ import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 // Importing from the same directory
 import { apiClient } from '@/data/connectors/client';
 
-export async function getCloudInfrastructure(clusters, jobs) {
+export async function getCloudInfrastructure(forceRefresh = true) {
+  const dashboardCache = (await import('@/lib/cache')).default;
+  const { getClusters } = await import('@/data/connectors/clusters');
+  const { getManagedJobs } = await import('@/data/connectors/jobs');
   try {
+    const jobsData = await dashboardCache.get(getManagedJobs, [
+      { allUsers: true },
+    ]);
+    const jobs = jobsData?.jobs || [];
+    const clustersData = await dashboardCache.get(getClusters);
+    const clusters = clustersData || [];
     // Get enabled clouds
     let enabledCloudsList = [];
     try {
+      // If forceRefresh is true, first run sky check to refresh cloud status
+      if (forceRefresh) {
+        console.log('Force refreshing clouds by running sky check...');
+        try {
+          const checkResponse = await apiClient.post('/check', {});
+          const checkId =
+            checkResponse.headers.get('X-Skypilot-Request-ID') ||
+            checkResponse.headers.get('X-Request-ID');
+
+          // Wait for the check to complete
+          const checkResult = await apiClient.get(
+            `/api/get?request_id=${checkId}`
+          );
+          const checkData = await checkResult.json();
+          console.log('Sky check completed:', checkData);
+        } catch (checkError) {
+          console.error('Error running sky check:', checkError);
+          // Continue anyway - we'll still try to get the cached enabled clouds
+        }
+      }
+
       const enabledCloudsResponse = await apiClient.get(`/enabled_clouds`);
 
       const id =
@@ -71,10 +101,10 @@ export async function getCloudInfrastructure(clusters, jobs) {
       (c) => c.enabled
     ).length;
 
-    // Convert to array, filter to only enabled clouds, and sort
+    // Convert to array, filter to only enabled clouds, and sort by name
     const result = Object.values(cloudsData)
       .filter((cloud) => cloud.enabled)
-      .sort((a, b) => b.clusters - a.clusters || b.jobs - a.jobs);
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     return {
       clouds: result,
@@ -91,117 +121,13 @@ export async function getCloudInfrastructure(clusters, jobs) {
   }
 }
 
-/**
- * Main function to get all infrastructure data.
- * Uses cached data from clusters and jobs to avoid redundant API calls.
- */
-export async function getInfraData() {
-  // Import here to avoid circular dependencies
-  const { getClusters } = await import('@/data/connectors/clusters');
-  const { getManagedJobs } = await import('@/data/connectors/jobs');
+export async function getGPUs() {
   const dashboardCache = (await import('@/lib/cache')).default;
-
-  // Use cache to get data instead of calling functions directly
-  const [clustersData, jobsData] = await Promise.all([
-    dashboardCache.get(getClusters),
-    dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
-  ]);
-
+  const { getClusters } = await import('@/data/connectors/clusters');
+  const clustersData = await dashboardCache.get(getClusters);
   const clusters = clustersData || [];
-  const jobs = jobsData?.jobs || [];
-
-  // Fetch both GPU and cloud data together
-  const [gpuData, cloudData] = await Promise.all([
-    getGPUs(clusters, jobs),
-    getCloudInfrastructure(clusters, jobs),
-  ]);
-
-  return {
-    gpuData,
-    cloudData,
-  };
-}
-
-export async function getGPUs(clusters, jobs) {
-  const clustersAndJobsData = {
-    clusters: clusters || [],
-    jobs: jobs || [],
-  };
-  const gpus = await getKubernetesGPUs(clustersAndJobsData);
+  const gpus = await getKubernetesGPUs(clusters);
   return gpus;
-}
-
-async function getKubernetesContextGPUs() {
-  try {
-    const response = await apiClient.post(
-      `/realtime_kubernetes_gpu_availability`,
-      {
-        context: null,
-        name_filter: null,
-        quantity_filter: null,
-      }
-    );
-
-    if (!response.ok) {
-      console.error(
-        `Error fetching Kubernetes context GPUs (in getKubernetesContextGPUs): ${response.status} ${response.statusText}`
-      );
-      return [];
-    }
-
-    const id =
-      response.headers.get('X-Skypilot-Request-ID') ||
-      response.headers.get('x-request-id');
-
-    if (!id) {
-      console.error(
-        'No request ID returned for Kubernetes GPU availability (in getKubernetesContextGPUs)'
-      );
-      return [];
-    }
-
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    const rawText = await fetchedData.text();
-
-    if (fetchedData.status === 500) {
-      try {
-        const errorData = JSON.parse(rawText);
-        if (errorData.detail && errorData.detail.error) {
-          try {
-            const errorDetail = JSON.parse(errorData.detail.error);
-            console.error(
-              '[infra.jsx] getKubernetesContextGPUs: Server error detail:',
-              errorDetail.message
-            );
-          } catch (jsonError) {
-            console.error(
-              '[infra.jsx] getKubernetesContextGPUs: Error parsing server error JSON:',
-              jsonError,
-              'Original error text:',
-              errorData.detail.error
-            );
-          }
-        }
-      } catch (parseError) {
-        console.error(
-          '[infra.jsx] getKubernetesContextGPUs: Error parsing 500 error response JSON:',
-          parseError,
-          'Raw text was:',
-          rawText
-        );
-      }
-      return [];
-    }
-    const data = JSON.parse(rawText);
-    const contextGPUs = data.return_value ? JSON.parse(data.return_value) : [];
-    return contextGPUs;
-  } catch (error) {
-    console.error(
-      '[infra.jsx] Outer error in getKubernetesContextGPUs:',
-      error
-    );
-    return [];
-  }
 }
 
 async function getAllContexts() {
@@ -272,45 +198,10 @@ async function getKubernetesPerNodeGPUs(context) {
   }
 }
 
-export async function getContextClustersAndJobs(clustersAndJobsData) {
+export async function getContextJobs(jobs) {
   try {
-    const clusters = clustersAndJobsData.clusters;
-    const jobs = clustersAndJobsData.jobs;
-
-    // Count clusters and jobs per k8s context/ssh node pool
+    // Count jobs per k8s context/ssh node pool
     const contextStats = {};
-
-    clusters.forEach((cluster) => {
-      let contextKey = null;
-
-      // Check if it's a Kubernetes cluster
-      if (cluster.cloud === 'Kubernetes') {
-        // For Kubernetes clusters, the context name is in cluster.region
-        contextKey = cluster.region;
-        if (contextKey) {
-          contextKey = `kubernetes/${contextKey}`;
-        }
-      }
-      // Check if it's an SSH Node Pool cluster
-      else if (cluster.cloud === 'SSH') {
-        // For SSH clusters, the node pool name is in cluster.region
-        contextKey = cluster.region;
-        if (contextKey) {
-          // Remove 'ssh-' prefix if present for display
-          const poolName = contextKey.startsWith('ssh-')
-            ? contextKey.substring(4)
-            : contextKey;
-          contextKey = `ssh/${poolName}`;
-        }
-      }
-
-      if (contextKey) {
-        if (!contextStats[contextKey]) {
-          contextStats[contextKey] = { clusters: 0, jobs: 0 };
-        }
-        contextStats[contextKey].clusters += 1;
-      }
-    });
 
     // Process jobs
     jobs.forEach((job) => {
@@ -347,12 +238,55 @@ export async function getContextClustersAndJobs(clustersAndJobsData) {
 
     return contextStats;
   } catch (error) {
-    console.error('=== Error in getContextClustersAndJobs ===', error);
+    console.error('=== Error in getContextJobs ===', error);
     return {};
   }
 }
 
-async function getKubernetesGPUs(clustersAndJobsData) {
+export async function getContextClusters(clusters) {
+  try {
+    // Count clusters per k8s context/ssh node pool
+    const contextStats = {};
+    clusters.forEach((cluster) => {
+      let contextKey = null;
+
+      // Check if it's a Kubernetes cluster
+      if (cluster.cloud === 'Kubernetes') {
+        // For Kubernetes clusters, the context name is in cluster.region
+        contextKey = cluster.region;
+        if (contextKey) {
+          contextKey = `kubernetes/${contextKey}`;
+        }
+      }
+      // Check if it's an SSH Node Pool cluster
+      else if (cluster.cloud === 'SSH') {
+        // For SSH clusters, the node pool name is in cluster.region
+        contextKey = cluster.region;
+        if (contextKey) {
+          // Remove 'ssh-' prefix if present for display
+          const poolName = contextKey.startsWith('ssh-')
+            ? contextKey.substring(4)
+            : contextKey;
+          contextKey = `ssh/${poolName}`;
+        }
+      }
+
+      if (contextKey) {
+        if (!contextStats[contextKey]) {
+          contextStats[contextKey] = { clusters: 0, jobs: 0 };
+        }
+        contextStats[contextKey].clusters += 1;
+      }
+    });
+
+    return contextStats;
+  } catch (error) {
+    console.error('=== Error in getContextClusters ===', error);
+    return {};
+  }
+}
+
+async function getKubernetesGPUs(clusters) {
   try {
     // 1. Fetch all context names (Kubernetes + SSH)
     const allAvailableContextNames = await getAllContexts();
@@ -368,60 +302,69 @@ async function getKubernetesGPUs(clustersAndJobsData) {
       };
     }
 
-    // 2. Fetch cluster and job counts per context
-    const contextStats = await getContextClustersAndJobs(clustersAndJobsData);
-
-    // 3. Fetch GPU availability information
-    const contextGPUAvailability = await getKubernetesContextGPUs();
-    const gpuAvailabilityMap = new Map();
-    if (contextGPUAvailability) {
-      contextGPUAvailability.forEach((cg) => {
-        gpuAvailabilityMap.set(cg[0], cg[1]); // cg[0] is context, cg[1] is gpusInCtx
-      });
-    }
+    // 2. Fetch cluster counts per context
+    const contextStats = await getContextClusters(clusters);
 
     const allGPUsSummary = {};
     const perContextGPUsData = {};
     const perNodeGPUs_dict = {};
 
-    // 4. Iterate through all_available_context_names and fetch node info for each
+    // Get all of the node info for all contexts in parallel and put them
+    // in a dictionary keyed by context name.
+    const contextNodeInfoList = await Promise.all(
+      allAvailableContextNames.map((context) =>
+        getKubernetesPerNodeGPUs(context)
+      )
+    );
+    const contextToNodeInfo = {};
+    for (let i = 0; i < allAvailableContextNames.length; i++) {
+      contextToNodeInfo[allAvailableContextNames[i]] = contextNodeInfoList[i];
+    }
+
+    // 3: Populate the gpuToData map for each context.
     for (const context of allAvailableContextNames) {
-      if (!perContextGPUsData[context]) {
-        perContextGPUsData[context] = [];
-      }
-
-      // Get GPU details from the availability map if present
-      const gpusInCtx = gpuAvailabilityMap.get(context);
-      if (gpusInCtx && gpusInCtx.length > 0) {
-        for (const gpu of gpusInCtx) {
-          const gpuName = gpu[0];
-          const gpuRequestableQtyPerNode = gpu[1].join(', ');
-          const gpuTotal = gpu[2];
-          const gpuFree = gpu[3];
-
+      const nodeInfoForContext = contextToNodeInfo[context] || {};
+      if (nodeInfoForContext && Object.keys(nodeInfoForContext).length > 0) {
+        const gpuToData = {};
+        for (const nodeName in nodeInfoForContext) {
+          const nodeData = nodeInfoForContext[nodeName];
+          const gpuName = nodeData['accelerator_type'];
+          const totalCount = nodeData['total']['accelerator_count'];
+          const freeCount = nodeData['free']['accelerators_available'];
+          if (totalCount > 0) {
+            if (!gpuToData[gpuName]) {
+              gpuToData[gpuName] = {
+                gpu_name: gpuName,
+                gpu_requestable_qty_per_node: 0,
+                gpu_total: 0,
+                gpu_free: 0,
+                context: context,
+              };
+            }
+            gpuToData[gpuName].gpu_total += totalCount;
+            gpuToData[gpuName].gpu_free += freeCount;
+            gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
+          }
+        }
+        perContextGPUsData[context] = Object.values(gpuToData);
+        for (const gpuName in gpuToData) {
           if (gpuName in allGPUsSummary) {
-            allGPUsSummary[gpuName].gpu_total += gpuTotal;
-            allGPUsSummary[gpuName].gpu_free += gpuFree;
+            allGPUsSummary[gpuName].gpu_total += gpuToData[gpuName].gpu_total;
+            allGPUsSummary[gpuName].gpu_free += gpuToData[gpuName].gpu_free;
           } else {
             allGPUsSummary[gpuName] = {
-              gpu_total: gpuTotal,
-              gpu_free: gpuFree,
+              gpu_total: gpuToData[gpuName].gpu_total,
+              gpu_free: gpuToData[gpuName].gpu_free,
               gpu_name: gpuName,
             };
           }
-
-          perContextGPUsData[context].push({
-            gpu_name: gpuName,
-            gpu_requestable_qty_per_node: gpuRequestableQtyPerNode,
-            gpu_total: gpuTotal,
-            gpu_free: gpuFree,
-            context: context,
-          });
         }
       }
+    }
 
-      // Fetch node information for the current context
-      const nodeInfoForContext = await getKubernetesPerNodeGPUs(context);
+    // 4: Populate the perNodeGPUs_dict map for each context.
+    for (const context of allAvailableContextNames) {
+      const nodeInfoForContext = contextToNodeInfo[context];
       if (nodeInfoForContext && Object.keys(nodeInfoForContext).length > 0) {
         for (const nodeName in nodeInfoForContext) {
           const nodeData = nodeInfoForContext[nodeName];
@@ -437,6 +380,7 @@ async function getKubernetesGPUs(clustersAndJobsData) {
             gpu_name: acceleratorType,
             gpu_total: totalAccelerators,
             gpu_free: freeAccelerators,
+            ip_address: nodeData['ip_address'] || null,
             context: context,
           };
 

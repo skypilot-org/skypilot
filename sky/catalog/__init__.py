@@ -91,7 +91,7 @@ def list_accelerator_counts(
     region_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None,
     clouds: CloudFilter = None,
-) -> Dict[str, List[int]]:
+) -> Dict[str, List[float]]:
     """Lists all accelerators offered by Sky and available counts.
 
     Returns: A dictionary of canonical accelerator names mapped to a list
@@ -107,12 +107,12 @@ def list_accelerator_counts(
                                   require_price=False)
     if not isinstance(results, list):
         results = [results]
-    accelerator_counts: Dict[str, Set[int]] = collections.defaultdict(set)
+    accelerator_counts: Dict[str, Set[float]] = collections.defaultdict(set)
     for result in results:
         for gpu, items in result.items():
             for item in items:
                 accelerator_counts[gpu].add(item.accelerator_count)
-    ret: Dict[str, List[int]] = {}
+    ret: Dict[str, List[float]] = {}
     for gpu, counts in accelerator_counts.items():
         ret[gpu] = sorted(counts)
     return ret
@@ -221,6 +221,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[
                                   resources_utils.DiskTier] = None,
+                              region: Optional[str] = None,
+                              zone: Optional[str] = None,
                               clouds: CloudFilter = None) -> Optional[str]:
     """Returns the cloud's default instance type for given #vCPUs and memory.
 
@@ -234,7 +236,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     the given CPU and memory requirement.
     """
     return _map_clouds_catalog(clouds, 'get_default_instance_type', cpus,
-                               memory, disk_tier)
+                               memory, disk_tier, region, zone)
 
 
 def get_accelerators_from_instance_type(
@@ -247,7 +249,7 @@ def get_accelerators_from_instance_type(
 
 def get_instance_type_for_accelerator(
     acc_name: str,
-    acc_count: int,
+    acc_count: Union[int, float],
     cpus: Optional[str] = None,
     memory: Optional[str] = None,
     use_spot: bool = False,

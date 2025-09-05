@@ -13,6 +13,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
@@ -50,7 +51,7 @@ class InstanceTypeInfo(NamedTuple):
     cloud: str
     instance_type: Optional[str]
     accelerator_name: str
-    accelerator_count: int
+    accelerator_count: float
     cpu_count: Optional[float]
     device_memory: Optional[float]
     memory: Optional[float]
@@ -125,17 +126,21 @@ class LazyDataFrame:
 
     We don't need to load the catalog for every SkyPilot call, and this class
     allows us to load the catalog only when needed.
+
+    Use update_if_stale_func to pass in a function that decides whether to
+    update the catalog on disk, updates it if needed, and returns
+    a bool indicating whether the update was done.
     """
 
-    def __init__(self, filename: str, update_func: Callable[[], None]):
+    def __init__(self, filename: str, update_if_stale_func: Callable[[], bool]):
         self._filename = filename
         self._df: Optional['pd.DataFrame'] = None
-        self._update_func = update_func
+        self._update_if_stale_func = update_if_stale_func
 
+    @annotations.lru_cache(scope='request')
     def _load_df(self) -> 'pd.DataFrame':
-        if self._df is None:
+        if self._update_if_stale_func() or self._df is None:
             try:
-                self._update_func()
                 self._df = pd.read_csv(self._filename)
             except Exception as e:  # pylint: disable=broad-except
                 # As users can manually modify the catalog, read_csv can fail.
@@ -193,55 +198,60 @@ def read_catalog(filename: str,
         return last_update + pull_frequency_hours * 3600 < time.time()
 
     def _update_catalog():
+        # Fast path: Exit early to avoid lock contention.
+        if not _need_update():
+            return False
+
         # Atomic check, to avoid conflicts with other processes.
         with filelock.FileLock(meta_path + '.lock'):
-            if _need_update():
-                url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
-                url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
-                headers = {'User-Agent': 'SkyPilot/0.7'}
-                update_frequency_str = ''
-                if pull_frequency_hours is not None:
-                    update_frequency_str = (
-                        f' (every {pull_frequency_hours} hours)')
-                with rich_utils.safe_status(
-                        ux_utils.spinner_message(
-                            f'Updating {cloud} catalog: {filename}') +
-                        f'{update_frequency_str}'):
-                    try:
-                        r = requests.get(url=url, headers=headers)
-                        if r.status_code == 429:
-                            # fallback to s3 mirror, github introduced rate
-                            # limit after 2025-05, see
-                            # https://github.com/skypilot-org/skypilot/issues/5438
-                            # for more details
-                            r = requests.get(url=url_fallback, headers=headers)
-                        r.raise_for_status()
-                    except requests.exceptions.RequestException as e:
-                        error_str = (f'Failed to fetch {cloud} catalog '
-                                     f'{filename}. ')
-                        if os.path.exists(catalog_path):
-                            logger.warning(
-                                f'{error_str}Using cached catalog files.')
-                            # Update catalog file modification time.
-                            os.utime(catalog_path, None)  # Sets to current time
-                        else:
-                            logger.error(
-                                f'{error_str}Please check your internet '
-                                'connection.')
-                            with ux_utils.print_exception_no_traceback():
-                                raise e
-                    else:
-                        # Download successful, save the catalog to a local file.
-                        os.makedirs(os.path.dirname(catalog_path),
-                                    exist_ok=True)
-                        with open(catalog_path, 'w', encoding='utf-8') as f:
-                            f.write(r.text)
-                        with open(meta_path + '.md5', 'w',
-                                  encoding='utf-8') as f:
-                            f.write(hashlib.md5(r.text.encode()).hexdigest())
-                logger.debug(f'Updated {cloud} catalog {filename}.')
+            # Double check after acquiring the lock.
+            if not _need_update():
+                return False
 
-    return LazyDataFrame(catalog_path, update_func=_update_catalog)
+            url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+            url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+            headers = {'User-Agent': 'SkyPilot/0.7'}
+            update_frequency_str = ''
+            if pull_frequency_hours is not None:
+                update_frequency_str = (
+                    f' (every {pull_frequency_hours} hours)')
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(
+                        f'Updating {cloud} catalog: {filename}') +
+                    f'{update_frequency_str}'):
+                try:
+                    r = requests.get(url=url, headers=headers)
+                    if r.status_code == 429:
+                        # fallback to s3 mirror, github introduced rate
+                        # limit after 2025-05, see
+                        # https://github.com/skypilot-org/skypilot/issues/5438
+                        # for more details
+                        r = requests.get(url=url_fallback, headers=headers)
+                    r.raise_for_status()
+                except requests.exceptions.RequestException as e:
+                    error_str = (f'Failed to fetch {cloud} catalog '
+                                 f'{filename}. ')
+                    if os.path.exists(catalog_path):
+                        logger.warning(
+                            f'{error_str}Using cached catalog files.')
+                        # Update catalog file modification time.
+                        os.utime(catalog_path, None)  # Sets to current time
+                    else:
+                        logger.error(f'{error_str}Please check your internet '
+                                     'connection.')
+                        with ux_utils.print_exception_no_traceback():
+                            raise e
+                else:
+                    # Download successful, save the catalog to a local file.
+                    os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
+                    with open(catalog_path, 'w', encoding='utf-8') as f:
+                        f.write(r.text)
+                    with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
+                        f.write(hashlib.md5(r.text.encode()).hexdigest())
+            logger.debug(f'Updated {cloud} catalog {filename}.')
+        return True
+
+    return LazyDataFrame(catalog_path, update_if_stale_func=_update_catalog)
 
 
 def _get_instance_type(
@@ -466,8 +476,11 @@ def _filter_region_zone(df: 'pd.DataFrame', region: Optional[str],
 
 
 def get_instance_type_for_cpus_mem_impl(
-        df: 'pd.DataFrame', cpus: Optional[str],
-        memory_gb_or_ratio: Optional[str]) -> Optional[str]:
+        df: 'pd.DataFrame',
+        cpus: Optional[str],
+        memory_gb_or_ratio: Optional[str],
+        region: Optional[str] = None,
+        zone: Optional[str] = None) -> Optional[str]:
     """Returns the cheapest instance type that satisfies the requirements.
 
     Args:
@@ -480,7 +493,10 @@ def get_instance_type_for_cpus_mem_impl(
             returned instance type should have at least the given memory size.
             If the string ends with "x", then the returned instance type should
             have at least the given number of vCPUs times the given ratio.
+        region: The region to filter by.
+        zone: The zone to filter by.
     """
+    df = _filter_region_zone(df, region, zone)
     df = _filter_with_cpus(df, cpus)
     df = _filter_with_mem(df, memory_gb_or_ratio)
     if df.empty:
@@ -615,7 +631,7 @@ def list_accelerators_impl(
         df = df[df['Region'].str.contains(region_filter,
                                           case=case_sensitive,
                                           regex=True)]
-    df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
+    df['AcceleratorCount'] = df['AcceleratorCount'].astype(float)
     if quantity_filter is not None:
         df = df[df['AcceleratorCount'] == quantity_filter]
     grouped = df.groupby('AcceleratorName')

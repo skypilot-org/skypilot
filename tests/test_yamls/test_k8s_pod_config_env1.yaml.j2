@@ -1,0 +1,12 @@
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - env:
+          - name: TEST_VAR_1
+            value: "1"
+
+run: |
+  echo "Running with original pod config"
+  echo "TEST_VAR_1 = $TEST_VAR_1"

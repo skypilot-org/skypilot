@@ -1,6 +1,7 @@
 """LoadBalancer: Distribute any incoming request to all ready replicas."""
 import asyncio
 import logging
+import os
 import threading
 import traceback
 from typing import Dict, List, Optional, Union
@@ -29,11 +30,13 @@ class SkyServeLoadBalancer:
     """
 
     def __init__(
-            self,
-            controller_url: str,
-            load_balancer_port: int,
-            load_balancing_policy_name: Optional[str] = None,
-            tls_credential: Optional[serve_utils.TLSCredential] = None) -> None:
+        self,
+        controller_url: str,
+        load_balancer_port: int,
+        load_balancing_policy_name: Optional[str] = None,
+        tls_credential: Optional[serve_utils.TLSCredential] = None,
+        target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None
+    ) -> None:
         """Initialize the load balancer.
 
         Args:
@@ -43,6 +46,9 @@ class SkyServeLoadBalancer:
                 to use. Defaults to None.
             tls_credentials: The TLS credentials for HTTPS endpoint. Defaults
                 to None.
+            target_qps_per_replica: Target QPS per replica for instance-aware
+                load balancing. Can be a float or dict mapping GPU types to QPS.
+                Defaults to None.
         """
         self._app = fastapi.FastAPI()
         self._controller_url: str = controller_url
@@ -50,6 +56,15 @@ class SkyServeLoadBalancer:
         # Use the registry to create the load balancing policy
         self._load_balancing_policy = lb_policies.LoadBalancingPolicy.make(
             load_balancing_policy_name)
+
+        # Set accelerator QPS for instance-aware policies
+        if (target_qps_per_replica and
+                isinstance(target_qps_per_replica, dict) and
+                isinstance(self._load_balancing_policy,
+                           lb_policies.InstanceAwareLeastLoadPolicy)):
+            self._load_balancing_policy.set_target_qps_per_accelerator(
+                target_qps_per_replica)
+
         logger.info('Starting load balancer with policy '
                     f'{load_balancing_policy_name}.')
         self._request_aggregator: serve_utils.RequestsAggregator = (
@@ -72,6 +87,9 @@ class SkyServeLoadBalancer:
 
     async def _sync_with_controller_once(self) -> List[asyncio.Task]:
         close_client_tasks = []
+        ready_replica_urls = []
+        replica_info = {}
+
         async with aiohttp.ClientSession() as session:
             try:
                 # Send request information
@@ -87,8 +105,8 @@ class SkyServeLoadBalancer:
                     self._request_aggregator.clear()
                     response.raise_for_status()
                     response_json = await response.json()
-                    ready_replica_urls = response_json.get(
-                        'ready_replica_urls', [])
+                    replica_info = response_json.get('replica_info', {})
+                    ready_replica_urls = list(replica_info.keys())
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.error(f'An error occurred when syncing with '
                              f'the controller: {e}'
@@ -98,6 +116,11 @@ class SkyServeLoadBalancer:
                 with self._client_pool_lock:
                     self._load_balancing_policy.set_ready_replicas(
                         ready_replica_urls)
+                    # Set replica info for instance-aware policies
+                    if isinstance(self._load_balancing_policy,
+                                  lb_policies.InstanceAwareLeastLoadPolicy):
+                        self._load_balancing_policy.set_replica_info(
+                            replica_info)
                     for replica_url in ready_replica_urls:
                         if replica_url not in self._client_pool:
                             self._client_pool[replica_url] = httpx.AsyncClient(
@@ -254,7 +277,8 @@ class SkyServeLoadBalancer:
         protocol = 'https' if self._tls_credential is not None else 'http'
 
         logger.info('SkyServe Load Balancer started on '
-                    f'{protocol}://0.0.0.0:{self._load_balancer_port}')
+                    f'{protocol}://0.0.0.0:{self._load_balancer_port}. '
+                    f'PID: {os.getpid()}')
 
         uvicorn.run(self._app,
                     host='0.0.0.0',
@@ -263,23 +287,31 @@ class SkyServeLoadBalancer:
 
 
 def run_load_balancer(
-        controller_addr: str,
-        load_balancer_port: int,
-        load_balancing_policy_name: Optional[str] = None,
-        tls_credential: Optional[serve_utils.TLSCredential] = None) -> None:
+    controller_addr: str,
+    load_balancer_port: int,
+    load_balancing_policy_name: Optional[str] = None,
+    tls_credential: Optional[serve_utils.TLSCredential] = None,
+    target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None
+) -> None:
     """ Run the load balancer.
 
     Args:
         controller_addr: The address of the controller.
         load_balancer_port: The port where the load balancer listens to.
-        policy_name: The name of the load balancing policy to use. Defaults to
-            None.
+        policy_name: The name of the load balancing policy to use.
+        Defaults to None.
+        tls_credential:
+            The TLS credentials for HTTPS endpoint. Defaults to None.
+        target_qps_per_replica: Target QPS per replica for instance-aware
+            load balancing. Can be a float or dict mapping GPU types to QPS.
+            Defaults to None.
     """
     load_balancer = SkyServeLoadBalancer(
         controller_url=controller_addr,
         load_balancer_port=load_balancer_port,
         load_balancing_policy_name=load_balancing_policy_name,
-        tls_credential=tls_credential)
+        tls_credential=tls_credential,
+        target_qps_per_replica=target_qps_per_replica)
     load_balancer.run()
 
 
@@ -303,5 +335,8 @@ if __name__ == '__main__':
         help=f'The load balancing policy to use. Available policies: '
         f'{", ".join(available_policies)}.')
     args = parser.parse_args()
-    run_load_balancer(args.controller_addr, args.load_balancer_port,
-                      args.load_balancing_policy)
+    run_load_balancer(args.controller_addr,
+                      args.load_balancer_port,
+                      args.load_balancing_policy,
+                      tls_credential=None,
+                      target_qps_per_replica=None)

@@ -1,53 +1,35 @@
+# auth.yaml
+envs:
+  MODEL_NAME: Qwen/Qwen3-0.6B
+
+secrets:
+  AUTH_TOKEN: # TODO: Fill with your own auth token (a random string), or use --secret to pass.
+
 service:
   readiness_probe:
-    path: /v1/chat/completions
-    post_data:
-      model: $MODEL_NAME
-      messages:
-        - role: user
-          content: How to print hello world?
-      max_tokens: 1
+    path: /v1/models
+    headers:
+      Authorization: Bearer $AUTH_TOKEN
     initial_delay_seconds: 1800
   replicas: 1
 
-envs:
-  MODEL_NAME: fastchat-t5-3b-v1.0
-
 resources:
-  ports: 8087
-  infra: gcp
-  accelerators: T4
+  accelerators: L4
   cpus: 7+
   memory: 20+
+  ports: 8087
 
 setup: |
-  conda activate chatbot
-  if [ $? -ne 0 ]; then
-    conda create -n chatbot python=3.9 -y
-    conda activate chatbot
-  fi
-
-  # Install dependencies
-  # TODO(tian): transformers<4.48.0 is a temporary solution for breaking
-  # change in transformers 4.48.0. Update to latest version when the issue
-  # is fixed. Ref: https://github.com/huggingface/transformers/issues/35639
-  pip install "fschat[model_worker,webui]==0.2.24" "transformers<4.48.0"
-  pip install sentencepiece protobuf
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
+  uv pip install vllm==0.10.0
+  # Have to use triton==3.2.0 to avoid https://github.com/triton-lang/triton/issues/6698
+  uv pip install triton==3.2.0
+  uv pip install openai
 
 run: |
-  conda activate chatbot
-
-  echo 'Starting controller...'
-  python -u -m fastchat.serve.controller --host 127.0.0.1 > ~/controller.log 2>&1 &
-  sleep 10
-  echo 'Starting model worker...'
-  python -u -m fastchat.serve.model_worker \
-             --host 127.0.0.1 \
-             --model-path lmsys/$MODEL_NAME 2>&1 \
-            | tee model_worker.log &
-
-  echo 'Waiting for model worker to start...'
-  while ! `cat model_worker.log | grep -q 'Uvicorn running on'`; do sleep 1; done
-
-  echo 'Starting openai api server...'
-  python -u -m fastchat.serve.openai_api_server --host 0.0.0.0 --port 8087 | tee ~/openai_api_server.log
+  source .venv/bin/activate
+  export PATH=$PATH:/sbin
+  vllm serve $MODEL_NAME --trust-remote-code \
+    --host 0.0.0.0 --port 8087 \
+    --api-key $AUTH_TOKEN

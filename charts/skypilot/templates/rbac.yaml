@@ -9,6 +9,10 @@ kind: ServiceAccount
 metadata:
   name: {{ include "skypilot.serviceAccountName" . }}
   namespace: {{ .Release.Namespace }}
+  {{- if .Values.rbac.serviceAccountAnnotations }}
+  annotations:
+    {{- toYaml .Values.rbac.serviceAccountAnnotations | nindent 4 }}
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -21,6 +25,9 @@ rules:
     resources: [ "clusterroles", "clusterrolebindings" ]
     verbs: [ "*" ]
 {{- end }}
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -34,11 +41,11 @@ roleRef:
   kind: ClusterRole
   name: {{ .Release.Name }}-api-role
   apiGroup: rbac.authorization.k8s.io
----
 {{- $namespace := .Values.kubernetesCredentials.inclusterNamespace | default .Release.Namespace }}
-{{- if ne $namespace .Release.Namespace -}}
+{{- if ne $namespace .Release.Namespace }}
+---
 {{- include "skypilot.ensureNamespace" $namespace }}
-{{- end -}}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

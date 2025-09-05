@@ -168,7 +168,7 @@ def build_dockerimage(task: task_mod.Task,
                                         build_dir=temp_dir)
 
     dst = os.path.join(temp_dir, SKY_DOCKER_WORKDIR)
-    if task.workdir is not None:
+    if task.workdir is not None and isinstance(task.workdir, str):
         # Copy workdir contents to tempdir
         shutil.copytree(os.path.expanduser(task.workdir), dst)
     else:

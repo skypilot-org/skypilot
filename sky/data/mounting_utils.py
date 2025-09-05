@@ -38,20 +38,45 @@ _GOOFYS_WRAPPER = ('$(if [ -S /dev/log ] ; then '
                    'fi)')
 
 
+def get_rclone_install_cmd() -> str:
+    """ RClone installation for both apt-get and rpm.
+    This would be common command.
+    """
+    # pylint: disable=line-too-long
+    install_cmd = (
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        '  ARCH_SUFFIX="arm64"; '
+        'else '
+        '  ARCH_SUFFIX="amd64"; '
+        'fi && '
+        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
+        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
+        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
+    return install_cmd
+
+
 def get_s3_mount_install_cmd() -> str:
-    """Returns a command to install S3 mount utility goofys."""
+    """Returns command for basic S3 mounting (goofys by default, rclone for
+    ARM64)."""
     # TODO(aylei): maintain our goofys fork under skypilot-org
-    install_cmd = ('ARCH=$(uname -m) && '
-                   'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-                   '  echo "goofys is not supported on $ARCH" && '
-                   f'  exit {exceptions.ARCH_NOT_SUPPORTED_EXIT_CODE}; '
-                   'else '
-                   '  ARCH_SUFFIX="amd64"; '
-                   'fi && '
-                   'sudo wget -nc https://github.com/aylei/goofys/'
-                   'releases/download/0.24.0-aylei-upstream/goofys '
-                   '-O /usr/local/bin/goofys && '
-                   'sudo chmod 755 /usr/local/bin/goofys')
+    install_cmd = (
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        # Use rclone for ARM64 since goofys doesn't support it
+        # Extract core rclone installation logic without redundant ARCH check
+        f'  {get_rclone_install_cmd()}; '
+        'else '
+        '  sudo wget -nc https://github.com/aylei/goofys/'
+        'releases/download/0.24.0-aylei-upstream/goofys '
+        '-O /usr/local/bin/goofys && '
+        'sudo chmod 755 /usr/local/bin/goofys; '
+        'fi')
     return install_cmd
 
 
@@ -59,15 +84,32 @@ def get_s3_mount_install_cmd() -> str:
 def get_s3_mount_cmd(bucket_name: str,
                      mount_path: str,
                      _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to mount an S3 bucket using goofys."""
+    """Returns a command to mount an S3 bucket (goofys by default, rclone for
+    ARM64)"""
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
-    mount_cmd = (f'{_GOOFYS_WRAPPER} -o allow_other '
-                 f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                 f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    # Use rclone for ARM64 architectures since goofys doesn't support them
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        # Have to add --s3-env-auth=true to allow rclone to access private
+        # buckets.
+        '--daemon --allow-other --s3-env-auth=true')
+    goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
     return mount_cmd
 
 
@@ -76,17 +118,33 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
                          endpoint_url: str,
                          mount_path: str,
                          _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to install Nebius mount utility goofys."""
+    """Returns a command to mount Nebius bucket (goofys by default, rclone for
+    ARM64)."""
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
-    mount_cmd = (f'AWS_PROFILE={nebius_profile_name} {_GOOFYS_WRAPPER} '
-                 '-o allow_other '
-                 f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                 f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'--endpoint {endpoint_url} '
-                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    # Use rclone for ARM64 architectures since goofys doesn't support them
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'AWS_PROFILE={nebius_profile_name} '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
+    goofys_mount = (f'AWS_PROFILE={nebius_profile_name} {_GOOFYS_WRAPPER} '
+                    '-o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'--endpoint {endpoint_url} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
     return mount_cmd
 
 
@@ -236,18 +294,35 @@ def get_r2_mount_cmd(r2_credentials_path: str,
                      bucket_name: str,
                      mount_path: str,
                      _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to install R2 mount utility goofys."""
+    """Returns a command to mount R2 bucket (goofys by default, rclone for
+    ARM64)."""
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
-    mount_cmd = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
-                 f'AWS_PROFILE={r2_profile_name} {_GOOFYS_WRAPPER} '
-                 '-o allow_other '
-                 f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                 f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'--endpoint {endpoint_url} '
-                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    # Use rclone for ARM64 architectures since goofys doesn't support them
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
+        f'AWS_PROFILE={r2_profile_name} '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
+    goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
+                    f'AWS_PROFILE={r2_profile_name} {_GOOFYS_WRAPPER} '
+                    '-o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'--endpoint {endpoint_url} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
     return mount_cmd
 
 
@@ -288,9 +363,9 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     # the filename length limit.
     # The hash is a non-negative integer in string form.
     hashed_mount_path = hashlib.md5(mount_path.encode()).hexdigest()
-    log_file_path = os.path.join(constants.RCLONE_LOG_DIR,
+    log_file_path = os.path.join(constants.RCLONE_MOUNT_CACHED_LOG_DIR,
                                  f'{hashed_mount_path}.log')
-    create_log_cmd = (f'mkdir -p {constants.RCLONE_LOG_DIR} && '
+    create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
                       f'touch {log_file_path}')
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
@@ -329,29 +404,6 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # produce any output, so we aren't dropping any logs.
         '> /dev/null 2>&1')
     return mount_cmd
-
-
-def get_rclone_install_cmd() -> str:
-    """ RClone installation for both apt-get and rpm.
-    This would be common command.
-    """
-    # pylint: disable=line-too-long
-    install_cmd = (
-        'ARCH=$(uname -m) && '
-        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-        '  ARCH_SUFFIX="arm"; '
-        'else '
-        '  ARCH_SUFFIX="amd64"; '
-        'fi && '
-        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
-        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
-        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
-        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
-    return install_cmd
 
 
 def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,

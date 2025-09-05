@@ -94,10 +94,19 @@ jobs:
           # Convert PEP440 version to SemVer if needed for Helm versioning
           # Handle cases like 1.0.0.dev20250218 -> 1.0.0-dev.20250218
           semversion=$(echo "$version" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
-          # Update the version and name in the Chart.yaml file
+          
+          # Update the version and name in the main skypilot chart
           sed -i "s/^version:.*$/version: ${semversion}/" src/charts/skypilot/Chart.yaml
           sed -i "s/^appVersion:.*$/appVersion: ${version}/" src/charts/skypilot/Chart.yaml
           sed -i "s/^name:.*$/name: ${{ inputs.package_name }}/" src/charts/skypilot/Chart.yaml
+          # Copy the non-HTML content from the README.md of root directory to the skypilot chart
+          line=$(grep -n "^----$" src/README.md | cut -d: -f1 | head -n 1)
+          tail -n +$line src/README.md >> src/charts/skypilot/README.md
+
+          # Update the version in the external-metrics chart (prometheus server)
+          # todo(rohan): update name the way we do for the main skypilot chart?
+          sed -i "s/^version:.*$/version: ${semversion}/" src/charts/external-metrics/Chart.yaml
+          sed -i "s/^appVersion:.*$/appVersion: ${version}/" src/charts/external-metrics/Chart.yaml
 
       - name: Update docker image in charts
         if: inputs.version != ''

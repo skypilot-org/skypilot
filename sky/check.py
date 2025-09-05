@@ -467,8 +467,18 @@ def _print_checked_cloud(
         if ok:
             enabled_capabilities.append(capability)
         # `dict` reasons for K8s and SSH will be printed in detail in
-        # _format_enabled_cloud. Skip here.
+        # _format_enabled_cloud. Skip here unless the cloud is disabled.
         if not isinstance(reason, str):
+            if not ok and isinstance(cloud_tuple[1],
+                                     (sky_clouds.SSH, sky_clouds.Kubernetes)):
+                if reason is not None:
+                    reason_str = _format_context_details(cloud_tuple[1],
+                                                         show_details=True,
+                                                         ctx2text=reason)
+                    reason_str = '\n'.join(
+                        '    ' + line for line in reason_str.splitlines())
+                    reasons_to_capabilities.setdefault(reason_str,
+                                                       []).append(capability)
             continue
         if ok:
             if reason is not None:
@@ -619,8 +629,11 @@ def _format_enabled_cloud(cloud_name: str,
             return _green_color(cloud_and_capabilities)
 
         # Check if allowed_contexts is explicitly set in config
-        allowed_contexts = skypilot_config.get_nested(
-            ('kubernetes', 'allowed_contexts'), None)
+        allowed_contexts = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=None,
+            keys=('allowed_contexts',),
+            default_value=None)
 
         # Format the context info with consistent styling
         if allowed_contexts is not None:

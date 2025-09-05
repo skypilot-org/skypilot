@@ -3,7 +3,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import { apiClient } from '@/data/connectors/client';
+import { ENDPOINT } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
+
+const DEFAULT_TAIL_LINES = 10000;
 
 /**
  * Truncates a string in the middle, preserving parts from beginning and end.
@@ -49,6 +52,7 @@ export async function getClusters({ clusterNames = null } = {}) {
     const clusters = await apiClient.fetch('/status', {
       cluster_names: clusterNames,
       all_users: true,
+      include_credentials: false,
     });
 
     const clusterData = clusters.map((cluster) => {
@@ -70,6 +74,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         cluster: cluster.name,
         user: cluster.user_name,
         user_hash: cluster.user_hash,
+        cluster_hash: cluster.cluster_hash,
         cloud: cluster.cloud,
         region: cluster.region,
         infra: region_or_zone
@@ -87,6 +92,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
         autostop: cluster.autostop,
+        last_event: cluster.last_event,
         to_down: cluster.to_down,
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
@@ -106,6 +112,72 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
+export async function getClusterHistory() {
+  try {
+    const history = await apiClient.fetch('/cost_report', {
+      days: 30,
+    });
+
+    console.log('Raw cluster history data:', history); // Debug log
+
+    const historyData = history.map((cluster) => {
+      // Get cloud name from resources if available
+      let cloud = 'Unknown';
+      if (cluster.cloud) {
+        cloud = cluster.cloud;
+      } else if (cluster.resources && cluster.resources.cloud) {
+        cloud = cluster.resources.cloud;
+      }
+
+      // Get user name - need to look up from user_hash if needed
+      let user_name = cluster.user_name || '-';
+
+      // Extract resource info
+
+      return {
+        status: cluster.status
+          ? clusterStatusMap[cluster.status]
+          : 'TERMINATED',
+        cluster: cluster.name,
+        user: user_name,
+        user_hash: cluster.user_hash,
+        cluster_hash: cluster.cluster_hash,
+        cloud: cloud,
+        region: '',
+        infra: cloud,
+        full_infra: cloud,
+        resources_str: cluster.resources_str,
+        resources_str_full: cluster.resources_str_full,
+        time: cluster.launched_at ? new Date(cluster.launched_at * 1000) : null,
+        num_nodes: cluster.num_nodes || 1,
+        duration: cluster.duration,
+        total_cost: cluster.total_cost,
+        workspace: cluster.workspace || 'default',
+        autostop: -1,
+        last_event: cluster.last_event,
+        to_down: false,
+        usage_intervals: cluster.usage_intervals,
+        command: cluster.last_creation_command || '',
+        task_yaml: cluster.last_creation_yaml || '{}',
+        events: [
+          {
+            time: cluster.launched_at
+              ? new Date(cluster.launched_at * 1000)
+              : new Date(),
+            event: 'Cluster created.',
+          },
+        ],
+      };
+    });
+
+    console.log('Processed cluster history data:', historyData); // Debug log
+    return historyData;
+  } catch (error) {
+    console.error('Error fetching cluster history:', error);
+    return [];
+  }
+}
+
 export async function streamClusterJobLogs({
   clusterName,
   jobId,
@@ -119,6 +191,7 @@ export async function streamClusterJobLogs({
         follow: false,
         cluster_name: clusterName,
         job_id: jobId,
+        tail: DEFAULT_TAIL_LINES,
         override_skypilot_config: {
           active_workspace: workspace || 'default',
         },
@@ -128,6 +201,63 @@ export async function streamClusterJobLogs({
   } catch (error) {
     console.error('Error in streamClusterJobLogs:', error);
     showToast(`Error in streamClusterJobLogs: ${error.message}`, 'error');
+  }
+}
+
+/**
+ * Downloads job logs as a zip via the API server.
+ * Flow:
+ * 1) POST /download_logs to fetch logs from the remote cluster to API server
+ * 2) POST /download to stream a zip back to the browser and trigger download
+ */
+export async function downloadJobLogs({
+  clusterName,
+  jobIds = null,
+  workspace,
+}) {
+  try {
+    // Step 1: schedule server-side download; result is a mapping job_id -> folder path on API server
+    const mapping = await apiClient.fetch('/download_logs', {
+      cluster_name: clusterName,
+      job_ids: jobIds ? jobIds.map(String) : null, // Convert to strings as expected by server
+      override_skypilot_config: {
+        active_workspace: workspace || 'default',
+      },
+    });
+
+    const folderPaths = Object.values(mapping || {});
+    if (!folderPaths.length) {
+      showToast('No logs found to download.', 'warning');
+      return;
+    }
+
+    // Step 2: request the zip and trigger browser download
+    const baseUrl = window.location.origin;
+    const fullUrl = `${baseUrl}${ENDPOINT}/download`;
+    const resp = await fetch(`${fullUrl}?relative=items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder_paths: folderPaths }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Download failed: ${resp.status} ${text}`);
+    }
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const namePart =
+      jobIds && jobIds.length === 1 ? `job-${jobIds[0]}` : 'jobs';
+    a.href = url;
+    a.download = `${clusterName}-${namePart}-logs-${ts}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error('Error downloading logs:', error);
+    showToast(`Error downloading logs: ${error.message}`, 'error');
   }
 }
 
@@ -157,6 +287,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
         status: job.status,
         job: job.job_name,
         user: job.username,
+        user_hash: job.user_hash,
         gpus: job.accelerators || {},
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)
@@ -168,6 +299,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
         infra: '',
         logs: '',
         workspace: workspace || 'default',
+        git_commit: job.metadata?.git_commit || '-',
       };
     });
     return jobData;

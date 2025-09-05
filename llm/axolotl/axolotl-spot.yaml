@@ -1,10 +1,10 @@
 # Usage:
 #
 #  Unmanaged spot (no auto-recovery; for debugging):
-#   HF_TOKEN=abc BUCKET=<unique-name> sky launch -c axolotl-spot axolotl-spot.yaml --env HF_TOKEN --env BUCKET -i30 --down
+#   HF_TOKEN=xxx BUCKET=<unique-name> sky launch -c axolotl-spot axolotl-spot.yaml --secret HF_TOKEN --env BUCKET -i30 --down
 #
 #  Managed spot (auto-recovery; for full runs):
-#   HF_TOKEN=abc BUCKET=<unique-name> sky jobs launch -n axolotl-spot axolotl-spot.yaml --env HF_TOKEN --env BUCKET
+#   HF_TOKEN=xxx BUCKET=<unique-name> sky jobs launch -n axolotl-spot axolotl-spot.yaml --secret HF_TOKEN --env BUCKET
 
 name: axolotl
 
@@ -27,5 +27,5 @@ run: |
   accelerate launch -m axolotl.cli.train qlora-checkpoint.yaml
 
 envs:
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
   BUCKET: # TODO: Fill with your unique bucket name, or use --env to pass.

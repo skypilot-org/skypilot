@@ -4,8 +4,6 @@ import os
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-import yaml
-
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
@@ -14,6 +12,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -66,7 +65,7 @@ class SSH(kubernetes.Kubernetes):
         if os.path.exists(SSH_NODE_POOLS_PATH):
             try:
                 with open(SSH_NODE_POOLS_PATH, 'r', encoding='utf-8') as f:
-                    ssh_config = yaml.safe_load(f)
+                    ssh_config = yaml_utils.safe_load(f)
                     if ssh_config:
                         # Get cluster names and prepend 'ssh-' to match
                         # context naming convention
@@ -143,8 +142,11 @@ class SSH(kubernetes.Kubernetes):
         allowed_node_pools = skypilot_config.get_workspace_cloud('ssh').get(
             'allowed_node_pools', None)
         if allowed_node_pools is None:
-            allowed_node_pools = skypilot_config.get_nested(
-                ('ssh', 'allowed_node_pools'), None)
+            allowed_node_pools = skypilot_config.get_effective_region_config(
+                cloud='ssh',
+                region=None,
+                keys=('allowed_node_pools',),
+                default_value=None)
 
         # Filter for SSH contexts (those starting with 'ssh-')
         ssh_contexts = [
@@ -210,6 +212,42 @@ class SSH(kubernetes.Kubernetes):
             ctx2text[context] = text
 
         return success, ctx2text
+
+    @classmethod
+    def check_single_context(cls, context: str) -> Tuple[bool, str]:
+        """Checks if the context is valid and accessible."""
+        reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
+        if reasons is not None:
+            formatted = '\n'.join(
+                [reasons[0]] +
+                [f'{cls._INDENT_PREFIX}' + r for r in reasons[1:]])
+            return (False, formatted)
+
+        # Add ssh- prefix to the context
+        if not context.startswith('ssh-'):
+            context = f'ssh-{context}'
+
+        # Get SSH contexts
+        try:
+            existing_allowed_contexts = cls.existing_allowed_contexts()
+        except Exception as e:  # pylint: disable=broad-except
+            return (False, f'Failed to get SSH contexts: {str(e)}')
+
+        if not existing_allowed_contexts:
+            return (False,
+                    'No SSH Node Pools are up. Run `sky ssh up` to set up '
+                    f'Node Pools from {SSH_NODE_POOLS_PATH}.')
+
+        if context not in existing_allowed_contexts:
+            return (False, f'SSH Node Pool {context} is not set up. '
+                    f'Run `sky ssh up --infra {context}` to set up.')
+
+        # Check if the context is valid
+        suc, text = super()._check_single_context(context)
+        if not suc:
+            return (False, text)
+
+        return (True, 'SSH Node Pool is set up.')
 
     @classmethod
     def expand_infras(cls) -> List[str]:

@@ -4,10 +4,12 @@ from unittest import mock
 
 import pytest
 
-import sky
 from sky import clouds
+from sky import exceptions
+from sky import resources as resources_lib
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import controller_utils
 from sky.utils import registry
@@ -77,7 +79,8 @@ def test_get_controller_resources(controller_type: str,
 
 
 def _check_controller_resources(
-        controller_resources: Set[sky.Resources], expected_infra_list: Set[str],
+        controller_resources: Set[resources_lib.Resources],
+        expected_infra_list: Set[str],
         default_controller_resources: Dict[str, Any]) -> None:
     """Helper function to check that the controller resources match the
     expected combinations."""
@@ -111,7 +114,7 @@ def test_get_controller_resources_with_task_resources(
     expected_infra_set = all_clouds
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
-        task_resources=[sky.Resources(infra=c) for c in all_clouds])
+        task_resources=[resources_lib.Resources(infra=c) for c in all_clouds])
     _check_controller_resources(controller_resources, expected_infra_set,
                                 default_controller_resources)
 
@@ -126,16 +129,16 @@ def test_get_controller_resources_with_task_resources(
         cloud = registry.CLOUD_REGISTRY.from_str(cloud_str)
         try:
             cloud.check_features_are_supported(
-                sky.Resources(),
-                {sky.clouds.CloudImplementationFeatures.HOST_CONTROLLERS})
-        except sky.exceptions.NotSupportedError:
+                resources_lib.Resources(),
+                {clouds.CloudImplementationFeatures.HOST_CONTROLLERS})
+        except exceptions.NotSupportedError:
             return False
         return True
 
     expected_infra_set = {c for c in all_clouds if _could_host_controllers(c)}
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
-        task_resources=[sky.Resources(infra=c) for c in all_clouds])
+        task_resources=[resources_lib.Resources(infra=c) for c in all_clouds])
     _check_controller_resources(controller_resources, expected_infra_set,
                                 default_controller_resources)
 
@@ -144,8 +147,8 @@ def test_get_controller_resources_with_task_resources(
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
-            sky.Resources(accelerators='L4'),
-            sky.Resources(infra='runpod', accelerators='A40'),
+            resources_lib.Resources(accelerators='L4'),
+            resources_lib.Resources(infra='runpod', accelerators='A40'),
         ])
     assert len(controller_resources) == 1
     config = list(controller_resources)[0].to_yaml_config()
@@ -156,14 +159,18 @@ def test_get_controller_resources_with_task_resources(
     # regions, and zones. Each combination should contain the default resources
     # along with the cloud, region, and zone.
     all_cloud_regions_zones = [
-        sky.Resources(cloud=sky.AWS(), region='us-east-1', zone='us-east-1a'),
-        sky.Resources(cloud=sky.AWS(), region='ap-south-1', zone='ap-south-1b'),
-        sky.Resources(cloud=sky.GCP(),
-                      region='us-central1',
-                      zone='us-central1-a'),
-        sky.Resources(cloud=sky.GCP(),
-                      region='europe-west1',
-                      zone='europe-west1-b'),
+        resources_lib.Resources(cloud=clouds.AWS(),
+                                region='us-east-1',
+                                zone='us-east-1a'),
+        resources_lib.Resources(cloud=clouds.AWS(),
+                                region='ap-south-1',
+                                zone='ap-south-1b'),
+        resources_lib.Resources(cloud=clouds.GCP(),
+                                region='us-central1',
+                                zone='us-central1-a'),
+        resources_lib.Resources(cloud=clouds.GCP(),
+                                region='europe-west1',
+                                zone='europe-west1-b'),
     ]
     expected_infra_set = {
         'aws/us-east-1/us-east-1a',
@@ -185,9 +192,9 @@ def test_get_controller_resources_with_task_resources(
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
-            sky.Resources(infra='aws/us-west-2'),
-            sky.Resources(infra='aws/us-west-2/us-west-2b'),
-            sky.Resources(infra='gcp/us-central1/us-central1-a')
+            resources_lib.Resources(infra='aws/us-west-2'),
+            resources_lib.Resources(infra='aws/us-west-2/us-west-2b'),
+            resources_lib.Resources(infra='gcp/us-central1/us-central1-a')
         ])
     expected_infra_set = {
         'aws/us-west-2',
@@ -203,14 +210,14 @@ def test_get_controller_resources_with_task_resources(
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
-            sky.Resources(cloud=sky.GCP(), region='europe-west1'),
-            sky.Resources(cloud=sky.GCP()),
-            sky.Resources(cloud=sky.AWS(),
-                          region='eu-north-1',
-                          zone='eu-north-1a'),
-            sky.Resources(cloud=sky.AWS(), region='eu-north-1'),
-            sky.Resources(cloud=sky.AWS(), region='ap-south-1'),
-            sky.Resources(cloud=sky.Azure()),
+            resources_lib.Resources(cloud=clouds.GCP(), region='europe-west1'),
+            resources_lib.Resources(cloud=clouds.GCP()),
+            resources_lib.Resources(cloud=clouds.AWS(),
+                                    region='eu-north-1',
+                                    zone='eu-north-1a'),
+            resources_lib.Resources(cloud=clouds.AWS(), region='eu-north-1'),
+            resources_lib.Resources(cloud=clouds.AWS(), region='ap-south-1'),
+            resources_lib.Resources(cloud=clouds.Azure()),
         ])
     expected_infra_set = {
         'aws/eu-north-1',

@@ -6,6 +6,28 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
+_REGION_CONFIG_CLOUDS = ['nebius', 'oci']
+
+# Kubernetes API use list to represent dictionary fields with patch strategy
+# merge and each item is indexed by the patch merge key. The following map
+# maps the field name to the patch merge key.
+# pylint: disable=line-too-long
+# Ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#podspec-v1-core
+# NOTE: field containers and imagePullSecrets are not included deliberately for
+# backward compatibility (we only support one container per pod now).
+_PATCH_MERGE_KEYS = {
+    'initContainers': 'name',
+    'ephemeralContainers': 'name',
+    'volumes': 'name',
+    'volumeMounts': 'name',
+    'resourceClaims': 'name',
+    'env': 'name',
+    'hostAliases': 'ip',
+    'topologySpreadConstraints': 'topologyKey',
+    'ports': 'containerPort',
+    'volumeDevices': 'devicePath',
+}
+
 
 class Config(Dict[str, Any]):
     """SkyPilot config that supports setting/getting values with nested keys."""
@@ -209,20 +231,80 @@ def merge_k8s_configs(
                 merge_k8s_configs(base_config[key][0], value[0],
                                   next_allowed_override_keys,
                                   next_disallowed_override_keys)
-            elif key in ['volumes', 'volumeMounts', 'initContainers']:
-                # If the key is 'volumes', 'volumeMounts', or 'initContainers',
-                # we search for item with the same name and merge it.
+            # For list fields with patch strategy "merge", we merge the list
+            # by the patch merge key.
+            elif key in _PATCH_MERGE_KEYS:
+                patch_merge_key = _PATCH_MERGE_KEYS[key]
                 for override_item in value:
-                    override_item_name = override_item.get('name')
+                    override_item_name = override_item.get(patch_merge_key)
                     if override_item_name is not None:
                         existing_base_item = next(
                             (v for v in base_config[key]
-                             if v.get('name') == override_item_name), None)
+                             if v.get(patch_merge_key) == override_item_name),
+                            None)
                         if existing_base_item is not None:
                             merge_k8s_configs(existing_base_item, override_item)
                         else:
                             base_config[key].append(override_item)
+                    else:
+                        base_config[key].append(override_item)
             else:
                 base_config[key].extend(value)
         else:
             base_config[key] = value
+
+
+def get_cloud_config_value_from_dict(
+        dict_config: Dict[str, Any],
+        cloud: str,
+        keys: Tuple[str, ...],
+        region: Optional[str] = None,
+        default_value: Optional[Any] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+    """Returns the nested key value by reading from config
+    Order to get the property_name value:
+    1. if region is specified,
+       try to get the value from <cloud>/<region_key>/<region>/keys
+    2. if no region or no override,
+       try to get it at the cloud level <cloud>/keys
+    3. if not found at cloud level,
+       return either default_value if specified or None
+    """
+    input_config = Config(dict_config)
+    region_key = None
+    if cloud == 'kubernetes':
+        region_key = 'context_configs'
+    elif cloud in _REGION_CONFIG_CLOUDS:
+        region_key = 'region_configs'
+
+    per_context_config = None
+    if region is not None and region_key is not None:
+        per_context_config = input_config.get_nested(
+            keys=(cloud, region_key, region) + keys,
+            default_value=None,
+            override_configs=override_configs)
+        if not per_context_config and cloud in _REGION_CONFIG_CLOUDS:
+            # TODO (kyuds): Backward compatibility, remove after 0.11.0.
+            per_context_config = input_config.get_nested(
+                keys=(cloud, region) + keys,
+                default_value=None,
+                override_configs=override_configs)
+            if per_context_config is not None:
+                logger.info(
+                    f'{cloud} configuration is using the legacy format. \n'
+                    'This format will be deprecated after 0.11.0, refer to '
+                    '`https://docs.skypilot.co/en/latest/reference/config.html` '  # pylint: disable=line-too-long
+                    'for the new format. Please use `region_configs` to specify region specific configuration.'
+                )
+    # if no override found for specified region
+    general_config = input_config.get_nested(keys=(cloud,) + keys,
+                                             default_value=default_value,
+                                             override_configs=override_configs)
+
+    if (cloud == 'kubernetes' and isinstance(general_config, dict) and
+            isinstance(per_context_config, dict)):
+        merge_k8s_configs(general_config, per_context_config)
+        return general_config
+    else:
+        return (general_config
+                if per_context_config is None else per_context_config)

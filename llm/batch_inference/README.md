@@ -43,7 +43,7 @@ This will automatically find available machines across multiple regions to compu
 
 ## Monitor the progress
 
-You can use `sky jobs queue` and `sky jobs dashboard` to see the status of jobs. Alternatively, you can monitor the progress via 
+You can use `sky jobs queue` and `sky dashboard` to see the status of jobs. Alternatively, you can monitor the progress via 
 ```
 sky launch -n monitor monitor_progress.yaml 
 ```
@@ -58,4 +58,4 @@ and visit `http:$ENDPOINT:8000` in the browser.
 
 ## Learn More
 
-For a complete walkthrough of this case study, including detailed performance metrics and implementation insights, read our [blog post on large-scale embedding generation](https://blog.skypilot.co/large-scale-embedding-generation/).
+For a complete walkthrough of this case study, including detailed performance metrics and implementation insights, read our [blog post on large-scale embedding generation](https://blog.skypilot.co/large-scale-embedding/).

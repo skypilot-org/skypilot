@@ -997,23 +997,29 @@ class Optimizer:
     @staticmethod
     def _print_candidates(node_to_candidate_map: _TaskToPerCloudCandidates):
         for node, candidate_set in node_to_candidate_map.items():
-            if node.best_resources:
-                accelerator = node.best_resources.accelerators
-            else:
-                accelerator = list(node.resources)[0].accelerators
+            best_resources = node.best_resources
+            if best_resources is None:
+                best_resources = list(node.resources)[0]
             is_multi_instances = False
-            if accelerator:
-                acc_name, acc_count = list(accelerator.items())[0]
+            if best_resources.accelerators:
+                acc_name, acc_count = list(
+                    best_resources.accelerators.items())[0]
                 for cloud, candidate_list in candidate_set.items():
-                    if len(candidate_list) > 1:
+                    # Filter only the candidates matching the best
+                    # resources chosen by the optimizer.
+                    best_resources_candidates = [
+                        res for res in candidate_list if
+                        res.get_accelerators_str() == f'{acc_name}:{acc_count}'
+                    ]
+                    if len(best_resources_candidates) > 1:
                         is_multi_instances = True
-                        instance_list = [
+                        instance_list = set([
                             res.instance_type
-                            for res in candidate_list
+                            for res in best_resources_candidates
                             if res.instance_type is not None
-                        ]
+                        ])
                         candidate_str = resources_utils.format_resource(
-                            candidate_list[0], simplify=True)
+                            best_resources, simplify=True)
 
                         logger.info(
                             f'{colorama.Style.DIM}🔍 Multiple {cloud} instances '
@@ -1252,6 +1258,62 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
             logger.warning(
                 f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}')
 
+        _check_specified_regions(task)
+
+
+def _check_specified_regions(task: task_lib.Task) -> None:
+    """Check if specified regions (Kubernetes/SSH contexts) are enabled.
+
+    Args:
+        task: The task to check.
+    """
+    # Only check for Kubernetes/SSH for now
+    # Below check works because SSH inherits Kubernetes cloud.
+    if not all(
+            isinstance(resources.cloud, clouds.Kubernetes)
+            for resources in task.resources):
+        return
+    # Kubernetes region is a context if set
+    for resources in task.resources:
+        if resources.region is None:
+            continue
+
+        is_ssh = isinstance(resources.cloud, clouds.SSH)
+        if is_ssh:
+            existing_contexts = clouds.SSH.existing_allowed_contexts()
+        else:
+            existing_contexts = clouds.Kubernetes.existing_allowed_contexts()
+
+        region = resources.region
+        task_name = f' {task.name!r}' if task.name is not None else ''
+        msg = f'Task{task_name} requires '
+        if region not in existing_contexts:
+            if is_ssh:
+                infra_str = f'SSH/{region.lstrip("ssh-")}'
+            else:
+                infra_str = f'Kubernetes/{region}'
+            logger.warning(f'{infra_str} is not enabled.')
+            volume_mounts_str = ''
+            if task.volume_mounts:
+                if len(task.volume_mounts) > 1:
+                    volume_mounts_str += 'volumes '
+                else:
+                    volume_mounts_str += 'volume '
+                volume_mounts_str += ', '.join(
+                    [f'{v.volume_name}' for v in task.volume_mounts])
+                volume_mounts_str += f' with infra {infra_str}'
+            if volume_mounts_str:
+                msg += volume_mounts_str
+            else:
+                msg += f'infra {infra_str}'
+            msg += (
+                f' which is not enabled. To enable access, change '
+                f'the task infra requirement or run: {colorama.Style.BRIGHT}'
+                f'sky check {colorama.Style.RESET_ALL}'
+                f'to ensure the infra is enabled.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(msg)
+
 
 def _fill_in_launchable_resources(
     task: task_lib.Task,
@@ -1281,8 +1343,7 @@ def _fill_in_launchable_resources(
     launchable: Dict[resources_lib.Resources, List[resources_lib.Resources]] = (
         collections.defaultdict(list))
     all_fuzzy_candidates = set()
-    cloud_candidates: _PerCloudCandidates = collections.defaultdict(
-        List[resources_lib.Resources])
+    cloud_candidates: _PerCloudCandidates = collections.defaultdict(list)
     resource_hints: Dict[resources_lib.Resources,
                          List[str]] = collections.defaultdict(list)
     if blocked_resources is None:
@@ -1319,7 +1380,10 @@ def _fill_in_launchable_resources(
                 launchable[resources].extend(
                     resources_utils.make_launchables_for_valid_region_zones(
                         cheapest))
-                cloud_candidates[cloud] = feasible_resources.resources_list
+                # Each cloud can occur multiple times in feasible_list,
+                # for different region/zone.
+                cloud_candidates[cloud].extend(
+                    feasible_resources.resources_list)
             else:
                 all_fuzzy_candidates.update(
                     feasible_resources.fuzzy_candidate_list)
@@ -1329,7 +1393,7 @@ def _fill_in_launchable_resources(
             num_node_str = ''
             if task.num_nodes > 1:
                 num_node_str = f'{task.num_nodes}x '
-            if not quiet:
+            if not (quiet or resources.no_missing_accel_warnings):
                 logger.info(
                     f'No resource satisfying {num_node_str}'
                     f'{resources.repr_with_region_zone} on {clouds_str}.')
