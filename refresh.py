@@ -32,7 +32,7 @@ def parse_smaps(pid: int = None):
                 result[current_file] += val
     agg = defaultdict(int)
     for k, v in result.items():
-        if k.endswith(".so"):
+        if ".so" in k:
             agg['.so'] += v
         else:
             agg[k] = v
@@ -45,4 +45,6 @@ for i in range(count):
     print(rss())
     mem_usage = parse_smaps()
     for k, v in sorted(mem_usage.items(), key=lambda x: -x[1]):
+        if v < 1024:
+            break
         print(f"{k:40} {v/1024/1024:.2f} MB")
