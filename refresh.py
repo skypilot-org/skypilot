@@ -14,6 +14,8 @@ count = int(os.getenv("RUN_COUNT", "200"))
 
 def rss():
     gc.collect()
+    libc = ctypes.CDLL("libc.so.6")
+    libc.malloc_trim(0)
     return f'RSS: {proc.memory_info().rss / 1024 / 1024:.2f}MB'
 
 def parse_smaps(pid: int = None):
