@@ -90,12 +90,12 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 Install with pip:
 ```bash   
 # Choose your clouds:
-pip install -U "skypilot[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,nebius,seeweb]"
+pip install -U "skypilot[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp]"
 ```
 To get the latest features and fixes, use the nightly build or [install from source](https://docs.skypilot.co/en/latest/getting-started/installation.html):
 ```bash
 # Choose your clouds:
-pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,nebius,seeweb]"
+pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp]"
 ```
 
 <p align="center">
@@ -104,7 +104,7 @@ pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidst
 
 Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
 RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
-VMware vSphere, Nebius, Seeweb.
+VMware vSphere.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png">
