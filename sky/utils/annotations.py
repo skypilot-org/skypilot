@@ -2,6 +2,7 @@
 
 import functools
 from typing import Callable, Literal, TypeVar
+import os
 
 from typing_extensions import ParamSpec
 
@@ -44,7 +45,7 @@ def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
     """
 
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
-        if os.environ.get('SKYPILOT_DISABLE_LRU_CACHE', '0') == '1':
+        if os.getenv('SKYPILOT_DISABLE_LRU_CACHE', '0') == '1':
             print(f'Skipping LRU cache for {func.__name__}')
             return func
         if scope == 'global':
