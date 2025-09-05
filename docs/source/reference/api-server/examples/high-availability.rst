@@ -59,7 +59,7 @@ How to enable high availability mode
 To enable high availability for the controller, set the ``high_availability`` flag to ``true`` within the ``[jobs,serve].controller`` section of your :ref:`SkyPilot configuration <config-yaml>`:
 
 .. code-block:: yaml
-    :emphasize-lines: 4-6,11-13
+    :emphasize-lines: 5,10
 
     jobs:
       controller:
@@ -94,7 +94,7 @@ The high availability implementation relies on standard Kubernetes mechanisms to
 
 The entire recovery process is handled transparently by SkyPilot and Kubernetes, requiring no action from users when failures occur.
 
-.. figure:: ../../../images/sky-serve-ha-architecture.png
+.. figure:: ../../../images/sky-serve-ha-architechture.png
     :width: 600
     :alt: Architecture Diagram
 
