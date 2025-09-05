@@ -362,7 +362,7 @@ class RayCodeGen:
             def get_or_fail(futures, pg) -> List[int]:
                 \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
                 if not futures:
-                    return []
+                    return [], []
                 returncodes = [1] * len(futures)
                 pids = [None] * len(futures)
                 failed = False
@@ -376,6 +376,7 @@ class RayCodeGen:
                 # Reference: https://github.com/ray-project/ray/blob/ray-2.9.3/python/ray/_private/worker.py#L2845-L2846
 
                 def handle_ready_tasks(tasks: List[ray.ObjectRef]) -> None:
+                    nonlocal returncodes, pids, failed
                     for task in tasks:
                         idx = futures.index(task)
                         res = ray.get(task)
