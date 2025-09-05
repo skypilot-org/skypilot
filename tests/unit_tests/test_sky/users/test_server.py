@@ -86,13 +86,14 @@ class TestUsersEndpoints:
         mock_get_users_for_role.assert_any_call('user')
 
     @mock.patch('sky.global_user_state.get_all_users')
-    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @pytest.mark.asyncio
-    async def test_users_endpoint_empty(self, mock_get_user_roles,
+    async def test_users_endpoint_empty(self, mock_get_users_for_role,
                                         mock_get_all_users):
         """Test GET /users endpoint with no users."""
         # Setup
         mock_get_all_users.return_value = []
+        mock_get_users_for_role.return_value = []
 
         # Execute
         result = server.users()
@@ -100,7 +101,8 @@ class TestUsersEndpoints:
         # Verify
         assert result == []
         mock_get_all_users.assert_called_once()
-        mock_get_user_roles.assert_not_called()
+        # Should still call get_users_for_role for each supported role even with no users
+        assert mock_get_users_for_role.call_count == 2  # admin and user roles
 
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @pytest.mark.asyncio
@@ -208,7 +210,8 @@ class TestUsersEndpoints:
 
         # Verify
         assert result is None  # Function returns None on success
-        mock_get_supported_roles.assert_called_once()
+        # get_supported_roles is called by both user_update and users() functions
+        assert mock_get_supported_roles.call_count == 2
         mock_get_user.assert_called_once_with('test_user')
         mock_update_role.assert_called_once_with('test_user', 'admin')
         args, kwargs = mock_add_or_update_user.call_args
@@ -260,7 +263,7 @@ class TestUsersEndpoints:
         assert exc_info.value.status_code == 400
         assert 'User nonexistent_user does not exist' in str(
             exc_info.value.detail)
-        mock_get_supported_roles.assert_called_once()
+        assert mock_get_supported_roles.call_count == 2
         mock_get_user.assert_called_once_with('nonexistent_user')
 
     @mock.patch('sky.users.rbac.get_supported_roles')
@@ -286,7 +289,7 @@ class TestUsersEndpoints:
             server.user_update(mock_request, update_body)
 
         assert 'Database error' in str(exc_info.value)
-        mock_get_supported_roles.assert_called_once()
+        assert mock_get_supported_roles.call_count == 2
         mock_get_user.assert_called_once_with('test_user')
         mock_update_role.assert_called_once_with('test_user', 'admin')
 
