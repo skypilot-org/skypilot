@@ -165,10 +165,7 @@ def get_lazy_modules_info():
             is_loaded = (hasattr(module, '_module') and
                          getattr(module, '_module', None) is not None)
             module_name = getattr(module, '_module_name', '<unknown>')
-            info['modules'].append({
-                'name': module_name,
-                'loaded': is_loaded
-            })
+            info['modules'].append({'name': module_name, 'loaded': is_loaded})
             if is_loaded:
                 info['loaded_count'] += 1
             info['total_count'] += 1
