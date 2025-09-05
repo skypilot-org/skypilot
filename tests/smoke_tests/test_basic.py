@@ -368,6 +368,63 @@ def test_aws_manual_restart_recovery():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.nebius
+def test_nebius_manual_restart_recovery():
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Nebius._max_cluster_name_length())
+    region = 'eu-north1'
+    test = smoke_tests_utils.Test(
+        'test_nebius_manual_restart_recovery',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                'nebius', name, skip_remote_server_check=True),
+            f'sky launch -y -c {name} --infra nebius/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky autostop {name} -y -i 1',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=180),
+            # Restart the cluster manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=(
+                    # Create Nebius profile for CLI commands
+                    'nebius profile create default --endpoint api.nebius.cloud --token-file ~/.nebius/NEBIUS_IAM_TOKEN.txt || true',
+                    f'project_id=`nebius iam project list --parent-id $(cat ~/.nebius/NEBIUS_TENANT_ID.txt) --format json | jq -r \'.items[] | select(.spec.region == "{region}") | .metadata.id\'` && '
+                    f'id=`nebius compute instance list --parent-id $project_id --format json | jq -r \'.items[] | select(.metadata.name == "{name_on_cloud}") | .metadata.id\'` && '
+                    # Wait for the instance to be stopped before restarting.
+                    f'while [ "$(nebius compute instance get --id $id --format json | jq -r \'.status.state\')" != "STOPPED" ]; do sleep 5; done && '
+                    # Start the instance.
+                    f'nebius compute instance start --id $id && '
+                    # Wait for the instance to be running.
+                    f'while [ "$(nebius compute instance get --id $id --format json | jq -r \'.status.state\')" != "RUNNING" ]; do sleep 5; done'
+                ),
+                skip_remote_server_check=True),
+            # Status refresh should time out, as the restarted
+            # instance would not have the SkyPilot runtime setup.
+            # We should see a warning message on how to recover
+            # from this state.
+            f'sky status -r {name} | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            # Recover the cluster.
+            f'sky start -y {name}',
+            # Wait for the cluster to be up.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=300),
+        ],
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
+        env={
+            # Technically, even without setting nebius.use_static_ip_address to true, restarting
+            # instances would not change the public IP address as long as it hasn't stopped
+            # for more than one hour.
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/test_yamls/nebius_static_ip_config.yaml'
+        },
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_vast
 @pytest.mark.gcp
 def test_gcp_stale_job_manual_restart():
