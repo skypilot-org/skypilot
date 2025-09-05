@@ -142,13 +142,9 @@ def get_region_zones_for_instance_type(instance_type: str,
     # Use common.get_region_zones() like all other providers
     region_list = common.get_region_zones(df_filtered, use_spot)
 
-    # Hack: Enforce hierarchical region priority
-    # Priority order:
-    # 1. Frosinone (it-fr2),
-    # 2. Milano (it-mi2),
-    # 3. Lugano (ch-lug1),
-    # 4. Bulgaria (bg-sof1)
-    priority_regions = ['it-fr2', 'it-mi2', 'ch-lug1', 'bg-sof1']
+    # Default region: Frosinone (it-fr2)
+    # Other regions: Milano (it-mi2), Lugano (ch-lug1), Bulgaria (bg-sof1)
+    priority_regions = ['it-fr2']
     prioritized_regions = []
     other_regions = []
 
