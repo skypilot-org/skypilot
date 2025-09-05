@@ -154,9 +154,6 @@
                                 "null"
                             ]
                         },
-                        "use-https": {
-                            "type": "boolean"
-                        },
                         "cookie-refresh": {
                             "type": [
                                 "string",
@@ -190,6 +187,9 @@
                         },
                         "session-store-type": {
                             "type": "string"
+                        },
+                        "use-https": {
+                            "type": "boolean"
                         }
                     }
                 },
