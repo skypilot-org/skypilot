@@ -168,6 +168,7 @@ def get_all_volumes_usedby(
         f'status.phase!={phase}'
         for phase in k8s_constants.PVC_NOT_HOLD_POD_PHASES
     ])
+    label_selector = 'parent=skypilot'
     context_to_namespaces: Dict[str, Set[str]] = {}
     pvc_names = set()
     for config in configs:
@@ -180,15 +181,16 @@ def get_all_volumes_usedby(
     # Get all pods in the namespace
     used_by_pods: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
     used_by_clusters: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
-    contexts = kubernetes_utils.get_all_kube_context_names()
-    for context in contexts:
+    for context, namespaces in context_to_namespaces.items():
         used_by_pods[context] = {}
         used_by_clusters[context] = {}
-        for namespace in context_to_namespaces[context]:
+        for namespace in namespaces:
             used_by_pods[context][namespace] = {}
             used_by_clusters[context][namespace] = {}
             pods = kubernetes.core_api(context).list_namespaced_pod(
-                namespace=namespace, field_selector=field_selector)
+                namespace=namespace,
+                field_selector=field_selector,
+                label_selector=label_selector)
             for pod in pods.items:
                 if pod.spec.volumes is None:
                     continue
