@@ -451,6 +451,9 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
 
     LABEL_KEY = 'gpu.nvidia.com/class'
 
+    # TODO (kyuds): fill in more label values for different accelerators.
+    ACC_VALUE_MAPPINGS = {'H100_NVLINK_80GB': 'H100'}
+
     @classmethod
     def get_label_key(cls, accelerator: Optional[str] = None) -> str:
         return cls.LABEL_KEY
@@ -469,7 +472,8 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
-        return value
+        # return original label value if not found in mappings.
+        return cls.ACC_VALUE_MAPPINGS.get(value, value)
 
 
 class GKELabelFormatter(GPULabelFormatter):
@@ -1012,15 +1016,16 @@ class GKEAutoscaler(Autoscaler):
         to fit the instance type.
         """
         for accelerator in node_pool_accelerators:
+            raw_value = accelerator['acceleratorType']
             node_accelerator_type = (
-                GKELabelFormatter.get_accelerator_from_label_value(
-                    accelerator['acceleratorType']))
+                GKELabelFormatter.get_accelerator_from_label_value(raw_value))
             # handle heterogenous nodes.
             if not node_accelerator_type:
                 continue
             node_accelerator_count = accelerator['acceleratorCount']
-            if node_accelerator_type == requested_gpu_type and int(
-                    node_accelerator_count) >= requested_gpu_count:
+            viable_names = [node_accelerator_type.lower(), raw_value.lower()]
+            if (requested_gpu_type.lower() in viable_names and
+                    int(node_accelerator_count) >= requested_gpu_count):
                 return True
         return False
 
@@ -1448,9 +1453,13 @@ def get_accelerator_label_key_values(
                 if is_multi_host_tpu(node_metadata_labels):
                     continue
                 for label, value in label_list:
-                    if (label_formatter.match_label_key(label) and
-                            label_formatter.get_accelerator_from_label_value(
-                                value).lower() == acc_type.lower()):
+                    if label_formatter.match_label_key(label):
+                        # match either canonicalized name or raw name
+                        accelerator = (label_formatter.
+                                       get_accelerator_from_label_value(value))
+                        viable = [value.lower(), accelerator.lower()]
+                        if acc_type.lower() not in viable:
+                            continue
                         if is_tpu_on_gke(acc_type):
                             assert isinstance(label_formatter,
                                               GKELabelFormatter)
