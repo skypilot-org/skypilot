@@ -18,7 +18,7 @@ Example:
 """
 from typing import List, Optional
 
-from sky.adaptors import runpod
+from sky.adaptors import runpod as rp_adaptor
 from sky.provision.runpod.api.pods import generate_spot_pod_deployment_mutation
 
 _INTERRUPTABLE_POD_FIELD: str = 'podRentInterruptable'
@@ -70,16 +70,18 @@ def create_spot_pod(
                 bid_per_gpu=0.3
             )
     """
-    runpod.runpod.get_gpu(gpu_type_id)
+    # Validate GPU type via SDK using per-request API key.
+    rp_adaptor.runpod.get_gpu(gpu_type_id, api_key=rp_adaptor._get_thread_runpod_api_key())  # type: ignore[attr-defined]
     # refer to https://graphql-spec.runpod.io/#definition-CloudTypeEnum
     if cloud_type not in ['ALL', 'COMMUNITY', 'SECURE']:
         raise ValueError('cloud_type must be one of ALL, COMMUNITY or SECURE')
 
     if network_volume_id and data_center_id is None:
-        user_info = runpod.runpod.get_user()
-        for network_volume in user_info['networkVolumes']:
-            if network_volume['id'] == network_volume_id:
-                data_center_id = network_volume['dataCenterId']
+        # Resolve data_center_id from the user's network volumes via SDK.
+        user_info = rp_adaptor.runpod.get_user(api_key=rp_adaptor._get_thread_runpod_api_key())  # type: ignore[attr-defined]
+        for network_volume in user_info.get('networkVolumes', []):
+            if network_volume.get('id') == network_volume_id:
+                data_center_id = network_volume.get('dataCenterId')
                 break
 
     if container_disk_in_gb is None and template_id is None:
@@ -115,5 +117,6 @@ def create_spot_pod(
         template_id=template_id,
         volume_key=volume_key,
     )
-    response = runpod.runpod.api.graphql.run_graphql_query(mutation)
+    response = rp_adaptor.runpod.api.graphql.run_graphql_query(  # type: ignore[attr-defined]
+        mutation, api_key=rp_adaptor._get_thread_runpod_api_key())
     return response[_RESPONSE_DATA_FIELD][_INTERRUPTABLE_POD_FIELD]

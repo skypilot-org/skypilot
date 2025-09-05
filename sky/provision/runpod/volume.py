@@ -131,7 +131,8 @@ def get_volume_usedby(
       }
     }
     """
-    resp = runpod.runpod.api.graphql.run_graphql_query(query)
+    resp = runpod.runpod.api.graphql.run_graphql_query(  # type: ignore[attr-defined]
+        query, api_key=runpod._get_thread_runpod_api_key())
     pods = resp.get('data', {}).get('myself', {}).get('pods', [])
     used_pods = [p for p in pods if p.get('networkVolumeId') == vol_id]
     usedby_pod_names = [p.get('name') for p in used_pods if p.get('name')]

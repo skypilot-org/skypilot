@@ -535,7 +535,11 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
-        runpod.runpod.cli.groups.ssh.functions.add_ssh_key(public_key)
+        # Ensure the SDK sees the per-request API key if provided.
+        from sky.adaptors import runpod as rp_adaptor
+        with rp_adaptor.with_runpod_sdk_api_key(
+                rp_adaptor._get_thread_runpod_api_key()):
+            rp_adaptor.runpod.cli.groups.ssh.functions.add_ssh_key(public_key)  # type: ignore[attr-defined]
 
     return configure_ssh_info(config)
 

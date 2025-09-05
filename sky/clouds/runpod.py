@@ -285,29 +285,51 @@ class RunPod(clouds.Cloud):
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """ Verify that the user has valid credentials for RunPod. """
+        """Verify that the user has valid credentials for RunPod.
+
+        Uses a lightweight REST call via the adaptor, which honors
+        request-scoped API keys if set.
+        """
+        # Try REST check first to respect inline credentials.
         try:
-            import runpod  # pylint: disable=import-outside-toplevel
-            valid, error = runpod.check_credentials()
-
-            if not valid:
-                return False, (
-                    f'{error} \n'  # First line is indented by 4 spaces
-                    '    Credentials can be set up by running: \n'
-                    f'        $ pip install runpod \n'
-                    f'        $ runpod config\n'
-                    '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
-                )
-
+            from sky.adaptors import runpod as rp_adaptor  # lazy
+            # A benign GET that requires auth; listing volumes is cheap.
+            # Any 4xx/5xx will raise; success implies valid API key.
+            rp_adaptor.rest_request('GET', '/networkvolumes')
             return True, None
-
-        except ImportError:
-            return False, ('Failed to import runpod. '
-                           'To install, run: pip install skypilot[runpod]')
+        except Exception as e:  # pylint: disable=broad-except
+            # Fall back to SDK-based check for better guidance when available.
+            try:
+                import runpod as runpod_sdk  # pylint: disable=import-outside-toplevel
+                valid, error = runpod_sdk.check_credentials()
+                if not valid:
+                    return False, (
+                        f'{error} \n'
+                        '    Credentials can be set up by running: \n'
+                        '        $ pip install runpod \n'
+                        '        $ runpod config\n'
+                        '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'
+                    )
+                return True, None
+            except ImportError:
+                return False, ('Failed to import runpod. '
+                               'To install, run: pip install skypilot[runpod]')
+            except Exception:
+                # Use adaptor error message if SDK path also failed.
+                return False, (f'RunPod credential check failed: {e}')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
+        from sky.adaptors import runpod as rp_adaptor
+        # If an inline API key is provided for this request, no file mounts
+        # are necessary for RunPod access on the remote VM.
+        if rp_adaptor._get_thread_runpod_api_key() is not None:
+            return {}
+
+        # Map from the local RunPod config dir (which may be request-overridden)
+        # to the standard location on the remote VM.
+        config_dir = rp_adaptor.get_runpod_config_dir()
         return {
-            f'~/.runpod/{filename}': f'~/.runpod/{filename}'
+            f'{config_dir}/{filename}': f'~/.runpod/{filename}'
             for filename in _CREDENTIAL_FILES
         }
 
