@@ -3,7 +3,6 @@ import copy
 import logging
 import math
 import os
-import typing
 from typing import Any, Dict, List, Optional, Union
 
 from sky.adaptors import kubernetes
