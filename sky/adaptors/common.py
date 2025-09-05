@@ -48,6 +48,24 @@ class LazyImport(types.ModuleType):
                     raise
         return self._module
 
+    def unload_module(self):
+        """Unload the cached module to free memory.
+        
+        This method clears the cached module and any dynamically created
+        submodules, allowing the garbage collector to reclaim memory.
+        Note that this only clears the cache - the module will be 
+        re-imported if accessed again.
+        """
+        with self._lock:
+            self._module = None
+            # Clear any cached submodules
+            attrs_to_remove = []
+            for attr_name, attr_value in self.__dict__.items():
+                if isinstance(attr_value, LazyImport):
+                    attrs_to_remove.append(attr_name)
+            for attr_name in attrs_to_remove:
+                delattr(self, attr_name)
+
     def __getattr__(self, name: str) -> Any:
         # Attempt to access the attribute, if it fails, assume it's a submodule
         # and lazily import it
@@ -78,3 +96,17 @@ def load_lazy_modules(modules: Tuple[LazyImport, ...]):
         return wrapper
 
     return decorator
+
+
+def unload_lazy_modules(modules: Tuple[LazyImport, ...]):
+    """Unload multiple lazy modules to free memory.
+    
+    Args:
+        modules: Tuple of LazyImport instances to unload.
+    
+    This function clears the cached modules from all provided LazyImport
+    instances, allowing the garbage collector to reclaim memory. The modules
+    will be re-imported if accessed again.
+    """
+    for module in modules:
+        module.unload_module()
