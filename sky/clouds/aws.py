@@ -859,11 +859,11 @@ class AWS(clouds.Cloud):
 
         # Fetch the AWS catalogs
         # pylint: disable=import-outside-toplevel
-        from sky.catalog import aws_catalog
+        from sky.catalog.data_fetchers import fetch_aws
 
         # Trigger the fetch of the availability zones mapping.
         try:
-            aws_catalog.get_default_instance_type()
+            fetch_aws.fetch_availability_zone_mappings()
         except RuntimeError as e:
             return False, (
                 'Failed to fetch the availability zones for the account '
