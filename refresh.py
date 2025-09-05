@@ -25,7 +25,6 @@ def parse_smaps(pid: int = None):
     with open(path) as f:
         for line in f:
             if re.match(r"^[0-9a-fA-F]+-[0-9a-fA-F]+", line):
-                # 新的一段 VMA
                 parts = line.strip().split()
                 current_file = parts[-1] if len(parts) > 5 else "[anon]"
             elif line.startswith("Rss:"):
