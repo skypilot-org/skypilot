@@ -210,7 +210,7 @@ class TestUsersEndpoints:
 
         # Verify
         assert result is None  # Function returns None on success
-        assert mock_get_supported_roles.call_count == 1
+        mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('test_user')
         mock_update_role.assert_called_once_with('test_user', 'admin')
         args, kwargs = mock_add_or_update_user.call_args
@@ -262,7 +262,7 @@ class TestUsersEndpoints:
         assert exc_info.value.status_code == 400
         assert 'User nonexistent_user does not exist' in str(
             exc_info.value.detail)
-        assert mock_get_supported_roles.call_count == 1
+        mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('nonexistent_user')
 
     @mock.patch('sky.users.rbac.get_supported_roles')
@@ -288,7 +288,7 @@ class TestUsersEndpoints:
             server.user_update(mock_request, update_body)
 
         assert 'Database error' in str(exc_info.value)
-        assert mock_get_supported_roles.call_count == 1
+        mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('test_user')
         mock_update_role.assert_called_once_with('test_user', 'admin')
 
