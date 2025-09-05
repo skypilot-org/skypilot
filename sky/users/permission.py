@@ -226,6 +226,12 @@ class PermissionService:
         self._load_policy_no_lock()
         return self.enforcer.get_roles_for_user(user_id)
 
+    def get_users_for_role(self, role: str) -> List[str]:
+        """Get all users for a role."""
+        self._lazy_initialize()
+        self._load_policy_no_lock()
+        return self.enforcer.get_users_for_role(role)
+
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
         """Check permission."""
