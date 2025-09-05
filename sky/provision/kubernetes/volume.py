@@ -118,6 +118,7 @@ def _get_volume_usedby(
     # Get all pods in the namespace
     pods = kubernetes.core_api(context).list_namespaced_pod(
         namespace=namespace, field_selector=field_selector)
+    logger.info(f'GetVolumeUsedBy: Found {len(pods.items)} pods in the namespace')
     for pod in pods.items:
         if pod.spec.volumes is None:
             continue

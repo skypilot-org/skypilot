@@ -81,6 +81,7 @@ def volume_list() -> List[Dict[str, Any]]:
             }
         ]
     """
+    tracemalloc.start()
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes()
         all_users = global_user_state.get_all_users()
