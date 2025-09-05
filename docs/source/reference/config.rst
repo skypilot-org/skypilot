@@ -30,6 +30,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
     :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 24
+    :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -165,8 +166,10 @@ Below is the configuration syntax and some example values. See detailed explanat
       :ref:`eu-west1 <config-yaml-nebius>`:
         project_id: project-e01xxxxxxxxxxx
         fabric: fabric-5
-      :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
-      :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+    :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
+    :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+    :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
+    :ref:`domain <config-yaml-nebius-domain>`: api.nebius.com:443
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -252,7 +255,25 @@ Example:
 .. code-block:: yaml
 
   api_server:
-    cluster_event_retention_hours: -1 # Disable cluster event GC
+    cluster_event_retention_hours: -1 # Disable all cluster event GC
+  
+.. _config-yaml-api-server-cluster-debug-event-retention-hours:
+
+``api_server.cluster_debug_event_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for cluster events in hours (optional). Set to a negative value to disable cluster event GC.
+
+Cluster event GC will remove debug cluster event entries in `sky status -v`, i.e., the logs and status of the cluster events.
+
+Default: ``720.0`` (30 days).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    cluster_debug_event_retention_hours: -1 # Disable all cluster event GC
 
 .. _config-yaml-jobs:
 
@@ -1143,6 +1164,7 @@ Can be one of:
 
 - ``gke``: Google Kubernetes Engine
 - ``karpenter``: Karpenter
+- ``coreweave``: `CoreWeave autoscaler <https://docs.coreweave.com/docs/products/cks/nodes/autoscaling>`_
 - ``generic``: Generic autoscaler, assumes nodes are labelled with ``skypilot.co/accelerator``.
 
 .. _config-yaml-kubernetes-pod-config:
@@ -1445,6 +1467,20 @@ Example:
 
   nebius:
     tenant_id: tenant-1234567890
+
+.. _config-yaml-nebius-domain:
+
+``nebius.domain``
+~~~~~~~~~~~~~~~~~~~~
+
+Nebius API domain (optional).
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    domain: api.nebius.com:443
 
 
 .. _config-yaml-rbac:

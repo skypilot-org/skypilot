@@ -1,28 +1,21 @@
 import fcntl
-import json
 import os
-import pathlib
+import shutil
 import signal
 import socket
 import subprocess
 import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import filelock
 import pytest
 import requests
 from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
-from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import orm
-from sqlalchemy import text as sqlalchemy_text
-import sqlalchemy_adapter
 
-from sky import global_user_state
+from sky import cloud_stores
 from sky import sky_logging
-from sky import skypilot_config
-from sky.skylet import constants
 from sky.utils import common_utils
 
 # Initialize logger at the top level
@@ -204,6 +197,12 @@ def pytest_addoption(parser):
         action='store_true',
         default=False,
         help='Run tests with GRPC enabled',
+    )
+    parser.addoption(
+        '--env-file',
+        type=str,
+        default=None,
+        help='Path to the env file to override the default env file',
     )
 
 
@@ -634,7 +633,8 @@ def setup_docker_container(request):
 
 @pytest.fixture(scope='session', autouse=True)
 def setup_controller_cloud_env(request):
-    """Setup controller cloud environment variable if --controller-cloud is specified."""
+    """Setup controller cloud environment variable if --controller-cloud is
+    specified."""
     if not request.config.getoption('--controller-cloud'):
         yield
         return
@@ -647,7 +647,8 @@ def setup_controller_cloud_env(request):
 
 @pytest.fixture(scope='session', autouse=True)
 def setup_postgres_backend_env(request):
-    """Setup Postgres Backend environment variable if --postgres is specified."""
+    """Setup Postgres Backend environment variable if --postgres is specified.
+    """
     if not request.config.getoption('--postgres'):
         yield
         return
@@ -657,9 +658,68 @@ def setup_postgres_backend_env(request):
 
 @pytest.fixture(scope='session', autouse=True)
 def setup_grpc_backend_env(request):
-    """Setup gRPC enabled environment variable if --grpc is specified."""
+    """Setup gRPC enabled environment variable if --grpc is specified.
+    """
     if not request.config.getoption('--grpc'):
         yield
         return
     os.environ['PYTEST_SKYPILOT_GRPC_ENABLED'] = '1'
     yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def prepare_env_file(request):
+    """Prepare environment file for tests.
+
+    If the env-file option is a local directory or file, use it directly.
+    Otherwise, treat it as a cloud storage URL (e.g., s3://bucket/path) and
+    download from storage.
+    """
+    env_file_path = request.config.getoption('--env-file')
+    if env_file_path is None:
+        yield
+        return
+
+    # Check if it's a local file or directory
+    expanded_path = os.path.expanduser(env_file_path)
+    if os.path.exists(expanded_path):
+        # It's a local file/directory, use it directly
+        logger.info(f'Using local env file: {expanded_path}')
+        os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = expanded_path
+        yield expanded_path
+        return
+
+    # Not a local file, treat as cloud storage URL (e.g., s3://bucket/path)
+
+    logger.info(
+        f'Attempting to download env file from cloud storage: {env_file_path}')
+
+    # Create temporary directory for downloaded files
+    temp_dir = tempfile.mkdtemp(prefix='skypilot_env_')
+
+    try:
+        # Get the appropriate CloudStorage handler for the URL
+        cloud_storage = cloud_stores.get_storage_from_path(env_file_path)
+
+        # Generate the download command - assert it's a file
+        assert not cloud_storage.is_directory(env_file_path), (
+            f'Expected file but got directory: {env_file_path}')
+        download_cmd = cloud_storage.make_sync_file_command(
+            env_file_path, temp_dir)
+
+        logger.info(f'Executing download command: {download_cmd}')
+
+        # Execute the download command
+        subprocess.run(download_cmd, shell=True, check=True)
+
+        # Get the filename from the original URL
+        file_name = os.path.basename(env_file_path)
+        file_path = os.path.join(temp_dir, file_name)
+
+        logger.info(f'Downloaded env file to: {file_path}')
+        os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = file_path
+        yield file_path
+    finally:
+        # Clean up temporary directory
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)

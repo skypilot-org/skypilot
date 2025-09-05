@@ -157,7 +157,7 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
         if _SQLALCHEMY_ENGINE is not None:
             return _SQLALCHEMY_ENGINE
         # get an engine to the db
-        engine = migration_utils.get_engine('spot_jobs')
+        engine = db_utils.get_engine('spot_jobs')
 
         # run migrations if needed
         create_table(engine)
