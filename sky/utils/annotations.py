@@ -44,14 +44,15 @@ def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
     """
 
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
-        if scope == 'global':
-            return functools.lru_cache(*lru_cache_args,
-                                       **lru_cache_kwargs)(func)
-        else:
-            cached_func = functools.lru_cache(*lru_cache_args,
-                                              **lru_cache_kwargs)(func)
-            _FUNCTIONS_NEED_RELOAD_CACHE.append(cached_func)
-            return cached_func
+        return func
+        # if scope == 'global':
+        #     return functools.lru_cache(*lru_cache_args,
+        #                                **lru_cache_kwargs)(func)
+        # else:
+        #     cached_func = functools.lru_cache(*lru_cache_args,
+        #                                       **lru_cache_kwargs)(func)
+        #     _FUNCTIONS_NEED_RELOAD_CACHE.append(cached_func)
+        #     return cached_func
 
     return decorator
 
