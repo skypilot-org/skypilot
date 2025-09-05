@@ -94,6 +94,12 @@ The high availability implementation relies on standard Kubernetes mechanisms to
 
 The entire recovery process is handled transparently by SkyPilot and Kubernetes, requiring no action from users when failures occur.
 
+.. figure:: ../../../images/sky-serve-ha-architecture.png
+    :width: 600
+    :alt: Architecture Diagram
+
+    The high availability architecture for SkyServe.
+
 Configuration details
 ---------------------
 Besides the main ``[jobs,serve].controller.high_availability: true`` flag, you can customize high availability behavior further:
