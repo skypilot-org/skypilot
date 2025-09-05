@@ -5,6 +5,7 @@ import subprocess
 import textwrap
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from importlib import util as importlib_util
 
 import colorama
 from packaging import version as pversion
@@ -546,6 +547,30 @@ class Azure(clouds.Cloud):
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+
+        dependency_installation_hints = (
+            'Azure dependencies are not installed. '
+            'Run the following commands:'
+            f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
+            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
+        )
+        # Check if the azure blob storage dependencies are installed.
+        try:
+            # pylint: disable=redefined-outer-name, import-outside-toplevel, unused-import
+            blob_spec = importlib_util.find_spec('azure.storage.blob')
+            if blob_spec is None:
+                return False, dependency_installation_hints
+            msgraph_spec = importlib_util.find_spec('msgraph')
+            if msgraph_spec is None:
+                return False, dependency_installation_hints
+        except ValueError as e:
+            # docstring of importlib_util.find_spec:
+            # First, sys.modules is checked to see if the module was alread
+            # imported.
+            # If so, then sys.modules[name].__spec__ is returned.
+            # If that happens to be set to None, then ValueError is raised.
+            return False, dependency_installation_hints
+
         help_str = (
             ' Run the following commands:'
             f'\n{cls._INDENT_PREFIX}  $ az login'
@@ -580,19 +605,6 @@ class Azure(clouds.Cloud):
             return False, (f'Getting user\'s Azure identity failed.{help_str}\n'
                            f'{cls._INDENT_PREFIX}Details: '
                            f'{common_utils.format_exception(e)}')
-
-        # Check if the azure blob storage dependencies are installed.
-        try:
-            # pylint: disable=redefined-outer-name, import-outside-toplevel, unused-import
-            from azure.storage import blob
-            import msgraph
-        except ImportError as e:
-            return False, (
-                f'Azure blob storage depdencies are not installed. '
-                'Run the following commands:'
-                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
-                f'\n{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e)}')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
