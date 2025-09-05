@@ -154,36 +154,15 @@ def test_ssm_private_custom_ami():
 
 @pytest.mark.aws
 def test_ssm_private_proxy_command_and_use_ssm():
-    """Test that ssm works with private IP addresses.
-
-    Because we turn on use_internal_ips SkyPilot will automatically
-    use the private subnet to create the cluster.
+    """Test that ssm errors if ssh_proxy_command and use_ssm are set.
     """
     name = smoke_tests_utils.get_cluster_name()
 
     warning_message = 'use_ssm is set to true, ' \
         'but ssh_proxy_command is already set to'
 
-    VALIDATE_SSM_OUTPUT = (
-        'echo "$s" && echo "==Validating launching==" && '
-        f'echo "$s" | grep "{warning_message}" && '
-        'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
-        'echo "$s" && echo "==Validating setup output==" && '
-        'echo "$s" | grep -A 1 "Setup detached" | grep "Job submitted" && '
-        'echo "==Validating running output hints==" && echo "$s" | '
-        'grep -A 1 "Job submitted, ID:" | '
-        'grep "Waiting for task resources on " && '
-        'echo "==Validating task setup/run output starting==" && echo "$s" | '
-        'grep -A 1 "Job started. Streaming logs..." | grep "(setup" | '
-        'grep "running setup" && '
-        'echo "$s" | grep -A 1 "(setup" | grep "(min, pid=" && '
-        'echo "==Validating task output ending==" && '
-        'echo "$s" | grep -A 1 "task run finish" | '
-        'grep "Job finished (status: SUCCEEDED)" && '
-        'echo "==Validating task output ending 2==" && '
-        'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
-        'grep "Job ID:" && '
-        'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
+    VALIDATE_SSM_OUTPUT = ('echo "$s" && echo "==Validating launching==" && '
+                           f'echo "$s" | grep "{warning_message}"')
 
     get_instance_id_command = 'aws ec2 describe-instances ' + \
         '--region us-west-1 --filters Name=private-ip-address,Values=%h ' + \

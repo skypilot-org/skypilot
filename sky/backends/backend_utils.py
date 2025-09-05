@@ -776,6 +776,13 @@ def write_cluster_config(
             region=region.name,
             keys=('use_ssm',),
             default_value=False)
+
+        if use_ssm and ssh_proxy_command is not None:
+            raise exceptions.InvalidCloudConfigs(
+                'use_ssm is set to true, but ssh_proxy_command '
+                f'is already set to {ssh_proxy_command!r}. Please remove '
+                'ssh_proxy_command or set use_ssm to false.')
+
         if not use_ssm and use_internal_ips and ssh_proxy_command is None:
             logger.warning(
                 f'{colorama.Fore.YELLOW}'
@@ -786,28 +793,22 @@ def write_cluster_config(
                 f'aws.ssh_proxy_command.{colorama.Style.RESET_ALL}')
             use_ssm = True
         if use_ssm:
-            if ssh_proxy_command is None:
-                aws_profile = os.environ.get('AWS_PROFILE', None)
-                profile_str = f'--profile {aws_profile}' if aws_profile else ''
-                ip_address_filter = ('Name=private-ip-address,Values=%h'
-                                     if use_internal_ips else
-                                     'Name=ip-address,Values=%h')
-                get_instance_id_command = 'aws ec2 describe-instances ' + \
-                    f'--region {region_name} --filters {ip_address_filter} ' + \
-                    '--query \"Reservations[].Instances[].InstanceId\" ' + \
-                    f'{profile_str} --output text'
-                ssm_proxy_command = 'aws ssm start-session --target ' + \
-                    f'\"$({get_instance_id_command})\" ' + \
-                    f'--region {region_name} {profile_str} ' + \
-                    '--document-name AWS-StartSSHSession ' + \
-                    '--parameters portNumber=%p'
-                ssh_proxy_command = ssm_proxy_command
-                region_name = 'ssm-session'  # TODO: change this to a random string
-            else:
-                logger.warning(f'{colorama.Fore.YELLOW}'
-                               'use_ssm is set to true, but ssh_proxy_command '
-                               f'is already set to {ssh_proxy_command!r}.'
-                               f'Ignoring use_ssm. {colorama.Style.RESET_ALL}')
+            aws_profile = os.environ.get('AWS_PROFILE', None)
+            profile_str = f'--profile {aws_profile}' if aws_profile else ''
+            ip_address_filter = ('Name=private-ip-address,Values=%h'
+                                 if use_internal_ips else
+                                 'Name=ip-address,Values=%h')
+            get_instance_id_command = 'aws ec2 describe-instances ' + \
+                f'--region {region_name} --filters {ip_address_filter} ' + \
+                '--query \"Reservations[].Instances[].InstanceId\" ' + \
+                f'{profile_str} --output text'
+            ssm_proxy_command = 'aws ssm start-session --target ' + \
+                f'\"$({get_instance_id_command})\" ' + \
+                f'--region {region_name} {profile_str} ' + \
+                '--document-name AWS-StartSSHSession ' + \
+                '--parameters portNumber=%p'
+            ssh_proxy_command = ssm_proxy_command
+            region_name = 'ssm-session'
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
