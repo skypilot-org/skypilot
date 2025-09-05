@@ -83,6 +83,29 @@ def volume_list() -> List[Dict[str, Any]]:
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes()
+        logger.warning(f'LLOYD: volumes: {volumes}')
+        cloud_to_configs = {}
+        for volume in volumes:
+            config = volume.get('handle')
+            if config is None:
+                volume_name = volume.get('name')
+                logger.warning(f'Volume {volume_name} has no handle.')
+                continue
+            cloud = config.cloud
+            if cloud not in cloud_to_configs:
+                cloud_to_configs[cloud] = []
+            cloud_to_configs[cloud].append(config)
+        logger.warning(f'LLOYD: cloud_to_configs: {cloud_to_configs}')
+
+        cloud_to_used_by_pods, cloud_to_used_by_clusters = {}, {}
+        for cloud, configs in cloud_to_configs.items():
+            logger.warning(f'LLOYD: cloud: {cloud}, configs: {configs}')
+            used_by_pods, used_by_clusters = provision.get_all_volumes_usedby(cloud, configs)
+            cloud_to_used_by_pods[cloud] = used_by_pods
+            cloud_to_used_by_clusters[cloud] = used_by_clusters
+        logger.warning(f'LLOYD: cloud_to_used_by_pods: {cloud_to_used_by_pods}')
+        logger.warning(f'LLOYD: cloud_to_used_by_clusters: {cloud_to_used_by_clusters}')
+
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
         records = []
@@ -109,8 +132,9 @@ def volume_list() -> List[Dict[str, Any]]:
                 logger.warning(f'Volume {volume_name} has no handle.')
                 continue
             cloud = config.cloud
-            usedby_pods, usedby_clusters = provision.get_volume_usedby(
-                cloud, config)
+            # usedby_pods, usedby_clusters = provision.get_volume_usedby(
+            #     cloud, config)
+            usedby_pods, usedby_clusters = provision.map_all_volumes_usedby(cloud, cloud_to_used_by_pods[cloud], cloud_to_used_by_clusters[cloud], config)
             record['type'] = config.type
             record['cloud'] = config.cloud
             record['region'] = config.region
