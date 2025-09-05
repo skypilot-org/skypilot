@@ -121,6 +121,7 @@ def volume_list() -> List[Dict[str, Any]]:
         record['usedby_pods'] = usedby_pods
         record['usedby_clusters'] = usedby_clusters
         records.append(record)
+        break
     return []
 
 
