@@ -3132,8 +3132,13 @@ def get_clusters(
     updated_records = []
     if len(cluster_names) > 0:
         with progress:
-            updated_records = subprocess_utils.run_in_parallel(
-                _refresh_cluster, cluster_names)
+            if os.getenv('SYNC_REFRESH', '0') == '1':
+                logger.info(f'Sync refresh for {len(cluster_names)} clusters')
+                for cluster_name in cluster_names:
+                    updated_records.append(_refresh_cluster(cluster_name))
+            else:
+                updated_records = subprocess_utils.run_in_parallel(
+                    _refresh_cluster, cluster_names)
 
     # Show information for removed clusters.
     kept_records = []

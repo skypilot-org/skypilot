@@ -8,7 +8,7 @@ RUN apt-get update && \
     apt-get update && \
     apt-get install --no-install-recommends -y \
         google-cloud-cli \
-        google-cloud-cli-gke-gcloud-auth-plugin && \
+        google-cloud-cli-gke-gcloud-auth-plugi sudo add-apt-repository ppa:deadsnakes/ppan && \
     apt-get clean && rm -rf /usr/lib/google-cloud-sdk/platform/bundledpythonunix \
     /var/lib/apt/lists/*
 

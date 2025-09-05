@@ -6,6 +6,7 @@ import os
 from collections import defaultdict
 import re
 
+os.environ['IS_SKYPILOT_SERVER'] = 'true'
 proc = psutil.Process()
 
 count = int(os.getenv("RUN_COUNT", "200"))
