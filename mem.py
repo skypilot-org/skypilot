@@ -23,7 +23,7 @@ def top_mmap(n: int = 20):
 
 
 proc = psutil.Process()
-tracemalloc.start()
+# tracemalloc.start()
 
 def rss():
     gc.collect()
