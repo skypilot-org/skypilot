@@ -215,16 +215,18 @@ class TestVolumeCore:
         monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
         # Mock provision.get_all_volumes_usedby
         config_name = 'mock-config'
-        mock_get_all_usedby = mock.MagicMock(
-            return_value=({config_name: ['pod1', 'pod2']}, 
-                          {config_name: ['cluster1', 'cluster2']}))
-        monkeypatch.setattr(
-            provision, 'get_all_volumes_usedby', mock_get_all_usedby)
+        mock_get_all_usedby = mock.MagicMock(return_value=({
+            config_name: ['pod1', 'pod2']
+        }, {
+            config_name: ['cluster1', 'cluster2']
+        }))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
 
         mock_map_all_usedby = mock.MagicMock(
             return_value=(['pod1', 'pod2'], ['cluster1', 'cluster2']))
-        monkeypatch.setattr(
-            provision, 'map_all_volumes_usedby', mock_map_all_usedby)
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock_map_all_usedby)
 
         # Call the function
         result = core.volume_list()
