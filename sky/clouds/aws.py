@@ -1,13 +1,13 @@
 """Amazon Web Services."""
 import enum
 import fnmatch
+from importlib import util as importlib_util
 import hashlib
 import json
 import os
 import re
 import subprocess
 import time
-from importlib import util as importlib_util
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
