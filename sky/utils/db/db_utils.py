@@ -280,7 +280,7 @@ def drop_column_from_table_alembic(
             raise
 
 
-class SQLiteConn():
+class SQLiteConn:
     """Thread-local connection to the sqlite3 database."""
 
     def __init__(self, db_path: str, create_table: Callable):
