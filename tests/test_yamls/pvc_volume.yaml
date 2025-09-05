@@ -1,0 +1,14 @@
+name: min
+resources:
+  cpus: 0.1+
+volumes:
+  /mnt/data0: pvc0
+setup: |
+  echo "running setup"
+
+run: |
+  set -e
+  echo "check volume"
+  df -h /mnt/data0 || (echo "df failed" && exit 1)
+  touch /mnt/data0/0.txt || (echo "touch failed" && exit 1)
+  ls -lart /mnt/data0 || (echo "ls failed" && exit 1)

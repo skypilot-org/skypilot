@@ -31,6 +31,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Make request
             response = client.get('/volumes')
@@ -42,7 +43,7 @@ class TestVolumeServer:
             mock_schedule.assert_called_once_with(
                 request_id='test-request-id',
                 request_name='volume_list',
-                request_body=payloads.RequestBody(),
+                request_body=payloads.VolumeListBody(),
                 func=server.core.volume_list,
                 schedule_type=requests_lib.ScheduleType.SHORT,
             )

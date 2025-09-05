@@ -4,7 +4,7 @@ import os
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
-from sky.utils import common_utils
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -69,7 +69,7 @@ def initialize_configmap_sync_on_startup(config_file_path: str) -> None:
 
         current_config = skypilot_config.parse_and_validate_config_file(
             config_file_path)
-        config_yaml = common_utils.dump_yaml_str(dict(current_config))
+        config_yaml = yaml_utils.dump_yaml_str(dict(current_config))
 
         configmap_body = {
             'apiVersion': 'v1',
@@ -111,7 +111,7 @@ def patch_configmap_with_config(config, config_file_path: str) -> None:
     try:
         namespace = _get_kubernetes_namespace()
         configmap_name = _get_configmap_name()
-        config_yaml = common_utils.dump_yaml_str(dict(config))
+        config_yaml = yaml_utils.dump_yaml_str(dict(config))
         patch_body = {'data': {'config.yaml': config_yaml}}
 
         try:

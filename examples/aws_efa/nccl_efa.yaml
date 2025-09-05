@@ -1,4 +1,6 @@
-name: nccl-test-efa
+# This example is used to test the NCCL performance
+# with EFA on HyperPod/EKS.
+name: nccl-efa-eks
 
 resources:
   infra: k8s

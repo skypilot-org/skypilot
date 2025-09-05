@@ -12,6 +12,7 @@ import pytest
 
 from sky import skypilot_config
 from sky.utils import common_utils
+from sky.utils import yaml_utils
 from sky.workspaces import core
 
 
@@ -36,7 +37,7 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
                 }
             }
         }
-        common_utils.dump_yaml(self.temp_config_file, self.initial_config)
+        yaml_utils.dump_yaml(self.temp_config_file, self.initial_config)
 
         # Patch the config path to use our temporary file
         self.config_path_patcher = mock.patch(
@@ -47,7 +48,7 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
         # Mock skypilot_config.to_dict to read from our temp file
         def mock_to_dict():
             if os.path.exists(self.temp_config_file):
-                return common_utils.read_yaml(self.temp_config_file)
+                return yaml_utils.read_yaml(self.temp_config_file)
             return {}
 
         self.to_dict_patcher = mock.patch('sky.skypilot_config.to_dict',
@@ -125,7 +126,7 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
         self.assertEqual(len(results), num_threads)
 
         # Verify final config contains all workspaces
-        final_config = common_utils.read_yaml(self.temp_config_file)
+        final_config = yaml_utils.read_yaml(self.temp_config_file)
         final_workspaces = final_config['workspaces']
 
         # Should have default + test + num_threads new workspaces
@@ -203,7 +204,7 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
         self.assertEqual(result1, expected_workspaces1)
 
         # Verify first update was written
-        config_after_first = common_utils.read_yaml(self.temp_config_file)
+        config_after_first = yaml_utils.read_yaml(self.temp_config_file)
         self.assertEqual(config_after_first['workspaces'], expected_workspaces1)
 
         # Second update (should preserve workspace1)
@@ -213,7 +214,7 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
         result2 = core._update_workspaces_config(second_modifier)
 
         # Verify second update was written and first workspace preserved
-        config_after_second = common_utils.read_yaml(self.temp_config_file)
+        config_after_second = yaml_utils.read_yaml(self.temp_config_file)
         final_workspaces = config_after_second['workspaces']
         self.assertEqual(len(final_workspaces), 3)
         self.assertEqual(final_workspaces['workspace1'],
@@ -251,7 +252,7 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
 
                 def mock_to_dict():
                     if os.path.exists(self.temp_config_file):
-                        return common_utils.read_yaml(self.temp_config_file)
+                        return yaml_utils.read_yaml(self.temp_config_file)
                     return {}
 
                 with mock.patch('sky.skypilot_config.to_dict',
@@ -289,7 +290,7 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
         self.assertEqual(len(results), 3)
 
         # Check final state
-        final_config = common_utils.read_yaml(self.temp_config_file)
+        final_config = yaml_utils.read_yaml(self.temp_config_file)
         final_workspaces = final_config['workspaces']
 
         # Should have default + test + 3 process workspaces

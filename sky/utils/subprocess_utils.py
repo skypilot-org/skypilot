@@ -437,12 +437,3 @@ def slow_start_processes(processes: List[Startable],
             break
         batch_size = min(batch_size * 2, max_batch_size)
         time.sleep(delay)
-
-
-def is_process_alive(pid: int) -> bool:
-    """Check if a process is alive."""
-    try:
-        process = psutil.Process(pid)
-        return process.is_running()
-    except psutil.NoSuchProcess:
-        return False

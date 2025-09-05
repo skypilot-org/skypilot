@@ -7,8 +7,10 @@ from typing import Callable
 from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
+from sky.utils import annotations
 from sky.utils import common
 from sky.utils import env_options
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -67,6 +69,10 @@ class InternalRequestDaemon:
                     sky_logging.reload_logger()
                     level = self.refresh_log_level()
                     self.event_fn()
+                # Clear request level cache after each run to avoid
+                # using too much memory.
+                annotations.clear_request_level_cache()
+                timeline.save_timeline()
             except Exception:  # pylint: disable=broad-except
                 # It is OK to fail to run the event, as the event is not
                 # critical, but we should log the error.
@@ -115,15 +121,18 @@ def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
+    from sky.utils import controller_utils
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
-    managed_job_utils.ha_recovery_for_consolidation_mode()
+    if controller_utils.high_availability_specified(
+            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name):
+        managed_job_utils.ha_recovery_for_consolidation_mode()
 
     # After recovery, we start the event loop.
     from sky.skylet import events
     refresh_event = events.ManagedJobEvent()
-    scheduling_event = events.ManagedJobEvent()
+    scheduling_event = events.ManagedJobSchedulingEvent()
     logger.info('=== Running managed job event ===')
     refresh_event.run()
     scheduling_event.run()
@@ -141,10 +150,14 @@ def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.serve import serve_utils
+    from sky.utils import controller_utils
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
-    serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
+    controller = controller_utils.get_controller_for_pool(pool)
+    if controller_utils.high_availability_specified(
+            controller.value.cluster_name):
+        serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
 
     # After recovery, we start the event loop.
     from sky.skylet import events
@@ -184,23 +197,28 @@ INTERNAL_REQUEST_DAEMONS = [
     # set to updated status automatically, without showing users the hint of
     # cluster being stopped or down when `sky status -r` is called.
     InternalRequestDaemon(id='skypilot-status-refresh-daemon',
-                          name='status',
+                          name='status-refresh',
                           event_fn=refresh_cluster_status_event,
                           default_log_level='DEBUG'),
     # Volume status refresh daemon to update the volume status periodically.
     InternalRequestDaemon(id='skypilot-volume-status-refresh-daemon',
-                          name='volume',
+                          name='volume-refresh',
                           event_fn=refresh_volume_status_event),
     InternalRequestDaemon(id='managed-job-status-refresh-daemon',
-                          name='managed-job-status',
+                          name='managed-job-status-refresh',
                           event_fn=managed_job_status_refresh_event,
                           should_skip=should_skip_managed_job_status_refresh),
     InternalRequestDaemon(id='sky-serve-status-refresh-daemon',
-                          name='sky-serve-status',
+                          name='sky-serve-status-refresh',
                           event_fn=sky_serve_status_refresh_event,
                           should_skip=should_skip_sky_serve_status_refresh),
     InternalRequestDaemon(id='pool-status-refresh-daemon',
-                          name='pool-status',
+                          name='pool-status-refresh',
                           event_fn=pool_status_refresh_event,
                           should_skip=should_skip_pool_status_refresh),
 ]
+
+
+def is_daemon_request_id(request_id: str) -> bool:
+    """Returns whether a specific request_id is an internal daemon."""
+    return any([d.id == request_id for d in INTERNAL_REQUEST_DAEMONS])

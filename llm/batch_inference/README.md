@@ -58,4 +58,4 @@ and visit `http:$ENDPOINT:8000` in the browser.
 
 ## Learn More
 
-For a complete walkthrough of this case study, including detailed performance metrics and implementation insights, read our [blog post on large-scale embedding generation](https://blog.skypilot.co/large-scale-embedding-generation/).
+For a complete walkthrough of this case study, including detailed performance metrics and implementation insights, read our [blog post on large-scale embedding generation](https://blog.skypilot.co/large-scale-embedding/).

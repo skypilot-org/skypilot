@@ -22,7 +22,11 @@ import {
   buildGrafanaUrl,
   openGrafana,
 } from '@/utils/grafana';
-import { getInfraData } from '@/data/connectors/infra';
+import {
+  getGPUs,
+  getCloudInfrastructure,
+  getContextJobs,
+} from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import {
@@ -68,14 +72,16 @@ export function InfrastructureSection({
   groupedPerNodeGPUs,
   handleContextClick,
   contextStats = {},
+  jobsData = {},
+  isJobsDataLoading = true,
   isSSH = false, // To differentiate between SSH and Kubernetes
   actionButton = null, // Optional action button for the header
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
 
-  // Show loading spinner while data is being fetched
-  if (isLoading || !isDataLoaded) {
+  // Show loading spinner while contexts are being fetched (only if no contexts at all)
+  if (isLoading && safeContexts.length === 0) {
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
@@ -106,7 +112,8 @@ export function InfrastructureSection({
     );
   }
 
-  if (isDataLoaded && safeContexts.length > 0) {
+  // Show table if we have contexts to display, even if some data is still loading
+  if (safeContexts.length > 0) {
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
@@ -172,8 +179,25 @@ export function InfrastructureSection({
                         jobs: 0,
                       };
 
+                      // Check if contextStats data is available for this context
+                      const hasContextStats =
+                        (Object.keys(contextStats).length > 0 &&
+                          contextStats[contextStatsKey]) ||
+                        isDataLoaded;
+
+                      // Check if GPU/Node data is available for this context
+                      const hasGpuData =
+                        (groupedPerContextGPUs &&
+                          Object.keys(groupedPerContextGPUs).length > 0) ||
+                        isDataLoaded;
+                      const hasNodeData =
+                        (groupedPerNodeGPUs &&
+                          Object.keys(groupedPerNodeGPUs).length > 0) ||
+                        isDataLoaded;
+
                       // Format GPU types based on context type
                       const gpuTypes = (() => {
+                        if (!hasGpuData) return null;
                         const typeCounts = gpus.reduce((acc, gpu) => {
                           acc[gpu.gpu_name] =
                             (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
@@ -206,7 +230,11 @@ export function InfrastructureSection({
                             </NonCapitalizedTooltip>
                           </td>
                           <td className="p-3">
-                            {stats.clusters > 0 ? (
+                            {!hasContextStats ? (
+                              <div className="flex items-center justify-center">
+                                <CircularProgress size={12} />
+                              </div>
+                            ) : stats.clusters > 0 ? (
                               <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
                                 {stats.clusters}
                               </span>
@@ -217,19 +245,49 @@ export function InfrastructureSection({
                             )}
                           </td>
                           <td className="p-3">
-                            {stats.jobs > 0 ? (
-                              <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                                {stats.jobs}
-                              </span>
+                            {!isJobsDataLoading ? (
+                              jobsData[contextStatsKey]?.jobs || 0 > 0 ? (
+                                <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                                  {jobsData[contextStatsKey]?.jobs}
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                  0
+                                </span>
+                              )
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                0
+                                <CircularProgress size={12} />
                               </span>
                             )}
                           </td>
-                          <td className="p-3">{nodes.length}</td>
-                          <td className="p-3">{gpuTypes || '-'}</td>
-                          <td className="p-3">{totalGpus}</td>
+                          <td className="p-3">
+                            {!hasNodeData ? (
+                              <div className="flex items-center justify-center">
+                                <CircularProgress size={16} />
+                              </div>
+                            ) : (
+                              nodes.length
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {!hasGpuData ? (
+                              <div className="flex items-center justify-center">
+                                <CircularProgress size={16} />
+                              </div>
+                            ) : (
+                              gpuTypes || '-'
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {!hasGpuData ? (
+                              <div className="flex items-center justify-center">
+                                <CircularProgress size={16} />
+                              </div>
+                            ) : (
+                              totalGpus
+                            )}
+                          </td>
                         </tr>
                       );
                     })}
@@ -1374,45 +1432,87 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
-          {pools.map((pool) => (
-            <tr
-              key={pool.name}
-              className="hover:bg-gray-50 cursor-pointer"
-              onClick={() => handleContextClick(`ssh-${pool.name}`)}
-            >
-              <td className="p-3 font-medium text-gray-700">
-                {pool.displayName}
-              </td>
-              <td className="p-3">
-                <StatusDisplay pool={pool} />
-              </td>
-              <td className="p-3">
-                {pool.clusters > 0 ? (
-                  <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                    {pool.clusters}
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                    0
-                  </span>
-                )}
-              </td>
-              <td className="p-3">
-                {pool.jobs > 0 ? (
-                  <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                    {pool.jobs}
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                    0
-                  </span>
-                )}
-              </td>
-              <td className="p-3">{pool.nodes}</td>
-              <td className="p-3">{pool.gpuTypes}</td>
-              <td className="p-3">{pool.totalGPUs}</td>
-            </tr>
-          ))}
+          {pools.map((pool) => {
+            // Check if this pool has complete data loaded
+            const hasCompleteData =
+              pool.clusters !== undefined &&
+              pool.jobs !== undefined &&
+              pool.nodes !== undefined &&
+              pool.gpuTypes !== undefined &&
+              pool.totalGPUs !== undefined;
+
+            return (
+              <tr
+                key={pool.name}
+                className="hover:bg-gray-50 cursor-pointer"
+                onClick={() => handleContextClick(`ssh-${pool.name}`)}
+              >
+                <td className="p-3 font-medium text-gray-700">
+                  {pool.displayName}
+                </td>
+                <td className="p-3">
+                  <StatusDisplay pool={pool} />
+                </td>
+                <td className="p-3">
+                  {!hasCompleteData ? (
+                    <div className="flex items-center justify-center">
+                      <CircularProgress size={16} />
+                    </div>
+                  ) : pool.clusters > 0 ? (
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                      {pool.clusters}
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                      0
+                    </span>
+                  )}
+                </td>
+                <td className="p-3">
+                  {!hasCompleteData ? (
+                    <div className="flex items-center justify-center">
+                      <CircularProgress size={16} />
+                    </div>
+                  ) : pool.jobs > 0 ? (
+                    <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                      {pool.jobs}
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                      0
+                    </span>
+                  )}
+                </td>
+                <td className="p-3">
+                  {!hasCompleteData ? (
+                    <div className="flex items-center justify-center">
+                      <CircularProgress size={16} />
+                    </div>
+                  ) : (
+                    pool.nodes
+                  )}
+                </td>
+                <td className="p-3">
+                  {!hasCompleteData ? (
+                    <div className="flex items-center justify-center">
+                      <CircularProgress size={16} />
+                    </div>
+                  ) : (
+                    pool.gpuTypes
+                  )}
+                </td>
+                <td className="p-3">
+                  {!hasCompleteData ? (
+                    <div className="flex items-center justify-center">
+                      <CircularProgress size={16} />
+                    </div>
+                  ) : (
+                    pool.totalGPUs
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -1445,6 +1545,10 @@ export function GPUs() {
   const [editingPool, setEditingPool] = useState(null);
   const [sshLoading, setSshLoading] = useState(false);
 
+  const [sshAndKubeJobsDataLoading, setSshAndKubeJobsDataLoading] =
+    useState(true);
+  const [sshAndKubeJobsData, setSshAndKubeJobsData] = useState({});
+
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
 
@@ -1454,65 +1558,24 @@ export function GPUs() {
       if (showLoadingIndicators) {
         setKubeLoading(true);
         setCloudLoading(true);
+        setSshLoading(true);
+        setSshAndKubeJobsDataLoading(true);
       }
 
       try {
-        // Use the shared getInfraData function
-        // If forceRefresh is true, call getInfraData directly to bypass cache
-        const infraData = forceRefresh
-          ? await getInfraData(true)
-          : await dashboardCache.get(getInfraData);
-
-        const { gpuData, cloudData } = infraData || {};
-
-        // Set GPU data with defensive checks
-        if (gpuData) {
-          const {
-            allContextNames: fetchedAllKubeContextNames,
-            allGPUs: fetchedAllGPUs,
-            perContextGPUs: fetchedPerContextGPUs,
-            perNodeGPUs: fetchedPerNodeGPUs,
-            contextStats: fetchedContextStats,
-          } = gpuData;
-
-          setAllKubeContextNames(fetchedAllKubeContextNames || []);
-          setAllGPUs(fetchedAllGPUs || []);
-          setPerContextGPUs(fetchedPerContextGPUs || []);
-          setPerNodeGPUs(fetchedPerNodeGPUs || []);
-          setContextStats(fetchedContextStats || {});
-          setKubeDataLoaded(true);
-        } else if (infraData && infraData.gpuData === null) {
-          // Data was explicitly null (not just missing)
-          setAllKubeContextNames([]);
-          setAllGPUs([]);
-          setPerContextGPUs([]);
-          setPerNodeGPUs([]);
-          setContextStats({});
-          setKubeDataLoaded(true);
-        } else if (!infraData) {
-          // If no data at all, still need to clear loading eventually
-          console.log('No infra data received from cache');
+        async function fetchKubeAndSshData(forceRefresh) {
+          await fetchKubernetesData(forceRefresh);
+          // Fetch SSH Node Pools after Kubernetes data is loaded
+          // because it relies on it for gpu info.
+          await fetchSSHNodePools(forceRefresh);
         }
 
-        // Set cloud data with defensive checks
-        if (cloudData) {
-          setCloudInfraData(cloudData.clouds || []);
-          setTotalClouds(cloudData.totalClouds || 0);
-          setEnabledClouds(cloudData.enabledClouds || 0);
-          setCloudDataLoaded(true);
-        } else if (infraData && infraData.cloudData === null) {
-          // Data was explicitly null (not just missing)
-          setCloudInfraData([]);
-          setTotalClouds(0);
-          setEnabledClouds(0);
-          setCloudDataLoaded(true);
-        } else if (!infraData) {
-          // If no data at all, still need to clear loading eventually
-          console.log('No cloud data received from cache');
-        }
-
-        // Add SSH Node Pool fetching
-        await fetchSSHNodePools();
+        // Fetch all data in parallel
+        await Promise.all([
+          fetchKubeAndSshData(forceRefresh),
+          fetchCloudData(forceRefresh),
+          fetchManagedJobsData(forceRefresh),
+        ]);
       } catch (error) {
         console.error('Error in fetchData:', error);
         // On error, we should still mark data as loaded but with empty values
@@ -1521,17 +1584,24 @@ export function GPUs() {
         setPerContextGPUs([]);
         setPerNodeGPUs([]);
         setContextStats({});
+        setKubeDataLoaded(true);
+        setKubeLoading(false);
         setCloudInfraData([]);
         setTotalClouds(0);
         setEnabledClouds(0);
-        setKubeDataLoaded(true);
         setCloudDataLoaded(true);
+        setSshNodePools({});
+        setSshLoading(false);
+        setSshAndKubeJobsData({});
+        setSshAndKubeJobsDataLoading(false);
       } finally {
         // Always clear loading states when showLoadingIndicators is true
         // This prevents infinite loading state
         if (showLoadingIndicators) {
           setKubeLoading(false);
           setCloudLoading(false);
+          setSshLoading(false);
+          setSshAndKubeJobsDataLoading(false);
         }
 
         // Set isInitialLoad to false only after the first fetch cycle initiated with showLoadingIndicators:true
@@ -1543,14 +1613,103 @@ export function GPUs() {
     [isInitialLoad]
   );
 
-  // SSH Node Pool data fetching
-  const fetchSSHNodePools = async () => {
+  const fetchKubernetesData = async (forceRefresh) => {
     try {
-      const pools = await getSSHNodePools();
+      const gpuData = forceRefresh
+        ? await getGPUs()
+        : await dashboardCache.get(getGPUs);
+      if (gpuData) {
+        const {
+          allContextNames: fetchedAllKubeContextNames,
+          allGPUs: fetchedAllGPUs,
+          perContextGPUs: fetchedPerContextGPUs,
+          perNodeGPUs: fetchedPerNodeGPUs,
+          contextStats: fetchedContextStats,
+        } = gpuData;
+
+        setAllKubeContextNames(fetchedAllKubeContextNames || []);
+        setAllGPUs(fetchedAllGPUs || []);
+        setPerContextGPUs(fetchedPerContextGPUs || []);
+        setPerNodeGPUs(fetchedPerNodeGPUs || []);
+        setContextStats(fetchedContextStats || {});
+        setKubeDataLoaded(true);
+        setKubeLoading(false);
+      } else if (gpuData === null) {
+        setAllKubeContextNames([]);
+        setAllGPUs([]);
+        setPerContextGPUs([]);
+        setPerNodeGPUs([]);
+        setContextStats({});
+        setKubeDataLoaded(true);
+        setKubeLoading(false);
+      }
+    } catch (error) {
+      console.error('Error in fetchKubernetesData:', error);
+      setAllKubeContextNames([]);
+      setAllGPUs([]);
+      setPerContextGPUs([]);
+      setPerNodeGPUs([]);
+      setContextStats({});
+      setKubeDataLoaded(true);
+      setKubeLoading(false);
+    }
+  };
+
+  const fetchManagedJobsData = async (forceRefresh) => {
+    try {
+      const jobsData = forceRefresh
+        ? await getManagedJobs({ allUsers: true })
+        : await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
+      const jobs = jobsData?.jobs || [];
+      setSshAndKubeJobsData(await getContextJobs(jobs));
+      setSshAndKubeJobsDataLoading(false);
+    } catch (error) {
+      console.error('Error in fetchManagedJobsData:', error);
+      setSshAndKubeJobsData({});
+      setSshAndKubeJobsDataLoading(false);
+    }
+  };
+
+  const fetchCloudData = async (forceRefresh) => {
+    try {
+      const cloudData = forceRefresh
+        ? await getCloudInfrastructure()
+        : await dashboardCache.get(getCloudInfrastructure, [forceRefresh]);
+
+      // Set cloud data with defensive checks
+      if (cloudData) {
+        setCloudInfraData(cloudData.clouds || []);
+        setTotalClouds(cloudData.totalClouds || 0);
+        setEnabledClouds(cloudData.enabledClouds || 0);
+        setCloudDataLoaded(true);
+      } else if (cloudData === null) {
+        // Data was explicitly null (not just missing)
+        setCloudInfraData([]);
+        setTotalClouds(0);
+        setEnabledClouds(0);
+        setCloudDataLoaded(true);
+      }
+    } catch (error) {
+      console.error('Error in fetchCloudData:', error);
+      setCloudInfraData([]);
+      setTotalClouds(0);
+      setEnabledClouds(0);
+      setCloudDataLoaded(true);
+    }
+  };
+
+  // SSH Node Pool data fetching
+  const fetchSSHNodePools = async (forceRefresh) => {
+    try {
+      const pools = forceRefresh
+        ? await getSSHNodePools()
+        : await dashboardCache.get(getSSHNodePools);
       setSshNodePools(pools);
+      setSshLoading(false);
     } catch (error) {
       console.error('Failed to fetch SSH Node Pools:', error);
       setSshNodePools({});
+      setSshLoading(false);
     }
   };
 
@@ -1652,7 +1811,9 @@ export function GPUs() {
       // Reset loading states for fresh load next time
       setKubeDataLoaded(false);
       setCloudDataLoaded(false);
+      setSshLoading(false);
       setIsInitialLoad(true);
+      setSshAndKubeJobsDataLoading(false);
     };
   }, []);
 
@@ -1660,7 +1821,9 @@ export function GPUs() {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
-    dashboardCache.invalidate(getInfraData);
+    dashboardCache.invalidate(getGPUs);
+    dashboardCache.invalidate(getCloudInfrastructure, [false]);
+    dashboardCache.invalidate(getSSHNodePools);
 
     if (refreshDataRef.current) {
       refreshDataRef.current({
@@ -1844,7 +2007,8 @@ export function GPUs() {
   };
 
   const renderCloudInfrastructure = () => {
-    if (cloudLoading || !cloudDataLoaded) {
+    // Show loading spinner only if no cloud data at all
+    if (cloudLoading && (!cloudInfraData || cloudInfraData.length === 0)) {
       return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
           <div className="p-5">
@@ -1888,35 +2052,51 @@ export function GPUs() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {cloudInfraData.map((cloud) => (
-                    <tr key={cloud.name} className="hover:bg-gray-50">
-                      <td className="p-3 font-medium text-gray-700">
-                        {cloud.name}
-                      </td>
-                      <td className="p-3">
-                        {cloud.clusters > 0 ? (
-                          <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                            {cloud.clusters}
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                            0
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        {cloud.jobs > 0 ? (
-                          <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                            {cloud.jobs}
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                            0
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {cloudInfraData.map((cloud) => {
+                    // Check if cloud data is complete
+                    const hasCompleteData =
+                      cloudDataLoaded &&
+                      cloud.clusters !== undefined &&
+                      cloud.jobs !== undefined;
+
+                    return (
+                      <tr key={cloud.name} className="hover:bg-gray-50">
+                        <td className="p-3 font-medium text-gray-700">
+                          {cloud.name}
+                        </td>
+                        <td className="p-3">
+                          {!hasCompleteData ? (
+                            <div className="flex items-center justify-center">
+                              <CircularProgress size={16} />
+                            </div>
+                          ) : cloud.clusters > 0 ? (
+                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                              {cloud.clusters}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                              0
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {!hasCompleteData ? (
+                            <div className="flex items-center justify-center">
+                              <CircularProgress size={16} />
+                            </div>
+                          ) : cloud.jobs > 0 ? (
+                            <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                              {cloud.jobs}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                              0
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1938,6 +2118,8 @@ export function GPUs() {
         groupedPerNodeGPUs={groupedPerNodeGPUs}
         handleContextClick={handleContextClick}
         contextStats={contextStats}
+        jobsData={sshAndKubeJobsData}
+        isJobsDataLoading={sshAndKubeJobsDataLoading}
         isSSH={true}
         actionButton={
           // TODO: Add back when SSH Node Pool add operation is more robust
@@ -1966,6 +2148,8 @@ export function GPUs() {
         groupedPerNodeGPUs={groupedPerNodeGPUs}
         handleContextClick={handleContextClick}
         contextStats={contextStats}
+        jobsData={sshAndKubeJobsData}
+        isJobsDataLoading={sshAndKubeJobsDataLoading}
         isSSH={false}
       />
     );
@@ -2113,17 +2297,8 @@ export function GPUs() {
         </div>
       </div>
 
-      {/* Show loading spinner for entire page if initial load */}
-      {!isAllDataLoaded ? (
-        <div className="flex flex-col items-center justify-center py-32">
-          <CircularProgress size={32} className="mb-4" />
-          <span className="text-gray-500 text-lg">
-            Loading infrastructure data...
-          </span>
-        </div>
-      ) : (
-        renderKubernetesTab()
-      )}
+      {/* Each section handles its own loading state */}
+      {renderKubernetesTab()}
 
       {/* SSH Node Pool Modal - Always available */}
       <SSHNodePoolModal

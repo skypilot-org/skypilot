@@ -209,3 +209,8 @@ def encode_job_status(return_value: Dict[int, Any]) -> Dict[int, str]:
 def encode_kubernetes_node_info(
         return_value: 'models.KubernetesNodesInfo') -> Dict[str, Any]:
     return return_value.to_dict()
+
+
+@register_encoder('endpoints')
+def encode_endpoints(return_value: Dict[int, str]) -> Dict[str, str]:
+    return {str(k): v for k, v in return_value.items()}

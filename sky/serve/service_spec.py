@@ -2,11 +2,9 @@
 import json
 import os
 import textwrap
-import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from sky import serve
-from sky.adaptors import common as adaptors_common
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
@@ -14,11 +12,7 @@ from sky.serve import spot_placer as spot_placer_lib
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    import yaml
-else:
-    yaml = adaptors_common.LazyImport('yaml')
+from sky.utils import yaml_utils
 
 
 class SkyServiceSpec:
@@ -33,7 +27,7 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         num_overprovision: Optional[int] = None,
         ports: Optional[str] = None,
-        target_qps_per_replica: Optional[float] = None,
+        target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None,
         post_data: Optional[Dict[str, Any]] = None,
         tls_credential: Optional[serve_utils.TLSCredential] = None,
         readiness_headers: Optional[Dict[str, str]] = None,
@@ -109,7 +103,8 @@ class SkyServiceSpec:
         self._max_replicas: Optional[int] = max_replicas
         self._num_overprovision: Optional[int] = num_overprovision
         self._ports: Optional[str] = ports
-        self._target_qps_per_replica: Optional[float] = target_qps_per_replica
+        self._target_qps_per_replica: Optional[Union[float, Dict[
+            str, float]]] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
             tls_credential)
@@ -241,6 +236,26 @@ class SkyServiceSpec:
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
 
+        # Validate instance-aware settings
+        target_qps_per_replica = service_config['target_qps_per_replica']
+        load_balancing_policy = service_config['load_balancing_policy']
+
+        if isinstance(target_qps_per_replica, dict):
+            if load_balancing_policy != 'instance_aware_least_load':
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'When using dict type target_qps_per_replica, '
+                        'load_balancing_policy must be '
+                        '"instance_aware_least_load".')
+
+        if load_balancing_policy == 'instance_aware_least_load':
+            if not isinstance(target_qps_per_replica, dict):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'When using "instance_aware_least_load" policy, '
+                        'target_qps_per_replica must be a '
+                        'dict mapping GPU types to QPS values.')
+
         tls_section = config.get('tls', None)
         if tls_section is not None:
             service_config['tls_credential'] = serve_utils.TLSCredential(
@@ -253,7 +268,7 @@ class SkyServiceSpec:
     @staticmethod
     def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
         with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
+            config = yaml_utils.safe_load(f)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():
@@ -435,7 +450,8 @@ class SkyServiceSpec:
         return self._ports
 
     @property
-    def target_qps_per_replica(self) -> Optional[float]:
+    def target_qps_per_replica(
+            self) -> Optional[Union[float, Dict[str, float]]]:
         return self._target_qps_per_replica
 
     @property

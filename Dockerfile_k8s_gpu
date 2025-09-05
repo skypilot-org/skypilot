@@ -25,6 +25,10 @@ RUN sudo useradd -m -s /bin/bash sky && \
     sudo /bin/bash -c 'echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers' && \
     sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky"
 
+# give sky group write permission to /opt/conda
+RUN chown -R :sky /opt/conda && \
+    chmod -R g+w /opt/conda
+
 # Switch to sky user
 USER sky
 

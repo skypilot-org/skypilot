@@ -87,6 +87,9 @@ def bootstrap_instances(
         use_internal_ips=config.provider_config.get('use_internal_ips', False),
         vpc_name=config.provider_config.get('vpc_name'))
 
+    max_efa_interfaces = config.provider_config.get('max_efa_interfaces', 0)
+    enable_efa = max_efa_interfaces > 0
+
     # Cluster workers should be in a security group that permits traffic within
     # the group, and also SSH access from outside.
     if security_group_ids is None:
@@ -103,7 +106,8 @@ def bootstrap_instances(
             extended_ip_rules = []
         security_group_ids = _configure_security_group(ec2, vpc_id,
                                                        expected_sg_name,
-                                                       extended_ip_rules)
+                                                       extended_ip_rules,
+                                                       enable_efa)
         if expected_sg_name != aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
             logger.debug('Attempting to create the default security group.')
             # Attempt to create the default security group. This is needed
@@ -114,7 +118,7 @@ def bootstrap_instances(
             try:
                 _configure_security_group(ec2, vpc_id,
                                           aws_cloud.DEFAULT_SECURITY_GROUP_NAME,
-                                          [])
+                                          [], enable_efa)
                 logger.debug('Default security group created.')
             except exceptions.NoClusterLaunchedError as e:
                 if 'not authorized to perform: ec2:CreateSecurityGroup' in str(
@@ -146,6 +150,37 @@ def bootstrap_instances(
             'No ImageId found in the node_config. '
             'ImageId will need to be set manually in your cluster config.')
     return config
+
+
+def _configure_placement_group(ec2: 'mypy_boto3_ec2.ServiceResource',
+                               placement_group_name: str):
+    """Configure placement group for the cluster."""
+    # Create the placement group
+    logger.info(f'Creating placement group {placement_group_name}.')
+    try:
+        ec2.meta.client.create_placement_group(GroupName=placement_group_name,
+                                               Strategy='cluster')
+    except aws.botocore_exceptions().ClientError as exc:
+        if exc.response.get(
+                'Error', {}).get('Code') == 'InvalidPlacementGroup.Duplicate':
+            logger.debug(
+                f'Placement group {placement_group_name} already exists.')
+        else:
+            raise exc
+
+
+def delete_placement_group(ec2: 'mypy_boto3_ec2.ServiceResource',
+                           placement_group_name: str):
+    """Delete the placement group."""
+    try:
+        ec2.meta.client.delete_placement_group(GroupName=placement_group_name)
+    except aws.botocore_exceptions().ClientError as exc:
+        if exc.response.get('Error',
+                            {}).get('Code') == 'InvalidPlacementGroup.Unknown':
+            logger.debug(
+                f'Placement group {placement_group_name} does not exist.')
+        else:
+            raise exc
 
 
 def _configure_iam_role(iam) -> Dict[str, Any]:
@@ -557,7 +592,8 @@ def _get_subnet_and_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
 
 def _configure_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
                               vpc_id: str, expected_sg_name: str,
-                              extended_ip_rules: List) -> List[str]:
+                              extended_ip_rules: List,
+                              enable_efa: bool) -> List[str]:
     security_group = _get_or_create_vpc_security_group(ec2, vpc_id,
                                                        expected_sg_name)
     sg_ids = [security_group.id]
@@ -583,14 +619,53 @@ def _configure_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
         },
         *extended_ip_rules,
     ]
+    outbound_rules = []
+    if enable_efa:
+        # EFA requires that outbound rules permit the same security group to
+        # communicate with each other
+        # Refer to https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start-nccl.html#nccl-start-base-setup # pylint: disable=line-too-long
+        outbound_rules.append({
+            'FromPort': -1,
+            'ToPort': -1,
+            'IpProtocol': '-1',
+            'UserIdGroupPairs': [{
+                'GroupId': i
+            } for i in sg_ids],
+        })
     # upsert the default security group
     if not security_group.ip_permissions:
         # If users specify security groups, we should not change the rules
         # of these security groups. Here we change it because it is the default
         # security group for SkyPilot.
         security_group.authorize_ingress(IpPermissions=inbound_rules)
+    if _need_to_update_outbound_rules(security_group, outbound_rules):
+        security_group.authorize_egress(IpPermissions=outbound_rules)
 
     return sg_ids
+
+
+def _need_to_update_outbound_rules(
+    security_group: Any,
+    outbound_rules: List[Dict[str, Any]],
+) -> bool:
+    """Check if we need to update the outbound rules of the security group."""
+    if not security_group.ip_permissions_egress:
+        return True  # No outbound rules, we need to add them
+    existing_group_ids = []
+    for rule in security_group.ip_permissions_egress:
+        if 'UserIdGroupPairs' in rule:
+            group_pairs = rule['UserIdGroupPairs']
+            for pair in group_pairs:
+                existing_group_ids.append(pair['GroupId'])
+    logger.debug(f'Existing group ids: {existing_group_ids}')
+    for rule in outbound_rules:
+        if 'UserIdGroupPairs' in rule:
+            group_pairs = rule['UserIdGroupPairs']
+            for pair in group_pairs:
+                if pair['GroupId'] not in existing_group_ids:
+                    logger.debug(f'New group id: {pair["GroupId"]}')
+                    return True  # New group id, we need to add it
+    return False  # No need to update
 
 
 def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',

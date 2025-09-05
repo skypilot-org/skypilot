@@ -226,6 +226,22 @@ jobs:
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
+  smoke-tests-remote-server-kubernetes:
+    needs: release-build
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ needs.release-build.outputs.new_commit_sha }}
+      branch: ${{ needs.release-build.outputs.test_branch }}
+      message: "Release ${{ needs.release-build.outputs.release_version }} --remote-server --kubernetes"
+      pipeline: "smoke-tests"
+      build_env_vars: '{"ARGS": "--remote-server --kubernetes"}'
+      timeout_minutes: 60
+      wait: true
+      fail_on_buildkite_failure: true
+      sleep_seconds: 1800  # 30-minute delay to reduce buildkite resource usage
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
   release-tests:
     needs: release-build
     uses: ./.github/workflows/buildkite-trigger-wait.yml
@@ -240,7 +256,7 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   create-pr:
-    needs: [release-build, smoke-tests, quicktest-core, quicktest-core-previous-minor, release-tests]
+    needs: [release-build, smoke-tests, quicktest-core, quicktest-core-previous-minor, smoke-tests-remote-server-kubernetes, release-tests]
     if: always() && needs.release-build.result == 'success'
     runs-on: ubuntu-latest
     steps:
@@ -258,6 +274,7 @@ jobs:
           SMOKE_TEST_BUILD: ${{ needs.smoke-tests.outputs.build_number }}
           QUICKTEST_BUILD: ${{ needs.quicktest-core.outputs.build_number }}
           QUICKTEST_PREV_MINOR_BUILD: ${{ needs.quicktest-core-previous-minor.outputs.build_number }}
+          REMOTE_SERVER_K8S_BUILD: ${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}
           RELEASE_TEST_BUILD: ${{ needs.release-tests.outputs.build_number }}
         run: |
           # Configure git
@@ -269,7 +286,8 @@ jobs:
 
           Buildkite Test Links:
           - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")"
+          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/skypilot-1/smoke-tests/builds/${REMOTE_SERVER_K8S_BUILD}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")"
           if [ "${{ needs.quicktest-core-previous-minor.result }}" == "success" ] || [ "${{ needs.quicktest-core-previous-minor.result }}" == "failure" ]; then
             PR_BODY="${PR_BODY}
           - [Quicktest Core (vs Previous Minor)](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_PREV_MINOR_BUILD}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")"

@@ -46,7 +46,10 @@ async def test_cluster_event_retention_daemon():
                     await sky.global_user_state.cluster_event_retention_daemon()
 
                 # Verify cleanup was called with the correct retention.
-                mock_clean.assert_called_with(2)
+                mock_clean.assert_any_call(
+                    2, sky.global_user_state.ClusterEventType.STATUS_CHANGE)
+                mock_clean.assert_any_call(
+                    2, sky.global_user_state.ClusterEventType.DEBUG)
 
                 # Verify sleep was called with max(2 * 3600, 3600) = 7200
                 assert mock_sleep.call_count == 5

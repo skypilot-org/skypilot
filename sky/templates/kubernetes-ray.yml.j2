@@ -302,7 +302,7 @@ available_node_types:
           provreq.kueue.x-k8s.io/maxRunDurationSeconds: "{{k8s_max_run_duration_seconds|string}}"
           {% endif %}
           {% endif %}
-        # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx 
+        # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx
         # Values from google cloud guide
           {% if k8s_enable_gpudirect_tcpx %}
           devices.gke.io/container.tcpx-daemon: |+
@@ -784,8 +784,8 @@ available_node_types:
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
-                ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && { 
-                  VIRTUAL_ENV=~/skypilot-runtime python -c "from sky.skylet.ray_patches import patch; patch()" || exit 1; 
+                ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
+                  VIRTUAL_ENV=~/skypilot-runtime python -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
@@ -1202,7 +1202,7 @@ setup_commands:
     {%- endfor %}
     STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
     start_epoch=$(date +%s);
-    
+
     # Wait for SSH setup to complete before proceeding
     if [ -f /tmp/apt_ssh_setup_started ]; then
       echo "=== Logs for asynchronous SSH setup ===";
@@ -1210,7 +1210,7 @@ setup_commands:
       { tail -f -n +1 /tmp/${STEPS[0]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/apt_ssh_setup_complete ]; do sleep 0.5; done; kill $TAIL_PID || true; };
       [ -f /tmp/${STEPS[0]}.failed ] && { echo "Error: ${STEPS[0]} failed. Exiting."; exit 1; } || true;
     fi
-    
+
     echo "=== Logs for asynchronous ray and skypilot installation ===";
     if [ -f /tmp/skypilot_is_nimbus ]; then
       echo "=== Logs for asynchronous ray and skypilot installation ===";

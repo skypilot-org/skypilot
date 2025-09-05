@@ -21,6 +21,15 @@ class DashboardCache {
     this.cache = new Map();
     this.backgroundJobs = new Map(); // Track ongoing background refresh jobs
     this.debugMode = false; // Added for debug mode
+    this.preloader = null; // Reference to cache preloader for coordination
+  }
+
+  /**
+   * Set the cache preloader instance for coordination
+   * @param {Object} preloader - The cache preloader instance
+   */
+  setPreloader(preloader) {
+    this.preloader = preloader;
   }
 
   /**
@@ -58,8 +67,17 @@ class DashboardCache {
       }
 
       // Launch background refresh if we're not already refreshing
+      // and if the data wasn't recently preloaded
       if (!this.backgroundJobs.has(key)) {
-        this._refreshInBackground(fetchFunction, args, key);
+        const wasRecentlyPreloaded =
+          this.preloader?.wasRecentlyPreloaded(fetchFunction, args) || false;
+        if (!wasRecentlyPreloaded) {
+          this._refreshInBackground(fetchFunction, args, key);
+        } else {
+          this._debug(
+            `Skipping background refresh for ${functionName} - recently preloaded`
+          );
+        }
       }
 
       return cachedItem.data;

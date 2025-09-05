@@ -11,7 +11,7 @@ import uuid
 from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
-from sky.utils import timeline
+from sky.utils import lock_events
 
 # The cluster yaml used to create the current cluster where the module is
 # called.
@@ -107,7 +107,7 @@ class SSHConfigHelper(object):
         return auth_config['ssh_private_key']
 
     @classmethod
-    @timeline.FileLockEvent(ssh_conf_lock_path)
+    @lock_events.FileLockEvent(ssh_conf_lock_path)
     def add_cluster(
         cls,
         cluster_name: str,
@@ -334,7 +334,7 @@ class SSHConfigHelper(object):
             cluster_name: Cluster name.
         """
 
-        with timeline.FileLockEvent(
+        with lock_events.FileLockEvent(
                 cls.ssh_conf_per_cluster_lock_path.format(cluster_name)):
             cluster_config_path = os.path.expanduser(
                 cls.ssh_cluster_path.format(cluster_name))

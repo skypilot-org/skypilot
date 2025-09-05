@@ -1,0 +1,61 @@
+# This YAML works with both:
+# - `sky launch` for regular clusters
+
+name: game-server
+
+resources:
+  cpus: 1+
+  memory: 1+
+  # Optional GPU for more complex simulations
+  # accelerators: T4:1
+  
+  # Use spot instances for cost savings
+  any_of:
+    - use_spot: true
+    - use_spot: false
+
+  # Open port for management API
+  ports:
+    - 8081  # Management API
+
+workdir: .
+
+setup: |
+  # Install system dependencies
+  sudo apt-get update && sudo apt-get install -y jq
+  
+  # Create virtual environment and install dependencies
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
+  
+  uv pip install fastapi uvicorn numpy requests
+
+run: |
+  export PATH="$HOME/.cargo/bin:$PATH"
+  source .venv/bin/activate
+  
+  # Determine server ID based on deployment type
+  if [ -n "${SKYPILOT_SERVICE_NAME}" ]; then
+    # Running as a SkyServe service
+    SERVER_ID="${SKYPILOT_SERVICE_NAME}"
+    echo "Running as SkyServe service: ${SERVER_ID}"
+  elif [ -n "${SKYPILOT_CLUSTER_INFO}" ]; then
+    # Running as a regular cluster
+    SERVER_ID=$(echo "$SKYPILOT_CLUSTER_INFO" | jq -r '.cluster_name')
+    echo "Running as cluster: ${SERVER_ID}"
+  else
+    # Fallback
+    SERVER_ID="game-server-$(hostname)"
+    echo "Using fallback server ID: ${SERVER_ID}"
+  fi
+  
+  # Start the game server (eval head will discover it via sky.endpoints)
+  echo "Starting game server on port 8081"
+  echo "The eval head will auto-discover and control this server"
+  python src/game_server.py \
+    --port 8081 \
+    --server-id "${SERVER_ID}"
+
+
+
+# No environment variables needed - eval head discovers game servers automatically

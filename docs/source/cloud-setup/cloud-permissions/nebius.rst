@@ -69,9 +69,13 @@ To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to sp
 
 The ``nebius.ssh_proxy_command`` field is optional. If SkyPilot is run on a machine that can directly access the internal IPs of the instances, it can be omitted. Otherwise, it should be set to a command that can be used to proxy SSH connections to the internal IPs of the instances.
 
-When using a proxy machine, don't forget to enable `AllowTcpForwarding` on the proxy host:
+Using static IPs
+-----------------------
+To ensure your VM’s IP address remains static across stop-start operations, set the `nebius.use_static_ip_address` field in SkyPilot's global config file (`~/.sky/config.yaml`). For a detailed syntax reference, see :ref:`config-yaml`.
 
-.. code-block:: bash
+.. code-block:: yaml
 
-    sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
-    sudo systemctl restart sshd
+    nebius:
+      use_static_ip_address: true
+
+Not working with `use_internal_ips`

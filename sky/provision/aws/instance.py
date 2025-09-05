@@ -184,9 +184,15 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
             tag_specs += [user_tag_spec]
 
 
-def _create_instances(ec2_fail_fast, cluster_name: str,
-                      node_config: Dict[str, Any], tags: Dict[str, str],
-                      count: int, associate_public_ip_address: bool) -> List:
+def _create_instances(
+    ec2_fail_fast,
+    cluster_name: str,
+    node_config: Dict[str, Any],
+    tags: Dict[str, str],
+    count: int,
+    associate_public_ip_address: bool,
+    max_efa_interfaces: int,
+) -> List:
     tags = {
         'Name': cluster_name,
         constants.TAG_RAY_CLUSTER_NAME: cluster_name,
@@ -239,7 +245,36 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
                 # Whether the VM(s) should have a public IP.
                 'AssociatePublicIpAddress': associate_public_ip_address,
                 'Groups': security_group_ids,
+                'InterfaceType': 'efa'
+                                 if max_efa_interfaces > 0 else 'interface',
             }]
+            # Due to AWS limitation, if an instance type supports multiple
+            # network cards, we cannot assign public IP addresses to the
+            # instance during creation, which will raise the following error:
+            #   (InvalidParameterCombination) when calling the RunInstances
+            #   operation: The associatePublicIPAddress parameter cannot be
+            #   specified when launching with multiple network interfaces.
+            # So we only attach multiple network interfaces if public IP is
+            # not required.
+            # TODO(hailong): support attaching/detaching elastic IP to expose
+            # public IP in this case.
+            if max_efa_interfaces > 1 and not associate_public_ip_address:
+                instance_type = conf['InstanceType']
+                for i in range(1, max_efa_interfaces):
+                    interface_type = 'efa-only'
+                    # Special handling for P5 instances
+                    # Refer to https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-acc-inst-types.html#efa-for-p5 for more details. # pylint: disable=line-too-long
+                    if (instance_type == 'p5.48xlarge' or
+                            instance_type == 'p5e.48xlarge'):
+                        interface_type = 'efa' if i % 4 == 0 else 'efa-only'
+                    network_interfaces.append({
+                        'SubnetId': subnet_id,
+                        'DeviceIndex': 1,
+                        'NetworkCardIndex': i,
+                        'AssociatePublicIpAddress': False,
+                        'Groups': security_group_ids,
+                        'InterfaceType': interface_type,
+                    })
             conf['NetworkInterfaces'] = network_interfaces
 
             instances = _ec2_call_with_retry_on_server_error(
@@ -289,6 +324,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     zone = None
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
+    max_efa_interfaces = config.provider_config.get('max_efa_interfaces', 0)
 
     # sort tags by key to support deterministic unit test stubbing
     tags = dict(sorted(copy.deepcopy(config.tags).items()))
@@ -504,7 +540,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                     tags,
                     reservation_count,
                     associate_public_ip_address=(
-                        not config.provider_config['use_internal_ips']))
+                        not config.provider_config['use_internal_ips']),
+                    max_efa_interfaces=max_efa_interfaces)
                 created_instances.extend(created_reserved_instances)
                 to_start_count -= reservation_count
                 if to_start_count <= 0:
@@ -527,7 +564,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 tags,
                 to_start_count,
                 associate_public_ip_address=(
-                    not config.provider_config['use_internal_ips']))
+                    not config.provider_config['use_internal_ips']),
+                max_efa_interfaces=max_efa_interfaces)
 
             created_instances.extend(created_remaining_instances)
         created_instances.sort(key=lambda x: x.id)
@@ -686,6 +724,7 @@ def terminate_instances(
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
+    instance_list = list(instances)
     default_sg = aws_config.get_security_group_from_vpc_id(
         ec2, _get_vpc_id(provider_config),
         aws_cloud.DEFAULT_SECURITY_GROUP_NAME)
@@ -719,7 +758,7 @@ def terminate_instances(
         # exist. We must block on instance termination so that we can
         # delete the security group.
         instances.terminate()
-        for instance in instances:
+        for instance in instance_list:
             instance.wait_until_terminated()
 
     # TODO(suquark): Currently, the implementation of GCP and Azure will

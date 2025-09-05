@@ -30,7 +30,6 @@ def test_provision_logs_streaming(generic_cloud: str):
                 'done; [ $ok -eq 1 ]')
 
     commands = [
-        smoke_tests_utils.SKY_API_RESTART,
         # Launch detached so we can immediately query provision logs.
         (f'sky launch --infra {generic_cloud} -d -y '
          f'{smoke_tests_utils.LOW_RESOURCE_ARG} -c {name} examples/minimal.yaml'
@@ -45,13 +44,9 @@ def test_provision_logs_streaming(generic_cloud: str):
         wait_stream_ok(tail_cmd),
     ]
 
-    # Ensure we also clear any global config override and restart API.
-    teardown = (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
-                'export SKYPILOT_DEBUG=0; '
-                f'{smoke_tests_utils.SKY_API_RESTART}')
     test = smoke_tests_utils.Test(
         'provision_logs_streaming',
         commands,
-        teardown=teardown,
+        teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud))
     smoke_tests_utils.run_one_test(test)

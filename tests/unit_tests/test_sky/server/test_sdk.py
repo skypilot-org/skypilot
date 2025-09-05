@@ -1,7 +1,9 @@
 # Tests for the sky/client/sdk.py file
+import base64
 from http.cookiejar import Cookie
 from http.cookiejar import MozillaCookieJar
 import io
+import json
 import os
 from pathlib import Path
 import time
@@ -273,6 +275,234 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         ])
 
 
+def test_api_login_user_hash_token(monkeypatch: pytest.MonkeyPatch,
+                                   tmp_path: Path):
+    # Test that we set the user hash when we have a service account token.
+    config_path = tmp_path / "config.yaml"
+    user_hash_path = tmp_path / "user_hash"
+    monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
+                        str(user_hash_path))
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+
+    user_hash = '11111111'
+
+    user = mock.MagicMock()
+    user.get.return_value = user_hash
+
+    test_endpoint = "http://test.skypilot.co"
+
+    # Test with service account token.
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False,
+                user=user))
+        client_sdk.api_login(test_endpoint, service_account_token="sky_test")
+
+        # Verify the user hash is written to the file.
+        assert user_hash_path.exists()
+        assert user_hash_path.read_text() == user_hash
+
+
+def test_api_login_user_hash_needs_auth(monkeypatch: pytest.MonkeyPatch,
+                                        tmp_path: Path):
+    # Test that we set the user hash when we need auth.
+    config_path = tmp_path / "config.yaml"
+    user_hash_path = tmp_path / "user_hash"
+    monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
+                        str(user_hash_path))
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+
+    user_hash = '11111111'
+
+    user = mock.MagicMock()
+    user.get.return_value = user_hash
+
+    test_endpoint = "http://test.skypilot.co"
+
+    # Test needs auth.
+    auth_token = base64.b64encode(
+        json.dumps({
+            'v': 1,
+            'user': user_hash,
+            'cookies': {}
+        }).encode('utf-8')).decode('utf-8')
+
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        # On first call, return needs auth.
+        first_return_value = (
+            server_common.ApiServerStatus.NEEDS_AUTH,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.NEEDS_AUTH,
+                basic_auth_enabled=False))
+
+        # On second call, auth has succeeded.
+        second_return_value = (server_common.ApiServerStatus.HEALTHY,
+                               server_common.ApiServerInfo(
+                                   status=server_common.ApiServerStatus.HEALTHY,
+                                   basic_auth_enabled=False))
+
+        mock_check.side_effect = [first_return_value, second_return_value]
+
+        def _fake_start_local_auth_server(callback_port, token_container,
+                                          remote_endpoint):
+            token_container['token'] = auth_token
+            return None
+
+        # Set the token container manually.
+        monkeypatch.setattr('sky.client.oauth.start_local_auth_server',
+                            _fake_start_local_auth_server)
+        monkeypatch.setattr('webbrowser.open', lambda url: True)
+        client_sdk.api_login(test_endpoint)
+
+        # Verify the user hash is written to the file.
+        assert user_hash_path.exists()
+        assert user_hash_path.read_text() == user_hash
+
+
+def test_api_login_user_hash_needs_auth_both(monkeypatch: pytest.MonkeyPatch,
+                                             tmp_path: Path):
+    # Test that we set the user hash with the token returned from the
+    # api server even if we negotiate a new hash.
+    config_path = tmp_path / "config.yaml"
+    user_hash_path = tmp_path / "user_hash"
+    monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
+                        str(user_hash_path))
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+
+    user_hash = '11111111'
+
+    new_user_hash = '22222222'
+
+    user = mock.MagicMock()
+    user.get.return_value = user_hash
+
+    test_endpoint = "http://test.skypilot.co"
+
+    # Test needs auth.
+    auth_token = base64.b64encode(
+        json.dumps({
+            'v': 1,
+            'user': new_user_hash,
+            'cookies': {}
+        }).encode('utf-8')).decode('utf-8')
+
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        # On first call, return needs auth.
+        first_return_value = (
+            server_common.ApiServerStatus.NEEDS_AUTH,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.NEEDS_AUTH,
+                basic_auth_enabled=False,
+                user=user))
+
+        # On second call, auth has succeeded.
+        second_return_value = (server_common.ApiServerStatus.HEALTHY,
+                               server_common.ApiServerInfo(
+                                   status=server_common.ApiServerStatus.HEALTHY,
+                                   basic_auth_enabled=False))
+
+        mock_check.side_effect = [first_return_value, second_return_value]
+
+        def _fake_start_local_auth_server(callback_port, token_container,
+                                          remote_endpoint):
+            token_container['token'] = auth_token
+            return None
+
+        # Set the token container manually.
+        monkeypatch.setattr('sky.client.oauth.start_local_auth_server',
+                            _fake_start_local_auth_server)
+        monkeypatch.setattr('webbrowser.open', lambda url: True)
+        client_sdk.api_login(test_endpoint)
+
+        # Verify the user hash is written to the file.
+        assert user_hash_path.exists()
+        # We should use the old user hash from the api server.
+        assert user_hash_path.read_text() == user_hash
+
+
+def test_api_login_user_hash_server_healthy(monkeypatch: pytest.MonkeyPatch,
+                                            tmp_path: Path):
+    # Test that we set the user hash when we need auth.
+    config_path = tmp_path / "config.yaml"
+    user_hash_path = tmp_path / "user_hash"
+    monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
+                        str(user_hash_path))
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+
+    user_hash = '11111111'
+
+    user = mock.MagicMock()
+    user.get.return_value = user_hash
+
+    test_endpoint = "http://test.skypilot.co"
+
+    # Test needs auth.
+    auth_token = base64.b64encode(
+        json.dumps({
+            'v': 1,
+            'user': user_hash,
+            'cookies': {}
+        }).encode('utf-8')).decode('utf-8')
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                user=user,
+                basic_auth_enabled=False))
+
+        def _fake_start_local_auth_server(callback_port, token_container,
+                                          remote_endpoint):
+            token_container['token'] = auth_token
+            return None
+
+        # Set the token container manually.
+        monkeypatch.setattr('sky.client.oauth.start_local_auth_server',
+                            _fake_start_local_auth_server)
+        monkeypatch.setattr('webbrowser.open', lambda url: True)
+        client_sdk.api_login(test_endpoint)
+
+        # Verify the user hash is written to the file.
+        assert user_hash_path.exists()
+        assert user_hash_path.read_text() == user_hash
+
+
+def test_api_login_user_hash_fail(monkeypatch: pytest.MonkeyPatch,
+                                  tmp_path: Path):
+    # Test that we don't set the user hash if we fail to login.
+    config_path = tmp_path / "config.yaml"
+    user_hash_path = tmp_path / "user_hash"
+    monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
+                        str(user_hash_path))
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+
+    user_hash = '11111111'
+
+    user = mock.MagicMock()
+    user.get.return_value = user_hash
+
+    test_endpoint = "http://test.skypilot.co"
+
+    # Make sure if we fail in the try block, the user hash is not written to
+    # the file.
+    # Make get_dashboard_url raise an exception.
+    monkeypatch.setattr('sky.server.common.get_dashboard_url',
+                        lambda *args, **kwargs: None)
+    with pytest.raises(Exception):
+        client_sdk.api_login(test_endpoint, service_account_token="sky_test")
+
+    # Verify the user hash is not written to the file.
+    assert not user_hash_path.exists()
+
+
 class MockRetryContext:
     """Mock retry context for testing resumable functionality."""
 
@@ -481,3 +711,17 @@ def test_reload_config():
     with mock.patch('sky.skypilot_config.safe_reload_config') as mock_reload:
         client_sdk.reload_config()
         mock_reload.assert_called_once()
+
+
+def test_get_request_id():
+    """Test that get_request_id returns the request id from the correct 
+    header."""
+    mock_response = mock.MagicMock()
+    mock_response.headers = {
+        'X-Skypilot-Request-ID': 'test_request_id',
+        'X-Request-ID': 'test_request_id_2',
+    }
+    mock_response.status_code = 200
+    mock_response.reason = 'OK'
+    request_id = server_common.get_request_id(mock_response)
+    assert request_id == 'test_request_id'

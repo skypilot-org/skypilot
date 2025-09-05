@@ -795,6 +795,7 @@ function ActiveTab({
             clusterJobData={clusterJobData}
             loading={clusterJobsLoading}
             refreshClusterJobsOnly={refreshClusterJobsOnly}
+            workspace={clusterData.workspace}
           />
         </div>
       )}

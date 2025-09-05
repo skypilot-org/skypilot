@@ -167,6 +167,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     expected_config_base = {
         'instance_type': resource.instance_type,
         'custom_resources': '{"fake-acc":2}',
+        'max_efa_interfaces': 0,
         'use_spot': False,
         'region': 'fake-region',
         'image_id': 'fake-image',
@@ -254,6 +255,7 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
     expected_config_base = {
         'instance_type': resource.instance_type,
         'custom_resources': '{"fake-acc":2}',
+        'max_efa_interfaces': 0,
         'use_spot': False,
         'region': 'fake-region',
         'image_id': 'fake-image',

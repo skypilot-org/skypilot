@@ -396,6 +396,21 @@ class Cloud:
         del label_key, label_value
         return True, None
 
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the volume name is valid for this cloud.
+
+        Returns:
+            A tuple of a boolean indicating whether the volume name is valid
+            and an optional string describing the reason if the volume name
+            is invalid.
+        """
+        # If a cloud does not support volume, they are ignored. Only clouds
+        # that support volume implement this method.
+        del volume_name
+        return True, None
+
     @timeline.event
     def get_feasible_launchable_resources(
             self,

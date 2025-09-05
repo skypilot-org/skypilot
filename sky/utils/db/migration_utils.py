@@ -3,24 +3,21 @@
 import contextlib
 import logging
 import os
-import pathlib
 
 from alembic import command as alembic_command
 from alembic.config import Config
 from alembic.runtime import migration
 import filelock
 import sqlalchemy
-from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky import sky_logging
-from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
 DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
-GLOBAL_USER_STATE_VERSION = '006'
+GLOBAL_USER_STATE_VERSION = '007'
 GLOBAL_USER_STATE_LOCK_PATH = '~/.sky/locks/.state_db.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
@@ -30,32 +27,6 @@ SPOT_JOBS_LOCK_PATH = '~/.sky/locks/.spot_jobs_db.lock'
 SERVE_DB_NAME = 'serve_db'
 SERVE_VERSION = '001'
 SERVE_LOCK_PATH = '~/.sky/locks/.serve_db.lock'
-
-
-def get_engine(db_name: str, async_engine: bool = False):
-    conn_string = None
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
-    if conn_string:
-        logger.debug(f'using db URI from {conn_string}')
-        if async_engine:
-            conn_string = conn_string.replace('postgresql://',
-                                              'postgresql+asyncpg://')
-            engine = sqlalchemy_async.create_async_engine(
-                conn_string, poolclass=sqlalchemy.NullPool)
-        else:
-            engine = sqlalchemy.create_engine(conn_string,
-                                              poolclass=sqlalchemy.NullPool)
-    else:
-        db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
-        pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
-        if async_engine:
-            engine = sqlalchemy_async.create_async_engine(
-                'sqlite+aiosqlite:///' + db_path, connect_args={'timeout': 30})
-        else:
-            engine = sqlalchemy.create_engine('sqlite:///' + db_path,
-                                              connect_args={'timeout': 30})
-    return engine
 
 
 @contextlib.contextmanager

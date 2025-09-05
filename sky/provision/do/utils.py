@@ -17,6 +17,7 @@ from sky.provision import constants as provision_constants
 from sky.provision.do import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -61,7 +62,7 @@ def _init_client():
     if get_credentials_path() is None:
         raise DigitalOceanError(
             'No credentials found, please run `doctl auth init`')
-    credentials = common_utils.read_yaml(get_credentials_path())
+    credentials = yaml_utils.read_yaml(get_credentials_path())
     default_token = credentials.get('access-token', None)
     if default_token is not None:
         try:

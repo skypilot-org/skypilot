@@ -1,0 +1,14 @@
+name: min
+resources:
+  cpus: 0.1+
+volumes:
+  /mnt/data: {{ volume_name }}
+setup: |
+  echo "running setup"
+
+run: |
+  set -e
+  echo "check volume"
+  df -h /mnt/data || (echo "df failed" && exit 1)
+  touch /mnt/data/test.txt || (echo "touch failed" && exit 1)
+  ls -lart /mnt/data || (echo "ls failed" && exit 1)

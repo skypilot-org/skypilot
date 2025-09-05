@@ -82,7 +82,7 @@ class TestConfigMapSync(unittest.TestCase):
     @mock.patch('sky.utils.kubernetes.config_map_utils.'
                 '_get_kubernetes_namespace')
     @mock.patch('sky.utils.kubernetes.config_map_utils._get_configmap_name')
-    @mock.patch('sky.utils.common_utils.dump_yaml_str')
+    @mock.patch('sky.utils.yaml_utils.dump_yaml_str')
     @mock.patch('sky.utils.kubernetes.config_map_utils.kubernetes')
     def test_patch_configmap_success(self, mock_k8s, mock_dump_yaml,
                                      mock_get_name, mock_get_ns, mock_is_k8s):
@@ -158,7 +158,7 @@ class TestConfigMapSync(unittest.TestCase):
         from sky import skypilot_config
         with mock.patch.object(skypilot_config, 'get_user_config_path',
                                return_value=config_path), \
-             mock.patch('sky.utils.common_utils.dump_yaml') as mock_dump_yaml, \
+             mock.patch('sky.utils.yaml_utils.dump_yaml') as mock_dump_yaml, \
              mock.patch('sky.skypilot_config.reload_config'):
 
             config = config_utils.Config({'test': 'value'})
@@ -185,7 +185,7 @@ class TestConfigMapSync(unittest.TestCase):
         from sky import skypilot_config
         with mock.patch.object(skypilot_config, 'get_user_config_path',
                                return_value=config_path), \
-             mock.patch('sky.utils.common_utils.dump_yaml') as mock_dump_yaml, \
+             mock.patch('sky.utils.yaml_utils.dump_yaml') as mock_dump_yaml, \
              mock.patch('sky.skypilot_config.reload_config'):
 
             config = config_utils.Config({'test': 'value'})
@@ -203,7 +203,7 @@ class TestConfigMapSync(unittest.TestCase):
                 '_get_kubernetes_namespace')
     @mock.patch('sky.utils.kubernetes.config_map_utils._get_configmap_name')
     @mock.patch('sky.skypilot_config.parse_and_validate_config_file')
-    @mock.patch('sky.utils.common_utils.dump_yaml_str')
+    @mock.patch('sky.utils.yaml_utils.dump_yaml_str')
     @mock.patch('sky.utils.kubernetes.config_map_utils.kubernetes')
     def test_initialize_configmap_sync_on_startup_creates_configmap(
             self, mock_k8s, mock_dump_yaml, mock_parse_config, mock_get_name,

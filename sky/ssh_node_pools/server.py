@@ -15,7 +15,7 @@ router = fastapi.APIRouter()
 
 
 @router.get('')
-async def get_ssh_node_pools() -> Dict[str, Any]:
+def get_ssh_node_pools() -> Dict[str, Any]:
     """Get all SSH Node Pool configurations."""
     try:
         return ssh_node_pools_core.get_all_pools()
@@ -27,7 +27,7 @@ async def get_ssh_node_pools() -> Dict[str, Any]:
 
 
 @router.post('')
-async def update_ssh_node_pools(pools_config: Dict[str, Any]) -> Dict[str, str]:
+def update_ssh_node_pools(pools_config: Dict[str, Any]) -> Dict[str, str]:
     """Update SSH Node Pool configurations."""
     try:
         ssh_node_pools_core.update_pools(pools_config)
@@ -39,7 +39,7 @@ async def update_ssh_node_pools(pools_config: Dict[str, Any]) -> Dict[str, str]:
 
 
 @router.delete('/{pool_name}')
-async def delete_ssh_node_pool(pool_name: str) -> Dict[str, str]:
+def delete_ssh_node_pool(pool_name: str) -> Dict[str, str]:
     """Delete a SSH Node Pool configuration."""
     try:
         if ssh_node_pools_core.delete_pool(pool_name):
@@ -83,7 +83,7 @@ async def upload_ssh_key(request: fastapi.Request) -> Dict[str, str]:
 
 
 @router.get('/keys')
-async def list_ssh_keys() -> List[str]:
+def list_ssh_keys() -> List[str]:
     """List available SSH keys."""
     try:
         return ssh_node_pools_core.list_ssh_keys()
@@ -200,7 +200,7 @@ async def down_ssh_node_pool_general(
 
 
 @router.get('/{pool_name}/status')
-async def get_ssh_node_pool_status(pool_name: str) -> Dict[str, str]:
+def get_ssh_node_pool_status(pool_name: str) -> Dict[str, str]:
     """Get the status of a specific SSH Node Pool."""
     try:
         # Call ssh_status to check the context
