@@ -3130,8 +3130,7 @@ def get_clusters(
 
     cluster_names = []
     for record in records:
-        logger.info(f'Name: {record["name"]}, Cloud: {record["cloud"]}')
-        if record['cloud'] == 'gcp':
+        if record['name'] in ['bastion3', 'sky-jobs-controller-b26f53aa', 'sky-serve-controller-29c994c3']:
             continue
         cluster_names.append(record['name'])
     updated_records = []
