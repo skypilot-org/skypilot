@@ -85,11 +85,6 @@ def volume_list() -> List[Dict[str, Any]]:
     all_users = global_user_state.get_all_users()
     user_map = {user.id: user.name for user in all_users}
     records = []
-    import tracemalloc
-    tracemalloc.start()
-    tracemalloc.stop()
-    logger.info(tracemalloc.get_traced_memory())
-    tracemalloc.clear_traces()
     for volume in volumes:
         volume_name = volume.get('name')
         record = {
