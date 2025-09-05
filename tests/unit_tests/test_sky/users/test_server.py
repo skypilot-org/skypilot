@@ -44,8 +44,6 @@ class TestUsersEndpoints:
         # Setup
         mock_get_all_users.return_value = mock_users
 
-        # Mock get_users_for_role for the test scenario:
-        # Alice (user1) has admin role, Bob (user2) has user role, Charlie (user3) has no roles
         def mock_users_for_role_side_effect(role):
             role_mappings = {
                 'admin': ['user1'],  # Alice has admin role
@@ -303,7 +301,6 @@ class TestUsersEndpoints:
         # Setup
         mock_get_all_users.return_value = mock_users
 
-        # Mock get_users_for_role to return users for each role
         def mock_users_for_role_side_effect(role):
             role_mappings = {
                 'admin': ['user1'],  # Alice has admin role
