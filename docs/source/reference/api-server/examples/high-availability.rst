@@ -126,8 +126,8 @@ Besides the main ``[jobs,serve].controller.high_availability: true`` flag, you c
 *   **Kubernetes Storage Class** (``kubernetes.high_availability.storage_class_name`` - Optional):
     If your Kubernetes cluster has specific storage classes defined (e.g., for different
     performance tiers like SSD vs HDD, or specific features like backup), you can specify
-    which one to use for the controller's PVC. This is configured under the
-    ``kubernetes`` section in ``config.yaml``.
+    which one to use for the controller's PVC. **Note:** This is configured under the
+    ``kubernetes`` section in ``config.yaml``, not as a top-level ``high_availability`` section.
 
     To specify a storage class for the controller's PVC:
 
