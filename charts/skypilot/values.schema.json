@@ -173,6 +173,12 @@
                                 "null"
                             ]
                         },
+                        "redis-image": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
                         "redis-secret": {
                             "type": [
                                 "string",
@@ -475,6 +481,12 @@
                             "type": "string"
                         },
                         "oidc-issuer-url": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "redis-image": {
                             "type": [
                                 "string",
                                 "null"
