@@ -3128,7 +3128,12 @@ def get_clusters(
         progress.update(task, advance=1)
         return record
 
-    cluster_names = [record['name'] for record in records]
+    cluster_names = []
+    for record in records:
+        logger.info(f'Name: {record["name"]}, Cloud: {record["cloud"]}')
+        if record['cloud'] == 'gcp':
+            continue
+        cluster_names.append(record['name'])
     updated_records = []
     if len(cluster_names) > 0:
         with progress:
