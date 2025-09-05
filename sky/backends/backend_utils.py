@@ -3104,18 +3104,18 @@ def get_clusters(
         # request info in backend_utils.py.
         # Refactor this to use some other info to
         # determine if a launch is in progress.
-        request = requests_lib.get_request_tasks(
-            req_filter=requests_lib.RequestTaskFilter(
-                status=[requests_lib.RequestStatus.RUNNING],
-                cluster_names=[cluster_name],
-                include_request_names=['sky.launch']))
-        if len(request) > 0:
-            # There is an active launch request on the cluster,
-            # so we don't want to update the cluster status until
-            # the request is completed.
-            logger.debug(f'skipping refresh for cluster {cluster_name} '
-                         'as there is an active launch request')
-            return global_user_state.get_cluster_from_name(cluster_name)
+        # request = requests_lib.get_request_tasks(
+        #     req_filter=requests_lib.RequestTaskFilter(
+        #         status=[requests_lib.RequestStatus.RUNNING],
+        #         cluster_names=[cluster_name],
+        #         include_request_names=['sky.launch']))
+        # if len(request) > 0:
+        #     # There is an active launch request on the cluster,
+        #     # so we don't want to update the cluster status until
+        #     # the request is completed.
+        #     logger.debug(f'skipping refresh for cluster {cluster_name} '
+        #                  'as there is an active launch request')
+        #     return global_user_state.get_cluster_from_name(cluster_name)
         try:
             record = refresh_cluster_record(
                 cluster_name,
