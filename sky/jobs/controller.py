@@ -1141,25 +1141,6 @@ class Controller:
                 await asyncio.sleep(10)
                 continue
 
-            schedule_state = waiting_job['schedule_state']
-            if (schedule_state !=
-                    managed_job_state.ManagedJobScheduleState.WAITING):
-                # in this case it is already currently being restarted
-
-                # two options, old_pid is > 0 meaning it is an old job, in which
-                # case we do not support taking it over
-                # if old_pid is < 0, that means it was started by the new
-                # consolidated controller, in which case we can take it over if
-                # the controller managing it is dead. if it is not dead, the
-                # other process will handle restarting it.
-                if waiting_job['old_pid'] < 0:
-                    try:
-                        process = psutil.Process(-waiting_job['old_pid'])
-                        if process.is_running():
-                            continue
-                    except psutil.NoSuchProcess:
-                        pass
-
             job_id = waiting_job['job_id']
             dag_yaml_path = waiting_job['dag_yaml_path']
             env_file_path = waiting_job.get('env_file_path')
