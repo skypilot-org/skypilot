@@ -119,6 +119,8 @@ def maybe_remove_container_cmds(container_name, docker_cmd):
         'rm',
         '-f',
         container_name,
+        '||',
+        'true',
     ]
     return ' '.join(docker_rm)
 
@@ -355,7 +357,7 @@ class DockerInitializer:
                     self._auto_configure_shm(user_docker_run_options)),
                 self.docker_cmd,
             )
-            self._run(f'{remove_container_cmd}; {start_command}')
+            self._run(f"flock -w 10 /tmp/{self.container_name}.lock -c '{remove_container_cmd} && {start_command}'")
 
         # SkyPilot: Setup Commands.
         # TODO(zhwu): the following setups should be aligned with the kubernetes
