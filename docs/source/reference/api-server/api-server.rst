@@ -126,13 +126,13 @@ To verify that the API server is working, run ``sky api info``:
    :hidden:
    :caption: Examples
 
-   API server metrics monitoring <api-server-admin-deploy/examples/api-server-metrics-setup>
-   GPU metrics monitoring <api-server-admin-deploy/examples/api-server-gpu-metrics-setup>
-   Advanced: Cross-Cluster State Persistence <api-server-admin-deploy/examples/api-server-persistence>
-   Advanced: High Availability Controller <api-server-admin-deploy/examples/high-availability>
-   Example: Deploy on GKE, GCP, and Nebius with Okta <api-server-admin-deploy/examples/example-deploy-gke-nebius-okta>
-   Example: Deploy SkyPilot API Server in Docker <api-server-admin-deploy/examples/api-server-in-docker>
-   Example: Deploy on GKE with Cloud SQL <api-server-admin-deploy/examples/example-deploy-gcp-cloud-sql>
+   API server metrics monitoring <examples/api-server-metrics-setup>
+   GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
+   Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
+   Advanced: High Availability Controller <examples/high-availability>
+   Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>
+   Example: Deploy SkyPilot API Server in Docker <examples/api-server-in-docker>
+   Example: Deploy on GKE with Cloud SQL <examples/example-deploy-gcp-cloud-sql>
 
 By default, each user connected to the API server will only see their own resources.
 
