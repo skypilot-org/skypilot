@@ -1054,6 +1054,7 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
     API server metrics monitoring <examples/api-server-metrics-setup>
     GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
+    Advanced: High Availability Controller <examples/high-availability>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>
     Example: Deploy SkyPilot API Server in Docker <examples/api-server-in-docker>
     Example: Deploy on GKE with Cloud SQL <examples/example-deploy-gcp-cloud-sql>
