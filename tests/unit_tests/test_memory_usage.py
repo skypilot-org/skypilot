@@ -1,8 +1,10 @@
+import gc
+import tracemalloc
+
 import pytest
 
 from sky import check as sky_check
-import tracemalloc
-import gc
+
 
 # if run with other tests, the memory usage may be
 # affected by other tests, so we run it separately.
@@ -17,5 +19,5 @@ def test_sky_check_memory_usage():
     tracemalloc.stop()
     print(f'Final memory: {final_memory}')
     memory_diff_mb = (final_memory - initial_memory) / 1024 / 1024
-    assert memory_diff_mb < 100, (
+    assert memory_diff_mb < 10, (
         f'Memory usage increased by {memory_diff_mb} MB')
