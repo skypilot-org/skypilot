@@ -283,17 +283,16 @@ class DO(clouds.Cloud):
         """Verify that the user has valid credentials for
         DO's compute service."""
 
-        try:
-            do.exceptions()
-        except ImportError as err:
-            return False, str(err)
+        installed, err_msg = do.check_exceptions_dependencies_installed()
+        if not installed:
+            return False, err_msg
 
         try:
             # attempt to make a CURL request for listing instances
             do_utils.client().droplets.list()
-        except do.exceptions().HttpResponseError as err:
-            return False, str(err)
         except do_utils.DigitalOceanError as err:
+            return False, str(err)
+        except do.exceptions().HttpResponseError as err:
             return False, str(err)
 
         return True, None

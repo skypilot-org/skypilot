@@ -1,5 +1,7 @@
 """ RunPod Cloud. """
 
+from importlib import util as import_lib_util
+import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -12,9 +14,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import volume as volume_lib
 
-_CREDENTIAL_FILES = [
-    'config.toml',
-]
+_CREDENTIAL_FILE = 'config.toml'
 
 
 @registry.CLOUD_REGISTRY.register
@@ -285,30 +285,71 @@ class RunPod(clouds.Cloud):
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """ Verify that the user has valid credentials for RunPod. """
+        """Verify that the user has valid credentials for RunPod. """
+        dependency_error_msg = ('Failed to import runpod. '
+                                'To install, run: pip install skypilot[runpod]')
         try:
-            import runpod  # pylint: disable=import-outside-toplevel
-            valid, error = runpod.check_credentials()
+            runpod_spec = import_lib_util.find_spec('runpod')
+            if runpod_spec is None:
+                return False, dependency_error_msg
+            toml_spec = import_lib_util.find_spec('toml')
+            if toml_spec is None:
+                return False, dependency_error_msg
+        except ValueError:
+            # docstring of importlib_util.find_spec:
+            # First, sys.modules is checked to see if the module was alread
+            # imported.
+            # If so, then sys.modules[name].__spec__ is returned.
+            # If that happens to be set to None, then ValueError is raised.
+            return False, dependency_error_msg
 
-            if not valid:
+        valid, error = cls._check_runpod_credentials()
+        if not valid:
+            return False, (
+                f'{error} \n'  # First line is indented by 4 spaces
+                '    Credentials can be set up by running: \n'
+                f'        $ pip install runpod \n'
+                f'        $ runpod config\n'
+                '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
+            )
+
+        return True, None
+
+    @classmethod
+    def _check_runpod_credentials(cls, profile: str = 'default'):
+        """Checks if the credentials file exists and is valid."""
+        credential_file = os.path.expanduser(f'~/.runpod/{_CREDENTIAL_FILE}')
+        if not os.path.exists(credential_file):
+            return False, '~/.runpod/config.toml does not exist.'
+
+        # we don't need to import toml here if config.toml does not exist,
+        # wait until we know the cred file exists.
+        import tomli as toml  # pylint: disable=import-outside-toplevel
+
+        # Check for default api_key
+        try:
+            with open(credential_file, 'rb') as cred_file:
+                config = toml.load(cred_file)
+
+            if profile not in config:
                 return False, (
-                    f'{error} \n'  # First line is indented by 4 spaces
-                    '    Credentials can be set up by running: \n'
-                    f'        $ pip install runpod \n'
-                    f'        $ runpod config\n'
-                    '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
+                    f'~/.runpod/config.toml is missing {profile} profile.')
+
+            if 'api_key' not in config[profile]:
+                return (
+                    False,
+                    '~/.runpod/config.toml is missing '
+                    f'api_key for {profile} profile.',
                 )
 
-            return True, None
+        except (TypeError, ValueError):
+            return False, '~/.runpod/config.toml is not a valid TOML file.'
 
-        except ImportError:
-            return False, ('Failed to import runpod. '
-                           'To install, run: pip install skypilot[runpod]')
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
-            f'~/.runpod/{filename}': f'~/.runpod/{filename}'
-            for filename in _CREDENTIAL_FILES
+            f'~/.runpod/{_CREDENTIAL_FILE}': f'~/.runpod/{_CREDENTIAL_FILE}'
         }
 
     @classmethod

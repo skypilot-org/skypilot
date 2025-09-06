@@ -28,6 +28,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 from sky import catalog
 from sky import clouds
 from sky import exceptions
+from sky.adaptors import common
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
 from sky.provision.oci.query_utils import query_helper
@@ -454,13 +455,12 @@ class OCI(clouds.Cloud):
             f'{cls._INDENT_PREFIX}  region=us-sanjose-1\n'
             f'{cls._INDENT_PREFIX}  key_file=~/.oci/oci_api_key.pem')
 
-        try:
-            # pylint: disable=import-outside-toplevel,unused-import
-            import oci
-        except ImportError:
-            return False, ('`oci` is not installed. Install it with: '
-                           'pip install oci\n'
-                           f'{cls._INDENT_PREFIX}{short_credential_help_str}')
+        dependency_error_msg = (
+            '`oci` is not installed. Install it with: '
+            'pip install oci\n'
+            f'{cls._INDENT_PREFIX}{short_credential_help_str}')
+        if not common.can_import_modules(['oci']):
+            return False, dependency_error_msg
 
         conf_file = oci_adaptor.get_config_file()
 
