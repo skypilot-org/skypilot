@@ -1,6 +1,4 @@
 """Vsphere cloud implementation."""
-from importlib import util as importlib_util
-import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -10,7 +8,6 @@ from sky.adaptors import common as adaptors_common
 from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.vsphere_utils import get_vsphere_credentials
 from sky.provision.vsphere.vsphere_utils import initialize_vsphere_data
-from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -286,16 +283,10 @@ class Vsphere(clouds.Cloud):
             f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
             'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
         )
-        try:
-            # pylint: disable=import-outside-toplevel,unused-import
-            # Check pyVmomi installation.
-            pyvmomi_spec = importlib_util.find_spec('pyVmomi')
-            if pyvmomi_spec is None:
-                return False, dependency_error_msg
-        except (ImportError, subprocess.CalledProcessError) as e:
-            return False, (
-                dependency_error_msg +
-                f' {common_utils.format_exception(e, use_bracket=True)}')
+        # Check pyVmomi installation.
+        can_import_pyvmomi = adaptors_common.can_import_module('pyVmomi')
+        if not can_import_pyvmomi:
+            return False, dependency_error_msg
 
         required_keys = ['name', 'username', 'password', 'clusters']
         skip_key = 'skip_verification'

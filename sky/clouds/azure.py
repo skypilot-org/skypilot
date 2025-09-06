@@ -1,5 +1,4 @@
 """Azure."""
-from importlib import util as importlib_util
 import os
 import re
 import subprocess
@@ -16,6 +15,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import azure
+from sky.adaptors import common as adaptors_common
 from sky.clouds.utils import azure_utils
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -569,20 +569,10 @@ class Azure(clouds.Cloud):
             f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
             f'\n{cls._INDENT_PREFIX}Credentials may also need to be set.')
         # Check if the azure blob storage dependencies are installed.
-        try:
-            # pylint: disable=redefined-outer-name, import-outside-toplevel, unused-import
-            blob_spec = importlib_util.find_spec('azure.storage.blob')
-            if blob_spec is None:
-                return False, dependency_installation_hints
-            msgraph_spec = importlib_util.find_spec('msgraph')
-            if msgraph_spec is None:
-                return False, dependency_installation_hints
-        except ValueError:
-            # docstring of importlib_util.find_spec:
-            # First, sys.modules is checked to see if the module was alread
-            # imported.
-            # If so, then sys.modules[name].__spec__ is returned.
-            # If that happens to be set to None, then ValueError is raised.
+        can_import_blob = (
+            adaptors_common.can_import_module('azure.storage.blob'))
+        can_import_msgraph = (adaptors_common.can_import_module('msgraph'))
+        if not can_import_blob or not can_import_msgraph:
             return False, dependency_installation_hints
 
         try:
