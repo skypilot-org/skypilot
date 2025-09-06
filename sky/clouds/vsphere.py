@@ -284,8 +284,7 @@ class Vsphere(clouds.Cloud):
             'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
         )
         # Check pyVmomi installation.
-        can_import_pyvmomi = adaptors_common.can_import_module('pyVmomi')
-        if not can_import_pyvmomi:
+        if not adaptors_common.can_import_modules(['pyVmomi']):
             return False, dependency_error_msg
 
         required_keys = ['name', 'username', 'password', 'clusters']

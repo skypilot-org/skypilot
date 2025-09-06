@@ -790,9 +790,7 @@ class AWS(clouds.Cloud):
             return False, dependency_installation_hints
 
         # Checks if aws boto is installed properly
-        can_import_boto3 = common.can_import_module('boto3')
-        can_import_botocore = common.can_import_module('botocore')
-        if not can_import_boto3 or not can_import_botocore:
+        if not common.can_import_modules(['boto3', 'botocore']):
             return False, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.

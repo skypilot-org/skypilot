@@ -569,10 +569,8 @@ class Azure(clouds.Cloud):
             f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
             f'\n{cls._INDENT_PREFIX}Credentials may also need to be set.')
         # Check if the azure blob storage dependencies are installed.
-        can_import_blob = (
-            adaptors_common.can_import_module('azure.storage.blob'))
-        can_import_msgraph = (adaptors_common.can_import_module('msgraph'))
-        if not can_import_blob or not can_import_msgraph:
+        if not adaptors_common.can_import_modules(
+            ['azure.storage.blob', 'msgraph']):
             return False, dependency_installation_hints
 
         try:
