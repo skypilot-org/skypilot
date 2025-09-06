@@ -1,8 +1,5 @@
 """Digital Ocean cloud adaptors"""
 
-# pylint: disable=import-outside-toplevel
-from importlib import util as importlib_util
-
 from sky.adaptors import common
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for DO. '
@@ -17,21 +14,14 @@ _LAZY_MODULES = (pydo, azure)
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def exceptions():
     """Azure exceptions."""
+    # pylint: disable=import-outside-toplevel
     from azure.core import exceptions as azure_exceptions
     return azure_exceptions
 
 
 def check_exceptions_dependencies_installed():
     """Check if the azure.core.exceptions module is installed."""
-    try:
-        exceptions_spec = importlib_util.find_spec('azure.core.exceptions')
-        if exceptions_spec is None:
-            return False, _IMPORT_ERROR_MESSAGE
-    except ValueError:
-        # docstring of importlib_util.find_spec:
-        # First, sys.modules is checked to see if the module was alread
-        # imported.
-        # If so, then sys.modules[name].__spec__ is returned.
-        # If that happens to be set to None, then ValueError is raised.
+    can_import_exceptions = common.can_import_module('azure.core.exceptions')
+    if not can_import_exceptions:
         return False, _IMPORT_ERROR_MESSAGE
     return True, None

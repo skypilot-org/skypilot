@@ -1,11 +1,11 @@
 """Cudo Compute"""
-from importlib import util as importlib_util
 import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky.adaptors import common
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -288,22 +288,10 @@ class Cudo(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Cudo's compute service."""
-        try:
-            # pylint: disable=import-outside-toplevel,unused-import
-            cudo_api_spec = importlib_util.find_spec('cudo_api')
-            if cudo_api_spec is None:
-                return False, (f'{cls._DEPENDENCY_HINT}\n'
-                               f'{cls._INDENT_PREFIX}')
-        except ValueError as e:
-            # docstring of importlib_util.find_spec:
-            # First, sys.modules is checked to see if the module was alread
-            # imported.
-            # If so, then sys.modules[name].__spec__ is returned.
-            # If that happens to be set to None, then ValueError is raised.
-            return False, (
-                f'{cls._DEPENDENCY_HINT}\n'
-                f'{cls._INDENT_PREFIX}'
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+        can_import_cudo_api = common.can_import_module('cudo_api')
+        if not can_import_cudo_api:
+            return False, (f'{cls._DEPENDENCY_HINT}\n'
+                           f'{cls._INDENT_PREFIX}')
 
         try:
             _run_output('cudoctl --version')

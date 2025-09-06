@@ -1,7 +1,6 @@
 """Amazon Web Services."""
 import enum
 import fnmatch
-from importlib import util as importlib_util
 import hashlib
 import json
 import os
@@ -18,6 +17,7 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
+from sky.adaptors import common
 from sky.catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
@@ -788,21 +788,11 @@ class AWS(clouds.Cloud):
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
             return False, dependency_installation_hints
-        try:
-            # Checks if aws boto is installed properly
-            # pylint: disable=import-outside-toplevel, unused-import
-            boto3_spec = importlib_util.find_spec('boto3')
-            if boto3_spec is None:
-                return False, dependency_installation_hints
-            botocore_spec = importlib_util.find_spec('botocore')
-            if botocore_spec is None:
-                return False, dependency_installation_hints
-        except ValueError:
-            # docstring of importlib_util.find_spec:
-            # First, sys.modules is checked to see if the module was alread
-            # imported.
-            # If so, then sys.modules[name].__spec__ is returned.
-            # If that happens to be set to None, then ValueError is raised.
+
+        # Checks if aws boto is installed properly
+        can_import_boto3 = common.can_import_module('boto3')
+        can_import_botocore = common.can_import_module('botocore')
+        if not can_import_boto3 or not can_import_botocore:
             return False, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.

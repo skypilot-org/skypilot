@@ -1,12 +1,12 @@
 """ Vast Cloud. """
 
-from importlib import util as importlib_util
 import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky.adaptors import common
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -261,16 +261,8 @@ class Vast(clouds.Cloud):
 
         dependency_error_msg = ('Failed to import vast. '
                                 'To install, run: pip install skypilot[vast]')
-        try:
-            vastai_sdk_spec = importlib_util.find_spec('vastai_sdk')
-            if vastai_sdk_spec is None:
-                return False, dependency_error_msg
-        except ValueError:
-            # docstring of importlib_util.find_spec:
-            # First, sys.modules is checked to see if the module was alread
-            # imported.
-            # If so, then sys.modules[name].__spec__ is returned.
-            # If that happens to be set to None, then ValueError is raised.
+        can_import_vastai_sdk = common.can_import_module('vastai_sdk')
+        if not can_import_vastai_sdk:
             return False, dependency_error_msg
 
         if not os.path.exists(os.path.expanduser(_CREDENTIAL_PATH)):
