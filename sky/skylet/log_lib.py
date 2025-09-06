@@ -36,6 +36,9 @@ from sky.utils import ux_utils
 SKY_LOG_WAITING_GAP_SECONDS = 1
 SKY_LOG_WAITING_MAX_RETRY = 5
 SKY_LOG_TAILING_GAP_SECONDS = 0.2
+
+SKY_LOG_SETUP_SPINNER_TIMEOUT = 60
+SKY_LOG_SETUP_SPINNER_STALL_INTERVAL = 5
 # Peek the head of the lines to check if we need to start
 # streaming when tail > 0.
 PEEK_HEAD_LINES_FOR_START_STREAM = 20
@@ -465,9 +468,9 @@ def _should_stream_the_whole_tail_lines(head_lines_of_log_file: List[str],
     return False
 
 
-def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool,
-                   start_streaming_at: str, cluster_name: Optional[str],
-                   num_nodes: int) -> bool:
+def _setup_watcher(log_file: TextIO, setup_output_iterator: Iterator[str],
+                   cluster_name: Optional[str], num_nodes: int,
+                   job_id: int) -> bool:
     """Watch the setup logs and print logs with a spinner during setup."""
 
     # The logic of this function is complicated by the fact that during
@@ -506,12 +509,8 @@ def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool,
     def is_setup_complete(line: str) -> bool:
         return 'Setup complete' == line
 
-    iterator = _follow_job_logs(log_file,
-                                job_id=job_id,
-                                start_streaming=start_streaming,
-                                start_streaming_at=start_streaming_at)
-
     def get_next_non_blocking() -> Optional[str]:
+        nonlocal log_file
         fd = log_file.fileno()
         ready, _, _ = select.select([fd], [], [], 1.0)
         if ready:
@@ -525,17 +524,18 @@ def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool,
 
     # Step 1: parse until we see the first setup log.
     # Get output from follow_job_logs
-    line = next(iterator)
+    line = next(setup_output_iterator)
     while not is_setup_line(line):
         print(line, end='', flush=True)
         try:
-            line = next(iterator)
+            line = next(setup_output_iterator)
         except StopIteration:
             return
 
     # Step 2: parse using a spinner until setup is complete.
-    setup_timeout = 60
+    setup_timeout = SKY_LOG_SETUP_SPINNER_TIMEOUT
     pids = set()
+    pid_to_last_update = dict()
     completed_pids = set()
 
     def update_pids(line: str) -> None:
@@ -543,6 +543,7 @@ def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool,
         if pid is None or message is None:
             return
         pids.add(pid)
+        pid_to_last_update[pid] = time.time()
         if is_setup_complete(message):
             completed_pids.add(pid)
 
@@ -554,20 +555,22 @@ def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool,
         uncompleted_pids = sorted(list(uncompleted_pids))
         for i in range(len(uncompleted_pids)):
             pid = uncompleted_pids[i]
-            indent_symbol = (ux_utils.INDENT_SYMBOL
-                             if i != len(uncompleted_pids) - 1 else
-                             ux_utils.INDENT_LAST_SYMBOL)
-            if cluster_name is not None:
-                spinner_str += (
-                    f'\n{colorama.Style.RESET_ALL}'
-                    f'{colorama.Style.DIM}'
-                    f'{indent_symbol} {colorama.Style.DIM} Worker: {pid} '
-                    'may have stalled, '
-                    f'check logs: `sky logs {cluster_name} {job_id} '
-                    f'--no-follow | grep pid={pid}`')
-            else:
-                spinner_str += (f'\n{indent_symbol} Worker: {pid} may have '
-                                'stalled')
+            if (time.time() - pid_to_last_update[pid] >
+                    SKY_LOG_SETUP_SPINNER_STALL_INTERVAL):
+                indent_symbol = (ux_utils.INDENT_SYMBOL
+                                 if i != len(uncompleted_pids) - 1 else
+                                 ux_utils.INDENT_LAST_SYMBOL)
+                if cluster_name is not None:
+                    spinner_str += (
+                        f'\n{colorama.Style.RESET_ALL}'
+                        f'{colorama.Style.DIM}'
+                        f'{indent_symbol} {colorama.Style.DIM} Worker: {pid} '
+                        'may have stalled, '
+                        f'check logs: `sky logs {cluster_name} {job_id} '
+                        f'--no-follow | grep pid={pid}`')
+                else:
+                    spinner_str += (f'\n{indent_symbol} Worker: {pid} may have '
+                                    'stalled')
         return spinner_str
 
     setup_start_time = time.time()
@@ -594,7 +597,7 @@ def _setup_watcher(log_file: TextIO, job_id: int, start_streaming: bool,
     # Step 3: print the running logs.
     while True:
         try:
-            line = next(iterator)
+            line = next(setup_output_iterator)
             print(line, end='', flush=True)
         except StopIteration:
             return
@@ -688,15 +691,16 @@ def tail_logs(job_id: Optional[int],
                 print(end='', flush=True)
             # Now, the cursor is at the end of the last lines
             # if tail > 0
+            iterator = _follow_job_logs(log_file,
+                                        job_id=job_id,
+                                        start_streaming=start_streaming,
+                                        start_streaming_at=start_stream_at)
+
             if setup_spinner:
-                _setup_watcher(log_file, job_id, start_streaming,
-                               start_stream_at, cluster_name, num_nodes)
+                _setup_watcher(log_file, iterator, cluster_name, num_nodes,
+                               job_id)
             else:
-                for line in _follow_job_logs(
-                        log_file,
-                        job_id=job_id,
-                        start_streaming=start_streaming,
-                        start_streaming_at=start_stream_at):
+                for line in iterator:
                     print(line, end='', flush=True)
     else:
         try:
