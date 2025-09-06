@@ -2070,7 +2070,7 @@ def test_gcp_network_tier_with_gpu():
             f'sky exec {name} {shlex.quote(cmd)} && sky logs {name} --status'
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        timeout=15 * 60,  # 15 mins for GPU provisioning
+        timeout=25 * 60,  # 25 mins for GPU provisioning
     )
     smoke_tests_utils.run_one_test(test)
 

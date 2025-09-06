@@ -216,7 +216,8 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'if (( $SECONDS - $start_time > {timeout} )); then '
     '  echo "Timeout after {timeout} seconds waiting for job status \'{job_status}\'"; exit 1; '
     'fi; '
-    'current_status=$(sky queue {cluster_name} | '
+    'current_queue=$(sky queue {cluster_name}); '
+    'current_status=$(echo "$current_queue" | '
     'awk "\\$1 == \\"{job_id}\\" '
     r'{{for (i=1; i<=NF; i++) if (\$i ~ /^(' + _ALL_JOB_STATUSES +
     r')$/) print \$i}}"); '
@@ -230,6 +231,7 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'done <<< "$current_status"; '
     'if [ "$found" -eq 1 ]; then break; fi; '  # Break outer loop if match found
     'echo "Waiting for job status to contain {job_status}, current status: $current_status"; '
+    'echo "Current queue: $current_queue"; '
     'sleep 10; '
     'done')
 
