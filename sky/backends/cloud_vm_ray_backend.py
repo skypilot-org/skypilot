@@ -2671,19 +2671,35 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def open_and_update_skylet_tunnel(self) -> None:
         """Opens an SSH tunnel to the Skylet on the head node,
         updates the cluster handle, and persists it to the database."""
-        local_port = common_utils.find_free_port(10000)
-        runners = self.get_command_runners()
-        head_runner = runners[0]
-        if isinstance(head_runner, command_runner.SSHCommandRunner):
-            # Disabling ControlMaster makes things easier to reason about
-            # with respect to resource management/ownership,
-            # as killing the process will close the tunnel too.
-            head_runner.disable_control_master = True
+        max_attempts = 3
+        # There could be a race condition here, as find_free_port
+        # can return the same port to multiple threads/processes.
+        for attempt in range(max_attempts):
+            runners = self.get_command_runners()
+            head_runner = runners[0]
+            local_port = common_utils.find_free_port(10000)
+            try:
+                ssh_tunnel_proc = backend_utils.open_ssh_tunnel(
+                    head_runner, (local_port, constants.SKYLET_GRPC_PORT))
+            except exceptions.CommandError as e:
+                # Don't retry if the error is due to timeout,
+                # connection refused, Kubernetes pods not found,
+                # or an in-progress termination.
+                if (e.detailed_reason is not None and
+                    (backend_utils.SSH_CONNECTION_ERROR_PATTERN.search(
+                        e.detailed_reason) or
+                     backend_utils.K8S_PODS_NOT_FOUND_PATTERN.search(
+                         e.detailed_reason) or attempt == max_attempts - 1)):
+                    raise e
+                logger.warning(
+                    f'Failed to open SSH tunnel on port {local_port} '
+                    f'({attempt + 1}/{max_attempts}). '
+                    f'{e.error_msg}\n{e.detailed_reason}')
+                continue
+            tunnel_info = SSHTunnelInfo(port=local_port,
+                                        pid=ssh_tunnel_proc.pid)
+            break
 
-        cmd = head_runner.port_forward_command([(local_port,
-                                                 constants.SKYLET_GRPC_PORT)])
-        ssh_tunnel_proc = subprocess.Popen(cmd)
-        tunnel_info = SSHTunnelInfo(port=local_port, pid=ssh_tunnel_proc.pid)
         try:
             grpc.channel_ready_future(
                 grpc.insecure_channel(f'localhost:{tunnel_info.port}')).result(
