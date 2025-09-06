@@ -548,6 +548,21 @@ class Azure(clouds.Cloud):
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
+        help_str = (
+            ' Run the following commands:'
+            f'\n{cls._INDENT_PREFIX}  $ az login'
+            f'\n{cls._INDENT_PREFIX}  $ az account set -s <subscription_id>'
+            f'\n{cls._INDENT_PREFIX}For more info: '
+            'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # pylint: disable=line-too-long
+        )
+        # This file is required because it will be synced to remote VMs for
+        # `az` to access private storage buckets.
+        # `az account show` does not guarantee this file exists.
+        azure_token_cache_file = '~/.azure/msal_token_cache.json'
+        if not os.path.isfile(os.path.expanduser(azure_token_cache_file)):
+            return (False,
+                    f'{azure_token_cache_file} does not exist.' + help_str)
+
         dependency_installation_hints = (
             'Azure dependencies are not installed. '
             'Run the following commands:'
@@ -569,21 +584,6 @@ class Azure(clouds.Cloud):
             # If so, then sys.modules[name].__spec__ is returned.
             # If that happens to be set to None, then ValueError is raised.
             return False, dependency_installation_hints
-
-        help_str = (
-            ' Run the following commands:'
-            f'\n{cls._INDENT_PREFIX}  $ az login'
-            f'\n{cls._INDENT_PREFIX}  $ az account set -s <subscription_id>'
-            f'\n{cls._INDENT_PREFIX}For more info: '
-            'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # pylint: disable=line-too-long
-        )
-        # This file is required because it will be synced to remote VMs for
-        # `az` to access private storage buckets.
-        # `az account show` does not guarantee this file exists.
-        azure_token_cache_file = '~/.azure/msal_token_cache.json'
-        if not os.path.isfile(os.path.expanduser(azure_token_cache_file)):
-            return (False,
-                    f'{azure_token_cache_file} does not exist.' + help_str)
 
         try:
             _run_output('az --version')
