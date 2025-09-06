@@ -817,7 +817,7 @@ To adjust the size of the jobs controller instance, see :ref:`jobs-controller-cu
 
 .. _managed-jobs-high-availability-controller:
 
-High Availability Controller
+High availability controller
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 High availability mode ensures the controller for Managed Jobs remains resilient to failures by running it as a Kubernetes Deployment with automatic restarts and persistent storage. This helps maintain management capabilities even if the controller pod crashes or the node fails.
