@@ -121,7 +121,7 @@ To verify that the API server is working, run ``sky api info``:
    Performance Best Practices <api-server-tunning>
    Troubleshooting <api-server-troubleshooting>
    Helm Chart Reference <helm-values-spec>
-   Advanced: High Availability Controller <api-server-admin-deploy/examples/high-availability>
+   Advanced: High Availability Controller <examples/high-availability>
 
 By default, each user connected to the API server will only see their own resources.
 
