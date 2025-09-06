@@ -405,7 +405,9 @@ def _request_execution_wrapper(request_id: str,
                                          group='request_execution'):
                     return_value = func(**request_body.to_kwargs())
                 f.flush()
-                common_utils.release_memory()
+                with metrics_lib.time_it(name='release_memory',
+                                         group='request_execution'):
+                    common_utils.release_memory()
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
             # Kill all children processes related to this request.
