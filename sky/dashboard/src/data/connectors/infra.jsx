@@ -559,7 +559,9 @@ export async function getDetailedGpuInfo(filter) {
       case_sensitive: false,
       all_regions: true,
     });
-    const id = response.headers.get('x-request-id');
+    const id =
+      response.headers.get('X-Skypilot-Request-ID') ||
+      response.headers.get('X-Request-ID');
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
 
     if (fetchedData.status === 500) {

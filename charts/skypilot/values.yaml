@@ -190,6 +190,9 @@ auth:
     # Refer to redis-url for more details.
     # @schema type: [string, null]
     redis-secret: null
+    # Redis container image for session storage
+    # @schema type: [string, null]
+    redis-image: "redis:7-alpine"
     # Cookie timing settings (in seconds)
     # @schema type: [string, number, null]
     cookie-refresh: null  # refresh tokens after this duration (Access token lifespan minus 1 min)
@@ -312,6 +315,9 @@ ingress:
     # If set, this external Redis instance will be used
     # @schema type: [string, null]
     redis-url: null
+    # Redis container image for session storage
+    # @schema type: [string, null]
+    redis-image: "redis:7-alpine"
     # Cookie timing settings (in seconds)
     # @schema type: [string, number, null]
     cookie-refresh: null  # refresh tokens after this duration (Access token lifespan minus 1 min)
