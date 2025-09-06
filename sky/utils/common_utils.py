@@ -994,7 +994,8 @@ def get_mem_size_gb() -> float:
         except ValueError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Failed to parse the memory size from {mem_size} (GB)') from e
+                    f'Failed to parse the memory size from {mem_size} (GB)'
+                ) from e
     mem_size = os.getenv('SKYPILOT_POD_MEMORY_BYTES_LIMIT')
     if mem_size is not None:
         try:
@@ -1002,7 +1003,8 @@ def get_mem_size_gb() -> float:
         except ValueError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Failed to parse the memory size from {mem_size} (bytes)') from e
+                    f'Failed to parse the memory size from {mem_size} (bytes)'
+                ) from e
     return _mem_size_gb()
 
 
