@@ -25,9 +25,12 @@ from sky.skylet import constants
 def test_endpoint_output_basic(generic_cloud: str):
     """Test that sky api info endpoint output is correct."""
     name = smoke_tests_utils.get_cluster_name()
+    location = 'Endpoint set to default local API server'
+    if smoke_tests_utils.is_remote_server_test():
+        location = 'Endpoint set via the environment variable SKYPILOT_API_SERVER_ENDPOINT'
     test = smoke_tests_utils.Test('endpoint_output_basic', [
         f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-        f's=$(SKYPILOT_DEBUG=0 sky api info | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Endpoint set to default local API server."',
+        f's=$(SKYPILOT_DEBUG=0 sky api info | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "{location}"',
     ],
                                   timeout=smoke_tests_utils.get_timeout(
                                       generic_cloud),
@@ -49,11 +52,14 @@ def test_endpoint_output_config(generic_cloud: str):
     with tempfile.NamedTemporaryFile(delete=True) as f:
         f.write(config.encode('utf-8'))
         f.flush()
+        location = f'Endpoint set via {f.name}'
+        if smoke_tests_utils.is_remote_server_test():
+            location = 'Endpoint set via the environment variable SKYPILOT_API_SERVER_ENDPOINT'
 
         name = smoke_tests_utils.get_cluster_name()
         test = smoke_tests_utils.Test('endpoint_output_config', [
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            f's=$(SKYPILOT_DEBUG=0 sky api info | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Endpoint set via {f.name}"',
+            f's=$(SKYPILOT_DEBUG=0 sky api info | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "{location}"',
         ],
                                       timeout=smoke_tests_utils.get_timeout(
                                           generic_cloud),
