@@ -208,9 +208,6 @@ class DockerInitializer:
             cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
                    f' {shlex.quote(cmd)} ')
 
-        # add flock to the command
-        cmd = f"flock -w 10 /tmp/{self.container_name}.lock -c '{cmd}'"
-
         logger.debug(f'+ {cmd}')
         start = time.time()
         while True:
@@ -360,7 +357,7 @@ class DockerInitializer:
                     self._auto_configure_shm(user_docker_run_options)),
                 self.docker_cmd,
             )
-            self._run(f"{remove_container_cmd} && {start_command}")
+            self._run(f"flock -w 10 /tmp/{self.container_name}.lock -c '{remove_container_cmd} && {start_command}'")
 
         # SkyPilot: Setup Commands.
         # TODO(zhwu): the following setups should be aligned with the kubernetes
@@ -461,8 +458,7 @@ class DockerInitializer:
         user_pos = string.find('~')
         if user_pos > -1:
             if self.home_dir is None:
-                cmd = (f'{self.docker_cmd} exec {self.container_name} '
-                       'printenv HOME')
+                cmd = (f"flock -w 10 /tmp/{self.container_name}.lock -c '{self.docker_cmd} exec {self.container_name} printenv HOME'")
                 self.home_dir = self._run(cmd, separate_stderr=True)
                 # Check for unexpected newline in home directory, which can be
                 # a common issue when the output is mixed with stderr.
