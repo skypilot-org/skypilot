@@ -35,7 +35,7 @@ class FluentbitAgent(LoggingAgent):
                           cluster_name: resources_utils.ClusterName) -> str:
         install_cmd = (
             'if ! command -v fluent-bit >/dev/null 2>&1; then '
-            'sudo apt-get install -y gnupg; '
+            'sudo apt-get update; sudo apt-get install -y gnupg; '
             # pylint: disable=line-too-long
             'curl https://raw.githubusercontent.com/fluent/fluent-bit/master/install.sh | sh; '
             'fi')
