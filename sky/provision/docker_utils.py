@@ -207,7 +207,7 @@ class DockerInitializer:
             # TODO(zhwu): ray use the `-it` flag, we need to check why.
             cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
                    f' {shlex.quote(cmd)} ')
-            cmd = f'flock -s -w 120 /tmp/{self.container_name}.lock -c {cmd}'
+            cmd = f'flock -s -w 120 /tmp/{self.container_name}.lock -c {shlex.quote(cmd)}'
 
         logger.debug(f'+ {cmd}')
         start = time.time()
