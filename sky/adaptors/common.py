@@ -4,7 +4,7 @@ import functools
 import importlib
 import threading
 import types
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 
 class LazyImport(types.ModuleType):
@@ -81,12 +81,13 @@ def load_lazy_modules(modules: Tuple[LazyImport, ...]):
     return decorator
 
 
-def can_import_module(module_name: str) -> bool:
+def can_import_modules(module_names: List[str]) -> bool:
     """Check if a module can be imported."""
     try:
-        module_spec = importlib_util.find_spec(module_name)
-        if module_spec is None:
-            return False
+        for module_name in module_names:
+            module_spec = importlib_util.find_spec(module_name)
+            if module_spec is None:
+                return False
         return True
     except ValueError:
         # docstring of importlib_util.find_spec:

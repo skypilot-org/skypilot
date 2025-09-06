@@ -459,8 +459,7 @@ class OCI(clouds.Cloud):
             '`oci` is not installed. Install it with: '
             'pip install oci\n'
             f'{cls._INDENT_PREFIX}{short_credential_help_str}')
-        can_import_oci = common.can_import_module('oci')
-        if not can_import_oci:
+        if not common.can_import_modules(['oci']):
             return False, dependency_error_msg
 
         conf_file = oci_adaptor.get_config_file()

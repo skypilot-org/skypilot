@@ -21,7 +21,6 @@ def exceptions():
 
 def check_exceptions_dependencies_installed():
     """Check if the azure.core.exceptions module is installed."""
-    can_import_exceptions = common.can_import_module('azure.core.exceptions')
-    if not can_import_exceptions:
+    if not common.can_import_modules(['azure.core.exceptions']):
         return False, _IMPORT_ERROR_MESSAGE
     return True, None
