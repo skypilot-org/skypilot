@@ -82,7 +82,17 @@ def load_lazy_modules(modules: Tuple[LazyImport, ...]):
 
 
 def can_import_modules(module_names: List[str]) -> bool:
-    """Check if a module can be imported."""
+    """ module availability without actually importing it to
+    save memory footprint.
+
+    Args:
+        module_names: List[str], the names of the modules to check.
+
+    Returns:
+        True if all modules are available, False otherwise.
+        If a module exists in sys.modules, but is set to None,
+        then it is considered as not available.
+    """
     try:
         for module_name in module_names:
             module_spec = importlib_util.find_spec(module_name)
@@ -90,9 +100,4 @@ def can_import_modules(module_names: List[str]) -> bool:
                 return False
         return True
     except ValueError:
-        # docstring of importlib_util.find_spec:
-        # First, sys.modules is checked to see if the module was alread
-        # imported.
-        # If so, then sys.modules[name].__spec__ is returned.
-        # If that happens to be set to None, then ValueError is raised.
         return False
