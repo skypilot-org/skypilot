@@ -207,7 +207,7 @@ class DockerInitializer:
             # TODO(zhwu): ray use the `-it` flag, we need to check why.
             cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
                    f' {shlex.quote(cmd)} ')
-            cmd = f'flock -s -w 120 /tmp/{self.container_name}.lock -c {shlex.quote(cmd)}'
+            cmd = f'flock -s -w 5 /tmp/{self.container_name}.lock -c {shlex.quote(cmd)}'
 
         logger.debug(f'+ {cmd}')
         start = time.time()
@@ -347,10 +347,10 @@ class DockerInitializer:
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
                 'sudo systemctl restart docker; } || true')
             user_docker_run_options = self.docker_config.get('run_options', [])
-            # remove_container_cmd = maybe_remove_container_cmds(
-            #     self.container_name,
-            #     self.docker_cmd,
-            # )
+            remove_container_cmd = maybe_remove_container_cmds(
+                self.container_name,
+                self.docker_cmd,
+            )
             start_command = docker_start_cmds(
                 specific_image,
                 self.container_name,
@@ -358,7 +358,7 @@ class DockerInitializer:
                     self._auto_configure_shm(user_docker_run_options)),
                 self.docker_cmd,
             )
-            self._run(f"flock -w 10 /tmp/{self.container_name}.lock -c '{start_command}'")
+            self._run(f"flock -w 10 /tmp/{self.container_name}.lock -c '{remove_container_cmd} && {start_command}'")
 
         # SkyPilot: Setup Commands.
         # TODO(zhwu): the following setups should be aligned with the kubernetes
