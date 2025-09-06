@@ -438,8 +438,7 @@ def _request_execution_wrapper(request_id: str,
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
         finally:
-            with metrics_lib.time_it(name='release_memory',
-                                     group='internal'):
+            with metrics_lib.time_it(name='release_memory', group='internal'):
                 try:
                     common_utils.release_memory()
                 except Exception as e:  # pylint: disable=broad-except
