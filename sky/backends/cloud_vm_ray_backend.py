@@ -4786,7 +4786,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                 config['provider'])
                     ports_cleaned_up = True
                 except exceptions.NotSupportedError:
-                    pass
+                    ports_cleaned_up = True
                 except exceptions.PortDoesNotExistError:
                     logger.debug('Ports do not exist. Skipping cleanup.')
                 except Exception as e:  # pylint: disable=broad-except
@@ -4811,7 +4811,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         failover)
                     custom_multi_network_cleaned_up = True
                 except exceptions.NotSupportedError:
-                    pass
+                    custom_multi_network_cleaned_up = True
                 except Exception as e:  # pylint: disable=broad-except
                     if purge:
                         msg = common_utils.format_exception(e, use_bracket=True)
