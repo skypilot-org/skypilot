@@ -38,4 +38,6 @@ jobs:
       run: |
         source ~/test-env/bin/activate
         cd ./docs
+        # Set production environment for llms.txt generation
+        export SPHINX_BUILD_PRODUCTION=true
         ./build.sh
