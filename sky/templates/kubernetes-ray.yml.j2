@@ -690,6 +690,24 @@ available_node_types:
                     $(prefix_cmd) cp -a "$backup_dir/sources.list.d" /etc/apt/ || true
                   fi
                 }
+                update_debian_sources() {
+                  local host=$1
+                  local apt_file=$2
+                  $(prefix_cmd) sed -i -E "s|https?://deb.debian.org/debian-security|http://$host/debian|g" $apt_file
+                  $(prefix_cmd) sed -i -E "s|Suites: bookworm bookworm-updates|Suites: bookworm|g" $apt_file
+                  $(prefix_cmd) sed -i -E "s|Suites: bookworm-security|Suites: bookworm-updates|g" $apt_file
+                  $(prefix_cmd) sed -i -E "s|https?://deb.debian.org/debian|http://$host/debian|g" $apt_file
+                }
+                update_apt_sources() {
+                  local apt_os=$1
+                  local host=$2
+                  local apt_file=$3
+                  if [ "$apt_os" = "debian" ]; then
+                    update_debian_sources $host $apt_file
+                  elif [ "$apt_os" = "ubuntu" ]; then
+                    $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" $apt_file
+                  fi
+                }
                 # Helper: install packages across mirrors with retries
                 apt_install_with_mirrors() {
                   local required=$1; shift
@@ -699,27 +717,28 @@ available_node_types:
                   # Backup current sources once
                   backup_source
                   # Detect distro (ubuntu/debian)
-                  local APT_OS="ubuntu"
+                  local APT_OS="unknown"
                   if [ -f /etc/os-release ]; then
                     . /etc/os-release
                     case "$ID" in
                       debian) APT_OS="debian" ;;
                       ubuntu) APT_OS="ubuntu" ;;
                       *)
-                        # Some distros set ID=linuxmint etc. Prefer ID_LIKE if available
-                        if echo "$ID_LIKE" | grep -qi debian; then
-                          # Default to debian family; but if VERSION_CODENAME typical of ubuntu, treat as ubuntu
-                          if echo " $ID $ID_LIKE " | grep -qi ubuntu; then
-                            APT_OS="ubuntu"
-                          else
-                            APT_OS="debian"
-                          fi
+                        if [ -n "$ID_LIKE" ]; then
+                          case " $ID $ID_LIKE " in
+                            *ubuntu*) APT_OS="ubuntu" ;;
+                            *debian*) APT_OS="debian" ;;
+                          esac
                         fi
                         ;;
                     esac
                   fi
                   # Build mirror candidates (default first)
-                  local MIRROR_CANDIDATES="default mirror.mit.edu mirror.math.princeton.edu/pub"
+                  if [ "$APT_OS" = "unknown" ]; then
+                    local MIRROR_CANDIDATES="default"
+                  else
+                    local MIRROR_CANDIDATES="default mirror.mit.edu mirror.math.princeton.edu/pub"
+                  fi
                   # Restore to default sources first
                   restore_source
                   for host in $MIRROR_CANDIDATES; do
@@ -727,26 +746,12 @@ available_node_types:
                     if [ "$host" != "default" ]; then
                       echo "Trying APT mirror ($APT_OS): $host" >> /tmp/apt-update.log
                       if [ -f /etc/apt/sources.list ]; then
-                        if [ "$APT_OS" = "debian" ]; then
-                          $(prefix_cmd) sed -i -E "s|https?://deb.debian.org/debian-security|http://$host/debian|g" /etc/apt/sources.list
-                          $(prefix_cmd) sed -i -E "s|Suites: bookworm bookworm-updates|Suites: bookworm|g" /etc/apt/sources.list
-                          $(prefix_cmd) sed -i -E "s|Suites: bookworm-security|Suites: bookworm-updates|g" /etc/apt/sources.list
-                          $(prefix_cmd) sed -i -E "s|https?://deb.debian.org/debian|http://$host/debian|g" /etc/apt/sources.list
-                        else
-                          $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" /etc/apt/sources.list
-                        fi
+                        update_apt_sources $APT_OS $host /etc/apt/sources.list
                       fi
                       if [ -d /etc/apt/sources.list.d ]; then
                         for f in /etc/apt/sources.list.d/*; do
                           [ -f "$f" ] || continue
-                          if [ "$APT_OS" = "debian" ]; then
-                            $(prefix_cmd) sed -i -E "s|https?://deb.debian.org/debian-security|http://$host/debian|g" "$f"
-                            $(prefix_cmd) sed -i -E "s|Suites: bookworm bookworm-updates|Suites: bookworm|g" "$f"
-                            $(prefix_cmd) sed -i -E "s|Suites: bookworm-security|Suites: bookworm-updates|g" "$f"
-                            $(prefix_cmd) sed -i -E "s|https?://deb.debian.org/debian|http://$host/debian|g" "$f"
-                          else
-                            $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" "$f"
-                          fi
+                          update_apt_sources $APT_OS $host $f
                         done
                       fi
                     else
