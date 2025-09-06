@@ -405,9 +405,6 @@ def _request_execution_wrapper(request_id: str,
                                          group='request_execution'):
                     return_value = func(**request_body.to_kwargs())
                 f.flush()
-                with metrics_lib.time_it(name='release_memory',
-                                         group='request_execution'):
-                    common_utils.release_memory()
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
             # Kill all children processes related to this request.
@@ -440,6 +437,14 @@ def _request_execution_wrapper(request_id: str,
                 request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
+        finally:
+            with metrics_lib.time_it(name='release_memory',
+                                     group='internal'):
+                try:
+                    common_utils.release_memory()
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(f'Failed to release memory: '
+                                 f'{common_utils.format_exception(e)}')
 
 
 async def execute_request_coroutine(request: api_requests.Request):
