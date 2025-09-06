@@ -79,6 +79,7 @@ MULTI_WORD_TERMS = {
     'Google Auth Platform',
     'Google Cloud Logging',
     'AWS Systems Manager',
+    'Microsoft Entra ID',
 }
 
 
