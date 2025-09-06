@@ -1785,6 +1785,17 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str,
 
 
 @_init_db
+def remove_waiting_job_controller_pids() -> None:
+    """Remove controller PIDs for all jobs with schedule_state WAITING."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(job_info_table).filter(
+            job_info_table.c.schedule_state == ManagedJobScheduleState.WAITING.value
+        ).update({job_info_table.c.controller_pid: None})
+        session.commit()
+
+
+@_init_db
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get all job ids by name."""
     assert _SQLALCHEMY_ENGINE is not None
