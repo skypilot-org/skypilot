@@ -202,6 +202,7 @@ extras_require: Dict[str, List[str]] = {
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'server': server_dependencies,
+    'shadeform': [],  # No dependencies needed for shadeform
 }
 
 # Calculate which clouds should be included in the [all] installation.
