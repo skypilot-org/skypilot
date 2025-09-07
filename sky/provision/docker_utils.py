@@ -459,7 +459,7 @@ class DockerInitializer:
         user_pos = string.find('~')
         if user_pos > -1:
             if self.home_dir is None:
-                cmd = (f'{self.docker_cmd} exec {self.container_name} printenv HOME')
+                cmd = (f"flock -s -w 5 /tmp/{self.container_name}.lock -c '{self.docker_cmd} exec {self.container_name} printenv HOME'")
                 self.home_dir = self._run(cmd, separate_stderr=True)
                 # Check for unexpected newline in home directory, which can be
                 # a common issue when the output is mixed with stderr.
