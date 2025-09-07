@@ -380,7 +380,6 @@ class DockerInitializer:
             "bash -lc '"
             "exec 200>/var/tmp/sky_apt.lock; "
             "flock -x -w 120 200 || exit 1; "
-            "set -e; "
             "export DEBIAN_FRONTEND=noninteractive; "
             "sudo apt-get -yq update && "
             # Our mount script will install gcsfuse without fuse package.
