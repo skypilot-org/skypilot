@@ -328,7 +328,7 @@ class TestQueue:
                             lambda pattern: [type('U', (), {'id': 'hashA'})()])
 
         # Filter by user match 'a', page 1, limit 10
-        filtered, total, status_counts, total_no_filter = jobs_core.queue(
+        filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
             refresh=False,
             skip_finished=False,
             all_users=True,
@@ -353,7 +353,7 @@ class TestQueue:
         monkeypatch.setattr(jobs_core.global_user_state,
                             'get_user_by_name_match', lambda pattern: [])
 
-        filtered, total, status_counts, total_no_filter = jobs_core.queue(
+        filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
             refresh=False,
             skip_finished=False,
             all_users=True,
@@ -375,7 +375,7 @@ class TestQueue:
         self._patch_backend_and_utils(monkeypatch, jobs)
 
         # Page 2, limit 10
-        filtered, total, status_counts, total_no_filter = jobs_core.queue(
+        filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
             refresh=False,
             skip_finished=False,
             all_users=True,
@@ -396,7 +396,7 @@ class TestQueue:
         self._patch_backend_and_utils(monkeypatch, jobs)
         # page without limit
         with pytest.raises(ValueError):
-            jobs_core.queue(refresh=False,
+            jobs_core.queue_v2(refresh=False,
                             skip_finished=False,
                             all_users=True,
                             job_ids=None,
@@ -408,7 +408,7 @@ class TestQueue:
                             limit=None)
         # invalid page
         with pytest.raises(ValueError):
-            jobs_core.queue(refresh=False,
+            jobs_core.queue_v2(refresh=False,
                             skip_finished=False,
                             all_users=True,
                             job_ids=None,
@@ -420,7 +420,7 @@ class TestQueue:
                             limit=10)
         # invalid limit
         with pytest.raises(ValueError):
-            jobs_core.queue(refresh=False,
+            jobs_core.queue_v2(refresh=False,
                             skip_finished=False,
                             all_users=True,
                             job_ids=None,
@@ -475,7 +475,7 @@ class TestQueue:
         # Only my hash and None should pass when all_users=False
         monkeypatch.setattr(jobs_core.common_utils, 'get_user_hash',
                             lambda: 'me')
-        filtered, total, status_counts, total_no_filter = jobs_core.queue(
+        filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
             refresh=False,
             skip_finished=False,
             all_users=False,
@@ -503,7 +503,7 @@ class TestQueue:
         self._patch_backend_and_utils(monkeypatch, jobs)
         monkeypatch.setattr(jobs_core.workspaces_core, 'get_workspaces',
                             fake_get_workspaces_only_w1)
-        filtered, total, status_counts, total_no_filter = jobs_core.queue(
+        filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
             refresh=False,
             skip_finished=False,
             all_users=True,
@@ -566,7 +566,7 @@ class TestQueue:
             },
         ]
         self._patch_backend_and_utils(monkeypatch, jobs)
-        filtered, total, status_counts, total_no_filter = jobs_core.queue(
+        filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
             refresh=False,
             skip_finished=True,
             all_users=True,
@@ -585,7 +585,7 @@ class TestQueue:
     def test_queue_filter_by_job_ids(self, monkeypatch):
         jobs = [_make_job(1), _make_job(2), _make_job(3)]
         self._patch_backend_and_utils(monkeypatch, jobs)
-        filtered, total, status_counts, total_no_filter = jobs_core.queue(
+        filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
             refresh=False,
             skip_finished=False,
             all_users=True,
