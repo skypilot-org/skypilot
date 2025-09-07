@@ -208,7 +208,6 @@ class DockerInitializer:
             # TODO(zhwu): ray use the `-it` flag, we need to check why.
             cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
                    f' {shlex.quote(cmd)} ')
-            cmd = f'flock -s -w 5 /tmp/{self.container_name}.lock -c {shlex.quote(cmd)}'
 
         logger.debug(f'+ {cmd}')
         start = time.time()
@@ -260,7 +259,15 @@ class DockerInitializer:
         if self._check_container_exited():
             self.initialized = True
             self._run(f'{self.docker_cmd} start {self.container_name}')
-            self._run('sudo service ssh start', run_env='docker')
+            inner = (
+                f"{self.docker_cmd} exec {self.container_name} "
+                f"/bin/bash -lc {shlex.quote('sudo service ssh start')}"
+            )
+            cmd = (
+                f"flock -s -w 1 /tmp/{self.container_name}.lifecycle.lock "
+                f"-c {shlex.quote(inner)}"
+            )
+            self._run(cmd)
             return self._run('whoami', run_env='docker')
 
         # SkyPilot: Docker login if user specified a private docker registry.
@@ -359,7 +366,10 @@ class DockerInitializer:
                     self._auto_configure_shm(user_docker_run_options)),
                 self.docker_cmd,
             )
-            self._run(f"flock -w 10 /tmp/{self.container_name}.lock -c '{remove_container_cmd} && {start_command}'")
+            self._run(
+                f"flock -x -w 10 /tmp/{self.container_name}.lifecycle.lock "
+                f"-c {shlex.quote(f'{remove_container_cmd} && {start_command}')}"
+            )
 
         # SkyPilot: Setup Commands.
         # TODO(zhwu): the following setups should be aligned with the kubernetes
@@ -464,7 +474,10 @@ class DockerInitializer:
         user_pos = string.find('~')
         if user_pos > -1:
             if self.home_dir is None:
-                cmd = (f"flock -s -w 5 /tmp/{self.container_name}.lock -c '{self.docker_cmd} exec {self.container_name} printenv HOME'")
+                cmd = (
+                    f"flock -s -w 1 /tmp/{self.container_name}.lifecycle.lock "
+                    f"-c {shlex.quote(f'{self.docker_cmd} exec {self.container_name} printenv HOME')}"
+                )
                 self.home_dir = self._run(cmd, separate_stderr=True)
                 # Check for unexpected newline in home directory, which can be
                 # a common issue when the output is mixed with stderr.
