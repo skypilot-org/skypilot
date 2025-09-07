@@ -96,6 +96,9 @@ class TestBackwardCompatibility:
         """Session-wide setup that runs exactly once (concurrency limited to 1)."""
         # No locking mechanism needed since concurrency is limited to 1
         base_branch = request.config.getoption("--base-branch")
+        if not base_branch:
+            # Default to the minimum compatible version as the base branch
+            base_branch = f'v{constants.MIN_COMPATIBLE_VERSION}'
 
         # Check if gcloud is installed
         if subprocess.run('gcloud --version', shell=True).returncode != 0:

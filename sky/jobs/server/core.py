@@ -576,7 +576,99 @@ def _maybe_restart_controller(
 
 
 @usage_lib.entrypoint
-def queue(
+def queue(refresh: bool,
+          skip_finished: bool = False,
+          all_users: bool = False,
+          job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Gets statuses of managed jobs.
+
+    Please refer to sky.cli.job_queue for documentation.
+
+    Returns:
+        [
+            {
+                'job_id': int,
+                'job_name': str,
+                'resources': str,
+                'submitted_at': (float) timestamp of submission,
+                'end_at': (float) timestamp of end,
+                'job_duration': (float) duration in seconds,
+                'recovery_count': (int) Number of retries,
+                'status': (sky.jobs.ManagedJobStatus) of the job,
+                'cluster_resources': (str) resources of the cluster,
+                'region': (str) region of the cluster,
+                'user_name': (Optional[str]) job creator's user name,
+                'user_hash': (str) job creator's user hash,
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+            }
+        ]
+    Raises:
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
+            does not exist.
+        RuntimeError: if failed to get the managed jobs with ssh.
+    """
+    handle = _maybe_restart_controller(refresh,
+                                       stopped_message='No in-progress '
+                                       'managed jobs.',
+                                       spinner_message='Checking '
+                                       'managed jobs')
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
+    returncode, job_table_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+
+    if returncode != 0:
+        logger.error(job_table_payload + stderr)
+        raise RuntimeError('Failed to fetch managed jobs with returncode: '
+                           f'{returncode}.\n{job_table_payload + stderr}')
+
+    jobs, _, _, _, _ = managed_job_utils.load_managed_job_queue(
+        job_table_payload)
+
+    if not all_users:
+
+        def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
+            user_hash = job.get('user_hash', None)
+            if user_hash is None:
+                # For backwards compatibility, we show jobs that do not have a
+                # user_hash. TODO(cooperc): Remove before 0.12.0.
+                return True
+            return user_hash == common_utils.get_user_hash()
+
+        jobs = list(filter(user_hash_matches_or_missing, jobs))
+
+    accessible_workspaces = workspaces_core.get_workspaces()
+    jobs = list(
+        filter(
+            lambda job: job.get('workspace', skylet_constants.
+                                SKYPILOT_DEFAULT_WORKSPACE) in
+            accessible_workspaces, jobs))
+
+    if skip_finished:
+        # Filter out the finished jobs. If a multi-task job is partially
+        # finished, we will include all its tasks.
+        non_finished_tasks = list(
+            filter(lambda job: not job['status'].is_terminal(), jobs))
+        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
+        jobs = list(
+            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+
+    if job_ids:
+        jobs = [job for job in jobs if job['job_id'] in job_ids]
+
+    return jobs
+
+
+@usage_lib.entrypoint
+def queue_v2(
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
@@ -590,7 +682,7 @@ def queue(
     statuses: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Gets statuses of managed jobs.
+    """Gets statuses of managed jobs with filtering.
 
     Please refer to sky.cli.job_queue for documentation.
 

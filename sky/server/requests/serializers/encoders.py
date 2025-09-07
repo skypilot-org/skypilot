@@ -121,7 +121,14 @@ def encode_status_kubernetes(
 
 
 @register_encoder('jobs.queue')
-def encode_jobs_queue(jobs_or_tuple):
+def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
+    for job in jobs:
+        job['status'] = job['status'].value
+    return jobs
+
+
+@register_encoder('jobs.queue_v2')
+def encode_jobs_queue_v2(jobs_or_tuple):
     # Support returning either a plain jobs list or a (jobs, total) tuple
     status_counts = {}
     if isinstance(jobs_or_tuple, tuple):

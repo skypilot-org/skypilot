@@ -46,6 +46,21 @@ async def queue(request: fastapi.Request,
     )
 
 
+@router.post('/queue/v2')
+async def queue_v2(request: fastapi.Request,
+                   jobs_queue_body_v2: payloads.JobsQueueV2Body) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='jobs.queue_v2',
+        request_body=jobs_queue_body_v2,
+        func=core.queue_v2,
+        schedule_type=(api_requests.ScheduleType.LONG
+                       if jobs_queue_body_v2.refresh else
+                       api_requests.ScheduleType.SHORT),
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
+    )
+
+
 @router.post('/cancel')
 async def cancel(request: fastapi.Request,
                  jobs_cancel_body: payloads.JobsCancelBody) -> None:

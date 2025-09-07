@@ -109,7 +109,15 @@ def decode_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
 
 
 @register_decoders('jobs.queue')
-def decode_jobs_queue(return_value):
+def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
+    jobs = return_value
+    for job in jobs:
+        job['status'] = managed_jobs.ManagedJobStatus(job['status'])
+    return jobs
+
+
+@register_decoders('jobs.queue_v2')
+def decode_jobs_queue_v2(return_value):
     """Decode jobs queue response.
 
     Supports legacy list, or a dict {jobs, total}.
