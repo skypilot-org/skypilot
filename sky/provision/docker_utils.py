@@ -119,6 +119,7 @@ def maybe_remove_container_cmds(container_name, docker_cmd):
         'rm',
         '-f',
         container_name,
+        '2>/dev/null',
         '||',
         'true',
     ]
