@@ -397,39 +397,39 @@ class TestQueue:
         # page without limit
         with pytest.raises(ValueError):
             jobs_core.queue_v2(refresh=False,
-                            skip_finished=False,
-                            all_users=True,
-                            job_ids=None,
-                            user_match=None,
-                            workspace_match=None,
-                            name_match=None,
-                            pool_match=None,
-                            page=1,
-                            limit=None)
+                               skip_finished=False,
+                               all_users=True,
+                               job_ids=None,
+                               user_match=None,
+                               workspace_match=None,
+                               name_match=None,
+                               pool_match=None,
+                               page=1,
+                               limit=None)
         # invalid page
         with pytest.raises(ValueError):
             jobs_core.queue_v2(refresh=False,
-                            skip_finished=False,
-                            all_users=True,
-                            job_ids=None,
-                            user_match=None,
-                            workspace_match=None,
-                            name_match=None,
-                            pool_match=None,
-                            page=0,
-                            limit=10)
+                               skip_finished=False,
+                               all_users=True,
+                               job_ids=None,
+                               user_match=None,
+                               workspace_match=None,
+                               name_match=None,
+                               pool_match=None,
+                               page=0,
+                               limit=10)
         # invalid limit
         with pytest.raises(ValueError):
             jobs_core.queue_v2(refresh=False,
-                            skip_finished=False,
-                            all_users=True,
-                            job_ids=None,
-                            user_match=None,
-                            workspace_match=None,
-                            name_match=None,
-                            pool_match=None,
-                            page=1,
-                            limit=0)
+                               skip_finished=False,
+                               all_users=True,
+                               job_ids=None,
+                               user_match=None,
+                               workspace_match=None,
+                               name_match=None,
+                               pool_match=None,
+                               page=1,
+                               limit=0)
 
     def test_queue_all_users_filtering(self, monkeypatch):
         # Create jobs with user_hash values
