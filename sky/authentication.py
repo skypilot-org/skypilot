@@ -40,6 +40,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
 from sky.adaptors import runpod
+from sky.adaptors import seeweb as seeweb_adaptor
 from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -586,3 +587,40 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_public_key'] = public_key_path
 
     return configure_ssh_info(config)
+
+
+def setup_seeweb_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Registers the public key with Seeweb and notes the remote name."""
+    # 1. local key pair
+    get_or_generate_keys()
+
+    # 2. public key
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    # 3. Seeweb API client
+    client = seeweb_adaptor.client()
+
+    # 4. Check if key is already registered
+    prefix = f'sky-key-{common_utils.get_user_hash()}'
+    remote_name = None
+    for k in client.fetch_ssh_keys():
+        if k.key.strip() == public_key:
+            remote_name = k.label  # already present
+            break
+
+    # 5. doesn't exist, choose a unique name and create it
+    if remote_name is None:
+        suffix = 1
+        remote_name = prefix
+        existing_names = {k.label for k in client.fetch_ssh_keys()}
+        while remote_name in existing_names:
+            suffix += 1
+            remote_name = f'{prefix}-{suffix}'
+        client.create_ssh_key(label=remote_name, key=public_key)
+
+    # 6. Put the remote name in cluster-config (like for Lambda)
+    config['auth']['remote_key_name'] = remote_name
+
+    return config

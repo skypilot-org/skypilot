@@ -201,6 +201,7 @@ extras_require: Dict[str, List[str]] = {
         'nebius>=0.2.47',
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
+    'seeweb': ['ecsapi>=0.2.0'],
     'server': server_dependencies,
 }
 
@@ -209,16 +210,11 @@ clouds_for_all = set(extras_require)
 clouds_for_all.remove('remote')
 
 if sys.version_info < (3, 10):
-    # Nebius needs python3.10. If python 3.9 [all] will not install nebius
-    clouds_for_all.remove('nebius')
-
-if sys.version_info >= (3, 12):
-    # The version of ray we use does not work with >= 3.12, so avoid clouds
-    # that require ray.
-    clouds_for_all -= set(clouds_with_ray)
-    # vast requires setuptools==51.1.1 which will not work with python >= 3.12
-    # TODO: Remove once https://github.com/vast-ai/vast-sdk/pull/6 is released
-    clouds_for_all.remove('vast')
-
-extras_require['all'] = list(
-    set().union(*[extras_require[cloud] for cloud in clouds_for_all]))
+    filtered_keys = [
+        k for k in extras_require if k != 'nebius' and k != 'seeweb'
+    ]
+    extras_require['all'] = sum([
+        v for k, v in extras_require.items() if k != 'nebius' and k != 'seeweb'
+    ], [])
+else:
+    extras_require['all'] = sum(extras_require.values(), [])

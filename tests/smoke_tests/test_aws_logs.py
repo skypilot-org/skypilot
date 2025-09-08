@@ -14,7 +14,7 @@ from sky import skypilot_config
 
 @pytest.mark.no_vast  # Requires AWS
 @pytest.mark.no_fluidstack  # Requires AWS to be enabled
-@pytest.mark.no_nebius  # Requires AWS to be enabled
+@pytest.mark.no_seeweb  # Seeweb does not support AWS CloudWatch
 def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Calculate timestamp 1 hour ago in ISO format

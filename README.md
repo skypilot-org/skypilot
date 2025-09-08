@@ -88,7 +88,7 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
 Install with pip:
-```bash
+```bash   
 # Choose your clouds:
 pip install -U "skypilot[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp]"
 ```
