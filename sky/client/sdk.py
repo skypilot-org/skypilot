@@ -845,10 +845,10 @@ def tail_logs(
     job_id: Optional[int],
     follow: bool,
     tail: int = 0,
+    credentials: Optional[Dict[str, Any]] = None,
     output_stream: Optional['io.TextIOBase'] = None,
     *,  # keyword only separator
     preload_content: bool = True,
-    credentials: Optional[Dict[str, Any]] = None
 ) -> Union[int, Iterator[Optional[str]]]:
     """Tails the logs of a job.
 

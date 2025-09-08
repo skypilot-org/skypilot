@@ -519,54 +519,56 @@ async def execute_request_coroutine(request: api_requests.Request):
     # 1. skypilot config is not contextual
     # 2. envs that read directly from os.environ are not contextual
     ctx.override_envs(request_body.env_vars)
-    fut: asyncio.Future = context_utils.to_thread(func,
-                                                  **request_body.to_kwargs())
+    # Apply inline credentials during execution, similar to process executor.
+    with _inline_credentials_context(request_body.credentials):
+        fut: asyncio.Future = context_utils.to_thread(
+            func, **request_body.to_kwargs())
 
-    async def poll_task(request_id: str) -> bool:
-        request = await api_requests.get_request_async(request_id)
-        if request is None:
-            raise RuntimeError('Request not found')
+        async def poll_task(request_id: str) -> bool:
+            request = await api_requests.get_request_async(request_id)
+            if request is None:
+                raise RuntimeError('Request not found')
 
-        if request.status == api_requests.RequestStatus.CANCELLED:
+            if request.status == api_requests.RequestStatus.CANCELLED:
+                ctx.cancel()
+                return True
+
+            if fut.done():
+                try:
+                    result = await fut
+                    api_requests.set_request_succeeded(request_id, result)
+                except asyncio.CancelledError:
+                    # The task is cancelled by ctx.cancel(), where the status
+                    # should already be set to CANCELLED.
+                    pass
+                except Exception as e:  # pylint: disable=broad-except
+                    ctx.redirect_log(original_output)
+                    api_requests.set_request_failed(request_id, e)
+                    logger.error(f'Request {request_id} failed due to '
+                                 f'{common_utils.format_exception(e)}')
+                return True
+            return False
+
+        try:
+            while True:
+                res = await poll_task(request.request_id)
+                if res:
+                    break
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            # Current coroutine is cancelled due to client disconnect, set the
+            # request status for consistency.
+            api_requests.set_request_cancelled(request.request_id)
+            pass
+        # pylint: disable=broad-except
+        except (Exception, KeyboardInterrupt, SystemExit) as e:
+            # Handle any other error
+            ctx.redirect_log(original_output)
             ctx.cancel()
-            return True
-
-        if fut.done():
-            try:
-                result = await fut
-                api_requests.set_request_succeeded(request_id, result)
-            except asyncio.CancelledError:
-                # The task is cancelled by ctx.cancel(), where the status
-                # should already be set to CANCELLED.
-                pass
-            except Exception as e:  # pylint: disable=broad-except
-                ctx.redirect_log(original_output)
-                api_requests.set_request_failed(request_id, e)
-                logger.error(f'Request {request_id} failed due to '
-                             f'{common_utils.format_exception(e)}')
-            return True
-        return False
-
-    try:
-        while True:
-            res = await poll_task(request.request_id)
-            if res:
-                break
-            await asyncio.sleep(0.5)
-    except asyncio.CancelledError:
-        # Current coroutine is cancelled due to client disconnect, set the
-        # request status for consistency.
-        api_requests.set_request_cancelled(request.request_id)
-        pass
-    # pylint: disable=broad-except
-    except (Exception, KeyboardInterrupt, SystemExit) as e:
-        # Handle any other error
-        ctx.redirect_log(original_output)
-        ctx.cancel()
-        api_requests.set_request_failed(request.request_id, e)
-        logger.error(f'Request {request.request_id} interrupted due to '
-                     f'unhandled exception: {common_utils.format_exception(e)}')
-        raise
+            api_requests.set_request_failed(request.request_id, e)
+            logger.error(f'Request {request.request_id} interrupted due to '
+                         f'unhandled exception: {common_utils.format_exception(e)}')
+            raise
 
 
 def prepare_request(
