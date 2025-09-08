@@ -145,7 +145,7 @@ def pytest_addoption(parser):
     parser.addoption(
         '--base-branch',
         type=str,
-        default='master',
+        default='',
         help='Base branch to test backward compatibility against',
     )
     parser.addoption(

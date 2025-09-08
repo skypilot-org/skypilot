@@ -6,7 +6,7 @@ import base64
 import dataclasses
 import pickle
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky.schemas.api import responses
 from sky.server import constants as server_constants
@@ -128,7 +128,8 @@ def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
 
 
 @register_encoder('jobs.queue_v2')
-def encode_jobs_queue_v2(jobs_or_tuple):
+def encode_jobs_queue_v2(
+        jobs_or_tuple) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     # Support returning either a plain jobs list or a (jobs, total) tuple
     status_counts = {}
     if isinstance(jobs_or_tuple, tuple):

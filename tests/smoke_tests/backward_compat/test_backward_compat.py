@@ -2,6 +2,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 from typing import Sequence
@@ -99,6 +100,7 @@ class TestBackwardCompatibility:
         if not base_branch:
             # Default to the minimum compatible version as the base branch
             base_branch = f'v{constants.MIN_COMPATIBLE_VERSION}'
+        print(f'base_branch: {base_branch}', file=sys.stderr, flush=True)
 
         # Check if gcloud is installed
         if subprocess.run('gcloud --version', shell=True).returncode != 0:
