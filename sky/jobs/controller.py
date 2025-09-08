@@ -12,7 +12,6 @@ import typing
 from typing import Dict, Optional, Set, Tuple
 
 import dotenv
-import psutil
 
 import sky
 from sky import core

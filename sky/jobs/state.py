@@ -1794,7 +1794,7 @@ def reset_jobs_for_recovery() -> None:
             job_info_table.c.controller_pid.isnot(None),
             # Schedule state should be alive.
             job_info_table.c.schedule_state.isnot(None),
-            (job_info_table.c.schedule_state != 
+            (job_info_table.c.schedule_state !=
              ManagedJobScheduleState.INVALID.value),
             (job_info_table.c.schedule_state !=
              ManagedJobScheduleState.WAITING.value),
@@ -1802,8 +1802,8 @@ def reset_jobs_for_recovery() -> None:
              ManagedJobScheduleState.DONE.value),
         ).update({
             job_info_table.c.controller_pid: None,
-            job_info_table.c.schedule_state: (
-                ManagedJobScheduleState.WAITING.value)
+            job_info_table.c.schedule_state:
+                (ManagedJobScheduleState.WAITING.value)
         })
         session.commit()
 
