@@ -4,6 +4,8 @@ import contextlib
 import functools
 import os
 import time
+import multiprocessing
+import psutil
 
 import fastapi
 from prometheus_client import generate_latest
@@ -38,14 +40,6 @@ SKY_APISERVER_REQUEST_DURATION_SECONDS = prom.Histogram(
              60.0, 120.0, float('inf')),
 )
 
-# Time spent processing requests in executor.
-SKY_APISERVER_REQUEST_EXECUTION_DURATION_SECONDS = prom.Histogram(
-    'sky_apiserver_request_execution_duration_seconds',
-    'Time spent executing requests in executor',
-    ['request', 'worker'],
-    buckets=(0.5, 1, 2.5, 5.0, 10.0, 15.0, 25.0, 40.0, 60.0, 90.0, 120.0, 180.0,
-             float('inf')),
-)
 
 # Time spent processing a piece of code, refer to time_it().
 SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
@@ -62,6 +56,28 @@ SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
     ['pid'],
     buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 20.0,
              60.0, float('inf')),
+)
+
+# The number of execution starts in each worker process, we do not record
+# histogram here as the duration has been measured in
+# SKY_APISERVER_CODE_DURATION_SECONDS without the worker label (process id).
+# Recording histogram WITH worker label will cause high cardinality.
+SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL = prom.Counter(
+    'sky_apiserver_process_execution_start_total',
+    'Total number of execution starts in each worker process',
+    ['request', 'pid'],
+)
+
+SKY_APISERVER_PROCESS_PEAK_RSS = prom.Gauge(
+    'sky_apiserver_process_peak_rss',
+    'Peak RSS we saw in each process in last 30 seconds',
+    ['pid', 'type'],
+)
+
+SKY_APISERVER_PROCESS_CPU_TOTAL = prom.Gauge(
+    'sky_apiserver_process_cpu_total',
+    'Total CPU times a worker process has been running',
+    ['pid', 'type', 'mode'],
 )
 
 metrics_app = fastapi.FastAPI()
@@ -178,3 +194,22 @@ def time_me_async(func):
             return await func(*args, **kwargs)
 
     return async_wrapper
+
+def process_monitor(process_type: str):
+    pid = multiprocessing.current_process().pid
+    proc = psutil.Process(pid)
+    peak_rss = 0
+    last_bucket_end = 0
+    while True:
+        peak_rss = max(peak_rss, proc.memory_info().rss)
+        SKY_APISERVER_PROCESS_PEAK_RSS.labels(
+            pid=pid, type=process_type).set(peak_rss)
+        if time.time() - last_bucket_end >= 30:
+            last_bucket_end = time.time()
+            peak_rss = 0
+            ctimes = proc.cpu_times()
+            SKY_APISERVER_PROCESS_CPU_TOTAL.labels(
+                pid=pid, type=process_type, mode='user').set(ctimes.user)
+            SKY_APISERVER_PROCESS_CPU_TOTAL.labels(
+                pid=pid, type=process_type, mode='system').set(ctimes.system)
+        time.sleep(1)

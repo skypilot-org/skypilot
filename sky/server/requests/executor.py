@@ -23,6 +23,7 @@ import concurrent.futures
 import contextlib
 import multiprocessing
 import os
+import psutil
 import queue as queue_lib
 import signal
 import sys
@@ -130,6 +131,8 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    threading.Thread(target=metrics_lib.process_monitor,
+                     args=(f'worker:{proc_group}',), daemon=True).start()
 
 
 class RequestWorker:
@@ -401,6 +404,8 @@ def _request_execution_wrapper(request_id: str,
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
                                  f'{yaml_utils.dump_yaml_str(dict(config))}')
+                metrics_lib.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.labels(
+                    request=request_name, pid=pid).inc()
                 with metrics_lib.time_it(name=request_name,
                                          group='request_execution'):
                     return_value = func(**request_body.to_kwargs())
@@ -439,11 +444,7 @@ def _request_execution_wrapper(request_id: str,
             logger.info(f'Request {request_id} finished')
         finally:
             with metrics_lib.time_it(name='release_memory', group='internal'):
-                try:
-                    common_utils.release_memory()
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.error(f'Failed to release memory: '
-                                 f'{common_utils.format_exception(e)}')
+                common_utils.release_memory()
 
 
 async def execute_request_coroutine(request: api_requests.Request):
