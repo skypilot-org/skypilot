@@ -228,7 +228,7 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
                             # All controllers should be dead. Remove the PIDs so
                             # that update_managed_jobs_statuses won't think they
                             # have failed.
-                            state.remove_waiting_job_controller_pids()
+                            state.reset_jobs_for_recovery()
                         except Exception as e:  # pylint: disable=broad-except
                             logger.error(f'Failed to stop the api server: {e}')
                             pass
@@ -267,6 +267,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
     """
     controller_pid = state.get_job_controller_pid(job_id)
     if controller_pid is not None:
+        # why? TODO(cooperc): figure out why this is needed, fix it, and remove
         if managed_job_utils.controller_process_alive(controller_pid, job_id):
             # This can happen when HA recovery runs for some reason but the job
             # controller is still alive.

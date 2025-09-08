@@ -1785,13 +1785,26 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str,
 
 
 @_init_db
-def remove_waiting_job_controller_pids() -> None:
-    """Remove controller PIDs for all jobs with schedule_state WAITING."""
+def reset_jobs_for_recovery() -> None:
+    """Remove controller PIDs for live jobs, allowing them to be recovered."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(job_info_table).filter(
-            job_info_table.c.schedule_state == ManagedJobScheduleState.WAITING.value
-        ).update({job_info_table.c.controller_pid: None})
+            # PID should be set.
+            job_info_table.c.controller_pid.isnot(None),
+            # Schedule state should be alive.
+            job_info_table.c.schedule_state.isnot(None),
+            (job_info_table.c.schedule_state != 
+             ManagedJobScheduleState.INVALID.value),
+            (job_info_table.c.schedule_state !=
+             ManagedJobScheduleState.WAITING.value),
+            (job_info_table.c.schedule_state !=
+             ManagedJobScheduleState.DONE.value),
+        ).update({
+            job_info_table.c.controller_pid: None,
+            job_info_table.c.schedule_state: (
+                ManagedJobScheduleState.WAITING.value)
+        })
         session.commit()
 
 
