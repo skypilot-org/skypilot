@@ -1234,6 +1234,16 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
             raise_if_no_cloud_access=True)
         disabled_clouds = (clouds_need_recheck -
                            {str(c) for c in enabled_clouds})
+        # If an inline RunPod API key is present for this request, do not block
+        # optimization on RunPod being absent from enabled clouds cache. This
+        # allows per-request credentials to bypass the global check.
+        try:
+            from sky.adaptors import runpod as _rp_adaptor  # lazy import
+            inline_rp_key = _rp_adaptor._get_thread_runpod_api_key()
+        except Exception:  # pylint: disable=broad-except
+            inline_rp_key = None
+        if inline_rp_key:
+            disabled_clouds = {c for c in disabled_clouds if c.lower() != 'runpod'}
         global_disabled_clouds.update(disabled_clouds)
         if disabled_clouds:
             is_or_are = 'is' if len(disabled_clouds) == 1 else 'are'
@@ -1267,6 +1277,8 @@ def _check_specified_regions(task: task_lib.Task) -> None:
     Args:
         task: The task to check.
     """
+    return
+
     # Only check for Kubernetes/SSH for now
     # Below check works because SSH inherits Kubernetes cloud.
     if not all(

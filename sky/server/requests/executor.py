@@ -444,9 +444,11 @@ def _inline_credentials_context(credentials: Optional[Dict[str, Any]]):
         return
 
     azure_creds = credentials.get('azure')
+    runpod_creds = credentials.get('runpod')
 
     azure_config_dir_set = False
     azure_service_principal_set = False
+    runpod_config_dir_set = False
 
     try:
         # Set up Azure credentials in thread-local storage ONLY
@@ -464,6 +466,19 @@ def _inline_credentials_context(credentials: Optional[Dict[str, Any]]):
                 # Set thread-local service principal credentials (thread-safe)
                 azure_adaptor.set_thread_azure_credentials(service_principal)
                 azure_service_principal_set = True
+
+        # Set up RunPod credentials (API key and/or config dir)
+        if isinstance(runpod_creds, dict):
+            from sky.adaptors import runpod as runpod_adaptor
+            runpod_config_dir = runpod_creds.get('config_dir')
+            api_key = runpod_creds.get('api_key')
+
+            if runpod_config_dir:
+                runpod_adaptor.set_thread_runpod_config_dir(runpod_config_dir)
+                runpod_config_dir_set = True
+            if api_key:
+                # Thread-local for SkyPilot adaptors/REST; avoid process-global mutation.
+                runpod_adaptor.set_thread_runpod_api_key(api_key)
         # Yield control to the caller while credentials are set
         yield
     finally:
@@ -473,6 +488,12 @@ def _inline_credentials_context(credentials: Optional[Dict[str, Any]]):
             azure_adaptor.clear_thread_azure_config_dir()
         if azure_service_principal_set:
             azure_adaptor.clear_thread_azure_credentials()
+        # Clean up RunPod thread-local storage
+        if runpod_config_dir_set:
+            from sky.adaptors import runpod as runpod_adaptor
+            runpod_adaptor.clear_thread_runpod_config_dir()
+        from sky.adaptors import runpod as runpod_adaptor
+        runpod_adaptor.clear_thread_runpod_api_key()
 
 
 async def execute_request_coroutine(request: api_requests.Request):
