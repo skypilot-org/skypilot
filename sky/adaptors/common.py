@@ -1,9 +1,10 @@
 """Lazy import for modules to avoid import error when not used."""
+from importlib import util as importlib_util
 import functools
 import importlib
 import threading
 import types
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 
 class LazyImport(types.ModuleType):
@@ -78,3 +79,25 @@ def load_lazy_modules(modules: Tuple[LazyImport, ...]):
         return wrapper
 
     return decorator
+
+
+def can_import_modules(module_names: List[str]) -> bool:
+    """ module availability without actually importing it to
+    save memory footprint.
+
+    Args:
+        module_names: List[str], the names of the modules to check.
+
+    Returns:
+        True if all modules are available, False otherwise.
+        If a module exists in sys.modules, but is set to None,
+        then it is considered as not available.
+    """
+    try:
+        for module_name in module_names:
+            module_spec = importlib_util.find_spec(module_name)
+            if module_spec is None:
+                return False
+        return True
+    except ValueError:
+        return False

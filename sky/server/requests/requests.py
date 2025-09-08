@@ -1,5 +1,6 @@
 """Utilities for REST API."""
 import asyncio
+import atexit
 import contextlib
 import dataclasses
 import enum
@@ -16,6 +17,7 @@ import traceback
 from typing import (Any, AsyncContextManager, Callable, Dict, Generator, List,
                     NamedTuple, Optional, Tuple)
 
+import anyio
 import colorama
 import filelock
 
@@ -31,7 +33,6 @@ from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 from sky.utils import common_utils
-from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
 
@@ -783,17 +784,15 @@ def set_request_cancelled(request_id: str) -> None:
 
 @init_db
 @metrics_lib.time_me
-def _delete_requests(requests: List[Request]):
+async def _delete_requests(requests: List[Request]):
     """Clean up requests by their IDs."""
     id_list_str = ','.join(repr(req.request_id) for req in requests)
     assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(
-            f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+    await _DB.execute_and_commit_async(
+        f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
 
 
-def clean_finished_requests_with_retention(retention_seconds: int):
+async def clean_finished_requests_with_retention(retention_seconds: int):
     """Clean up finished requests older than the retention period.
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
@@ -803,17 +802,19 @@ def clean_finished_requests_with_retention(retention_seconds: int):
         retention_seconds: Requests older than this many seconds will be
             deleted.
     """
-    reqs = get_request_tasks(
+    reqs = await get_request_tasks_async(
         req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
                                      finished_before=time.time() -
                                      retention_seconds))
 
-    subprocess_utils.run_in_parallel(
-        func=lambda req: req.log_path.unlink(missing_ok=True),
-        args=reqs,
-        num_threads=len(reqs))
+    futs = []
+    for req in reqs:
+        futs.append(
+            asyncio.create_task(
+                anyio.Path(req.log_path.absolute()).unlink(missing_ok=True)))
+    await asyncio.gather(*futs)
 
-    _delete_requests(reqs)
+    await _delete_requests(reqs)
 
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.
@@ -838,7 +839,16 @@ async def requests_gc_daemon():
             logger.info('Requests GC daemon cancelled')
             break
         except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'Error running requests GC daemon: {e}')
+            logger.error(f'Error running requests GC daemon: {e}'
+                         f'traceback: {traceback.format_exc()}')
         # Run the daemon at most once every hour to avoid too frequent
         # cleanup.
         await asyncio.sleep(max(retention_seconds, 3600))
+
+
+def _cleanup():
+    if _DB is not None:
+        asyncio.run(_DB.close())
+
+
+atexit.register(_cleanup)

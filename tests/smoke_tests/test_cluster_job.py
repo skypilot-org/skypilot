@@ -2089,7 +2089,7 @@ def test_remote_server_api_login():
             # Backup existing config file if it exists
             f'if [ -f {config_path} ]; then cp {config_path} {backup_path}; fi',
             # Run sky api login
-            f'sky api login -e {endpoint}',
+            f'unset {constants.SKY_API_SERVER_URL_ENV_VAR} && sky api login -e {endpoint}',
             # Echo the config file content to see what was written
             f'echo "Config file content after sky api login:" && cat {config_path}',
             # Verify the config file is updated with the endpoint

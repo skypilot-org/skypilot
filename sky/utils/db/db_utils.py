@@ -334,6 +334,9 @@ class SQLiteConn(threading.local):
         """Execute the sql and commit the transaction in a sync block."""
         conn = await self._get_async_conn()
 
+        if parameters is None:
+            parameters = []
+
         def exec_and_commit(sql: str, parameters: Optional[Iterable[Any]]):
             # pylint: disable=protected-access
             conn._conn.execute(sql, parameters)
@@ -349,6 +352,11 @@ class SQLiteConn(threading.local):
                                     ) -> Iterable[sqlite3.Row]:
         conn = await self._get_async_conn()
         return await conn.execute_fetchall(sql, parameters)
+
+    async def close(self):
+        if self._async_conn is not None:
+            await self._async_conn.close()
+        self.conn.close()
 
 
 _max_connections = 0

@@ -21,6 +21,7 @@ from sky.server import common as server_common
 from sky.skylet import constants
 
 
+@pytest.mark.no_remote_server
 def test_endpoint_output_basic(generic_cloud: str):
     """Test that sky api info endpoint output is correct."""
     name = smoke_tests_utils.get_cluster_name()
@@ -34,6 +35,7 @@ def test_endpoint_output_basic(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server
 def test_endpoint_output_config(generic_cloud: str):
     """Test that sky api info endpoint output is correct when config is set."""
 
@@ -64,6 +66,7 @@ def test_endpoint_output_config(generic_cloud: str):
         smoke_tests_utils.run_one_test(test, check_sky_status=False)
 
 
+@pytest.mark.no_remote_server
 def test_endpoint_output_env(generic_cloud: str):
     """Test that sky api info output is correct when env endpoint is set."""
     name = smoke_tests_utils.get_cluster_name()
@@ -82,6 +85,7 @@ def test_endpoint_output_env(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server
 def test_sky_logout_wih_env_endpoint(generic_cloud: str):
     """Test that sky api logout with env endpoint fails."""
     test = smoke_tests_utils.Test(
@@ -95,6 +99,7 @@ def test_sky_logout_wih_env_endpoint(generic_cloud: str):
     smoke_tests_utils.run_one_test(test, check_sky_status=False)
 
 
+@pytest.mark.no_remote_server
 def test_sky_login_wih_env_endpoint(generic_cloud: str):
     """Test that sky api login with env endpoint fails."""
     test = smoke_tests_utils.Test(

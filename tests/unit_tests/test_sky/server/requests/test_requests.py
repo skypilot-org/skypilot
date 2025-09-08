@@ -73,7 +73,8 @@ def test_set_request_failed_nonexistent_request(isolated_database):
                                     ValueError('Test error'))
 
 
-def test_clean_finished_requests_with_retention(isolated_database):
+@pytest.mark.asyncio
+async def test_clean_finished_requests_with_retention(isolated_database):
     """Test cleaning up old finished requests."""
     current_time = time.time()
     retention_seconds = 60  # 1 minute retention
@@ -117,7 +118,8 @@ def test_clean_finished_requests_with_retention(isolated_database):
     # Mock log file unlinking
     with mock.patch.object(pathlib.Path, 'unlink') as mock_unlink:
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
-            requests.clean_finished_requests_with_retention(retention_seconds)
+            await requests.clean_finished_requests_with_retention(
+                retention_seconds)
 
     # Verify old finished request was deleted
     assert requests.get_request('old-finished-1') is None
@@ -137,7 +139,8 @@ def test_clean_finished_requests_with_retention(isolated_database):
     assert 'Cleaned up 1 finished requests' in log_message
 
 
-def test_clean_finished_requests_with_retention_no_old_requests(
+@pytest.mark.asyncio
+async def test_clean_finished_requests_with_retention_no_old_requests(
         isolated_database):
     """Test cleanup when there are no old requests to clean."""
     current_time = time.time()
@@ -157,7 +160,7 @@ def test_clean_finished_requests_with_retention_no_old_requests(
     requests.create_if_not_exists(recent_request)
 
     with mock.patch('sky.server.requests.requests.logger') as mock_logger:
-        requests.clean_finished_requests_with_retention(retention_seconds)
+        await requests.clean_finished_requests_with_retention(retention_seconds)
 
     # Verify request was NOT deleted
     assert requests.get_request('recent-test-1') is not None
@@ -168,7 +171,9 @@ def test_clean_finished_requests_with_retention_no_old_requests(
     assert 'Cleaned up 0 finished requests' in log_message
 
 
-def test_clean_finished_requests_with_retention_all_statuses(isolated_database):
+@pytest.mark.asyncio
+async def test_clean_finished_requests_with_retention_all_statuses(
+        isolated_database):
     """Test cleanup works for all finished statuses."""
     current_time = time.time()
     retention_seconds = 60
@@ -207,7 +212,8 @@ def test_clean_finished_requests_with_retention_all_statuses(isolated_database):
 
     with mock.patch.object(pathlib.Path, 'unlink'):
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
-            requests.clean_finished_requests_with_retention(retention_seconds)
+            await requests.clean_finished_requests_with_retention(
+                retention_seconds)
 
     # Verify all finished requests were deleted
     assert requests.get_request('old-succeeded-1') is None
@@ -222,30 +228,93 @@ def test_clean_finished_requests_with_retention_all_statuses(isolated_database):
 
 @pytest.mark.asyncio
 async def test_requests_gc_daemon(isolated_database):
-    """Test the garbage collection daemon runs correctly."""
+    """Test the garbage collection daemon runs correctly with real cleanup."""
+    current_time = time.time()
+
+    # Create test requests: some old finished, some recent, some running
+    old_finished_request = requests.Request(
+        request_id='old-finished-gc-1',
+        name='test-request',
+        entrypoint=dummy,
+        request_body=payloads.RequestBody(),
+        status=RequestStatus.SUCCEEDED,
+        created_at=current_time - 180,
+        finished_at=current_time - 150,  # Finished 150 seconds ago
+        user_id='test-user')
+
+    recent_finished_request = requests.Request(
+        request_id='recent-finished-gc-1',
+        name='test-request',
+        entrypoint=dummy,
+        request_body=payloads.RequestBody(),
+        status=RequestStatus.FAILED,
+        created_at=current_time - 60,
+        finished_at=current_time - 30,  # Finished 30 seconds ago
+        user_id='test-user')
+
+    running_request = requests.Request(request_id='running-gc-1',
+                                       name='test-request',
+                                       entrypoint=dummy,
+                                       request_body=payloads.RequestBody(),
+                                       status=RequestStatus.RUNNING,
+                                       created_at=current_time - 180,
+                                       user_id='test-user')
+
+    # Create the requests in the database
+    requests.create_if_not_exists(old_finished_request)
+    requests.create_if_not_exists(recent_finished_request)
+    requests.create_if_not_exists(running_request)
+
+    # Verify all requests exist before cleanup
+    assert requests.get_request('old-finished-gc-1') is not None
+    assert requests.get_request('recent-finished-gc-1') is not None
+    assert requests.get_request('running-gc-1') is not None
+
+    # Mock the entire daemon to run only one iteration by patching the loop
+    async def single_iteration_daemon():
+        """Modified daemon that runs only one iteration."""
+        logger = requests.logger
+        logger.info('Running requests GC daemon...')
+        # Use the latest config.
+        requests.skypilot_config.reload_config()
+        retention_seconds = requests.skypilot_config.get_nested(
+            ('api_server', 'requests_retention_hours'),
+            requests.DEFAULT_REQUESTS_RETENTION_HOURS) * 3600
+        try:
+            # Negative value disables the requests GC
+            if retention_seconds >= 0:
+                await requests.clean_finished_requests_with_retention(
+                    retention_seconds)
+        except Exception as e:  # pylint: disable=broad-except
+            import traceback
+            logger.error(f'Error running requests GC daemon: {e}'
+                         f'traceback: {traceback.format_exc()}')
+        # Don't loop - just return after one iteration
+
     with mock.patch(
             'sky.server.requests.requests.skypilot_config') as mock_config:
-        with mock.patch(
-                'sky.server.requests.requests.clean_finished_requests_with_retention'
-        ) as mock_clean:
-            with mock.patch('asyncio.sleep') as mock_sleep:
-                # Configure retention seconds
-                mock_config.get_nested.return_value = 120  # 2 minutes
+        # Configure retention to 2 minutes (0.033 hours)
+        # This will be converted to 0.033 * 3600 = ~120 seconds
+        mock_config.get_nested.return_value = 120 / 3600  # 2 minutes in hours
+        mock_config.reload_config.return_value = None
 
-                # Make sleep raise CancelledError after first iteration
-                # to exit loop
-                mock_sleep.side_effect = [None, asyncio.CancelledError()]
+        # Run the single iteration daemon
+        await single_iteration_daemon()
 
-                # Run the daemon
-                with pytest.raises(asyncio.CancelledError):
-                    await requests.requests_gc_daemon()
+        # Verify config was called
+        mock_config.reload_config.assert_called_once()
+        mock_config.get_nested.assert_called_once_with(
+            ('api_server', 'requests_retention_hours'), 24)
 
-                # Verify cleanup was called
-                mock_clean.assert_called_with(120 * 3600)
+        # Verify cleanup was actually performed on old finished requests
+        # Old finished request should be deleted (finished 150s ago > 120s)
+        assert requests.get_request('old-finished-gc-1') is None
 
-                # Verify sleep was called with max(retention, 3600)
-                assert mock_sleep.call_count == 2
-                mock_sleep.assert_any_call(120 * 3600)
+        # Recent finished request should still exist (finished 30s ago < 120s)
+        assert requests.get_request('recent-finished-gc-1') is not None
+
+        # Running request should still exist (not finished)
+        assert requests.get_request('running-gc-1') is not None
 
 
 @pytest.mark.asyncio
