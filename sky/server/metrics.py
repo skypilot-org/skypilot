@@ -2,15 +2,15 @@
 
 import contextlib
 import functools
+import multiprocessing
 import os
 import time
-import multiprocessing
-import psutil
 
 import fastapi
 from prometheus_client import generate_latest
 from prometheus_client import multiprocess
 import prometheus_client as prom
+import psutil
 import starlette.middleware.base
 import uvicorn
 
@@ -39,7 +39,6 @@ SKY_APISERVER_REQUEST_DURATION_SECONDS = prom.Histogram(
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
              60.0, 120.0, float('inf')),
 )
-
 
 # Time spent processing a piece of code, refer to time_it().
 SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
@@ -195,21 +194,25 @@ def time_me_async(func):
 
     return async_wrapper
 
+
 def process_monitor(process_type: str):
     pid = multiprocessing.current_process().pid
     proc = psutil.Process(pid)
     peak_rss = 0
-    last_bucket_end = 0
+    last_bucket_end = time.time()
     while True:
-        peak_rss = max(peak_rss, proc.memory_info().rss)
-        SKY_APISERVER_PROCESS_PEAK_RSS.labels(
-            pid=pid, type=process_type).set(peak_rss)
         if time.time() - last_bucket_end >= 30:
+            # Reset peak RSS every 30 seconds.
             last_bucket_end = time.time()
             peak_rss = 0
-            ctimes = proc.cpu_times()
-            SKY_APISERVER_PROCESS_CPU_TOTAL.labels(
-                pid=pid, type=process_type, mode='user').set(ctimes.user)
-            SKY_APISERVER_PROCESS_CPU_TOTAL.labels(
-                pid=pid, type=process_type, mode='system').set(ctimes.system)
+        peak_rss = max(peak_rss, proc.memory_info().rss)
+        SKY_APISERVER_PROCESS_PEAK_RSS.labels(pid=pid,
+                                              type=process_type).set(peak_rss)
+        ctimes = proc.cpu_times()
+        SKY_APISERVER_PROCESS_CPU_TOTAL.labels(pid=pid,
+                                               type=process_type,
+                                               mode='user').set(ctimes.user)
+        SKY_APISERVER_PROCESS_CPU_TOTAL.labels(pid=pid,
+                                               type=process_type,
+                                               mode='system').set(ctimes.system)
         time.sleep(1)

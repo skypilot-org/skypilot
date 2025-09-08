@@ -23,7 +23,6 @@ import concurrent.futures
 import contextlib
 import multiprocessing
 import os
-import psutil
 import queue as queue_lib
 import signal
 import sys
@@ -132,7 +131,8 @@ def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
     threading.Thread(target=metrics_lib.process_monitor,
-                     args=(f'worker:{proc_group}',), daemon=True).start()
+                     args=(f'worker:{proc_group}',),
+                     daemon=True).start()
 
 
 class RequestWorker:

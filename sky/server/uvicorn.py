@@ -19,9 +19,9 @@ from uvicorn.supervisors import multiprocess
 
 from sky import sky_logging
 from sky.server import daemons
+from sky.server import metrics as metrics_lib
 from sky.server import state
 from sky.server.requests import requests as requests_lib
-from sky.server import metrics as metrics_lib
 from sky.skylet import constants
 from sky.utils import context_utils
 from sky.utils import env_options
@@ -214,7 +214,8 @@ class Server(uvicorn.Server):
             event_loop.set_debug(True)
             event_loop.slow_callback_duration = lag_threshold
         threading.Thread(target=metrics_lib.process_monitor,
-                         args=('server',), daemon=True).start()
+                         args=('server',),
+                         daemon=True).start()
         with self.capture_signals():
             asyncio.run(self.serve(*args, **kwargs))
 
