@@ -19,8 +19,8 @@ from sky.utils import common_utils
 # TODO(aylei): maintaining these constants is error-prone, we may need to
 # automatically tune parallelism at runtime according to system usage stats
 # in the future.
-_LONG_WORKER_MEM_GB = 0.4
-_SHORT_WORKER_MEM_GB = 0.25
+_LONG_WORKER_MEM_GB = 0.5
+_SHORT_WORKER_MEM_GB = 0.4
 # To control the number of long workers.
 _CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
 # Limit the number of long workers of local API server, since local server is
@@ -171,7 +171,7 @@ def compute_server_config(deploy: bool,
         f'and will allow at max {max_parallel_for_short} short requests in '
         f'parallel.')
     return ServerConfig(
-        num_server_workers=num_server_workers,
+        num_server_workers=1,
         queue_backend=queue_backend,
         long_worker_config=WorkerConfig(
             garanteed_parallelism=max_parallel_for_long,
