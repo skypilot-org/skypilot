@@ -5963,8 +5963,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 mount_cmd = store.mount_cached_command(dst)
                 action_message = 'Mounting cached mode'
 
-            mount_cmd = (
-                "bash -lc '"
+            inner = (
                 f"DST=$(eval echo {shlex.quote(dst)}); "
                 "lock=/var/tmp/sky_mount_$(echo -n \"$DST\" | tr -c A-Za-z0-9_.- _); "
                 "exec 300>$lock; "
@@ -5981,8 +5980,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 "  sleep 1; "
                 "done; "
                 "exit 1; "
-                "fi'"
+                "fi"
             )
+
+            # Minimal change: no manual single quotes; just quote the whole inner string.
+            mount_cmd = "bash -lc " + shlex.quote(inner)
 
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
