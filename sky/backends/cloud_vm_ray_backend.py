@@ -5962,16 +5962,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
                 mount_cmd = store.mount_cached_command(dst)
                 action_message = 'Mounting cached mode'
-            dst_q = shlex.quote(dst)
 
             script = (
-                f"lock=/var/tmp/sky_mount_$(echo -n {dst_q} | tr -c 'A-Za-z0-9_.-' '_'); "
+                f"DST={dst}; "
+                "lock=/var/tmp/sky_mount_$(echo -n \"$DST\" | tr -c 'A-Za-z0-9_.-' '_'); "
                 "exec 300>$lock; "
                 "if flock -x -w 60 300; then "
+                "if findmnt -rn -T \"$DST\" >/dev/null 2>&1; then exit 0; fi; "
                 f"{mount_cmd}; "
                 "else "
                 "for i in $(seq 1 180); do "
-                f"if findmnt -rn -T {dst_q} >/dev/null 2>&1; then exit 0; fi; "
+                "if findmnt -rn -T \"$DST\" >/dev/null 2>&1; then exit 0; fi; "
                 "sleep 1; "
                 "done; "
                 "exit 1; "
