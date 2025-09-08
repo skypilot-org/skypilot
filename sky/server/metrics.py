@@ -196,6 +196,8 @@ def time_me_async(func):
 
 
 def process_monitor(process_type: str):
+    """Monitor current process and record metrics."""
+
     pid = multiprocessing.current_process().pid
     proc = psutil.Process(pid)
     peak_rss = 0

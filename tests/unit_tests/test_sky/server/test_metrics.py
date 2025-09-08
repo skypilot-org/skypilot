@@ -275,3 +275,34 @@ def cleanup_metrics():
     # Clear all metrics after each test
     metrics.SKY_APISERVER_REQUESTS_TOTAL.clear()
     metrics.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
+
+
+def test_process_monitor():
+    """Test process monitor."""
+    import memory_profiler
+    memory_usage_before = memory_profiler.memory_usage(os.getpid(),
+                                                       interval=0.1,
+                                                       timeout=1)[0]
+
+    iteration_count = [0]  # Using list to make it mutable in nested function
+    original_sleep = time.sleep
+
+    def mock_sleep(duration):
+        iteration_count[0] += 1
+        if iteration_count[0] >= 10:
+            raise StopIteration("Max iterations reached")
+        original_sleep(duration)
+
+    # Patch time.sleep to count iterations and break after 10
+    with patch('time.sleep', side_effect=mock_sleep):
+        try:
+            metrics.process_monitor('test')
+        except StopIteration:
+            pass  # Expected after 10 iterations
+
+    memory_usage_after = memory_profiler.memory_usage(os.getpid(),
+                                                      interval=0.1,
+                                                      timeout=1)[0]
+
+    memory_increase = memory_usage_after - memory_usage_before
+    assert memory_increase < 1, f"Memory increased by {memory_increase}MB"
