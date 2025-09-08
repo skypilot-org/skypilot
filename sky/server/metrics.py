@@ -27,7 +27,7 @@ logger = sky_logging.init_logger(__name__)
 SKY_APISERVER_REQUESTS_TOTAL = prom.Counter(
     'sky_apiserver_requests_total',
     'Total number of API server requests',
-    ['path', 'method', 'status'],
+    ['pid', 'path', 'method', 'status'],
 )
 
 # Time spent processing API server requests, grouped by path, method, and
@@ -122,6 +122,10 @@ def _is_streaming_api(path: str) -> bool:
 class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to collect Prometheus metrics for HTTP requests."""
 
+    def __init__(self, app: fastapi.FastAPI):
+        super().__init__(app)
+        self.pid = multiprocessing.current_process().pid
+
     async def dispatch(self, request: fastapi.Request, call_next):
         path = request.url.path
         logger.debug(f'PROM Middleware Request: {request}, {request.url.path}')
@@ -140,7 +144,8 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             status_code_group = '5xx'
             raise
         finally:
-            SKY_APISERVER_REQUESTS_TOTAL.labels(path=path,
+            SKY_APISERVER_REQUESTS_TOTAL.labels(pid=self.pid,
+                                                path=path,
                                                 method=method,
                                                 status=status_code_group).inc()
             if not streaming:

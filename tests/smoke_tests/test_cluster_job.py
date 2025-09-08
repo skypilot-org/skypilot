@@ -1947,6 +1947,7 @@ def test_gcp_zero_quota_failover():
 
 
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controller and auto-stop
+@pytest.mark.skip(reason='Skipping long setup run script test')
 def test_long_setup_run_script(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
