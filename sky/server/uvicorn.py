@@ -85,7 +85,9 @@ def add_timestamp_prefix_for_server_logs() -> None:
 
 def reclaim_memory():
     from sky.utils import common_utils
+    import psutil
     pid = os.getpid()
+    proc = psutil.Process(pid)
     while True:
         logger.info(f'Reclaiming memory in server process {pid}')
         common_utils.release_memory()
@@ -94,10 +96,12 @@ def reclaim_memory():
         logger.info(f'Traced memory: {current/1024/1024}MB, peak: {peak/1024/1024}MB')
         snapshot = tracemalloc.take_snapshot()
         top_stats = snapshot.statistics('lineno')
-        for index, stat in enumerate(top_stats[:30]):
+        for index, stat in enumerate(top_stats[:20]):
             logger.info(f'{index + 1:2d}. {stat}')
+            if stat.size > 2 * 1024 * 1024:
+                for line in stat.traceback.format():
+                    print(line)
         time.sleep(30)
-
 
 class Server(uvicorn.Server):
     """Server wrapper for uvicorn.
@@ -231,7 +235,7 @@ class Server(uvicorn.Server):
             event_loop.set_debug(True)
             event_loop.slow_callback_duration = lag_threshold
         
-        tracemalloc.start()
+        tracemalloc.start(25)
         
         threading.Thread(target=metrics_lib.process_monitor,
                          args=('server',),

@@ -1933,6 +1933,7 @@ if __name__ == '__main__':
     config = server_config.compute_server_config(cmd_args.deploy,
                                                  max_db_connections)
 
+    pathlib.Path
     num_workers = config.num_server_workers
 
     queue_server: Optional[multiprocessing.Process] = None
