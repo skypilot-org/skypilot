@@ -11,6 +11,8 @@ import tempfile
 from typing import (Any, Dict, Generator, List, NamedTuple, Optional, Sequence,
                     Set, Tuple)
 import uuid
+from pytest_benchmark.fixture import BenchmarkFixture
+import time
 
 import colorama
 import pytest
@@ -340,6 +342,26 @@ class Test(NamedTuple):
     def echo_without_prefix(cls, message: str):
         print(message, file=sys.stderr, flush=True)
 
+class BenchmarkTest(NamedTuple):
+    name: str
+    setup_command: Optional[str]
+    benchmarked_command: List[str]
+    teardown: Optional[str] = None
+    timeout: int = DEFAULT_CMD_TIMEOUT
+    env: Optional[Dict[str, str]] = None
+
+    def echo(self, message: str):
+        # pytest's xdist plugin captures stdout; print to stderr so that the
+        # logs are streaming while the tests are running.
+        prefix = f'[{self.name}]'
+        message = f'{prefix} {message}'
+        message = message.replace('\n', f'\n{prefix} ')
+        self.echo_without_prefix(message)
+    
+    @classmethod
+    def echo_without_prefix(cls, message: str):
+        print(message, file=sys.stderr, flush=True)
+
 
 def get_timeout(generic_cloud: str,
                 override_timeout: int = DEFAULT_CMD_TIMEOUT):
@@ -527,6 +549,120 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
 
             if proc.returncode:
                 break
+
+        style = colorama.Style
+        fore = colorama.Fore
+        outcome = (
+            f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
+            if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
+        reason = f'\nReason: {command}' if proc.returncode else ''
+        msg = (f'{outcome}.'
+               f'{reason}')
+        if log_to_stdout:
+            test.echo(msg)
+        else:
+            msg += f'\nLog: less -r {log_file.name}\n'
+            test.echo(msg)
+            write(msg)
+
+        if (proc.returncode == 0 or
+                pytest.terminate_on_failure) and test.teardown is not None:
+            subprocess_utils.run(
+                test.teardown,
+                stdout=subprocess_out,
+                stderr=subprocess.STDOUT,
+                timeout=10 * 60,  # 10 mins
+                shell=True,
+                env=env_dict,
+            )
+
+        if proc.returncode:
+            if log_to_stdout:
+                raise Exception(f'test failed')
+            else:
+                raise Exception(f'test failed: less -r {log_file.name}')
+
+def run_one_benchmark(test: BenchmarkTest,
+                      benchmark: BenchmarkFixture,
+                      check_sky_status: bool = True) -> None:
+    def run_command(command: str, is_benchmark: bool = False):
+        write(f'+ {command}\n')
+        flush()
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess_out,
+            stderr=subprocess.STDOUT,
+            shell=True,
+            executable='/bin/bash',
+            env=env_dict,
+        )
+        if not is_benchmark:
+            proc.wait(timeout=test.timeout)
+        else:
+            benchmark.pedantic(
+                proc.wait,
+                kwargs={'timeout': test.timeout},
+                iterations=1,
+                rounds=1,
+            )
+
+        return proc
+
+    log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
+    if log_to_stdout:
+        write = test.echo
+        flush = lambda: None
+        subprocess_out = sys.stderr
+        test.echo('Test started. Log to stdout')
+    else:
+        log_file = tempfile.NamedTemporaryFile('a',
+                                               prefix=f'{test.name}-',
+                                               suffix='.log',
+                                               delete=False)
+        write = log_file.write
+        flush = log_file.flush
+        subprocess_out = log_file
+        test.echo(f'Test started. Log: less -r {log_file.name}')
+
+    env_dict = os.environ.copy()
+    if test.env:
+        env_dict.update(test.env)
+
+    # Fail fast if `sky` CLI somehow errors out.
+    if check_sky_status:
+        run_command('sky status', is_benchmark=False)
+
+    with override_sky_config(test, env_dict):
+        try:
+            command = test.setup_command
+            if test.setup_command:
+                proc = run_command(command, is_benchmark=False)
+                if proc.returncode:
+                    raise Exception(f'setup command failed')
+            command = test.benchmarked_command
+            proc = run_command(command, is_benchmark=True)
+            if proc.returncode:
+                raise Exception(f'benchmarked command failed')
+            command = test.teardown
+            if test.teardown:
+                proc = run_command(command, is_benchmark=False)
+                if proc.returncode:
+                    raise Exception(f'teardown command failed')
+        except subprocess.TimeoutExpired as e:
+            flush()
+            test.echo(f'Timeout after {test.timeout} seconds.')
+            test.echo(str(e))
+            write(f'Timeout after {test.timeout} seconds.\n')
+            flush()
+            # Kill the current process.
+            proc.terminate()
+            proc.returncode = 1  # None if we don't set it.
+        except Exception as e:
+            flush()
+            test.echo(f'Error executing command {command}: {e}')
+            write(f'Error executing command {command}: {e}\n')
+            flush()
+            proc.returncode = 1  # None if we don't set it.
 
         style = colorama.Style
         fore = colorama.Fore
