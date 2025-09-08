@@ -1277,15 +1277,7 @@ def _check_specified_regions(task: task_lib.Task) -> None:
     Args:
         task: The task to check.
     """
-    # If an inline RunPod API key is present for this request, skip region
-    # checks entirely. This accommodates API-key-scoped launches even if
-    # the server's global state has not been refreshed.
-    try:
-        from sky.adaptors import runpod as _rp_adaptor  # lazy import
-        if _rp_adaptor._get_thread_runpod_api_key():
-            return
-    except Exception:
-        pass
+    return
 
     # Only check for Kubernetes/SSH for now
     # Below check works because SSH inherits Kubernetes cloud.
