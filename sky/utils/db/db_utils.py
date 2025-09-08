@@ -7,7 +7,7 @@ import pathlib
 import sqlite3
 import threading
 import typing
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Literal, Optional, Union
 
 import aiosqlite
 import aiosqlite.context
@@ -376,7 +376,23 @@ def get_max_connections():
     return _max_connections
 
 
-def get_engine(db_name: str, async_engine: bool = False):
+@typing.overload
+def get_engine(
+        db_name: str,
+        async_engine: Literal[False] = False) -> sqlalchemy.engine.Engine:
+    ...
+
+
+@typing.overload
+def get_engine(db_name: str,
+               async_engine: Literal[True]) -> sqlalchemy_async.AsyncEngine:
+    ...
+
+
+def get_engine(
+    db_name: str,
+    async_engine: bool = False
+) -> Union[sqlalchemy.engine.Engine, sqlalchemy_async.AsyncEngine]:
     conn_string = None
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)

@@ -182,8 +182,8 @@ def initialize_and_get_db_async() -> sql_async.AsyncEngine:
         if _SQLALCHEMY_ENGINE_ASYNC is not None:
             return _SQLALCHEMY_ENGINE_ASYNC
 
-        _SQLALCHEMY_ENGINE_ASYNC = migration_utils.get_engine('spot_jobs',
-                                                              async_engine=True)
+        _SQLALCHEMY_ENGINE_ASYNC = db_utils.get_engine('spot_jobs',
+                                                       async_engine=True)
 
     # to create the table in case an async function gets called first
     initialize_and_get_db()
