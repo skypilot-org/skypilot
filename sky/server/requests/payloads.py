@@ -512,6 +512,14 @@ class JobsQueueBody(RequestBody):
     skip_finished: bool = False
     all_users: bool = False
     job_ids: Optional[List[int]] = None
+
+
+class JobsQueueV2Body(RequestBody):
+    """The request body for the jobs queue endpoint."""
+    refresh: bool = False
+    skip_finished: bool = False
+    all_users: bool = False
+    job_ids: Optional[List[int]] = None
     user_match: Optional[str] = None
     workspace_match: Optional[str] = None
     name_match: Optional[str] = None
