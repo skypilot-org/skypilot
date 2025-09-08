@@ -433,7 +433,7 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
         if base_branches:
             for branch in base_branches:
                 if ('test_quick_tests_core.py' in test_file and
-                     branch != 'master'):
+                        branch != 'master'):
                     continue
                 pipeline = _generate_pipeline(test_file,
                                               args + f'--base-branch {branch}',
