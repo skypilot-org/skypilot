@@ -1277,8 +1277,6 @@ def _check_specified_regions(task: task_lib.Task) -> None:
     Args:
         task: The task to check.
     """
-    return
-
     # Only check for Kubernetes/SSH for now
     # Below check works because SSH inherits Kubernetes cloud.
     if not all(
