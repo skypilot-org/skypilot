@@ -78,6 +78,10 @@ def _get_buildkite_queue(cloud: str, remote_server: bool,
     Kubernetes has low concurrency on a single VM originally,
     so remote-server won't drain VM resources, we can reuse the same queue.
     """
+    env_queue = os.environ.get('BUILDKITE_QUEUE', None)
+    if env_queue:
+        return env_queue
+
     if '--env-file' in args:
         # TODO(zeping): Remove this when test requirements become more varied.
         # Currently, tests specifying --env-file and a custom API server endpoint are assigned to
