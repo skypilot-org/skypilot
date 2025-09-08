@@ -345,6 +345,10 @@ class SeewebNodeProvider:
             if s.notes and s.notes.startswith(self.cluster_name)
         ]
 
+    def query_cluster_nodes(self):
+        """Public wrapper for querying cluster nodes for this cluster."""
+        return self._query_cluster_nodes()
+
     def _get_head_instance_id(self) -> Optional[str]:
         """Return head instance id for this cluster.
 
@@ -361,6 +365,10 @@ class SeewebNodeProvider:
             except Exception:  # pylint: disable=broad-except
                 continue
         return nodes[0].name if nodes else None
+
+    def get_head_instance_id(self) -> Optional[str]:
+        """Public wrapper for getting head instance id."""
+        return self._get_head_instance_id()
 
     def _create_server(self):
         """POST /servers with complete payload."""
@@ -460,11 +468,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     provider.run_instances(config.node_config, config.count)
 
     # Find the head node using notes convention
-    cluster_nodes = provider._query_cluster_nodes()
+    cluster_nodes = provider.query_cluster_nodes()
     if not cluster_nodes:
         raise RuntimeError(
             f'No nodes found for cluster {cluster_name_on_cloud}')
-    head_node_id = provider._get_head_instance_id()
+    head_node_id = provider.get_head_instance_id()
     assert head_node_id is not None, 'head_instance_id should not be None'
 
     return ProvisionRecord(
