@@ -99,7 +99,7 @@ def reclaim_memory():
         for index, stat in enumerate(top_stats[:20]):
             logger.info(f'{index + 1:2d}. {stat}')
             if stat.size > 2 * 1024 * 1024:
-                for line in stat.traceback.format():
+                for line in stat.traceback.format(limit=20):
                     logger.info(line)
         time.sleep(30)
 
