@@ -2,6 +2,7 @@
 
 import dataclasses
 import enum
+from typing import Optional
 
 from sky import sky_logging
 from sky.server import constants as server_constants
@@ -62,6 +63,7 @@ class QueueBackend(enum.Enum):
 class WorkerConfig:
     garanteed_parallelism: int
     burstable_parallelism: int
+    num_db_connections_per_worker: int
 
 
 @dataclasses.dataclass
@@ -69,10 +71,13 @@ class ServerConfig:
     num_server_workers: int
     long_worker_config: WorkerConfig
     short_worker_config: WorkerConfig
+    num_db_connections_per_worker: int
     queue_backend: QueueBackend
 
 
-def compute_server_config(deploy: bool, quiet: bool = False) -> ServerConfig:
+def compute_server_config(deploy: bool,
+                          max_db_connections: Optional[int] = None,
+                          quiet: bool = False) -> ServerConfig:
     """Compute the server config based on environment.
 
     We have different assumptions for the resources in different deployment
@@ -115,7 +120,17 @@ def compute_server_config(deploy: bool, quiet: bool = False) -> ServerConfig:
     queue_backend = QueueBackend.MULTIPROCESSING
     burstable_parallel_for_long = 0
     burstable_parallel_for_short = 0
+    # if num_db_connections_per_worker is 0, server will use NullPool
+    # to conserve the number of concurrent db connections.
+    # This could lead to performance degradation.
+    num_db_connections_per_worker = 0
     num_server_workers = cpu_count
+
+    # +1 for the event loop running the main process
+    # and gc daemons in the '__main__' body of sky/server/server.py
+    max_parallel_all_workers = (max_parallel_for_long + max_parallel_for_short +
+                                num_server_workers + 1)
+
     if not deploy:
         # For local mode, use local queue backend since we only run 1 uvicorn
         # worker in local mode and no multiprocessing is needed.
@@ -146,25 +161,37 @@ def compute_server_config(deploy: bool, quiet: bool = False) -> ServerConfig:
                 logger.warning(
                     'SkyPilot API server will run in low resource mode because '
                     'the available memory is less than '
-                    f'{max_memory}GB.')
+                    f'{server_constants.MIN_AVAIL_MEM_GB}GB.')
+    elif max_db_connections is not None:
+        if max_parallel_all_workers > max_db_connections:
+            if not quiet:
+                logger.warning(
+                    f'Max parallel all workers ({max_parallel_all_workers}) '
+                    'is greater than max db connections '
+                    f'({max_db_connections}). Increase the number of max db '
+                    f'connections to at least {max_parallel_all_workers} for '
+                    'optimal performance.')
+        else:
+            num_db_connections_per_worker = 1
+
     if not quiet:
         logger.info(
             f'SkyPilot API server will start {num_server_workers} server '
             f'processes with {max_parallel_for_long} background workers for '
             f'long requests and will allow at max {max_parallel_for_short} '
-            'short requests in parallel. SkyPilot API server will start '
-            f'{burstable_parallel_for_long} burstable workers for long '
-            f' requests and {burstable_parallel_for_short} burstable workers '
-            'for short requests.')
+            'short requests in parallel.')
     return ServerConfig(
         num_server_workers=num_server_workers,
         queue_backend=queue_backend,
         long_worker_config=WorkerConfig(
             garanteed_parallelism=max_parallel_for_long,
-            burstable_parallelism=burstable_parallel_for_long),
+            burstable_parallelism=burstable_parallel_for_long,
+            num_db_connections_per_worker=num_db_connections_per_worker),
         short_worker_config=WorkerConfig(
             garanteed_parallelism=max_parallel_for_short,
-            burstable_parallelism=burstable_parallel_for_short),
+            burstable_parallelism=burstable_parallel_for_short,
+            num_db_connections_per_worker=num_db_connections_per_worker),
+        num_db_connections_per_worker=num_db_connections_per_worker,
     )
 
 

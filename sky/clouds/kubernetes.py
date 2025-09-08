@@ -1005,7 +1005,7 @@ class Kubernetes(clouds.Cloud):
 
         all_contexts = kubernetes_utils.get_all_kube_context_names()
 
-        if region not in all_contexts:
+        if region and region not in all_contexts:
             raise ValueError(
                 f'Context {region} not found in kubeconfig. Kubernetes only '
                 'supports context names as regions. Available '

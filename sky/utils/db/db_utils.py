@@ -2,16 +2,21 @@
 import asyncio
 import contextlib
 import enum
+import os
+import pathlib
 import sqlite3
 import threading
 import typing
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 
 import aiosqlite
+import aiosqlite.context
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
+from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky import sky_logging
+from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 if typing.TYPE_CHECKING:
@@ -286,11 +291,131 @@ class SQLiteConn(threading.local):
         self.cursor = self.conn.cursor()
         create_table(self.cursor, self.conn)
         self._async_conn: Optional[aiosqlite.Connection] = None
-        self._async_conn_lock = asyncio.Lock()
+        self._async_conn_lock: Optional[asyncio.Lock] = None
 
-    async def async_conn(self) -> aiosqlite.Connection:
+    async def _get_async_conn(self) -> aiosqlite.Connection:
+        """Get the shared aiosqlite connection for current thread.
+
+        Typically, external caller should not get the connection directly,
+        instead, SQLiteConn.{operation}_async methods should be used. This
+        is to avoid txn interleaving on the shared aiosqlite connection.
+        E.g.
+        coroutine 1:
+            A: await write(row1)
+            B: cursor = await conn.execute(read_row1)
+            C: await cursor.fetchall()
+        coroutine 2:
+            D: await write(row2)
+            E: cursor = await conn.execute(read_row2)
+            F: await cursor.fetchall()
+        The A -> B -> D -> E -> C time sequence will cause B and D read at the
+        same snapshot point when B started, thus cause coroutine2 lost the
+        read-after-write consistency. When you are adding new async operations
+        to SQLiteConn, make sure the txn pattern does not cause this issue.
+        """
+        # Python 3.8 binds current event loop to asyncio.Lock(), which requires
+        # a loop available in current thread. Lazy-init the lock to avoid this
+        # dependency. The correctness is guranteed since SQLiteConn is
+        # thread-local so there is no race condition between check and init.
+        if self._async_conn_lock is None:
+            self._async_conn_lock = asyncio.Lock()
         if self._async_conn is None:
             async with self._async_conn_lock:
                 if self._async_conn is None:
+                    # Init logic like requests.init_db_within_lock will handle
+                    # initialization like setting the WAL mode, so we do not
+                    # duplicate that logic here.
                     self._async_conn = await aiosqlite.connect(self.db_path)
         return self._async_conn
+
+    async def execute_and_commit_async(self,
+                                       sql: str,
+                                       parameters: Optional[
+                                           Iterable[Any]] = None) -> None:
+        """Execute the sql and commit the transaction in a sync block."""
+        conn = await self._get_async_conn()
+
+        if parameters is None:
+            parameters = []
+
+        def exec_and_commit(sql: str, parameters: Optional[Iterable[Any]]):
+            # pylint: disable=protected-access
+            conn._conn.execute(sql, parameters)
+            conn._conn.commit()
+
+        # pylint: disable=protected-access
+        await conn._execute(exec_and_commit, sql, parameters)
+
+    @aiosqlite.context.contextmanager
+    async def execute_fetchall_async(self,
+                                     sql: str,
+                                     parameters: Optional[Iterable[Any]] = None
+                                    ) -> Iterable[sqlite3.Row]:
+        conn = await self._get_async_conn()
+        return await conn.execute_fetchall(sql, parameters)
+
+    async def close(self):
+        if self._async_conn is not None:
+            await self._async_conn.close()
+        self.conn.close()
+
+
+_max_connections = 0
+_postgres_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
+_sqlite_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
+
+_db_creation_lock = threading.Lock()
+
+
+def set_max_connections(max_connections: int):
+    global _max_connections
+    _max_connections = max_connections
+
+
+def get_max_connections():
+    return _max_connections
+
+
+def get_engine(db_name: str, async_engine: bool = False):
+    conn_string = None
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
+    if conn_string:
+        if async_engine:
+            conn_string = conn_string.replace('postgresql://',
+                                              'postgresql+asyncpg://')
+            # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
+            # so we should not put it in the cache. Instead, just return.
+            return sqlalchemy_async.create_async_engine(
+                conn_string, poolclass=sqlalchemy.NullPool)
+        with _db_creation_lock:
+            if conn_string not in _postgres_engine_cache:
+                if _max_connections == 0:
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy.create_engine(
+                            conn_string, poolclass=sqlalchemy.pool.NullPool))
+                elif _max_connections == 1:
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy.create_engine(
+                            conn_string, poolclass=sqlalchemy.pool.StaticPool))
+                else:
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy.create_engine(
+                            conn_string,
+                            poolclass=sqlalchemy.pool.QueuePool,
+                            size=_max_connections,
+                            max_overflow=0))
+            engine = _postgres_engine_cache[conn_string]
+    else:
+        db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
+        pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
+        if async_engine:
+            # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
+            # so we should not put it in the cache. Instead, just return.
+            return sqlalchemy_async.create_async_engine(
+                'sqlite+aiosqlite:///' + db_path, connect_args={'timeout': 30})
+        if db_path not in _sqlite_engine_cache:
+            _sqlite_engine_cache[db_path] = sqlalchemy.create_engine(
+                'sqlite:///' + db_path)
+        engine = _sqlite_engine_cache[db_path]
+    return engine

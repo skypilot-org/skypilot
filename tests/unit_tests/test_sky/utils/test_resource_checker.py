@@ -86,13 +86,13 @@ class TestResourceChecker:
         }]
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_for_users_no_resources(
             self, mock_queue, mock_get_clusters):
         """Test resource check passes when user has no active resources."""
         # Setup mocks - no resources
         mock_get_clusters.return_value = []
-        mock_queue.return_value = []
+        mock_queue.return_value = ([], 0, {}, 0)
 
         # Should not raise any exception
         resource_checker.check_no_active_resources_for_users([('user123',
@@ -105,13 +105,13 @@ class TestResourceChecker:
                                            all_users=True)
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_for_users_with_clusters(
             self, mock_queue, mock_get_clusters, sample_clusters):
         """Test resource check fails when user has active clusters."""
         # Setup mocks - user has clusters
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = []
+        mock_queue.return_value = ([], 0, {}, 0)
 
         # Should raise ValueError for user with clusters
         with pytest.raises(ValueError) as exc_info:
@@ -124,13 +124,13 @@ class TestResourceChecker:
         assert "Please terminate these resources first" in error_message
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_for_users_with_jobs(
             self, mock_queue, mock_get_clusters, sample_managed_jobs):
         """Test resource check fails when user has active managed jobs."""
         # Setup mocks - user has jobs
         mock_get_clusters.return_value = []
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
 
         # Should raise ValueError for user with jobs
         with pytest.raises(ValueError) as exc_info:
@@ -144,14 +144,14 @@ class TestResourceChecker:
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
     @mock.patch('sky.utils.resource_checker.global_user_state.get_user')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_for_users_with_mixed_resources(
             self, mock_queue, mock_get_user, mock_get_clusters, sample_clusters,
             sample_managed_jobs, sample_user):
         """Test resource check fails when user has both clusters and jobs."""
         # Setup mocks - user has both clusters and jobs
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
         mock_get_user.return_value = sample_user
 
         # Should raise ValueError for user with both types of resources
@@ -166,14 +166,14 @@ class TestResourceChecker:
         assert "Please terminate these resources first" in error_message
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_for_service_account(
             self, mock_queue, mock_get_clusters, sample_clusters,
             sample_managed_jobs):
         """Test resource check for service account user."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
 
         # Should raise ValueError for service account with resources
         with pytest.raises(ValueError) as exc_info:
@@ -187,14 +187,14 @@ class TestResourceChecker:
         assert "1 active managed job(s): job-002" in error_message
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_for_multiple_users(
             self, mock_queue, mock_get_clusters, sample_clusters,
             sample_managed_jobs):
         """Test resource check for multiple users with mixed results."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
 
         # Should raise ValueError with details for multiple users
         with pytest.raises(ValueError) as exc_info:
@@ -211,7 +211,7 @@ class TestResourceChecker:
         # userclean should not appear in errors since it has no resources
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_jobs_controller_down(
             self, mock_queue, mock_get_clusters, sample_clusters):
         """Test resource check when jobs controller is down."""
@@ -231,7 +231,7 @@ class TestResourceChecker:
         # Should not mention jobs since controller is down
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_for_workspaces(self, mock_queue,
                                                       mock_get_clusters,
                                                       sample_clusters,
@@ -239,7 +239,7 @@ class TestResourceChecker:
         """Test resource check for workspaces."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
 
         # Should raise ValueError for workspace with resources
         with pytest.raises(ValueError) as exc_info:
@@ -253,7 +253,7 @@ class TestResourceChecker:
         assert "1 active managed job(s): job-002" in error_message
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_empty_operations(self, mock_queue,
                                                         mock_get_clusters):
         """Test resource check with empty operations list."""
@@ -266,14 +266,14 @@ class TestResourceChecker:
         mock_queue.assert_not_called()
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_update_operation(self, mock_queue,
                                                         mock_get_clusters,
                                                         sample_clusters):
         """Test resource check for update operations (not just delete)."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = []
+        mock_queue.return_value = ([], 0, {}, 0)
 
         # Should raise ValueError even for update operations with active resources
         with pytest.raises(ValueError) as exc_info:
@@ -285,7 +285,7 @@ class TestResourceChecker:
         assert "1 active cluster(s): cluster-1" in error_message
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_mixed_operations(self, mock_queue,
                                                         mock_get_clusters,
                                                         sample_clusters,
@@ -293,7 +293,7 @@ class TestResourceChecker:
         """Test resource check with mixed update and delete operations."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
 
         # Should handle mixed operations correctly
         with pytest.raises(ValueError) as exc_info:
@@ -306,7 +306,7 @@ class TestResourceChecker:
         assert "Cannot update user 'user456'" in error_message
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.resource_checker.global_user_state.get_all_users')
     def test_check_users_workspaces_active_resources_all_authorized(
             self, mock_get_all_users, mock_queue, mock_get_clusters,
@@ -323,7 +323,7 @@ class TestResourceChecker:
         ]
 
         mock_get_clusters.return_value = workspace_clusters
-        mock_queue.return_value = workspace_jobs
+        mock_queue.return_value = (workspace_jobs, 0, {}, 0)
 
         # All users who have resources in these workspaces
         authorized_users = ['user123', 'user456', 'sa-service123']
@@ -337,7 +337,7 @@ class TestResourceChecker:
         assert missed_users == []
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.resource_checker.global_user_state.get_all_users')
     def test_check_users_workspaces_active_resources_unauthorized_users(
             self, mock_get_all_users, mock_queue, mock_get_clusters,
@@ -345,7 +345,7 @@ class TestResourceChecker:
         """Test when some active resources belong to unauthorized users."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
 
         # Mock user data for name resolution
         class MockUser:
@@ -375,14 +375,14 @@ class TestResourceChecker:
         assert len(missed_users) == 2
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.resource_checker.global_user_state.get_all_users')
     def test_check_users_workspaces_active_resources_no_resources(
             self, mock_get_all_users, mock_queue, mock_get_clusters):
         """Test when there are no active resources in specified workspaces."""
         # Setup mocks - no resources
         mock_get_clusters.return_value = []
-        mock_queue.return_value = []
+        mock_queue.return_value = ([], 0, {}, 0)
 
         authorized_users = ['user123', 'user456']
         workspaces = ['empty-workspace']
@@ -395,7 +395,7 @@ class TestResourceChecker:
         assert missed_users == []
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.resource_checker.global_user_state.get_all_users')
     def test_check_users_workspaces_active_resources_clusters_only(
             self, mock_get_all_users, mock_queue, mock_get_clusters,
@@ -403,7 +403,7 @@ class TestResourceChecker:
         """Test when only clusters exist (no managed jobs)."""
         # Setup mocks - only clusters
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = []
+        mock_queue.return_value = ([], 0, {}, 0)
 
         # Mock user data
         class MockUser:
@@ -428,7 +428,7 @@ class TestResourceChecker:
         assert 'bob@company.com' in missed_users
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.resource_checker.global_user_state.get_all_users')
     def test_check_users_workspaces_active_resources_jobs_only(
             self, mock_get_all_users, mock_queue, mock_get_clusters,
@@ -436,7 +436,7 @@ class TestResourceChecker:
         """Test when only managed jobs exist (no clusters)."""
         # Setup mocks - only jobs
         mock_get_clusters.return_value = []
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
 
         # Mock user data
         class MockUser:
@@ -461,14 +461,14 @@ class TestResourceChecker:
         assert 'service-account-1' in missed_users
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_get_active_resources_for_workspaces_multiple_workspaces(
             self, mock_queue, mock_get_clusters, sample_clusters,
             sample_managed_jobs):
         """Test getting active resources for multiple workspaces."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
 
         workspaces = ['default', 'production']
 
@@ -486,14 +486,14 @@ class TestResourceChecker:
             assert job['workspace'] in workspaces
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_get_active_resources_for_workspaces_single_workspace(
             self, mock_queue, mock_get_clusters, sample_clusters,
             sample_managed_jobs):
         """Test getting active resources for a single workspace."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
 
         workspaces = ['default']
 
@@ -518,7 +518,7 @@ class TestResourceChecker:
             assert job['workspace'] == 'default'
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_get_active_resources_for_workspaces_empty_list(
             self, mock_queue, mock_get_clusters):
         """Test getting active resources for empty workspace list."""
@@ -534,14 +534,14 @@ class TestResourceChecker:
         mock_queue.assert_not_called()
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_get_active_resources_for_workspaces_nonexistent_workspace(
             self, mock_queue, mock_get_clusters, sample_clusters,
             sample_managed_jobs):
         """Test getting active resources for non-existent workspace."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
 
         workspaces = ['nonexistent-workspace']
 
@@ -553,7 +553,7 @@ class TestResourceChecker:
         assert jobs == []
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.resource_checker.global_user_state.get_all_users')
     def test_check_users_workspaces_active_resources_user_without_name(
             self, mock_get_all_users, mock_queue, mock_get_clusters,
@@ -561,7 +561,7 @@ class TestResourceChecker:
         """Test handling users without names (fallback to user ID)."""
         # Setup mocks - only clusters
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = []
+        mock_queue.return_value = ([], 0, {}, 0)
 
         # Mock user data with some users having no name
         class MockUser:
@@ -586,7 +586,7 @@ class TestResourceChecker:
         assert 'service-account-1' in missed_users  # Use name when available
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_get_active_resources_for_workspaces_jobs_controller_down(
             self, mock_queue, mock_get_clusters, sample_clusters):
         """Test handling when jobs controller is down."""
@@ -608,14 +608,14 @@ class TestResourceChecker:
         assert jobs == []  # Should be empty due to controller being down
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     def test_get_active_resources_by_names_filter_functionality(
             self, mock_queue, mock_get_clusters, sample_clusters,
             sample_managed_jobs):
         """Test the generic _get_active_resources_by_names function."""
         # Setup mocks
         mock_get_clusters.return_value = sample_clusters
-        mock_queue.return_value = sample_managed_jobs
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0)
 
         # Create a custom filter factory for testing
         def test_filter_factory(resource_names):
@@ -646,7 +646,7 @@ class TestResourceChecker:
             assert job['user_hash'] in user_ids
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.resource_checker.global_user_state.get_all_users')
     def test_check_users_workspaces_active_resources_empty_workspaces(
             self, mock_get_all_users, mock_queue, mock_get_clusters):
@@ -667,7 +667,7 @@ class TestResourceChecker:
         mock_get_all_users.assert_not_called()
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
-    @mock.patch('sky.jobs.server.core.queue')
+    @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.resource_checker.global_user_state.get_all_users')
     def test_check_users_workspaces_active_resources_mixed_workspace_resources(
             self, mock_get_all_users, mock_queue, mock_get_clusters):
@@ -697,7 +697,7 @@ class TestResourceChecker:
         }]
 
         mock_get_clusters.return_value = mixed_clusters
-        mock_queue.return_value = mixed_jobs
+        mock_queue.return_value = (mixed_jobs, 0, {}, 0)
 
         # Mock user data
         class MockUser:

@@ -591,8 +591,50 @@ def _maybe_restart_controller(
     return handle
 
 
+# For backwards compatibility
+# TODO(hailong): Remove before 0.12.0.
 @usage_lib.entrypoint
-def queue(
+def queue(refresh: bool,
+          skip_finished: bool = False,
+          all_users: bool = False,
+          job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Gets statuses of managed jobs.
+
+    Please refer to sky.cli.job_queue for documentation.
+
+    Returns:
+        [
+            {
+                'job_id': int,
+                'job_name': str,
+                'resources': str,
+                'submitted_at': (float) timestamp of submission,
+                'end_at': (float) timestamp of end,
+                'job_duration': (float) duration in seconds,
+                'recovery_count': (int) Number of retries,
+                'status': (sky.jobs.ManagedJobStatus) of the job,
+                'cluster_resources': (str) resources of the cluster,
+                'region': (str) region of the cluster,
+                'user_name': (Optional[str]) job creator's user name,
+                'user_hash': (str) job creator's user hash,
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+            }
+        ]
+    Raises:
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
+            does not exist.
+        RuntimeError: if failed to get the managed jobs with ssh.
+    """
+    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids, None,
+                             None, None, None, None, None, None)
+
+    return jobs
+
+
+@usage_lib.entrypoint
+def queue_v2(
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
@@ -606,7 +648,7 @@ def queue(
     statuses: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Gets statuses of managed jobs.
+    """Gets statuses of managed jobs with filtering.
 
     Please refer to sky.cli.job_queue for documentation.
 

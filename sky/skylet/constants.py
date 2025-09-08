@@ -362,7 +362,7 @@ SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
 
 RCLONE_CONFIG_DIR = '~/.config/rclone'
 RCLONE_CONFIG_PATH = f'{RCLONE_CONFIG_DIR}/rclone.conf'
-RCLONE_LOG_DIR = '~/.sky/rclone_log'
+RCLONE_MOUNT_CACHED_LOG_DIR = '~/.sky/rclone_log'
 RCLONE_CACHE_DIR = '~/.cache/rclone'
 RCLONE_CACHE_REFRESH_INTERVAL = 10
 
@@ -506,3 +506,6 @@ COST_REPORT_DEFAULT_DAYS = 30
 
 # The directory for file locks.
 SKY_LOCKS_DIR = os.path.expanduser('~/.sky/locks')
+
+ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
+                                 'DEBUG_LOOP_LAG_THRESHOLD_MS')

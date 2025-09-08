@@ -1047,8 +1047,10 @@ def stop_instances(
     raise NotImplementedError()
 
 
-def _delete_services(name_prefix: str, namespace: str,
-                     context: Optional[str]) -> None:
+def _delete_services(name_prefix: str,
+                     namespace: str,
+                     context: Optional[str],
+                     skip_ssh_service: bool = False) -> None:
     """Delete services with the given name prefix.
 
     Args:
@@ -1057,7 +1059,9 @@ def _delete_services(name_prefix: str, namespace: str,
         context: Kubernetes context
     """
     # TODO(andy): We should use tag for the service filter.
-    for service_name in [name_prefix, f'{name_prefix}-ssh']:
+    services = ([name_prefix, f'{name_prefix}-ssh']
+                if not skip_ssh_service else [name_prefix])
+    for service_name in services:
         # Since we are not saving this lambda, it's a false positive.
         # TODO(andyl): Wait for
         # https://github.com/pylint-dev/pylint/issues/5263.
@@ -1083,6 +1087,9 @@ def _terminate_node(namespace: str,
         # Delete services for the head pod
         # services are specified in sky/templates/kubernetes-ray.yml.j2
         _delete_services(pod_name, namespace, context)
+    else:
+        # No ssh service is created for worker pods
+        _delete_services(pod_name, namespace, context, skip_ssh_service=True)
 
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
