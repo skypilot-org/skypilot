@@ -575,6 +575,8 @@ def _maybe_restart_controller(
     return handle
 
 
+# For backwards compatibility
+# TODO(hailong): Remove before 0.12.0.
 @usage_lib.entrypoint
 def queue(refresh: bool,
           skip_finished: bool = False,
@@ -609,60 +611,8 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    handle = _maybe_restart_controller(refresh,
-                                       stopped_message='No in-progress '
-                                       'managed jobs.',
-                                       spinner_message='Checking '
-                                       'managed jobs')
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-
-    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
-    returncode, job_table_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
-
-    if returncode != 0:
-        logger.error(job_table_payload + stderr)
-        raise RuntimeError('Failed to fetch managed jobs with returncode: '
-                           f'{returncode}.\n{job_table_payload + stderr}')
-
-    jobs, _, _, _, _ = managed_job_utils.load_managed_job_queue(
-        job_table_payload)
-
-    if not all_users:
-
-        def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
-            user_hash = job.get('user_hash', None)
-            if user_hash is None:
-                # For backwards compatibility, we show jobs that do not have a
-                # user_hash. TODO(cooperc): Remove before 0.12.0.
-                return True
-            return user_hash == common_utils.get_user_hash()
-
-        jobs = list(filter(user_hash_matches_or_missing, jobs))
-
-    accessible_workspaces = workspaces_core.get_workspaces()
-    jobs = list(
-        filter(
-            lambda job: job.get('workspace', skylet_constants.
-                                SKYPILOT_DEFAULT_WORKSPACE) in
-            accessible_workspaces, jobs))
-
-    if skip_finished:
-        # Filter out the finished jobs. If a multi-task job is partially
-        # finished, we will include all its tasks.
-        non_finished_tasks = list(
-            filter(lambda job: not job['status'].is_terminal(), jobs))
-        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
-        jobs = list(
-            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
-
-    if job_ids:
-        jobs = [job for job in jobs if job['job_id'] in job_ids]
+    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids, None,
+                             None, None, None, None, None, None)
 
     return jobs
 

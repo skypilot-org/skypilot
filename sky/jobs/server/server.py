@@ -32,6 +32,8 @@ async def launch(request: fastapi.Request,
     )
 
 
+# For backwards compatibility
+# TODO(hailong): Remove before 0.12.0.
 @router.post('/queue')
 async def queue(request: fastapi.Request,
                 jobs_queue_body: payloads.JobsQueueBody) -> None:
