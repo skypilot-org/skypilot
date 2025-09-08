@@ -5962,23 +5962,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
                 mount_cmd = store.mount_cached_command(dst)
                 action_message = 'Mounting cached mode'
-            mount_cmd = (
-                "bash -lc " + shlex.quote(
-                    "lock=/var/tmp/sky_mount_$(echo -n {dst} | tr -c 'A-Za-z0-9_.-' '_'); "
-                    "exec 300>$lock; "
-                    # try to take EX lock for up to 60s
-                    "if flock -x -w 60 300; then "
-                    f"  {mount_cmd}; "
-                    "else "
-                    # didn't get lock -> wait up to 180s for someone else's mount
-                    "  for i in $(seq 1 180); do "
-                    f"    if findmnt -rn -T {shlex.quote(dst)} >/dev/null 2>&1; then exit 0; fi; "
-                    "    sleep 1; "
-                    "  done; "
-                    "  exit 1; "
-                    "fi"
-                ).format(dst=shlex.quote(dst))
+            dst_q = shlex.quote(dst)
+
+            script = (
+                f"lock=/var/tmp/sky_mount_$(echo -n {dst_q} | tr -c 'A-Za-z0-9_.-' '_'); "
+                "exec 300>$lock; "
+                "if flock -x -w 60 300; then "
+                f"{mount_cmd}; "
+                "else "
+                "for i in $(seq 1 180); do "
+                f"if findmnt -rn -T {dst_q} >/dev/null 2>&1; then exit 0; fi; "
+                "sleep 1; "
+                "done; "
+                "exit 1; "
+                "fi"
             )
+
+            mount_cmd = "bash -lc " + shlex.quote(script)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
