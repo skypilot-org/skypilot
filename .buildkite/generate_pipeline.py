@@ -25,7 +25,6 @@ import argparse
 import collections
 import os
 import re
-import requests
 import subprocess
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -33,6 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import click
 from conftest import cloud_to_pytest_keyword
 from conftest import default_clouds_to_run
+import requests
 import yaml
 
 DEFAULT_CLOUDS_TO_RUN = default_clouds_to_run
@@ -432,7 +432,8 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
         # to run by parameter.
         if base_branches:
             for branch in base_branches:
-                if 'test_quick_tests_core.py' in test_file and branch != 'master':
+                if ('test_quick_tests_core.py' in test_file and
+                     branch != 'master'):
                     continue
                 pipeline = _generate_pipeline(test_file,
                                               args + f'--base-branch {branch}',
