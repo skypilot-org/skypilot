@@ -198,6 +198,7 @@ auth:
     cookie-refresh: null  # refresh tokens after this duration (Access token lifespan minus 1 min)
     # @schema type: [string, number, null]
     cookie-expire: null  # cookie expiration time (should match refresh token lifespan)
+    use-https: false
 
   # Service account token based authentication for the API server
   # @schema type: [object, null]

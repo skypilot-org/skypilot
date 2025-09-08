@@ -94,10 +94,6 @@ Add the following to your ``~/.sky/config.yaml`` file:
     aws:
         use_ssm: true
 
-.. note::
-
-    - The ``jq`` command-line JSON processor must be installed on your system.
-
 Once configured, SkyPilot will automatically use SSM for all SSH connections to your AWS instances in the specified regions.
 
 

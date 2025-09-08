@@ -367,10 +367,10 @@ class Nebius(clouds.Cloud):
                       f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long
         if not nebius.is_token_or_cred_file_exist():
             return False, f'{token_cred_msg}'
-        sdk = nebius.sdk()
         tenant_id = nebius.get_tenant_id()
         if tenant_id is None:
             return False, f'{tenant_msg}'
+        sdk = nebius.sdk()
         try:
             service = nebius.iam().ProjectServiceClient(sdk)
             service.list(
