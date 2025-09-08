@@ -239,10 +239,23 @@ To use Microsoft Entra ID, you will need to add an "App registration" in the Mic
      .. note::
         Microsoft Entra ID requires HTTPS, so make sure to use ``https://`` rather than ``http://`` in your redirect URI.
 
-2. Click **Register**. You will need the **Client ID** (``Application (client) ID``)
+2. Click **Register**. You will need the **Client ID** (``Application (client) ID``) and **Tenant ID** (``Directory (tenant) ID``) from the overview page.
 
 3. In the **App registrations** detail page for the newly created application, click **Add a certificate or secret** and create a new client secret.
    You will need the **Client Secret** in the next step.
+
+**Microsoft Entra ID example values.yaml:**
+
+.. code-block:: yaml
+
+    auth:
+      oauth:
+        enabled: true
+        oidc-issuer-url: https://login.microsoftonline.com/<TENANT_ID>/v2.0
+        client-id: <CLIENT_ID>
+        client-secret: <CLIENT_SECRET>
+        use-https: true
+        email-domain: <YOUR_DOMAIN>  # optional
 
 You can now proceed to :ref:`the Helm deployment <oidc-oauth2-proxy-helm>`.
 
@@ -269,6 +282,8 @@ Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-o
   * **Okta**: Your Okta login URL, like ``https://acme-corp.okta.com``
 
   * **Google Workspace**: Set to ``https://accounts.google.com``
+
+  * **Microsoft Entra ID**: Set to ``https://login.microsoftonline.com/<TENANT_ID>/v2.0``, where ``<TENANT_ID>`` is your Microsoft Entra ID tenant ID
 
 * ``<EMAIL DOMAIN>``: Optionally :ref:`restrict login to specific email domains <helm-values-ingress-oauth2-proxy-email-domain>`
 
