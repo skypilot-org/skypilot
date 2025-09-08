@@ -451,7 +451,6 @@ async def tail_logs(cluster_name: str,
                     follow: bool,
                     tail: int = 0,
                     output_stream: Optional['io.TextIOBase'] = None,
-                    *,
                     credentials: Optional[Dict[str, Any]] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
     return await context_utils.to_thread(sdk.tail_logs, cluster_name, job_id,
@@ -463,7 +462,6 @@ async def tail_logs(cluster_name: str,
 @annotations.client_api
 async def download_logs(cluster_name: str,
                         job_ids: Optional[List[str]],
-                        *,
                         credentials: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
     """Async version of download_logs() that downloads the logs of jobs."""
     return await context_utils.to_thread(sdk.download_logs, cluster_name,

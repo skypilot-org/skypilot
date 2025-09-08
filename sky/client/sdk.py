@@ -976,7 +976,6 @@ def tail_provision_logs(cluster_name: str,
 @annotations.client_api
 def download_logs(cluster_name: str,
                   job_ids: Optional[List[str]],
-                  *,
                   credentials: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
     """Downloads the logs of jobs.
 
