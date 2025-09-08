@@ -95,10 +95,10 @@ def reclaim_memory():
         current, peak = tracemalloc.get_traced_memory()
         logger.info(f'Traced memory: {current/1024/1024}MB, peak: {peak/1024/1024}MB')
         snapshot = tracemalloc.take_snapshot()
-        top_stats = snapshot.statistics('lineno')
-        for index, stat in enumerate(top_stats[:20]):
+        top_stats = snapshot.statistics('traceback')
+        for index, stat in enumerate(top_stats[:30]):
             logger.info(f'{index + 1:2d}. {stat}')
-            if stat.size > 2 * 1024 * 1024:
+            if stat.size > 1024 * 1024:
                 for line in stat.traceback.format(limit=20):
                     logger.info(line)
         time.sleep(30)
@@ -235,7 +235,7 @@ class Server(uvicorn.Server):
             event_loop.set_debug(True)
             event_loop.slow_callback_duration = lag_threshold
         
-        tracemalloc.start(25)
+        tracemalloc.start(nframe=25)
         
         threading.Thread(target=metrics_lib.process_monitor,
                          args=('server',),
