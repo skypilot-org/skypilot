@@ -98,8 +98,9 @@ def reclaim_memory():
         top_stats = snapshot.statistics('traceback')
         for index, stat in enumerate(top_stats[:30]):
             logger.info(f'{index + 1:2d}. {stat}')
-            for line in stat.traceback.format(limit=20):
-                logger.info(line)
+            if stat.size > 1024 * 1024:
+                for line in stat.traceback.format(limit=20):
+                    logger.info(line)
         time.sleep(30)
 
 class Server(uvicorn.Server):
@@ -234,7 +235,7 @@ class Server(uvicorn.Server):
             event_loop.set_debug(True)
             event_loop.slow_callback_duration = lag_threshold
         
-        tracemalloc.start(nframe=25)
+        tracemalloc.start(25)
         
         threading.Thread(target=metrics_lib.process_monitor,
                          args=('server',),
