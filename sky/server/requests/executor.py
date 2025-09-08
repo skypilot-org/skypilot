@@ -284,34 +284,34 @@ def override_request_env_and_config(
         request_id: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
-    # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API server
-    # affecting client requests. If set on the client side, it will be
-    # overridden by the request body.
-    os.environ.pop('SKYPILOT_DEBUG', None)
-    # Remove the db connection uri from client supplied env vars, as the
-    # client should not set the db string on server side.
-    request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
-    os.environ.update(request_body.env_vars)
-    # Note: may be overridden by AuthProxyMiddleware.
-    # TODO(zhwu): we need to make the entire request a context available to the
-    # entire request execution, so that we can access info like user through
-    # the execution.
-    user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
-                       name=request_body.env_vars[constants.USER_ENV_VAR])
-    global_user_state.add_or_update_user(user)
-    # Refetch the user to get the latest user info, including the created_at
-    # field.
-    user = global_user_state.get_user(user.id)
-
-    # Force color to be enabled.
-    os.environ['CLICOLOR_FORCE'] = '1'
-    server_common.reload_for_new_request(
-        client_entrypoint=request_body.entrypoint,
-        client_command=request_body.entrypoint_command,
-        using_remote_api_server=request_body.using_remote_api_server,
-        user=user,
-        request_id=request_id)
     try:
+        # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API
+        # server affecting client requests. If set on the client side, it will
+        # be overridden by the request body.
+        os.environ.pop('SKYPILOT_DEBUG', None)
+        # Remove the db connection uri from client supplied env vars, as the
+        # client should not set the db string on server side.
+        request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+        os.environ.update(request_body.env_vars)
+        # Note: may be overridden by AuthProxyMiddleware.
+        # TODO(zhwu): we need to make the entire request a context available to
+        # the entire request execution, so that we can access info like user
+        # through the execution.
+        user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
+                           name=request_body.env_vars[constants.USER_ENV_VAR])
+        global_user_state.add_or_update_user(user)
+        # Refetch the user to get the latest user info, including the created_at
+        # field.
+        user = global_user_state.get_user(user.id)
+
+        # Force color to be enabled.
+        os.environ['CLICOLOR_FORCE'] = '1'
+        server_common.reload_for_new_request(
+            client_entrypoint=request_body.entrypoint,
+            client_command=request_body.entrypoint_command,
+            using_remote_api_server=request_body.using_remote_api_server,
+            user=user,
+            request_id=request_id)
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
