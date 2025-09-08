@@ -82,6 +82,13 @@ def add_timestamp_prefix_for_server_logs() -> None:
         uvicorn_logger.addHandler(stream_handler)
 
 
+def reclaim_memory():
+    from sky.utils import common_utils
+    while True:
+        common_utils.release_memory()
+        time.sleep(30)
+
+
 class Server(uvicorn.Server):
     """Server wrapper for uvicorn.
 
@@ -216,6 +223,8 @@ class Server(uvicorn.Server):
         threading.Thread(target=metrics_lib.process_monitor,
                          args=('server',),
                          daemon=True).start()
+        threading.Thread(target=reclaim_memory,
+                    daemon=True).start()
         with self.capture_signals():
             asyncio.run(self.serve(*args, **kwargs))
 
