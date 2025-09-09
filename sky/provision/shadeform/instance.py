@@ -128,10 +128,38 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         instance_name = f'{cluster_name_on_cloud}-{node_type}'
 
         # Extract configuration from node_config
+
+        # The node_config contains instance specs including InstanceType
+        # which follows the format: {cloud_provider}_{instance_type}
+        # (e.g., "massedcompute_A6000_basex2")
         node_config = config.node_config
-        instance_type_split = node_config['InstanceType'].split('_')
-        instance_type = '_'.join(instance_type_split[1:])
+        assert 'InstanceType' in node_config, \
+            'InstanceType must be present in node_config'
+
+        # Parse the instance type to extract cloud provider and instance specs
+        # Expected format: "{cloud}_{instance_type}" where cloud is provider
+        # (massedcompute, scaleway, lambda, etc.)
+        instance_type_full = node_config['InstanceType']
+        assert (isinstance(instance_type_full, str) and
+                '_' in instance_type_full), \
+            f'InstanceType must be in format cloud_instance_type, got: ' \
+            f'{instance_type_full}'
+
+        instance_type_split = instance_type_full.split('_')
+        assert len(instance_type_split) >= 2, \
+            f'InstanceType must contain at least one underscore, got: ' \
+            f'{instance_type_full}'
+
+        # Extract cloud provider (first part) and instance type (remaining)
+        # Example: "massedcompute_A6000_basex2" -> cloud="massedcompute",
+        # instance_type="A6000_basex2"
         cloud = instance_type_split[0]
+        instance_type = '_'.join(instance_type_split[1:])
+
+        assert cloud, 'Cloud provider cannot be empty'
+        assert instance_type, 'Instance type cannot be empty'
+
+        # Get SSH key ID for authentication - this is optional and may be None
         ssh_key_id = config.authentication_config.get('ssh_key_id')
 
         create_config = {
