@@ -77,16 +77,29 @@ def _try_request_with_backoff(
     backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF_SECONDS,
                                    max_backoff_factor=MAX_BACKOFF_FACTOR)
     for i in range(MAX_ATTEMPTS):
+        timeout = 30
         if method == 'get':
-            response = requests.get(url, headers=headers, params=data)
+            response = requests.get(url,
+                                    headers=headers,
+                                    params=data,
+                                    timeout=timeout)
         elif method == 'post':
-            response = requests.post(url, headers=headers, json=data)
+            response = requests.post(url,
+                                     headers=headers,
+                                     json=data,
+                                     timeout=timeout)
         elif method == 'put':
-            response = requests.put(url, headers=headers, json=data)
+            response = requests.put(url,
+                                    headers=headers,
+                                    json=data,
+                                    timeout=timeout)
         elif method == 'patch':
-            response = requests.patch(url, headers=headers, json=data)
+            response = requests.patch(url,
+                                      headers=headers,
+                                      json=data,
+                                      timeout=timeout)
         elif method == 'delete':
-            response = requests.delete(url, headers=headers)
+            response = requests.delete(url, headers=headers, timeout=timeout)
         else:
             raise ValueError(f'Unsupported requests method: {method}')
         # If rate limited, wait and try again
