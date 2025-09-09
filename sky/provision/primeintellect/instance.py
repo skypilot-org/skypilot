@@ -387,7 +387,7 @@ def get_cluster_info(
             'sshConnection'), 'sshConnection cannot be null anymore'
 
         ssh_connection = instance['sshConnection']
-        parsed_user_for_port, ssh_port = parse_ssh_connection(ssh_connection)
+        _, ssh_port = parse_ssh_connection(ssh_connection)
 
         external_ip = instance['ip']
         if isinstance(external_ip, list):
