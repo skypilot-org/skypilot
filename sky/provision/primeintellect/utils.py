@@ -39,7 +39,14 @@ class PrimeintellectResourcesUnavailableError(PrimeintellectAPIError):
 
 
 def _parse_api_error(response: Any) -> Tuple[str, bool]:
-    """Parse API error response to extract meaningful error messages."""
+    """Parse API error response to extract meaningful error messages.
+
+    Returns:
+        Tuple[str, bool]:
+        - str: A human-readable error message parsed from the API response.
+        - bool: True if the error indicates resource unavailability (e.g.,
+          capacity issues or quota/limit exceeded), otherwise False.
+    """
     try:
         if hasattr(response, 'json'):
             error_data = response.json()
