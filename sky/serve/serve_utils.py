@@ -251,7 +251,14 @@ def apply_change_batch(change_batch: List[Dict[str, Any]], service_name: str,
                        logger: logging.Logger) -> None:
     if not change_batch:
         return
-    assert target_hosted_zone_id is not None
+    if target_hosted_zone_id is None:
+        # Do not fail hard during cleanup; skip DNS changes but keep
+        # terminating replicas to avoid resource leaks.
+        logger.warning(
+            'Skipping Route53 change batch for %s: target_hosted_zone_id is '
+            'not set. Records may remain until manually cleaned.',
+            service_name)
+        return
     # TODO(tian): Fix this import hack.
     import boto3  # pylint: disable=import-outside-toplevel
     client = boto3.client('route53')

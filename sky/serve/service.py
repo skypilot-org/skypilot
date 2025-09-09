@@ -115,14 +115,20 @@ def _cleanup(service_name: str,
                     lb_region = lb_record['handle'].launched_resources.region
                     lb_ip = serve_utils.get_cluster_ip(cn)
                     if lb_ip is not None:
-                        # Hosted zone must be set for external LBs.
-                        # TODO(tian): Directly query all related records,
-                        # so we don't need the LB IP anymore.
-                        assert hosted_zone is not None
-                        change_batch.append(
-                            serve_utils.get_route53_change(
-                                'DELETE', service_name, hosted_zone, 'A',
-                                lb_region, lb_ip))
+                        # Hosted zone is needed for Route53 cleanup. If
+                        # missing, skip DNS record deletion but continue
+                        # terminating replicas to avoid resource leak.
+                        if (hosted_zone is None or
+                                service_spec.target_hosted_zone_id is None):
+                            logger.warning(
+                                'Skipping Route53 deletion for external LB '
+                                '%s: hosted_zone / target_hosted_zone_id not '
+                                'set.', cn)
+                        else:
+                            change_batch.append(
+                                serve_utils.get_route53_change(
+                                    'DELETE', service_name, hosted_zone, 'A',
+                                    lb_region, lb_ip))
                 # If lb_record is None or the ip is None, that means the LB does
                 # not have an IP address yet, which means the record is not
                 # added to Route53 yet. Hence we skip the cleanup for it.
@@ -335,7 +341,15 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             force=True)
         for process in process_to_kill:
             process.join()
-        failed = _cleanup(service_name, service_spec)
+        failed = False
+        try:
+            failed = _cleanup(service_name, service_spec)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Cleanup for service %s raised an exception: %s',
+                         service_name, common_utils.format_exception(e))
+            with ux_utils.enable_traceback():
+                logger.error(f'  Traceback: {traceback.format_exc()}')
+            failed = True
         lb_svc_name = serve_utils.format_lb_service_name(service_name)
         if failed:
             for sn in [lb_svc_name, service_name]:

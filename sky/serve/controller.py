@@ -84,15 +84,20 @@ class SkyServeController:
                 lb_region = lb_record['handle'].launched_resources.region
                 lb_ip = serve_utils.get_cluster_ip(cn)
                 if lb_ip is not None:
-                    # Hosted zone must be set for external LBs.
-                    # TODO(tian): Directly query all related records,
-                    # so we don't need the LB IP anymore.
-                    assert hosted_zone is not None
-                    change_batch.append(
-                        serve_utils.get_route53_change('DELETE',
-                                                       self._service_name,
-                                                       hosted_zone, 'A',
-                                                       lb_region, lb_ip))
+                    # Hosted zone is needed for Route53 cleanup. If missing,
+                    # skip DNS record deletion but continue terminating LB.
+                    if (hosted_zone is None or
+                            ss.target_hosted_zone_id is None):
+                        logger.warning(
+                            'Skipping Route53 deletion for external LB %s: '
+                            'hosted_zone / target_hosted_zone_id not set.',
+                            cn)
+                    else:
+                        change_batch.append(
+                            serve_utils.get_route53_change('DELETE',
+                                                           self._service_name,
+                                                           hosted_zone, 'A',
+                                                           lb_region, lb_ip))
             assert self._lb_replica_manager is not None
             self._lb_replica_manager.scale_down(info.replica_id,
                                                 purge=True,
