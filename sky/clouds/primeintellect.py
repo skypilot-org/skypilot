@@ -6,12 +6,13 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
-from sky.provision.primeintellect import utils
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.provision.primeintellect import utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+    from sky.volumes import volume as volume_lib
 
 CredentialCheckResult = Tuple[bool, Optional[Union[str, Dict[str, str]]]]
 
@@ -36,7 +37,7 @@ class PrimeIntellect(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             ('Custom network tier not supported yet.'),
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
-            ('Custom multi-network not supported yet.'),
+            ('Customized multiple network interfaces are not supported'),
         clouds.CloudImplementationFeatures.IMAGE_ID:
             ('Custom image not supported yet.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
@@ -169,7 +170,8 @@ class PrimeIntellect(clouds.Cloud):
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
             dryrun: bool = False,
-            volume_mounts: Optional[List[Any]] = None) -> Dict[str, Any]:
+            volume_mounts: Optional[List['volume_lib.VolumeMount']] = None
+    ) -> Dict[str, Optional[Union[str, bool]]]:
         del dryrun, cluster_name, num_nodes, volume_mounts
         assert zones is not None, (region, zones)
 

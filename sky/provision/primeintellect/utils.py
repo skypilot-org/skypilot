@@ -189,6 +189,9 @@ class PrimeIntellectAPIClient:
                 'gpuType': gpu_type,
                 'gpuCount': int(gpu_count),
                 'diskSize': disk_size,
+                # Prime Intellect API historically required maxPrice.
+                # Set to 0 to indicate on-demand/non-spot pricing.
+                'maxPrice': 0,
             },
             'provider': {
                 'type': provider,
