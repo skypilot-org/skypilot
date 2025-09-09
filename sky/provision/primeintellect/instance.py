@@ -21,6 +21,10 @@ MAX_POLLS_FOR_UP_OR_TERMINATE = MAX_POLLS * 16
 
 logger = sky_logging.init_logger(__name__)
 
+# SSH connection readiness polling constants
+SSH_CONN_MAX_RETRIES = 6
+SSH_CONN_RETRY_INTERVAL_SECONDS = 10
+
 
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]]) -> Dict[str, Any]:
@@ -364,15 +368,14 @@ def get_cluster_info(
     head_ssh_user = None
     for instance_id, instance in running_instances.items():
         retry_count = 0
-        max_retries = 6
+        max_retries = SSH_CONN_MAX_RETRIES
         while (instance.get('sshConnection') is None and
                retry_count < max_retries):
             name = instance.get('name')
-            print(f'SSH connection to '
-                  f'{name} is not ready, '
-                  f'waiting 10 seconds... (attempt {retry_count + 1}/'
-                  f'{max_retries})')
-            time.sleep(10)
+            print(f'SSH connection to {name} is not ready, waiting '
+                  f'{SSH_CONN_RETRY_INTERVAL_SECONDS} seconds... '
+                  f'(attempt {retry_count + 1}/{max_retries})')
+            time.sleep(SSH_CONN_RETRY_INTERVAL_SECONDS)
             retry_count += 1
             running_instances[instance_id] = _get_instance_info(instance_id)
 
