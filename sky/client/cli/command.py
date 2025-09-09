@@ -129,6 +129,7 @@ def _get_cluster_records_and_set_ssh_config(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     verbose: bool = False,
+    fetch_credentials: bool = True,
 ) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
@@ -147,60 +148,62 @@ def _get_cluster_records_and_set_ssh_config(
                             refresh=refresh,
                             all_users=all_users,
                             _include_credentials=True,
-                            _summary_response=not verbose)
+                            _summary_response=not verbose,
+                            _include_credentials=fetch_credentials)
     cluster_records = sdk.stream_and_get(request_id)
     # Update the SSH config for all clusters
-    for record in cluster_records:
-        handle = record['handle']
+    if fetch_credentials:
+        for record in cluster_records:
+            handle = record['handle']
 
-        if not (handle is not None and handle.cached_external_ips is not None
-                and 'credentials' in record):
-            # If the cluster is not UP or does not have credentials available,
-            # we need to remove the cluster from the SSH config.
-            cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
-            continue
+            if not (handle is not None and handle.cached_external_ips is not None
+                    and 'credentials' in record):
+                # If the cluster is not UP or does not have credentials available,
+                # we need to remove the cluster from the SSH config.
+                cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
+                continue
 
-        # During the failover, even though a cluster does not exist, the handle
-        # can still exist in the record, and we check for credentials to avoid
-        # updating the SSH config for non-existent clusters.
-        credentials = record['credentials']
-        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-            # Replace the proxy command to proxy through the SkyPilot API
-            # server with websocket.
-            escaped_key_path = shlex.quote(
-                (cluster_utils.SSHConfigHelper.generate_local_key_file(
-                    handle.cluster_name, credentials)))
-            escaped_executable_path = shlex.quote(sys.executable)
-            escaped_websocket_proxy_path = shlex.quote(
-                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
-            # Instead of directly use websocket_proxy.py, we add an
-            # additional proxy, so that ssh can use the head pod in the
-            # cluster to jump to worker pods.
-            proxy_command = (
-                f'ssh -tt -i {escaped_key_path} '
-                '-o StrictHostKeyChecking=no '
-                '-o UserKnownHostsFile=/dev/null '
-                '-o IdentitiesOnly=yes '
-                '-W \'[%h]:%p\' '
-                f'{handle.ssh_user}@127.0.0.1 '
-                '-o ProxyCommand='
-                # TODO(zhwu): write the template to a temp file, don't use
-                # the one in skypilot repo, to avoid changing the file when
-                # updating skypilot.
-                f'\"{escaped_executable_path} '
-                f'{escaped_websocket_proxy_path} '
-                f'{server_common.get_server_url()} '
-                f'{handle.cluster_name}\"')
-            credentials['ssh_proxy_command'] = proxy_command
+            # During the failover, even though a cluster does not exist, the handle
+            # can still exist in the record, and we check for credentials to avoid
+            # updating the SSH config for non-existent clusters.
+            credentials = record['credentials']
+            if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+                # Replace the proxy command to proxy through the SkyPilot API
+                # server with websocket.
+                escaped_key_path = shlex.quote(
+                    (cluster_utils.SSHConfigHelper.generate_local_key_file(
+                        handle.cluster_name, credentials)))
+                escaped_executable_path = shlex.quote(sys.executable)
+                escaped_websocket_proxy_path = shlex.quote(
+                    f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
+                # Instead of directly use websocket_proxy.py, we add an
+                # additional proxy, so that ssh can use the head pod in the
+                # cluster to jump to worker pods.
+                proxy_command = (
+                    f'ssh -tt -i {escaped_key_path} '
+                    '-o StrictHostKeyChecking=no '
+                    '-o UserKnownHostsFile=/dev/null '
+                    '-o IdentitiesOnly=yes '
+                    '-W \'[%h]:%p\' '
+                    f'{handle.ssh_user}@127.0.0.1 '
+                    '-o ProxyCommand='
+                    # TODO(zhwu): write the template to a temp file, don't use
+                    # the one in skypilot repo, to avoid changing the file when
+                    # updating skypilot.
+                    f'\"{escaped_executable_path} '
+                    f'{escaped_websocket_proxy_path} '
+                    f'{server_common.get_server_url()} '
+                    f'{handle.cluster_name}\"')
+                credentials['ssh_proxy_command'] = proxy_command
 
-        cluster_utils.SSHConfigHelper.add_cluster(
-            handle.cluster_name,
-            handle.cached_external_ips,
-            credentials,
-            handle.cached_external_ssh_ports,
-            handle.docker_user,
-            handle.ssh_user,
-        )
+            cluster_utils.SSHConfigHelper.add_cluster(
+                handle.cluster_name,
+                handle.cached_external_ips,
+                credentials,
+                handle.cached_external_ssh_ports,
+                handle.docker_user,
+                handle.ssh_user,
+            )
 
     # Clean up SSH configs for clusters that do not exist.
     #
@@ -1652,6 +1655,11 @@ def _show_enabled_infra(
               is_flag=True,
               required=False,
               help='Also show cluster pools, if any.')
+@click.option('--fetch-credentials/--no-fetch-credentials',
+              default=True,
+              is_flag=True,
+              required=False,
+              help='Fetch credentials for the clusters.')
 @click.option(
     '--kubernetes',
     '--k8s',
@@ -1672,7 +1680,7 @@ def _show_enabled_infra(
 def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
            show_services: bool, show_pools: bool, kubernetes: bool,
-           clusters: List[str], all_users: bool):
+           clusters: List[str], all_users: bool, fetch_credentials: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1861,7 +1869,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     # Phase 3: Get cluster records and handle special cases
     cluster_records = _get_cluster_records_and_set_ssh_config(
-        query_clusters, refresh_mode, all_users, verbose)
+        query_clusters, refresh_mode, all_users, verbose, fetch_credentials)
 
     # TOOD(zhwu): setup the ssh config for status
     if ip or show_endpoints:
