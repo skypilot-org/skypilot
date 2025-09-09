@@ -14,6 +14,7 @@ from sky.utils import common_utils
 _df = None
 _lookup_dict = None
 
+# Base URL for Prime Intellect API (used as default if not configured).
 DEFAULT_BASE_URL = 'https://api.primeintellect.ai'
 CREDENTIALS_PATH = '~/.prime/config.json'
 INITIAL_BACKOFF_SECONDS = 10
