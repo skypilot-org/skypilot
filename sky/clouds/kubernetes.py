@@ -119,6 +119,7 @@ class Kubernetes(clouds.Cloud):
             'Stopping clusters is not supported on Kubernetes.')
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
             'Auto-stop is not supported on Kubernetes.')
+        return unsupported_features
         # Allow spot instances if supported by the cluster
         try:
             spot_label_key, _ = kubernetes_utils.get_spot_label(context)

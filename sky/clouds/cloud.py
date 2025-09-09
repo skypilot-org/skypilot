@@ -684,9 +684,6 @@ class Cloud:
             exceptions.NotSupportedError: If the cloud does not support all the
             requested features.
         """
-        unsupported_features2reason = cls._unsupported_features_for_resources(
-            resources)
-
         # Docker image is not compatible with ssh proxy command.
         if skypilot_config.get_effective_region_config(
                 cloud=str(cls).lower(),
@@ -699,6 +696,10 @@ class Cloud:
                     'when proxy command is set. Please remove proxy command in '
                     'the config.'),
             })
+
+        unsupported_features2reason = cls._unsupported_features_for_resources(
+            resources)
+
 
         unsupported_features = set(unsupported_features2reason.keys())
         unsupported_features = requested_features.intersection(

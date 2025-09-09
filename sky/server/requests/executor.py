@@ -474,11 +474,11 @@ async def execute_request_coroutine(request: api_requests.Request):
                                                   **request_body.to_kwargs())
 
     async def poll_task(request_id: str) -> bool:
-        request = await api_requests.get_request_async(request_id)
-        if request is None:
+        req_status = await api_requests.get_request_status_async(request_id)
+        if req_status is None:
             raise RuntimeError('Request not found')
 
-        if request.status == api_requests.RequestStatus.CANCELLED:
+        if req_status.status == api_requests.RequestStatus.CANCELLED:
             ctx.cancel()
             return True
 
