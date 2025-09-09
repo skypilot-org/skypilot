@@ -106,30 +106,40 @@ class SkyServiceSpec:
                 # Validate resources
                 resources_lib.Resources.from_yaml_config(r)
             if route53_hosted_zone is not None:
-                # TODO(tian): Move the import.
-                import boto3  # pylint: disable=import-outside-toplevel
-                client = boto3.client('route53')
-                hosted_zones = client.list_hosted_zones()['HostedZones']
-                target_hosted_zone_id = None
-                for hz in hosted_zones:
-                    # Amazon Route 53 treats domain name as FQDN.
-                    # Thus a trailing dot is added to the domain name.
-                    # Here we strip the trailing dot for comparison.
-                    if hz['Name'].strip('.') == route53_hosted_zone:
-                        if hz['Config']['PrivateZone']:
-                            with ux_utils.print_exception_no_traceback():
-                                raise ValueError('`route53_hosted_zone` must be'
-                                                 ' a public hosted zone.')
-                        target_hosted_zone_id = hz['Id']
-                        break
-                # if target_hosted_zone_id is None:
-                #     with ux_utils.print_exception_no_traceback():
-                #         raise ValueError(
-                #             f'route53_hosted_zone ({route53_hosted_zone}) '
-                #             'not found.')
-                self._target_hosted_zone_id = target_hosted_zone_id
-                print(f'Found hosted zone: {route53_hosted_zone} with ID: '
-                      f'{target_hosted_zone_id}.')
+                # Skip Route53 validation on client side to avoid credential issues
+                # Only validate when running on the controller/server side
+                is_controller = os.environ.get('SKY_SERVE_CONTROLLER', 'False') == 'True'
+                
+                if is_controller:
+                    # TODO(tian): Move the import.
+                    import boto3  # pylint: disable=import-outside-toplevel
+                    client = boto3.client('route53')
+                    hosted_zones = client.list_hosted_zones()['HostedZones']
+                    target_hosted_zone_id = None
+                    for hz in hosted_zones:
+                        # Amazon Route 53 treats domain name as FQDN.
+                        # Thus a trailing dot is added to the domain name.
+                        # Here we strip the trailing dot for comparison.
+                        if hz['Name'].strip('.') == route53_hosted_zone:
+                            if hz['Config']['PrivateZone']:
+                                with ux_utils.print_exception_no_traceback():
+                                    raise ValueError('`route53_hosted_zone` must be'
+                                                     ' a public hosted zone.')
+                            target_hosted_zone_id = hz['Id']
+                            break
+                    if target_hosted_zone_id is None:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'route53_hosted_zone ({route53_hosted_zone}) '
+                                'not found.')
+                    self._target_hosted_zone_id = target_hosted_zone_id
+                    print(f'Found hosted zone: {route53_hosted_zone} with ID: '
+                          f'{target_hosted_zone_id}.')
+                else:
+                    # On client side, defer validation to controller
+                    self._target_hosted_zone_id = None
+                    print(f'Route53 hosted zone {route53_hosted_zone} will be '
+                          'validated on the controller.')
                 # TODO(tian): Here we dont have the service_name information.
                 # Skip checking it for now. We should add it back later.
                 # for record in client.list_resource_record_sets(
