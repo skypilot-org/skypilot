@@ -11,6 +11,7 @@ from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -74,6 +75,10 @@ class InternalRequestDaemon:
                 # using too much memory.
                 annotations.clear_request_level_cache()
                 timeline.save_timeline()
+                # Kill all children processes related to this request.
+                # Each executor handles a single request, so we can safely
+                # kill all children processes related to this request.
+                subprocess_utils.kill_children_processes()
                 common_utils.release_memory()
             except Exception:  # pylint: disable=broad-except
                 # It is OK to fail to run the event, as the event is not
