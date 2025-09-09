@@ -671,42 +671,45 @@ available_node_types:
                   set -e
                   return 1
                 }
+                apt_install_with_retries() {
+                  local packages="$@"
+                  [ -z "$packages" ] && return 0
+                  set +e
+                  local log=/tmp/apt-update.log
+                  local tries=3
+                  local delay=1
+                  local i
+                  for i in $(seq 1 $tries); do
+                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $packages && { set -e; return 0; }
+                    echo "apt-get install failed for: $packages (attempt $i/$tries). Running -f install and retrying..." >> "$log"
+                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get -f install -y >> "$log" 2>&1 || true
+                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get clean >> "$log" 2>&1 || true
+                    sleep $delay
+                    delay=$((delay * 2))
+                  done
+                  set -e
+                  return 1
+                }
+                apt_update_install_with_retries() {
+                  apt_update_with_retries
+                  apt_install_with_retries "$@"
+                }
                 backup_dir=/etc/apt/sources.list.backup_skypilot
                 backup_source() {
                   $(prefix_cmd) mkdir -p "$backup_dir"
                   if [ -f /etc/apt/sources.list ] && [ ! -f "$backup_dir/sources.list" ]; then
                     $(prefix_cmd) cp -a /etc/apt/sources.list "$backup_dir/sources.list" || true
                   fi
-                  if [ -d /etc/apt/sources.list.d ] && [ ! -d "$backup_dir/sources.list.d" ]; then
-                    $(prefix_cmd) cp -a /etc/apt/sources.list.d "$backup_dir/" || true
-                  fi
                 }
                 restore_source() {
                   if [ -f "$backup_dir/sources.list" ]; then
                     $(prefix_cmd) cp -a "$backup_dir/sources.list" /etc/apt/sources.list || true
                   fi
-                  if [ -d "$backup_dir/sources.list.d" ]; then
-                    $(prefix_cmd) rm -rf /etc/apt/sources.list.d || true
-                    $(prefix_cmd) cp -a "$backup_dir/sources.list.d" /etc/apt/ || true
-                  fi
-                }
-                update_debian_sources() {
-                  local host=$1
-                  local apt_file=$2
-                  $(prefix_cmd) sed -i -E "s|https?://deb.debian.org/debian-security|http://$host/debian|g" $apt_file
-                  $(prefix_cmd) sed -i -E "s|Suites: bookworm bookworm-updates|Suites: bookworm|g" $apt_file
-                  $(prefix_cmd) sed -i -E "s|Suites: bookworm-security|Suites: bookworm-updates|g" $apt_file
-                  $(prefix_cmd) sed -i -E "s|https?://deb.debian.org/debian|http://$host/debian|g" $apt_file
                 }
                 update_apt_sources() {
-                  local apt_os=$1
-                  local host=$2
-                  local apt_file=$3
-                  if [ "$apt_os" = "debian" ]; then
-                    update_debian_sources $host $apt_file
-                  elif [ "$apt_os" = "ubuntu" ]; then
-                    $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" $apt_file
-                  fi
+                  local host=$1
+                  local apt_file=$2
+                  $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" $apt_file
                 }
                 # Helper: install packages across mirrors with retries
                 apt_install_with_mirrors() {
@@ -714,8 +717,12 @@ available_node_types:
                   local packages="$@"
                   [ -z "$packages" ] && return 0
                   set +e
-                  # Backup current sources once
-                  backup_source
+                  # Install packages with default sources first
+                  local log=/tmp/apt-update.log
+                  echo "$(date +%Y-%m-%d\ %H:%M:%S) Installing packages: $packages" >> "$log"
+                  restore_source
+                  apt_update_install_with_retries $packages >> "$log" 2>&1 && { set -e; return 0; }
+                  echo "Install failed with default sources: $packages" >> "$log"
                   # Detect distro (ubuntu/debian)
                   local APT_OS="unknown"
                   if [ -f /etc/os-release ]; then
@@ -733,54 +740,36 @@ available_node_types:
                         ;;
                     esac
                   fi
-                  # Build mirror candidates (default first)
-                  if [ "$APT_OS" = "unknown" ]; then
-                    local MIRROR_CANDIDATES="default"
-                  else
-                    local MIRROR_CANDIDATES="default mirror.mit.edu mirror.math.princeton.edu/pub"
-                  fi
-                  # Restore to default sources first
-                  restore_source
-                  for host in $MIRROR_CANDIDATES; do
-                    # If not default, rewrite mirror host
-                    if [ "$host" != "default" ]; then
-                      echo "Trying APT mirror ($APT_OS): $host" >> /tmp/apt-update.log
+                  # Build mirror candidates
+                  # deb.debian.org is a CDN endpoint, if one backend goes down,
+                  # the CDN automatically fails over to another mirror,
+                  # so we only retry for ubuntu here.
+                  if [ "$APT_OS" = "ubuntu" ]; then
+                    # Backup current sources once
+                    backup_source
+                    # Selected from https://launchpad.net/ubuntu/+archivemirrors
+                    # and results from apt-select
+                    local MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"
+                    for host in $MIRROR_CANDIDATES; do
+                      echo "Trying APT mirror ($APT_OS): $host" >> "$log"
                       if [ -f /etc/apt/sources.list ]; then
-                        update_apt_sources $APT_OS $host /etc/apt/sources.list
+                        update_apt_sources $host /etc/apt/sources.list
+                      else
+                        echo "Error: /etc/apt/sources.list not found" >> "$log"
+                        break
                       fi
-                      if [ -d /etc/apt/sources.list.d ]; then
-                        for f in /etc/apt/sources.list.d/*; do
-                          [ -f "$f" ] || continue
-                          update_apt_sources $APT_OS $host $f
-                        done
-                      fi
-                    else
-                      echo "Trying APT mirror ($APT_OS): default" >> /tmp/apt-update.log
-                    fi
-                    # Update indices for this mirror
-                    apt_update_with_retries || { echo "apt-get update failed on mirror: $host" >> /tmp/apt-update.log; continue; }
-                    # Retry installs for this mirror
-                    local tries=3
-                    local delay=1
-                    local i code
-                    for i in $(seq 1 $tries); do
-                      DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $packages && { set -e; return 0; }
-                      code=$?
-                      echo "apt-get install failed for: $packages on mirror $host (attempt $i/$tries). Running -f install and retrying..." >> /tmp/apt-update.log
-                      DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get -f install -y >> /tmp/apt-update.log 2>&1 || true
-                      DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get clean >> /tmp/apt-update.log 2>&1 || true
-                      sleep $delay
-                      delay=$((delay * 2))
+                      apt_update_install_with_retries $packages >> "$log" 2>&1 && { set -e; return 0; }
+                      echo "Install failed with mirror ($APT_OS): $host" >> "$log"
+                      # Restore to default sources
+                      restore_source
                     done
-                    # Restore to default sources
-                    restore_source
-                  done
+                  fi
                   set -e
                   if [ "$required" = "1" ]; then
-                    echo "Error: required package install failed across all mirrors: $packages" >> /tmp/apt-update.log
+                    echo "Error: required package install failed across all mirrors: $packages" >> "$log"
                     return 1
                   else
-                    echo "Optional package install failed across all mirrors: $packages; skipping." >> /tmp/apt-update.log
+                    echo "Optional package install failed across all mirrors: $packages; skipping." >> "$log"
                     return 0
                   fi
                 }
