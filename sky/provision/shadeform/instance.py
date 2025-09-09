@@ -1,6 +1,6 @@
 """Shadeform instance provisioning."""
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -114,7 +114,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             provider_name='shadeform',
             cluster_name=cluster_name_on_cloud,
             region=region,
-            zone=region,  # Shadeform doesn't use separate zones
+            zone=None,  # Shadeform doesn't use separate zones
             head_instance_id=head_instance_id,
             resumed_instance_ids=[],
             created_instance_ids=[])
@@ -256,9 +256,10 @@ def get_cluster_info(
         # ClusterInfo expects Dict[InstanceId, List[InstanceInfo]]
         cluster_instances[instance_id] = [instance_info]
 
-    ssh_user = 'root'  # default
+    ssh_user = 'shadeform'  # default
     if head_instance_id is not None:
-        ssh_user = instances.get(head_instance_id, {}).get('ssh_user', 'root')
+        ssh_user = instances.get(head_instance_id,
+                                 {}).get('ssh_user', 'shadeform')
 
     return common.ClusterInfo(instances=cluster_instances,
                               head_instance_id=head_instance_id,
@@ -267,18 +268,20 @@ def get_cluster_info(
 
 
 def query_instances(
-        cluster_name_on_cloud: str,
-        provider_config: Optional[Dict[str, Any]] = None,
-        non_terminated_only: bool = True
-) -> Dict[str, status_lib.ClusterStatus]:
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Query the status of instances."""
-    del provider_config  # unused
+    del cluster_name, provider_config  # unused
     instances = _get_cluster_instances(cluster_name_on_cloud)
 
     if not instances:
         return {}
 
-    status_map = {}
+    status_map: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                                Optional[str]]] = {}
     for instance_id, instance in instances.items():
         shadeform_status = instance.get('status', 'unknown')
         sky_status = SHADEFORM_STATUS_MAP.get(shadeform_status,
@@ -288,7 +291,7 @@ def query_instances(
                 sky_status == status_lib.ClusterStatus.STOPPED):
             continue
 
-        status_map[instance_id] = sky_status
+        status_map[instance_id] = (sky_status, None)
 
     return status_map
 
