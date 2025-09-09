@@ -3,10 +3,6 @@
 Installation
 ==================
 
-.. note::
-
-    For Macs, macOS >= 10.15 is required to install SkyPilot.
-
 Install SkyPilot using pip:
 
 .. tab-set::
