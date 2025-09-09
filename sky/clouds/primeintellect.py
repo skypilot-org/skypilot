@@ -287,8 +287,6 @@ class PrimeIntellect(clouds.Cloud):
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
-        # NOTE: used for very advanced SkyPilot functionality
-        # Can implement later if desired
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
