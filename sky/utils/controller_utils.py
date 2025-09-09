@@ -442,6 +442,9 @@ def shared_controller_vars_to_fill(
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
         env_vars[
             skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
+    # Set environment variable to identify when running on serve controller
+    if controller == Controllers.SKY_SERVE_CONTROLLER:
+        env_vars['SKY_SERVE_CONTROLLER'] = 'True'
     vars_to_fill['controller_envs'] = env_vars
     return vars_to_fill
 
