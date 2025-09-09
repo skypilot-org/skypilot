@@ -1128,15 +1128,16 @@ def test_pools_setup_num_gpus():
             'sleep 5; '
             'done')
 
-
         test = smoke_tests_utils.Test(
             'test_pools_setup_num_gpus',
             [
                 f's=$(sky jobs pool apply -p {pool} {f.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully created pool"',
                 # Wait for the pool to be created.
-                wait_until_pool_ready.format(timeout=smoke_tests_utils.get_timeout('gcp')),
+                wait_until_pool_ready.format(
+                    timeout=smoke_tests_utils.get_timeout('gcp')),
             ],
             timeout=smoke_tests_utils.get_timeout('gcp'),
-            teardown=f'sky jobs pool down {pool} -y && sleep 5 && controller=$(sky status -u | grep sky-jobs-controller- | awk \'NR==1{{print $1}}\') && echo "$controller" && echo delete | sky down "$controller" && exit 1 || true'
+            teardown=
+            f'sky jobs pool down {pool} -y && sleep 5 && controller=$(sky status -u | grep sky-jobs-controller- | awk \'NR==1{{print $1}}\') && echo "$controller" && echo delete | sky down "$controller" && exit 1 || true'
         )
         smoke_tests_utils.run_one_test(test)
