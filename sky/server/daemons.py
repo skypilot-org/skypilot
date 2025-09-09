@@ -8,7 +8,6 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
 from sky.utils import annotations
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import subprocess_utils

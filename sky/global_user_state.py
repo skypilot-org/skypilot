@@ -1627,6 +1627,19 @@ def get_clusters(
 
 @_init_db
 @metrics_lib.time_me
+def get_cluster_names(exclude_managed_clusters: bool = False,) -> List[str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        query = session.query(cluster_table.c.name)
+        if exclude_managed_clusters:
+            query = query.filter(cluster_table.c.is_managed == int(False))
+        rows = query.all()
+    print(rows)
+    return [row[0] for row in rows]
+
+
+@_init_db
+@metrics_lib.time_me
 def get_clusters_from_history(
         days: Optional[int] = None,
         abbreviate_response: bool = False,

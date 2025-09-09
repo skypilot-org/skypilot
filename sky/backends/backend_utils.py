@@ -3022,8 +3022,11 @@ def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
 
-def _refresh_cluster(cluster_name,
-    force_refresh_statuses):
+
+def _refresh_cluster(
+    cluster_name: str,
+    force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]]
+) -> Optional[Dict[str, Any]]:
     # TODO(syang): we should try not to leak
     # request info in backend_utils.py.
     # Refactor this to use some other info to
@@ -3038,7 +3041,7 @@ def _refresh_cluster(cluster_name,
         # so we don't want to update the cluster status until
         # the request is completed.
         logger.debug(f'skipping refresh for cluster {cluster_name} '
-                        'as there is an active launch request')
+                     'as there is an active launch request')
         return global_user_state.get_cluster_from_name(cluster_name)
     try:
         record = refresh_cluster_record(
@@ -3054,16 +3057,34 @@ def _refresh_cluster(cluster_name,
         record = {'status': 'UNKNOWN', 'error': e}
     return record
 
+
 def refresh_cluster_records() -> None:
+    """Refreshes the status of all clusters, except managed clusters.
+
+    Used by the background status refresh daemon.
+    This function is a stripped-down version of get_clusters, with only the
+    bare bones refresh logic.
+
+    Returns:
+        None
+
+    Raises:
+        None
+    """
     exclude_managed_clusters = True
     if env_options.Options.SHOW_DEBUG_INFO.get():
         exclude_managed_clusters = False
-    records = global_user_state.get_clusters(
-        exclude_managed_clusters=exclude_managed_clusters)
-    cluster_names = [record['name'] for record in records]
+    cluster_names = global_user_state.get_cluster_names(
+        exclude_managed_clusters=exclude_managed_clusters,)
+
+    def _refresh_cluster_record(cluster_name):
+        return _refresh_cluster(cluster_name,
+                                force_refresh_statuses=set(
+                                    status_lib.ClusterStatus))
+
     if len(cluster_names) > 0:
-        subprocess_utils.run_in_parallel(
-            _refresh_cluster, cluster_names)
+        subprocess_utils.run_in_parallel(_refresh_cluster_record, cluster_names)
+
 
 def get_clusters(
     refresh: common.StatusRefreshMode,
@@ -3238,11 +3259,10 @@ def get_clusters(
         force_refresh_statuses = set(status_lib.ClusterStatus)
     else:
         force_refresh_statuses = None
-    
+
     def _refresh_cluster_record(cluster_name):
-        record = _refresh_cluster(
-            cluster_name,
-            force_refresh_statuses=force_refresh_statuses)
+        record = _refresh_cluster(cluster_name,
+                                  force_refresh_statuses=force_refresh_statuses)
         if 'error' not in record:
             _update_records_with_handle_info([record])
             if include_credentials:
