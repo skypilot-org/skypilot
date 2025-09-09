@@ -21,7 +21,9 @@ from sky.utils import common_utils
 # automatically tune parallelism at runtime according to system usage stats
 # in the future.
 # TODO(luca): The future is now! ^^^
-SERVER_WORKER_MEM_GB = 0.6
+# Memory reserved specifically for server worker processes.
+SERVER_WORKER_RESERVED_MEM_GB = 1
+SERVER_WORKER_MEM_GB = 0.45
 LONG_WORKER_MEM_GB = 0.4
 SHORT_WORKER_MEM_GB = 0.3
 # To control the number of long workers.
@@ -38,7 +40,7 @@ _MAX_MEM_PERCENT_FOR_SERVER_WORKERS = 0.2
 # Percentage of memory for long requests
 # from the memory reserved for SkyPilot.
 # This is to reserve some memory for short requests.
-_MAX_MEM_PERCENT_FOR_BLOCKING = 0.4
+_MAX_MEM_PERCENT_FOR_BLOCKING = 0.5
 # Minimal number of server workers to ensure responsiveness.
 _MIN_SERVER_WORKERS = 1
 # Minimal number of long workers to ensure responsiveness.
@@ -209,7 +211,7 @@ def _max_server_worker_parallism(cpu_count: int, mem_size_gb: float) -> int:
     max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                   if job_utils.is_consolidation_mode() else
                   server_constants.MIN_AVAIL_MEM_GB)
-    available_mem = max(0, mem_size_gb - max_memory)
+    available_mem = max(0, mem_size_gb - max_memory + SERVER_WORKER_RESERVED_MEM_GB)
     cpu_based_max_parallel = cpu_count
     mem_based_max_parallel = int(available_mem *
                                  _MAX_MEM_PERCENT_FOR_SERVER_WORKERS /
