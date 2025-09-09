@@ -1104,7 +1104,7 @@ def test_pools_setup_num_gpus():
     with tempfile.NamedTemporaryFile(delete=True) as f:
         f.write(setup_yaml.encode('utf-8'))
         f.flush()
-        name = smoke_tests_utils.get_cluster_name()+'-lloyd'
+        name = smoke_tests_utils.get_cluster_name()
         pool = f'{name}-pool'
 
         wait_until_pool_ready = (
