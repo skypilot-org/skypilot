@@ -12,7 +12,7 @@ from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 CredentialCheckResult = Tuple[bool, Optional[Union[str, Dict[str, str]]]]
 
@@ -171,7 +171,7 @@ class PrimeIntellect(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None
-    ) -> Dict[str, Optional[Union[str, bool]]]:
+    ) -> Dict[str, Optional[str]]:
         del dryrun, cluster_name, num_nodes, volume_mounts
         assert zones is not None, (region, zones)
 
