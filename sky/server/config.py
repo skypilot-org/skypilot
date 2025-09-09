@@ -211,7 +211,8 @@ def _max_server_worker_parallism(cpu_count: int, mem_size_gb: float) -> int:
     max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                   if job_utils.is_consolidation_mode() else
                   server_constants.MIN_AVAIL_MEM_GB)
-    available_mem = max(0, mem_size_gb - max_memory + SERVER_WORKER_RESERVED_MEM_GB)
+    available_mem = max(
+        0, mem_size_gb - max_memory + SERVER_WORKER_RESERVED_MEM_GB)
     cpu_based_max_parallel = cpu_count
     mem_based_max_parallel = int(available_mem *
                                  _MAX_MEM_PERCENT_FOR_SERVER_WORKERS /

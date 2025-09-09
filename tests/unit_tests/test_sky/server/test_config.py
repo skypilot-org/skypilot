@@ -10,10 +10,10 @@ from sky.server import config
 def test_compute_server_config_on_minimal_deployment(cpu_count, mem_size_gb):
     # Test deployment mode
     c = config.compute_server_config(deploy=True)
-    assert c.num_server_workers == 4
-    assert c.long_worker_config.garanteed_parallelism == 8
+    assert c.num_server_workers == 3
+    assert c.long_worker_config.garanteed_parallelism == 5
     assert c.long_worker_config.burstable_parallelism == 0
-    assert c.short_worker_config.garanteed_parallelism == 9
+    assert c.short_worker_config.garanteed_parallelism == 8
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
@@ -26,7 +26,7 @@ def test_compute_server_config_on_large_deployment(cpu_count, mem_size_gb):
     assert c.num_server_workers == 196
     assert c.long_worker_config.garanteed_parallelism == 392
     assert c.long_worker_config.burstable_parallelism == 0
-    assert c.short_worker_config.garanteed_parallelism == 2084
+    assert c.short_worker_config.garanteed_parallelism == 1790
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
@@ -39,7 +39,7 @@ def test_compute_server_config(cpu_count, mem_size_gb):
     assert c.num_server_workers == 4
     assert c.long_worker_config.garanteed_parallelism == 8
     assert c.long_worker_config.burstable_parallelism == 0
-    assert c.short_worker_config.garanteed_parallelism == 36
+    assert c.short_worker_config.garanteed_parallelism == 30
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
@@ -48,7 +48,7 @@ def test_compute_server_config(cpu_count, mem_size_gb):
     assert c.num_server_workers == 1
     assert c.long_worker_config.garanteed_parallelism == 4
     assert c.long_worker_config.burstable_parallelism == 1024
-    assert c.short_worker_config.garanteed_parallelism == 41
+    assert c.short_worker_config.garanteed_parallelism == 35
     assert c.short_worker_config.burstable_parallelism == 1024
     assert c.queue_backend == config.QueueBackend.LOCAL
 
@@ -114,7 +114,7 @@ def test_parallel_size_short():
     num_server_workers = 2
     num_long_workers = 8
     mem_size_gb = 13.7
-    expected = 29
+    expected = 25
     assert config._max_short_worker_parallism(mem_size_gb, num_server_workers,
                                               num_long_workers) == expected
 
@@ -122,6 +122,6 @@ def test_parallel_size_short():
     num_server_workers = 1
     num_long_workers = 1
     mem_size_gb = 3
-    expected = 2
+    expected = 3
     assert config._max_short_worker_parallism(mem_size_gb, num_server_workers,
                                               num_long_workers) == expected
