@@ -442,7 +442,7 @@ Lambda Cloud
 Together AI
 ~~~~~~~~~~~~~~~~~~
 
-`Together AI <https://together.ai/>`_ offers GPU *instance clusters*. To access Together AI the cluster, it is similar to using :ref:`Kubernetes <kubernetes-installation>`:
+`Together AI <https://together.ai/>`_ offers GPU *instant clusters*. Accessing them is similar to using :ref:`Kubernetes <kubernetes-installation>`:
 
 1. Launch a Together [Instant Cluster](https://api.together.ai/clusters/create) with cluster type selected as Kubernetes
 2. Get the Kubernetes config for the cluster
