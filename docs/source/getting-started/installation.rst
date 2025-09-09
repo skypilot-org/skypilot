@@ -438,6 +438,22 @@ Lambda Cloud
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
+
+Together AI
+~~~~~~~~~~~~~~~~~~
+
+`Together AI <https://together.ai/>`_ offers GPU *instant clusters*. Accessing them is similar to using :ref:`Kubernetes <kubernetes-installation>`:
+
+1. Launch a Together [Instant Cluster](https://api.together.ai/clusters/create) with cluster type selected as Kubernetes
+2. Get the Kubernetes config for the cluster
+3. Save the kubeconfig to a file, e.g., ``./together.kubeconfig``
+4. Copy the kubeconfig to your ``~/.kube/config`` or merge the Kubernetes config with your existing kubeconfig file by running:
+
+.. code-block:: shell
+
+  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config    
+
+
 Paperspace
 ~~~~~~~~~~~~~~~~~~
 
