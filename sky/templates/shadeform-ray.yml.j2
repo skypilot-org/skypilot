@@ -18,7 +18,11 @@ auth:
 
 available_node_types:
   ray_head_default:
+{%- if custom_resources %}
+    resources: {{custom_resources}}
+{%- else %}
     resources: {}
+{%- endif %}
     node_config:
       InstanceType: {{instance_type}}
       PublicKey: |-
