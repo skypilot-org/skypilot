@@ -147,7 +147,6 @@ def _get_cluster_records_and_set_ssh_config(
     request_id = sdk.status(clusters,
                             refresh=refresh,
                             all_users=all_users,
-                            _include_credentials=True,
                             _summary_response=not verbose,
                             _include_credentials=fetch_credentials)
     cluster_records = sdk.stream_and_get(request_id)
@@ -156,16 +155,16 @@ def _get_cluster_records_and_set_ssh_config(
         for record in cluster_records:
             handle = record['handle']
 
-            if not (handle is not None and handle.cached_external_ips is not None
-                    and 'credentials' in record):
-                # If the cluster is not UP or does not have credentials available,
-                # we need to remove the cluster from the SSH config.
+            if not (handle is not None and handle.cached_external_ips
+                    is not None and 'credentials' in record):
+                # If the cluster is not UP or does not have credentials
+                # available, we need to remove the cluster from the SSH config.
                 cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
                 continue
 
-            # During the failover, even though a cluster does not exist, the handle
-            # can still exist in the record, and we check for credentials to avoid
-            # updating the SSH config for non-existent clusters.
+            # During the failover, even though a cluster does not exist, the
+            # handle can still exist in the record, and we check for credentials
+            # to avoid updating the SSH config for non-existent clusters.
             credentials = record['credentials']
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
                 # Replace the proxy command to proxy through the SkyPilot API
@@ -175,7 +174,8 @@ def _get_cluster_records_and_set_ssh_config(
                         handle.cluster_name, credentials)))
                 escaped_executable_path = shlex.quote(sys.executable)
                 escaped_websocket_proxy_path = shlex.quote(
-                    f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
+                    f'{directory_utils.get_sky_dir()}/'
+                    'templates/websocket_proxy.py')
                 # Instead of directly use websocket_proxy.py, we add an
                 # additional proxy, so that ssh can use the head pod in the
                 # cluster to jump to worker pods.
