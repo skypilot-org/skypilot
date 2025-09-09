@@ -7,6 +7,7 @@ import json
 import math
 import os
 import pathlib
+import random
 import re
 import shlex
 import signal
@@ -2740,12 +2741,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """Opens an SSH tunnel to the Skylet on the head node,
         updates the cluster handle, and persists it to the database."""
         max_attempts = 3
-        # There could be a race condition here, as find_free_port
-        # can return the same port to multiple threads/processes.
+        # There could be a race condition here, as multiple processes may
+        # attempt to open the same port at the same time.
         for attempt in range(max_attempts):
             runners = self.get_command_runners()
             head_runner = runners[0]
-            local_port = common_utils.find_free_port(10000)
+            local_port = random.randint(10000, 65535)
             try:
                 ssh_tunnel_proc = backend_utils.open_ssh_tunnel(
                     head_runner, (local_port, constants.SKYLET_GRPC_PORT))
