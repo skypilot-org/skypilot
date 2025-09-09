@@ -459,7 +459,7 @@ def get_cluster_info(
             'sshConnection'), 'sshConnection cannot be null anymore'
 
         ssh_connection = instance['sshConnection']
-        _parsed_user, ssh_port = _parse_ssh_connection(ssh_connection)
+        parsed_user_for_port, ssh_port = _parse_ssh_connection(ssh_connection)
 
         external_ip = instance['ip']
         if isinstance(external_ip, list):
@@ -476,8 +476,8 @@ def get_cluster_info(
         ]
         if instance['name'].endswith('-head'):
             head_instance_id = instance_id
-            parsed_user, _ = _parse_ssh_connection(ssh_connection)
-            head_ssh_user = parsed_user or 'ubuntu'
+            parsed_user_for_user, _ = _parse_ssh_connection(ssh_connection)
+            head_ssh_user = parsed_user_for_user or 'ubuntu'
 
     return common.ClusterInfo(
         instances=instances,
