@@ -3646,7 +3646,7 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     1. Try the gRPC request
     2. If SSH tunnel is closed, recreate it and retry
     """
-    max_attempts = 10
+    max_attempts = 5
     backoff = common_utils.Backoff(initial_backoff=0.5)
     last_exception: Optional[Exception] = None
 
