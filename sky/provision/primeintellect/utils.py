@@ -236,14 +236,14 @@ class PrimeIntellectAPIClient:
         assert availability_zone, 'availability_zone cannot be None'
 
         # Parse the instance_type. We only need the first two components:
-        #   provider and accelerator info (see docstring above).
+        # provider and accelerator info (see docstring above).
         provider, gpu_parts, _, _ = instance_type.split('__', 3)
         if 'CPU_NODE' in gpu_parts:
-            # Prime Intellect API uses the same schema for CPU-only and GPU pods.
-            # For CPU-only instances, we set gpuType='CPU_NODE' and gpuCount=1 as a
-            # sentinel to indicate "no GPU". This is how CPU instances are represented
-            # internally on our platform; the backend does not interpret this as
-            # having a physical GPU.
+            # Prime Intellect API uses the same schema for CPU-only and GPU
+            # pods. For CPU-only instances, we set gpuType='CPU_NODE' and
+            # gpuCount=1 as a sentinel to indicate "no GPU". This is how CPU
+            # instances are represented internally on our platform; the
+            # backend does not interpret this as having a physical GPU.
             gpu_type = 'CPU_NODE'
             gpu_count = 1
         else:

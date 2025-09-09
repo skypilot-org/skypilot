@@ -58,7 +58,7 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-from sky.provision.primeintellect.utils import parse_ssh_connection
+"""Helper is available as utils.parse_ssh_connection."""
 
 
 def run_instances(region: str, cluster_name_on_cloud: str,
@@ -387,7 +387,7 @@ def get_cluster_info(
             'sshConnection'), 'sshConnection cannot be null anymore'
 
         ssh_connection = instance['sshConnection']
-        _, ssh_port = parse_ssh_connection(ssh_connection)
+        _, ssh_port = utils.parse_ssh_connection(ssh_connection)
 
         external_ip = instance['ip']
         if isinstance(external_ip, list):
@@ -404,7 +404,7 @@ def get_cluster_info(
         ]
         if instance['name'].endswith('-head'):
             head_instance_id = instance_id
-            parsed_user_for_user, _ = parse_ssh_connection(ssh_connection)
+            parsed_user_for_user, _ = utils.parse_ssh_connection(ssh_connection)
             head_ssh_user = parsed_user_for_user or 'ubuntu'
 
     return common.ClusterInfo(
