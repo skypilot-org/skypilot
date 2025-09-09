@@ -208,11 +208,17 @@ class PrimeIntellectAPIClient:
                   this method).
 
                 Notes:
-                - This method only requires the first two components
-                  (provider, accelerator) for building the API payload. The
-                  vCPU and memory values are provided separately via the
-                  ``vcpus`` and ``memory`` arguments; upstream code may also
-                  parse them from the instance_type for validation.
+                - Parsing: only the first two components (provider,
+                  accelerator) are needed to build the payload. The vCPU
+                  and memory values are provided via the ``vcpus`` and
+                  ``memory`` arguments.
+                - Catalog lookup: the full instance_type string is used to
+                  map to the catalog's UpstreamCloudId.
+                - CPU-only: accelerator "CPU_NODE" is a sentinel for
+                  "no GPU". We set gpuType='CPU_NODE' and gpuCount=1 to
+                  represent CPU-only pods.
+                - Spot: the optional "__SPOT" suffix (if present) is ignored
+                  here; pricing/spot behavior is handled elsewhere.
 
             region: Country/region code used by Prime Intellect.
             availability_zone: Data center ID (zone) within the region.
