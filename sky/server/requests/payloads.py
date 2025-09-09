@@ -86,6 +86,11 @@ def request_body_env_vars() -> dict:
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
+    # Remove the config related env vars, as the client config override
+    # should be passed in the request body.
+    # Any new environment variables that are server-specific should
+    # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
+    env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
     return env_vars
 
 
@@ -309,7 +314,8 @@ class StatusBody(RequestBody):
     cluster_names: Optional[List[str]] = None
     refresh: common_lib.StatusRefreshMode = common_lib.StatusRefreshMode.NONE
     all_users: bool = True
-    include_credentials: bool = False
+    # TODO (kyuds): default to False post 0.10.5
+    include_credentials: bool = True
 
 
 class StartBody(RequestBody):
@@ -464,6 +470,11 @@ class VolumeDeleteBody(RequestBody):
     names: List[str]
 
 
+class VolumeListBody(RequestBody):
+    """The request body for the volume list endpoint."""
+    pass
+
+
 class EndpointsBody(RequestBody):
     """The request body for the endpoint."""
     cluster: str
@@ -496,6 +507,14 @@ class JobsLaunchBody(RequestBody):
 
 
 class JobsQueueBody(RequestBody):
+    """The request body for the jobs queue endpoint."""
+    refresh: bool = False
+    skip_finished: bool = False
+    all_users: bool = False
+    job_ids: Optional[List[int]] = None
+
+
+class JobsQueueV2Body(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False
     skip_finished: bool = False

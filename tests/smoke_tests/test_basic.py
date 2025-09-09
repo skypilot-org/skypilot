@@ -747,10 +747,14 @@ def unreachable_context():
     to it. So this must be session scoped that the kubeconfig is modified before
     the local API server starts.
     """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        yield
+        return
     # Get kubeconfig path from environment variable or use default
     kubeconfig_path = os.environ.get('KUBECONFIG',
                                      os.path.expanduser('~/.kube/config'))
     if not os.path.exists(kubeconfig_path):
+        yield
         return
     import shutil
 
@@ -805,6 +809,11 @@ def test_kubernetes_context_failover(unreachable_context):
       # Set the namespace to test-namespace
       kubectl config set-context kind-skypilot --namespace=test-namespace --context kind-skypilot
     """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip('Skipping test because the Kubernetes configs and '
+                    'credentials are located on the remote API server '
+                    'and not the machine where the test is running')
+
     # Get context that is not kind-skypilot
     contexts = subprocess.check_output('kubectl config get-contexts -o name',
                                        shell=True).decode('utf-8').split('\n')
@@ -1256,8 +1265,8 @@ def test_cli_output(generic_cloud: str):
 @pytest.mark.aws
 def test_sky_down_with_multiple_sgs():
     """Test that sky down works with multiple security groups.
-    
-    The goal is to ensure that when we run sky down we get the typical 
+
+    The goal is to ensure that when we run sky down we get the typical
     terminating output with no extra output. If the output changes please
     update the test.
     """

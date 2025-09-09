@@ -18,6 +18,7 @@ import requests
 from smoke_tests.docker import docker_utils
 
 import sky
+from sky import clouds
 from sky import serve
 from sky import skypilot_config
 from sky.client import sdk
@@ -32,6 +33,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
+from sky.utils import registry
 from sky.utils import subprocess_utils
 from sky.utils import yaml_utils
 
@@ -425,6 +427,18 @@ def override_sky_config(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
         )
+        if services_account_token_configured_in_env_file():
+            config_file = pytest_config_file_override()
+            config = skypilot_config.parse_and_validate_config_file(config_file)
+            service_account_token = config.get_nested(
+                ('api_server', 'service_account_token'), 'UNKNOWN')
+            override_sky_config_dict.set_nested(
+                ('api_server', 'service_account_token'), service_account_token)
+            env_dict[
+                constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR] = service_account_token
+            echo(
+                f'Overriding service account token {service_account_token[:4]}...'
+            )
     if pytest_controller_cloud():
         cloud = pytest_controller_cloud()
         override_sky_config_dict.set_nested(
@@ -823,21 +837,31 @@ def get_api_server_url() -> str:
     return server_common.get_server_url()
 
 
+def is_non_docker_remote_api_server() -> bool:
+    if is_remote_server_test():
+        return 'host.docker.internal' not in get_api_server_url()
+    return False
+
+
 def get_dashboard_cluster_status_request_id() -> str:
     """Get the status of the cluster from the dashboard."""
     body = payloads.StatusBody(all_users=True,)
-    response = requests.post(
-        f'{get_api_server_url()}/internal/dashboard/status',
-        json=json.loads(body.model_dump_json()))
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/internal/dashboard/status',
+        json=json.loads(body.model_dump_json()),
+        server_url=get_api_server_url())
     return server_common.get_request_id(response)
 
 
 def get_dashboard_jobs_queue_request_id() -> str:
     """Get the jobs queue from the dashboard."""
     body = payloads.JobsQueueBody(all_users=True,)
-    response = requests.post(
-        f'{get_api_server_url()}/internal/dashboard/jobs/queue',
-        json=json.loads(body.model_dump_json()))
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/internal/dashboard/jobs/queue',
+        json=json.loads(body.model_dump_json()),
+        server_url=get_api_server_url())
     return server_common.get_request_id(response)
 
 
@@ -856,8 +880,10 @@ def get_response_from_request_id(request_id: str) -> Any:
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
-    response = requests.get(
-        f'{get_api_server_url()}/internal/dashboard/api/get?request_id={request_id}',
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/internal/dashboard/api/get?request_id={request_id}',
+        server_url=get_api_server_url(),
         timeout=15)
     request_task = None
     if response.status_code == 200:
@@ -880,11 +906,13 @@ def _get_controller_pod_name(controller_name: str) -> str:
         f'awk \'$2 ~ /sky-{controller_name}-controller/ {{print $1; exit}}\'')
 
 
-def kill_and_wait_controller(controller_name: str) -> str:
+def kill_and_wait_controller(test_cluster_name: str,
+                             controller_name: str) -> str:
     """Kill the controller pod and wait for a new one to be ready."""
     assert controller_name in ['serve', 'jobs'
                               ], (f'Invalid controller name: {controller_name}')
-    return (
+    return run_cloud_cmd_on_cluster(
+        test_cluster_name,
         f'initial_controller_pod=$({_get_controller_pod_name(controller_name)}); '
         f'echo "Killing {controller_name} controller pod: $initial_controller_pod"; '
         'kubectl delete pod $initial_controller_pod; '
@@ -912,7 +940,8 @@ def server_side_is_consolidation_mode() -> bool:
         # even if they are specified.
         # (TODO: zeping) support this in the future.
         return False
-    response = requests.get(f'{get_api_server_url()}/workspaces/config')
+    response = server_common.make_authenticated_request(
+        'GET', '/workspaces/config', server_url=get_api_server_url())
     request_id = server_common.get_request_id(response)
     config = config_utils.Config.from_dict(sdk.get(request_id))
     config = skypilot_config.overlay_skypilot_config(
@@ -943,3 +972,32 @@ def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
         gpu_name = result.stdout.strip()
         return gpu_name
     return default_gpu
+
+
+def get_enabled_cloud_storages() -> List[clouds.Cloud]:
+    """Get the enabled cloud storages."""
+    if is_remote_server_test():
+        prefix = ''
+        env_file = pytest_config_file_override()
+        if env_file is not None:
+            prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
+        command = f'{prefix} sky check | grep enabled | grep storage | awk "{{print \\$2}}"'
+        Test.echo_without_prefix(command)
+        result = subprocess_utils.run(command,
+                                      shell=True,
+                                      check=True,
+                                      capture_output=True,
+                                      text=True)
+        cloud_names = result.stdout.strip().split('\n')
+        enabled_clouds = []
+        for cloud_name in cloud_names:
+            if cloud_name:
+                cloud_name = cloud_name.rstrip(':')
+                try:
+                    cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
+                    if cloud_obj is not None:
+                        enabled_clouds.append(cloud_obj)
+                except ValueError:
+                    pass
+        return enabled_clouds
+    return [clouds.AWS()]

@@ -6,8 +6,9 @@ import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
 import { getManagedJobsWithClientPagination } from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
-import { getInfraData } from '@/data/connectors/infra';
 import { getVolumes } from '@/data/connectors/volumes';
+import { getGPUs, getCloudInfrastructure } from '@/data/connectors/infra';
+import { getSSHNodePools } from '@/data/connectors/ssh-node-pools';
 
 /**
  * Complete list of all dashboard cache functions organized by page
@@ -23,7 +24,12 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
-    getInfraData: { fn: getInfraData, args: [] },
+    getGPUs: { fn: getGPUs, args: [] },
+    getCloudInfrastructure: {
+      fn: getCloudInfrastructure,
+      args: [false],
+    },
+    getSSHNodePools: { fn: getSSHNodePools, args: [] },
     getVolumes: { fn: getVolumes, args: [] },
   },
 
@@ -34,9 +40,15 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
 
   // Page-specific function requirements
   pages: {
-    clusters: ['getClusters', 'getClusterHistory', 'getWorkspaces', 'getUsers'],
+    clusters: ['getClusters', 'getClusterHistory', 'getWorkspaces'],
     jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
-    infra: ['getInfraData', 'getClusters', 'getManagedJobs'],
+    infra: [
+      'getClusters',
+      'getManagedJobs',
+      'getGPUs',
+      'getCloudInfrastructure',
+      'getSSHNodePools',
+    ],
     workspaces: [
       'getWorkspaces',
       'getClusters',
@@ -55,6 +67,8 @@ class CachePreloader {
   constructor() {
     this.isPreloading = false;
     this.preloadPromises = new Map();
+    this.recentlyPreloaded = new Map(); // Track recently preloaded functions with timestamps
+    this.PRELOAD_GRACE_PERIOD = 5000; // 5 seconds grace period
   }
 
   /**
@@ -105,7 +119,13 @@ class CachePreloader {
         if (force) {
           dashboardCache.invalidate(fn, args);
         }
-        promises.push(dashboardCache.get(fn, args));
+        promises.push(
+          dashboardCache.get(fn, args).then((result) => {
+            // Mark this function as recently preloaded
+            this._markAsPreloaded(fn, args);
+            return result;
+          })
+        );
       } else if (functionName === 'getEnabledClouds') {
         // Dynamic function that requires workspace data
         promises.push(this._loadEnabledCloudsForAllWorkspaces(force));
@@ -154,27 +174,52 @@ class CachePreloader {
 
     this.isPreloading = true;
 
-    // Get all pages except current
-    const otherPages = Object.keys(DASHBOARD_CACHE_FUNCTIONS.pages).filter(
-      (page) => page !== currentPage
+    // Get functions already loaded for current page
+    const currentPageFunctions = new Set(
+      DASHBOARD_CACHE_FUNCTIONS.pages[currentPage]
     );
+
+    // Get all unique functions needed by other pages, excluding current page functions
+    const allOtherFunctions = new Set();
+    Object.keys(DASHBOARD_CACHE_FUNCTIONS.pages)
+      .filter((page) => page !== currentPage)
+      .forEach((page) => {
+        DASHBOARD_CACHE_FUNCTIONS.pages[page].forEach((functionName) => {
+          if (!currentPageFunctions.has(functionName)) {
+            allOtherFunctions.add(functionName);
+          }
+        });
+      });
 
     console.log(
-      `[CachePreloader] Background preloading pages: ${otherPages.join(', ')}`
+      `[CachePreloader] Background preloading ${allOtherFunctions.size} unique functions: ${Array.from(allOtherFunctions).join(', ')}`
     );
 
-    // Preload all pages immediately in parallel
-    const preloadPromises = otherPages.map(async (page) => {
-      try {
-        await this._loadPageData(page, false);
-        console.log(`[CachePreloader] Background loaded: ${page}`);
-      } catch (error) {
-        console.error(
-          `[CachePreloader] Background load failed for ${page}:`,
-          error
-        );
+    // Load each unique function once
+    const preloadPromises = Array.from(allOtherFunctions).map(
+      async (functionName) => {
+        try {
+          if (DASHBOARD_CACHE_FUNCTIONS.base[functionName]) {
+            // Base function (no arguments)
+            const { fn, args } = DASHBOARD_CACHE_FUNCTIONS.base[functionName];
+            await dashboardCache.get(fn, args);
+            // Mark this function as recently preloaded
+            this._markAsPreloaded(fn, args);
+          } else if (functionName === 'getEnabledClouds') {
+            // Dynamic function that requires workspace data
+            await this._loadEnabledCloudsForAllWorkspaces(false);
+          }
+          console.log(
+            `[CachePreloader] Background loaded function: ${functionName}`
+          );
+        } catch (error) {
+          console.error(
+            `[CachePreloader] Background load failed for function ${functionName}:`,
+            error
+          );
+        }
       }
-    });
+    );
 
     // Wait for all preloading to complete
     Promise.allSettled(preloadPromises).then(() => {
@@ -215,18 +260,80 @@ class CachePreloader {
   }
 
   /**
+   * Check if a function was recently preloaded (within grace period)
+   * @param {Function} fetchFunction - The function to check
+   * @param {Array} [args=[]] - Arguments to check
+   * @returns {boolean} - True if recently preloaded
+   */
+  wasRecentlyPreloaded(fetchFunction, args = []) {
+    const key = this._generateKey(fetchFunction, args);
+    const preloadTime = this.recentlyPreloaded.get(key);
+
+    if (!preloadTime) {
+      return false;
+    }
+
+    const now = Date.now();
+    const isRecent = now - preloadTime < this.PRELOAD_GRACE_PERIOD;
+
+    // Clean up expired entries
+    if (!isRecent) {
+      this.recentlyPreloaded.delete(key);
+    }
+
+    return isRecent;
+  }
+
+  /**
+   * Mark a function as recently preloaded
+   * @private
+   */
+  _markAsPreloaded(fetchFunction, args = []) {
+    const key = this._generateKey(fetchFunction, args);
+    this.recentlyPreloaded.set(key, Date.now());
+  }
+
+  /**
+   * Generate a cache key based on function name and arguments (same as DashboardCache)
+   * @private
+   */
+  _generateKey(fetchFunction, args) {
+    // Use same key generation logic as DashboardCache
+    const functionString = fetchFunction.toString();
+    const functionHash = this._simpleHash(functionString);
+    const argsHash = args.length > 0 ? JSON.stringify(args) : '';
+    return `${functionHash}_${argsHash}`;
+  }
+
+  /**
+   * Simple string hash function (same as DashboardCache)
+   * @private
+   */
+  _simpleHash(str) {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash << 5) + hash + str.charCodeAt(i);
+    }
+    return hash >>> 0;
+  }
+
+  /**
    * Clear all cache and reset preloader state
    */
   clearCache() {
     dashboardCache.clear();
     this.isPreloading = false;
     this.preloadPromises.clear();
+    this.recentlyPreloaded.clear();
     console.log('[CachePreloader] Cache cleared');
   }
 }
 
 // Create singleton instance
 const cachePreloader = new CachePreloader();
+
+// Set up coordination between cache and preloader
+dashboardCache.setPreloader(cachePreloader);
 
 export { CachePreloader, cachePreloader };
 export default cachePreloader;

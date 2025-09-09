@@ -406,9 +406,25 @@ def _usable_subnets(
                 s for s in candidate_subnets if s.vpc_id == vpc_id_of_sg
             ]
 
+            if not candidate_subnets:
+                _skypilot_log_error_and_exit_for_failover(
+                    'No candidate subnets found in specified VPC '
+                    f'{vpc_id_of_sg}.')
+
         available_subnets = [
             s for s in candidate_subnets if s.state == 'available'
         ]
+
+        if not available_subnets:
+            _skypilot_log_error_and_exit_for_failover(
+                'All candidate subnets are pending in specified VPC '
+                f'{vpc_id_of_sg}.')
+
+        if len(candidate_subnets) > len(available_subnets):
+            num_pruned = len(candidate_subnets) - len(available_subnets)
+            logger.debug(
+                f'{num_pruned} candidate subnets pruned since they are not '
+                'available.')
 
         if use_internal_ips:
             # Get private subnets.
@@ -421,6 +437,10 @@ def _usable_subnets(
                 if not _is_subnet_public(ec2, s.subnet_id, vpc_id_of_sg) and
                 not s.map_public_ip_on_launch
             ]
+            if not subnets:
+                _skypilot_log_error_and_exit_for_failover(
+                    'The use_internal_ips option is set to True, but all '
+                    'candidate subnets are public.')
         else:
             # Get public subnets.
             #
@@ -436,6 +456,10 @@ def _usable_subnets(
                 s for s in available_subnets
                 if _is_subnet_public(ec2, s.subnet_id, vpc_id_of_sg)
             ]
+            if not subnets:
+                _skypilot_log_error_and_exit_for_failover(
+                    'All candidate subnets are private, did you mean to '
+                    'set use_internal_ips to True?')
 
         subnets = sorted(
             subnets,
@@ -449,18 +473,7 @@ def _usable_subnets(
                                 'Failed to fetch available subnets from AWS.')
         raise exc
 
-    if not subnets:
-        vpc_msg = (f'Does a default VPC exist in region '
-                   f'{ec2.meta.client.meta.region_name}? ') if (
-                       vpc_id_of_sg is None) else ''
-        _skypilot_log_error_and_exit_for_failover(
-            f'No usable subnets found. {vpc_msg}'
-            'Try manually creating an instance in your specified region to '
-            'populate the list of subnets and try again. '
-            'Note that the subnet must map public IPs '
-            'on instance launch unless you set `use_internal_ips: true` in '
-            'the `provider` config.')
-    elif _are_user_subnets_pruned(subnets):
+    if _are_user_subnets_pruned(subnets):
         _skypilot_log_error_and_exit_for_failover(
             f'The specified subnets are not '
             f'usable: {_get_pruned_subnets(subnets)}')
@@ -579,6 +592,11 @@ def _get_subnet_and_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
     # not want SkyPilot to use.
     if vpc_id_of_sg is None:
         all_subnets = [s for s in all_subnets if s.vpc.is_default]
+        if not all_subnets:
+            _skypilot_log_error_and_exit_for_failover(
+                f'The default VPC in {region} either does not exist or '
+                'has no subnets.')
+
     subnets, vpc_id = _usable_subnets(
         ec2,
         user_specified_subnets=None,

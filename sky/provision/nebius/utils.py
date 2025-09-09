@@ -188,6 +188,7 @@ def launch(cluster_name_on_cloud: str,
            user_data: str,
            associate_public_ip_address: bool,
            filesystems: List[Dict[str, Any]],
+           use_static_ip_address: bool = False,
            use_spot: bool = False,
            network_tier: Optional[resources_utils.NetworkTier] = None) -> str:
     # Each node must have a unique name to avoid conflicts between
@@ -303,7 +304,8 @@ def launch(cluster_name_on_cloud: str,
                         subnet_id=sub_net.items[0].metadata.id,
                         ip_address=nebius.compute().IPAddress(),
                         name='network-interface-0',
-                        public_ip_address=nebius.compute().PublicIPAddress()
+                        public_ip_address=nebius.compute().PublicIPAddress(
+                            static=use_static_ip_address)
                         if associate_public_ip_address else None,
                     )
                 ],

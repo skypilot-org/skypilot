@@ -429,13 +429,18 @@ def test_docker_preinstalled_package(generic_cloud: str):
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     use_spot = True
-    # EKS does not support spot instances
+    accelerator = 'T4'
     if generic_cloud == 'kubernetes':
-        use_spot = not smoke_tests_utils.is_eks_cluster()
+        # EKS does not support spot instances
+        # Assume tests using a remote api server endpoint do not support spot instances
+        use_spot = not smoke_tests_utils.is_eks_cluster(
+        ) and not smoke_tests_utils.api_server_endpoint_configured_in_env_file(
+        )
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     test = smoke_tests_utils.Test(
         'multi_echo',
         [
-            f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)}',
+            f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)} {accelerator}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             'sleep 10',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
@@ -889,6 +894,29 @@ def test_task_labels_kubernetes():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Services on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_services_on_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    service_check = smoke_tests_utils.run_cloud_cmd_on_cluster(
+        name,
+        f'services=$(kubectl get svc -o name | grep -F {name} | grep -v -- "-cloud-cmd" || true); '
+        'echo "[$services]"; '
+        'if [ -n "$services" ]; then echo "services found"; exit 1; else echo "services not found"; fi'
+    )
+    test = smoke_tests_utils.Test(
+        'services_on_kubernetes',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # Launch Kubernetes cluster with three nodes.
+            f'sky launch -y -c {name} --num-nodes 3 --cpus=0.1+ --infra kubernetes',
+        ],
+        f'sky down -y {name} && {service_check} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Pod Annotations on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_add_pod_annotations_for_autodown_with_launch():
@@ -968,6 +996,23 @@ def test_add_and_remove_pod_annotations_with_autostop():
         ],
         f'sky down -y {name} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Volumes on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_volumes_on_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'volumes_on_kubernetes',
+        [
+            f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
+            f'sky volumes ls | grep "pvc0"',
+            f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name} && sky volumes delete pvc0 -y && (vol=$(sky volumes ls | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi)',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1661,14 +1706,15 @@ def test_aws_custom_image():
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
+    accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test-kubernetes-custom-image',
         [
-            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus T4:1',
+            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1',
             f'sky logs {name} 1 --status',
             # Try exec to run again and check if the logs are printed
-            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus T4:1 | grep "Hello 100"',
+            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1 | grep "Hello 100"',
             # Make sure ssh is working with custom username
             f'ssh {name} echo hi | grep hi',
         ],
@@ -2033,7 +2079,7 @@ def test_remote_server_api_login():
     if not smoke_tests_utils.is_remote_server_test():
         pytest.skip('This test is only for remote server')
 
-    endpoint = docker_utils.get_api_server_endpoint_inside_docker()
+    endpoint = smoke_tests_utils.get_api_server_url()
     config_path = skypilot_config._GLOBAL_CONFIG_PATH
     backup_path = f'{config_path}.backup_for_test_remote_server_api_login'
 
@@ -2043,7 +2089,7 @@ def test_remote_server_api_login():
             # Backup existing config file if it exists
             f'if [ -f {config_path} ]; then cp {config_path} {backup_path}; fi',
             # Run sky api login
-            f'sky api login -e {endpoint}',
+            f'unset {constants.SKY_API_SERVER_URL_ENV_VAR} && sky api login -e {endpoint}',
             # Echo the config file content to see what was written
             f'echo "Config file content after sky api login:" && cat {config_path}',
             # Verify the config file is updated with the endpoint

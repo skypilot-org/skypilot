@@ -62,8 +62,15 @@ def test_api_stream_heartbeat(monkeypatch):
         async def mock_get_request(request_id):
             return MockRequest()
 
+        async def mock_get_request_status(request_id):
+            return requests_lib.StatusWithMsg(MockRequest().status,
+                                              MockRequest().status_msg)
+
         monkeypatch.setattr('sky.server.requests.requests.get_request_async',
                             mock_get_request)
+        monkeypatch.setattr(
+            'sky.server.requests.requests.get_request_status_async',
+            mock_get_request_status)
 
         log_path = pathlib.Path(temp_log_path)
 
@@ -147,9 +154,15 @@ def test_heartbeat_not_displayed_to_users(monkeypatch):
         async def mock_get_request(request_id):
             return MockRequest()
 
+        async def mock_get_request_status(request_id):
+            return requests_lib.StatusWithMsg(MockRequest().status,
+                                              MockRequest().status_msg)
+
         monkeypatch.setattr('sky.server.requests.requests.get_request_async',
                             mock_get_request)
-
+        monkeypatch.setattr(
+            'sky.server.requests.requests.get_request_status_async',
+            mock_get_request_status)
         log_path = pathlib.Path(temp_log_path)
 
         try:
