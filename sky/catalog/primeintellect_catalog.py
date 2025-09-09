@@ -1,7 +1,7 @@
 """PrimeIntellect service catalog.
 
 This module loads the service catalog file and can be used to
-query instance types and pricing information for Prime Intellect.
+query instance types and pricing information for PrimeIntellect.
 """
 
 import typing
