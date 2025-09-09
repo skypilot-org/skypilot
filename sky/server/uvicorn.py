@@ -101,7 +101,7 @@ def reclaim_memory():
             lines = stat.traceback.format()
             should_print = False
             for line in lines:
-                if ('json/decoder' in line or 'pandas/core' in line or 'kubernetes/client' in line):
+                if 'json/decoder' in line:
                     should_print = True
                     break
             if should_print:
