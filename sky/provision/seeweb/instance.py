@@ -18,6 +18,7 @@ from sky.provision.common import InstanceInfo
 from sky.provision.common import ProvisionConfig
 from sky.provision.common import ProvisionRecord
 from sky.utils import command_runner  # Unified SSH helper
+from sky.utils import common_utils
 from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -30,6 +31,7 @@ def _get_seeweb_client():
     """Return a singleton Seeweb ECS API client."""
     global _seeweb_client
     if _seeweb_client is None:
+        # Initialize via adaptor's cached client
         _seeweb_client = seeweb_adaptor.client()
     return _seeweb_client
 
@@ -39,7 +41,10 @@ def _get_seeweb_client():
 # --------------------------------------------------------------------------- #
 _POLL_INTERVAL = 5  # sec
 _MAX_BOOT_TIME = 1200  # sec
-_NOTE_KEY = 'skypilot_cluster'  # we save cluster_name in .notes for filtering
+_ACTION_WATCH_MAX_RETRY = 360  # number of polls before giving up
+_ACTION_WATCH_FETCH_EVERY = 5  # seconds between polls
+_API_RETRY_MAX_RETRIES = 5
+_API_RETRY_INITIAL_BACKOFF = 1
 
 
 # --------------------------------------------------------------------------- #
@@ -142,6 +147,12 @@ class SeewebNodeProvider:
         for srv in self._query_cluster_nodes():
             logger.info('Deleting server %s …', srv.name)
             self.ecs.delete_server(srv.name)  # DELETE /servers/{name}
+
+            # Retry deletion with exponential backoff
+            # to handle transient API errors
+            common_utils.retry(self.ecs.delete_server,
+                               max_retries=5,
+                               initial_backoff=1)(srv.name)
 
     # --------------------------------------------------------------------- #
     # 4. stop_instances
@@ -340,14 +351,20 @@ class SeewebNodeProvider:
     # ======================  private helpers  ========================= #
     def _query_cluster_nodes(self):
         """List servers with notes == cluster_name."""
+        servers = common_utils.retry(
+            self.ecs.fetch_servers,
+            max_retries=_API_RETRY_MAX_RETRIES,
+            initial_backoff=_API_RETRY_INITIAL_BACKOFF)()
         return [
-            s for s in self.ecs.fetch_servers()
+            s for s in servers
             if s.notes and s.notes.startswith(self.cluster_name)
         ]
 
     def query_cluster_nodes(self):
         """Public wrapper for querying cluster nodes for this cluster."""
-        return self._query_cluster_nodes()
+        return common_utils.retry(self._query_cluster_nodes,
+                                  max_retries=_API_RETRY_MAX_RETRIES,
+                                  initial_backoff=_API_RETRY_INITIAL_BACKOFF)()
 
     def _get_head_instance_id(self) -> Optional[str]:
         """Return head instance id for this cluster.
@@ -355,7 +372,9 @@ class SeewebNodeProvider:
         Prefer notes == "{cluster}-head"; fallback to first node if none
         matches (legacy naming).
         """
-        nodes = self._query_cluster_nodes()
+        nodes = common_utils.retry(self._query_cluster_nodes,
+                                   max_retries=_API_RETRY_MAX_RETRIES,
+                                   initial_backoff=_API_RETRY_INITIAL_BACKOFF)()
         for node in nodes:
             try:
                 if getattr(node, 'notes', None) == f'{self.cluster_name}-head':
@@ -368,7 +387,9 @@ class SeewebNodeProvider:
 
     def get_head_instance_id(self) -> Optional[str]:
         """Public wrapper for getting head instance id."""
-        return self._get_head_instance_id()
+        return common_utils.retry(self._get_head_instance_id,
+                                  max_retries=_API_RETRY_MAX_RETRIES,
+                                  initial_backoff=_API_RETRY_INITIAL_BACKOFF)()
 
     def _create_server(self):
         """POST /servers with complete payload."""
@@ -398,20 +419,31 @@ class SeewebNodeProvider:
         logger.info('Creating Seeweb server %s', payload)
 
         # POST /servers – returns (response, action_id)
-        _, action_id = self.ecs.create_server(create_request,
-                                              check_if_can_create=False)
-        self.ecs.watch_action(action_id, max_retry=360, fetch_every=5)
+        _, action_id = common_utils.retry(
+            self.ecs.create_server,
+            max_retries=_API_RETRY_MAX_RETRIES,
+            initial_backoff=_API_RETRY_INITIAL_BACKOFF)(
+                create_request, check_if_can_create=False)
+        self.ecs.watch_action(action_id,
+                              max_retry=_ACTION_WATCH_MAX_RETRY,
+                              fetch_every=_ACTION_WATCH_FETCH_EVERY)
 
     def _power_on(self, server_id: str):
         try:
-            self.ecs.turn_on_server(server_id)
+            common_utils.retry(
+                self.ecs.turn_on_server,
+                max_retries=_API_RETRY_MAX_RETRIES,
+                initial_backoff=_API_RETRY_INITIAL_BACKOFF)(server_id)
         except Exception as e:
             logger.error(f'Error in _power_on for {server_id}: {e}')
             raise
 
     def _power_off(self, server_id: str):
         try:
-            self.ecs.turn_off_server(server_id)
+            common_utils.retry(
+                self.ecs.turn_off_server,
+                max_retries=_API_RETRY_MAX_RETRIES,
+                initial_backoff=_API_RETRY_INITIAL_BACKOFF)(server_id)
         except Exception as e:
             logger.error(f'\n\nError in _power_off for {server_id}: {e}')
             raise
@@ -419,7 +451,10 @@ class SeewebNodeProvider:
     def _wait_action(self, action_id: int):
         """Poll action until it completes."""
         while True:
-            action = self.ecs.fetch_action(action_id)
+            action = common_utils.retry(
+                self.ecs.fetch_action,
+                max_retries=_API_RETRY_MAX_RETRIES,
+                initial_backoff=_API_RETRY_INITIAL_BACKOFF)(action_id)
             if action['status'] in ('completed', 'ok', 'no_content'):
                 return
             if action['status'] == 'error':
@@ -434,13 +469,19 @@ class SeewebNodeProvider:
 
         while time.time() - start_time < max_wait:
             # Force refresh by re-fetching cluster nodes
-            cluster_nodes = self._query_cluster_nodes()
+            cluster_nodes = common_utils.retry(
+                self._query_cluster_nodes,
+                max_retries=_API_RETRY_MAX_RETRIES,
+                initial_backoff=_API_RETRY_INITIAL_BACKOFF)()
 
             all_stopped = True
             for server in cluster_nodes:
                 try:
                     # Always use fetch_server_status() for accurate status
-                    specific_status = self.ecs.fetch_server_status(server.name)
+                    specific_status = common_utils.retry(
+                        self.ecs.fetch_server_status,
+                        max_retries=_API_RETRY_MAX_RETRIES,
+                        initial_backoff=_API_RETRY_INITIAL_BACKOFF)(server.name)
 
                     if specific_status != 'SHUTOFF':
                         all_stopped = False
@@ -550,7 +591,7 @@ def wait_instances(
         seeweb_state = 'Booted'  # Default fallback
 
     # Create Seeweb client directly and wait
-    client = seeweb_adaptor.client()
+    client = _get_seeweb_client()
     deadline = time.time() + _MAX_BOOT_TIME
     while time.time() < deadline:
         cluster_nodes = [
@@ -699,7 +740,7 @@ def get_cluster_info(
 ) -> 'ClusterInfo':
     del region  # unused
     # Use Seeweb client to get cluster instances
-    client = seeweb_adaptor.client()
+    client = _get_seeweb_client()
     cluster_nodes = [
         s for s in client.fetch_servers()
         if s.notes and s.notes.startswith(cluster_name_on_cloud)

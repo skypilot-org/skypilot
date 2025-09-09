@@ -444,11 +444,7 @@ def _request_execution_wrapper(request_id: str,
             logger.info(f'Request {request_id} finished')
         finally:
             with metrics_lib.time_it(name='release_memory', group='internal'):
-                try:
-                    common_utils.release_memory()
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.error(f'Failed to release memory: '
-                                 f'{common_utils.format_exception(e)}')
+                common_utils.release_memory()
 
 
 async def execute_request_coroutine(request: api_requests.Request):

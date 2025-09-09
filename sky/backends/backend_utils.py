@@ -1106,69 +1106,6 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
     yaml_utils.dump_yaml(tmp_yaml_path, config)
 
 
-# ---------------------------------------------------------------------
-# SEEWEB – query cluster status
-# ---------------------------------------------------------------------
-def _query_status_seeweb(
-    cluster: str,
-    ray_config: Dict[str, Any],
-) -> List[status_lib.ClusterStatus]:
-    """Returns the list of statuses (one per node) for the Seeweb cluster.
-
-    • Uses the `notes` field of ECS servers to identify which cluster
-      an instance belongs to (*notes == cluster_name_on_cloud*).
-    • Translates Seeweb statuses → SkyPilot ClusterStatus enum.
-    """
-    # ray_config is unused for Seeweb
-    del ray_config
-
-    try:
-        import configparser  # pylint: disable=import-outside-toplevel
-        from pathlib import Path  # pylint: disable=import-outside-toplevel
-
-        import ecsapi  # pylint: disable=import-outside-toplevel
-
-        # Read API key
-        parser = configparser.ConfigParser()
-        parser.read(Path('~/.seeweb_cloud/seeweb_keys').expanduser())
-        api_key = parser['DEFAULT']['api_key'].strip()
-
-        client = ecsapi.Api(token=api_key)
-    except Exception as e:  # pragma: no cover  # pylint: disable=broad-except
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Unable to query Seeweb: {e}. '
-                               'Check that SEEWEB_TOKEN is valid.') from e
-
-    # Filter cluster instances: select servers whose 'notes' field matches the cluster name
-    servers = [
-        s for s in client.servers.list()  # GET /servers
-        if s.get('notes') == cluster
-    ]
-
-    if not servers:
-        # No instance with that tag → cluster terminated
-        return []
-
-    # Map Seeweb status to ClusterStatus
-    translate = {
-        'Running': status_lib.ClusterStatus.UP,
-        'Booting': status_lib.ClusterStatus.INIT,
-        'PoweringOn': status_lib.ClusterStatus.INIT,
-        'Off': status_lib.ClusterStatus.STOPPED,
-        'PoweringOff': status_lib.ClusterStatus.STOPPED,
-    }
-
-    return [
-        translate.get(s['status'], status_lib.ClusterStatus.INIT)
-        for s in servers
-    ]
-
-
-_QUERY_STATUS_FUNCS = {
-    'Seeweb': _query_status_seeweb,
-}
-
-
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
     return datetime.strptime(
         run_timestamp.partition('-')[2], '%Y-%m-%d-%H-%M-%S-%f').timestamp()
