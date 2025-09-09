@@ -10,8 +10,6 @@ from sky.utils import common_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
 
-logger = sky_logging.init_logger(__name__)
-
 # The maximum number of times to poll for the status of an operation.
 POLL_INTERVAL = 5
 MAX_POLLS = 60 // POLL_INTERVAL
