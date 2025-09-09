@@ -13,8 +13,8 @@ from sky.utils import ux_utils
 # The maximum number of times to poll for the status of an operation.
 POLL_INTERVAL = 5
 MAX_POLLS = 60 // POLL_INTERVAL
-# Stopping instances can take several minutes, so we increase the timeout
-MAX_POLLS_FOR_UP_OR_STOP = MAX_POLLS * 16
+# Terminating instances can take several minutes, so we increase the timeout
+MAX_POLLS_FOR_UP_OR_TERMINATE = MAX_POLLS * 16
 
 # status filters
 # PROVISIONING, PENDING, ACTIVE, STOPPED, ERROR, DELETING, TERMINATED
@@ -203,7 +203,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             head_instance_id = instance_id
 
     # Wait for instances to be ready.
-    for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
+    for _ in range(MAX_POLLS_FOR_UP_OR_TERMINATE):
         instances = _filter_instances(cluster_name_on_cloud, ['ACTIVE'])
         logger.info('Waiting for instances to be ready: '
                     f'({len(instances)}/{config.count}).')
@@ -319,7 +319,7 @@ def terminate_instances(
 
     logger.info(f'Waiting for {len(terminated_instances)} instances to be '
                 f'terminated...')
-    for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
+    for _ in range(MAX_POLLS_FOR_UP_OR_TERMINATE):
         remaining_instances = _filter_instances(cluster_name_on_cloud, None)
 
         # Check if all terminated instances are gone
