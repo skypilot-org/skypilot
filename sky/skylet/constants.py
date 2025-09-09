@@ -374,6 +374,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('ssh', 'pod_config'),
     ('kubernetes', 'custom_metadata'),
     ('kubernetes', 'pod_config'),
+    ('kubernetes', 'context_configs'),
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
