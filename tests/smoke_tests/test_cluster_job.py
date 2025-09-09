@@ -1495,6 +1495,8 @@ def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
+    # Azure takes longer to setup
+    launch_timeout = 400 if generic_cloud == 'azure' else 150
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'cancel-pytorch',
@@ -1506,7 +1508,7 @@ def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
                 cluster_name=name,
                 job_id='1',
                 job_status=[sky.JobStatus.RUNNING],
-                timeout=150),
+                timeout=launch_timeout),
             # Wait the GPU process to start.
             'sleep 90',
             f'sky exec {name} --num-nodes 2 \'s=$(nvidia-smi); echo "$s"; echo "$s" | grep python || '
