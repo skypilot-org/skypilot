@@ -3559,7 +3559,7 @@ def workspace_lock_id(workspace_name: str) -> str:
 
 def cluster_tunnel_lock_id(cluster_name: str) -> str:
     """Get the lock ID for cluster tunnel operations."""
-    return f'{cluster_name}_tunnel'
+    return f'{cluster_name}_ssh_tunnel'
 
 
 def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
@@ -3646,7 +3646,7 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     1. Try the gRPC request
     2. If SSH tunnel is closed, recreate it and retry
     """
-    max_attempts = 5
+    max_attempts = 10
     backoff = common_utils.Backoff(initial_backoff=0.5)
     last_exception: Optional[Exception] = None
 
