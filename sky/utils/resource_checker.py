@@ -276,9 +276,8 @@ def _get_active_resources(
         # pylint: disable=import-outside-toplevel
         from sky.jobs.server import core as managed_jobs_core
         try:
-            filtered_jobs, _, _, _ = managed_jobs_core.queue(refresh=False,
-                                                             skip_finished=True,
-                                                             all_users=True)
+            filtered_jobs, _, _, _ = managed_jobs_core.queue_v2(
+                refresh=False, skip_finished=True, all_users=True)
             return filtered_jobs
         except exceptions.ClusterNotUpError:
             logger.warning('All jobs should be finished.')
