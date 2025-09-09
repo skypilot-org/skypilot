@@ -1016,7 +1016,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "sum(idelta(sky_apiserver_process_execution_start_total{app=\"$app\", worker=~\"$worker\"}[2m])) by (pid, request)",
+              "expr": "sum(idelta(sky_apiserver_process_execution_start_total{app=\"$app\", pid=~\"$worker\"}[2m])) by (pid, request)",
               "interval": "",
               "legendFormat": "{{pid}}-{{request}}",
               "range": true,
