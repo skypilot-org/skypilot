@@ -3022,6 +3022,48 @@ def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
 
+def _refresh_cluster(cluster_name,
+    force_refresh_statuses):
+    # TODO(syang): we should try not to leak
+    # request info in backend_utils.py.
+    # Refactor this to use some other info to
+    # determine if a launch is in progress.
+    request = requests_lib.get_request_tasks(
+        req_filter=requests_lib.RequestTaskFilter(
+            status=[requests_lib.RequestStatus.RUNNING],
+            cluster_names=[cluster_name],
+            include_request_names=['sky.launch']))
+    if len(request) > 0:
+        # There is an active launch request on the cluster,
+        # so we don't want to update the cluster status until
+        # the request is completed.
+        logger.debug(f'skipping refresh for cluster {cluster_name} '
+                        'as there is an active launch request')
+        return global_user_state.get_cluster_from_name(cluster_name)
+    try:
+        record = refresh_cluster_record(
+            cluster_name,
+            force_refresh_statuses=force_refresh_statuses,
+            acquire_per_cluster_status_lock=True)
+    except (exceptions.ClusterStatusFetchingError,
+            exceptions.CloudUserIdentityError,
+            exceptions.ClusterOwnerIdentityMismatchError) as e:
+        # Do not fail the entire refresh process. The caller will
+        # handle the 'UNKNOWN' status, and collect the errors into
+        # a table.
+        record = {'status': 'UNKNOWN', 'error': e}
+    return record
+
+def refresh_cluster_records() -> None:
+    exclude_managed_clusters = True
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        exclude_managed_clusters = False
+    records = global_user_state.get_clusters(
+        exclude_managed_clusters=exclude_managed_clusters)
+    cluster_names = [record['name'] for record in records]
+    if len(cluster_names) > 0:
+        subprocess_utils.run_in_parallel(
+            _refresh_cluster, cluster_names)
 
 def get_clusters(
     refresh: common.StatusRefreshMode,
@@ -3196,40 +3238,16 @@ def get_clusters(
         force_refresh_statuses = set(status_lib.ClusterStatus)
     else:
         force_refresh_statuses = None
-
-    def _refresh_cluster(cluster_name):
-        # TODO(syang): we should try not to leak
-        # request info in backend_utils.py.
-        # Refactor this to use some other info to
-        # determine if a launch is in progress.
-        request = requests_lib.get_request_tasks(
-            req_filter=requests_lib.RequestTaskFilter(
-                status=[requests_lib.RequestStatus.RUNNING],
-                cluster_names=[cluster_name],
-                include_request_names=['sky.launch']))
-        if len(request) > 0:
-            # There is an active launch request on the cluster,
-            # so we don't want to update the cluster status until
-            # the request is completed.
-            logger.debug(f'skipping refresh for cluster {cluster_name} '
-                         'as there is an active launch request')
-            return global_user_state.get_cluster_from_name(cluster_name)
-        try:
-            record = refresh_cluster_record(
-                cluster_name,
-                force_refresh_statuses=force_refresh_statuses,
-                acquire_per_cluster_status_lock=True)
+    
+    def _refresh_cluster_record(cluster_name):
+        record = _refresh_cluster(
+            cluster_name,
+            force_refresh_statuses=force_refresh_statuses)
+        if 'error' not in record:
             _update_records_with_handle_info([record])
             if include_credentials:
                 _update_records_with_credentials([record])
-        except (exceptions.ClusterStatusFetchingError,
-                exceptions.CloudUserIdentityError,
-                exceptions.ClusterOwnerIdentityMismatchError) as e:
-            # Do not fail the entire refresh process. The caller will
-            # handle the 'UNKNOWN' status, and collect the errors into
-            # a table.
-            record = {'status': 'UNKNOWN', 'error': e}
-        progress.update(task, advance=1)
+            progress.update(task, advance=1)
         return record
 
     cluster_names = [record['name'] for record in records]
@@ -3237,7 +3255,7 @@ def get_clusters(
     if len(cluster_names) > 0:
         with progress:
             updated_records = subprocess_utils.run_in_parallel(
-                _refresh_cluster, cluster_names)
+                _refresh_cluster_record, cluster_names)
 
     # Show information for removed clusters.
     kept_records = []
