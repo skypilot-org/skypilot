@@ -182,7 +182,8 @@ class TestCloudVmRayBackendTaskRedaction:
         # Verify sensitive string values in secrets are redacted
         assert redacted_config['secrets']['API_KEY'] == '<redacted>'
         assert redacted_config['secrets']['DATABASE_PASSWORD'] == '<redacted>'
-        assert redacted_config['AWS_SECRET_ACCESS_KEY'] == '<redacted>'
+        assert redacted_config['secrets'][
+            'AWS_SECRET_ACCESS_KEY'] == '<redacted>'
         assert redacted_config['secrets']['STRIPE_SECRET_KEY'] == '<redacted>'
         assert redacted_config['secrets']['JWT_SECRET'] == '<redacted>'
 
@@ -223,7 +224,8 @@ class TestCloudVmRayBackendTaskRedaction:
         assert non_redacted_config['envs']['DEBUG'] == 'true'
         assert non_redacted_config['envs']['PORT'] == 8080
         assert non_redacted_config['secrets']['API_KEY'] == 'actual-api-key'
-        assert non_redacted_config['JWT_SECRET'] == 'actual-jwt-secret'
+        assert non_redacted_config['secrets'][
+            'JWT_SECRET'] == 'actual-jwt-secret'
 
         # Also test default behavior (should NOT redact secrets by default)
         default_config = test_task.to_yaml_config()
