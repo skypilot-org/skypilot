@@ -288,6 +288,7 @@ def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # Vast doesn't guarantee exactly 8 CPUs, only at least.
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic
 def test_large_job_queue(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -335,6 +336,7 @@ def test_large_job_queue(generic_cloud: str):
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # No Vast Cloud VM has 8 CPUs
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic
 @pytest.mark.resource_heavy
 def test_fast_large_job_queue(generic_cloud: str):
@@ -2131,6 +2133,7 @@ def test_remote_server_api_login():
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # See test_autostop_wait_for_jobs() for explanation of autostop_timeout.
@@ -2169,6 +2172,7 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
