@@ -317,10 +317,6 @@ class Shadeform(clouds.Cloud):
         # Handle accelerator requests
         accelerators = resources.accelerators
         if accelerators is not None:
-            # Get catalog data once outside loop to avoid closure capture
-            # pylint: disable=protected-access
-            catalog_data = shadeform_catalog._get_df()
-
             # Get the first accelerator type and count
             for accelerator_name, accelerator_count in accelerators.items():
                 # Get instance types that provide this accelerator
@@ -332,27 +328,12 @@ class Shadeform(clouds.Cloud):
                 if instance_types:
                     # Create separate resource objects for each instance type
                     # This is crucial: each resource will only be considered
-                    # for regions
-                    # where its specific instance type is available
+                    # for regions where its specific instance type is available
                     all_resources = []
                     all_candidate_names = []
 
-                    # Sort by availability and price for better selection order
-                    def get_sort_key(instance_type):
-                        matching_rows = catalog_data[
-                            catalog_data['InstanceType'] == instance_type]
-                        if matching_rows.empty:
-                            return (0, float('inf'))
-                        region_count = len(matching_rows)
-                        avg_price = matching_rows['Price'].mean()
-                        return (region_count, -avg_price)
-
-                    sorted_instance_types = sorted(instance_types,
-                                                   key=get_sort_key,
-                                                   reverse=True)
-
                     # Create one resource per instance type
-                    for instance_type in sorted_instance_types:
+                    for instance_type in instance_types:
                         resource = resources.copy(
                             cloud=Shadeform(),
                             instance_type=instance_type,
