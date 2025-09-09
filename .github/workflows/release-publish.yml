@@ -127,7 +127,14 @@ jobs:
         with:
           name: "Release v${{ needs.extract-version.outputs.version }}"
           tag_name: "v${{ needs.extract-version.outputs.version }}"
-          generate_release_notes: true
+          body: |
+            ## SkyPilot v${{ needs.extract-version.outputs.version }}
+
+            Get it now with:
+
+            ```bash
+            uv pip install "skypilot>=${{ needs.extract-version.outputs.version }}"
+            ```
           draft: true
           token: ${{ secrets.GH_PAT_FOR_RELEASE }}
 
