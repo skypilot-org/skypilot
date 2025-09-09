@@ -58,79 +58,7 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-def _parse_ssh_connection(ssh_connection: Any) -> Tuple[Optional[str], int]:
-    """Parse and extract SSH username and port from a connection field.
-
-    The provider may return the SSH connection in multiple shapes. This helper
-    robustly extracts the SSH username and port while tolerating extra flags or
-    various tokenizations.
-
-    Accepted formats (examples):
-    - String with port flag:
-      "ubuntu@1.2.3.4 -p 2222 [-o <flag> ...]"
-    - String without explicit port (defaults to 22):
-      "ubuntu@1.2.3.4"
-    - String with host:port:
-      "ubuntu@1.2.3.4:2222"
-    - List with a single target:
-      ["ubuntu@1.2.3.4"]
-    - List of tokens (e.g., split form):
-      ["ubuntu@1.2.3.4", "-p", "2222"]
-
-    Args:
-        ssh_connection: The raw field from the API; can be a string or a list
-            of strings.
-
-    Returns:
-        (ssh_user, ssh_port): username if found, else None; port if found,
-        else 22.
-    """
-    import shlex
-
-    ssh_user: Optional[str] = None
-    ssh_port: int = 22
-
-    # Normalize into a list of tokens for easier processing.
-    tokens: List[str] = []
-    if isinstance(ssh_connection, str):
-        try:
-            tokens = shlex.split(ssh_connection)
-        except Exception:  # pylint: disable=broad-except
-            tokens = [ssh_connection]
-    elif isinstance(ssh_connection, list):
-        for elem in ssh_connection:
-            if isinstance(elem, str):
-                try:
-                    tokens.extend(shlex.split(elem))
-                except Exception:  # pylint: disable=broad-except
-                    tokens.append(elem)
-    else:
-        # Unknown type; return defaults.
-        return ssh_user, ssh_port
-
-    # Find the first token containing '@' as the user@host candidate.
-    user_host: Optional[str] = next((t for t in tokens if '@' in t), None)
-    if user_host:
-        ssh_user = user_host.split('@', 1)[0].strip()
-        # Try host:port format (after '@').
-        host_part = user_host.split('@', 1)[1]
-        if ':' in host_part:
-            _, maybe_port = host_part.rsplit(':', 1)
-            try:
-                ssh_port = int(maybe_port)
-            except ValueError:
-                pass
-
-    # Check for '-p <port>' pair anywhere in the tokens. This takes priority.
-    if '-p' in tokens:
-        idx = tokens.index('-p')
-        if idx + 1 < len(tokens):
-            try:
-                ssh_port = int(tokens[idx + 1])
-            except ValueError:
-                pass
-
-    return ssh_user, ssh_port
+from sky.provision.primeintellect.utils import parse_ssh_connection
 
 
 def run_instances(region: str, cluster_name_on_cloud: str,
@@ -459,7 +387,7 @@ def get_cluster_info(
             'sshConnection'), 'sshConnection cannot be null anymore'
 
         ssh_connection = instance['sshConnection']
-        parsed_user_for_port, ssh_port = _parse_ssh_connection(ssh_connection)
+        parsed_user_for_port, ssh_port = parse_ssh_connection(ssh_connection)
 
         external_ip = instance['ip']
         if isinstance(external_ip, list):
@@ -476,7 +404,7 @@ def get_cluster_info(
         ]
         if instance['name'].endswith('-head'):
             head_instance_id = instance_id
-            parsed_user_for_user, _ = _parse_ssh_connection(ssh_connection)
+            parsed_user_for_user, _ = parse_ssh_connection(ssh_connection)
             head_ssh_user = parsed_user_for_user or 'ubuntu'
 
     return common.ClusterInfo(
