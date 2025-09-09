@@ -5968,12 +5968,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 "lock=/var/tmp/sky_mount_$(echo -n \"$DST\" | tr -c A-Za-z0-9_.- _); "
                 "exec 300>$lock; "
                 "if flock -x -w 60 300; then "
-                f"{mount_cmd} & pid=$!; "
+                f"nohup {mount_cmd} >/dev/null 2>&1 & disown; "
                 "for i in $(seq 1 180); do "
                 "  if findmnt -rn -T \"$DST\" >/dev/null 2>&1; then exit 0; fi; "
                 "  sleep 1; "
                 "done; "
-                "kill $pid; exit 1; "
+                "exit 1; "
                 "else "
                 "for i in $(seq 1 180); do "
                 "  if findmnt -rn -T \"$DST\" >/dev/null 2>&1; then exit 0; fi; "
@@ -5983,7 +5983,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 "fi"
             )
 
-            # Minimal change: no manual single quotes; just quote the whole inner string.
             mount_cmd = "bash -lc " + shlex.quote(inner)
 
             src_print = (storage_obj.source
