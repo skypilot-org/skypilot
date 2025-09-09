@@ -96,11 +96,21 @@ def reclaim_memory():
         logger.info(f'Traced memory: {current/1024/1024}MB, peak: {peak/1024/1024}MB')
         snapshot = tracemalloc.take_snapshot()
         top_stats = snapshot.statistics('traceback')
-        for index, stat in enumerate(top_stats[:30]):
-            logger.info(f'{index + 1:2d}. {stat}')
-            if stat.size > 1024 * 1024:
-                for line in stat.traceback.format(limit=20):
+        printed = 0
+        for _, stat in enumerate(top_stats):
+            lines = stat.traceback.format()
+            should_print = False
+            for line in lines:
+                if ('json/decoder' in line or 'pandas/core' in line or 'kubernetes/client' in line):
+                    should_print = True
+                    break
+            if should_print:
+                printed += 1
+                logger.info(str(stat))
+                for line in lines:
                     logger.info(line)
+            if printed >= 5:
+                break
         time.sleep(30)
 
 class Server(uvicorn.Server):
