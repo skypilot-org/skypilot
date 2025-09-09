@@ -189,10 +189,47 @@ class PrimeIntellectAPIClient:
                disk_size: int,
                vcpus: int = 0,
                memory: int = 0) -> Dict[str, Any]:
+        """Create a pod/instance via Prime Intellect API.
+
+        Args:
+            name: User-visible name of the pod.
+            instance_type: A catalog instance type string. The expected format
+                is:
+                "<provider>__<accelerator>__<vcpus>__<memory>[_SPOT]".
+
+                - <provider>: Upstream provider tag (e.g., "primecompute").
+                - <accelerator>:
+                  * GPU nodes: "<N>x<GPU_MODEL>", e.g., "8xH100_80GB".
+                  * CPU-only nodes: the literal "CPU_NODE".
+                - <vcpus>: Integer string for vCPU count (e.g., "104").
+                - <memory>: Integer string for memory in GB (e.g., "752").
+                - Optional suffix "_SPOT" may be present in the full string
+                  (ignored here; pricing/spot behavior is not controlled by
+                  this method).
+
+                Notes:
+                - This method only requires the first two components
+                  (provider, accelerator) for building the API payload. The
+                  vCPU and memory values are provided separately via the
+                  ``vcpus`` and ``memory`` arguments; upstream code may also
+                  parse them from the instance_type for validation.
+
+            region: Country/region code used by Prime Intellect.
+            availability_zone: Data center ID (zone) within the region.
+            disk_size: Boot disk size in GB.
+            vcpus: Optional explicit vCPU override; if >0 it will be sent.
+            memory: Optional explicit memory override in GB; if >0 it will be
+                sent.
+
+        Returns:
+            The API response JSON as a dict.
+        """
         cloud_id = get_upstream_cloud_id(instance_type)
         assert cloud_id, 'cloudId cannot be None'
         assert availability_zone, 'availability_zone cannot be None'
 
+        # Parse the instance_type. We only need the first two components:
+        #   provider and accelerator info (see docstring above).
         provider, gpu_parts, _, _ = instance_type.split('__', 3)
         if 'CPU_NODE' in gpu_parts:
             # Prime Intellect API uses the same schema for CPU-only and GPU pods.
