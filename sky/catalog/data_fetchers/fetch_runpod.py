@@ -166,21 +166,14 @@ def get_gpu_info(gpu_type: Dict, gpu_count: int) -> Dict:
     # This is the GPU memory not the CPU memory.
     memory = gpu_type.get('memoryInGb')
 
-    # Fall back to defaults if values are None
-    # scale default value by gpu_count
-    vcpus = DEFAULT_VCPUS * gpu_count if vcpus is None else vcpus
-    memory = (MEMORY_PER_GPU if memory is None else memory) * gpu_count
-
-    assert isinstance(
-        vcpus,
-        (float,
-         int)) and vcpus > 0, f'vCPUs must be a positive number, not {vcpus}'
-    assert isinstance(
-        memory,
-        (float, int
-        )) and memory > 0, f'MemoryGiB must be a positive number, not {memory}'
-
+    # Return None if memory or vcpus not valid
     gpu_name = format_gpu_name(gpu_type)
+    if not isinstance(vcpus, (float, int)) or vcpus <= 0:
+        print(f"Skipping GPU {gpu_name}: vCPUs must be a positive number, not {vcpus}")
+        return None
+    if not isinstance(memory, (float, int)) or memory <= 0:
+        print(f"Skipping GPU {gpu_name}: Memory must be a positive number, not {memory}")
+        return None
 
     # Convert the counts, vCPUs, and memory to float
     # for consistency with skypilot's catalog format
@@ -209,22 +202,28 @@ def get_instance_configurations(gpu_id: str) -> List[Dict]:
             detailed_gpu = get_gpu_details(gpu_id, gpu_count)
 
         # only add secure clouds. skipping community cloud instances.
-        if not detailed_gpu['secureCloud']:
+        if not detailed_gpu["secureCloud"]:
             continue
+
+        # Get basic info including memory & vcpu from the returned data
+        # If memory or vpcu is not available, skip this gpu count
+        gpu_info = get_gpu_info(detailed_gpu, gpu_count)
+        if gpu_info is None:
+            continue
+
+        spot_price = base_price = None
+        if detailed_gpu['secureSpotPrice'] is not None:
+            spot_price = format_price(detailed_gpu['secureSpotPrice'] * gpu_count)
+        if detailed_gpu['securePrice'] is not None:
+            base_price = format_price(detailed_gpu['securePrice'] * gpu_count)
 
         for region, zones in REGION_ZONES.items():
             for zone in zones:
-                spot_price = None
-                if detailed_gpu['secureSpotPrice'] is not None:
-                    spot_price = format_price(detailed_gpu['secureSpotPrice'] *
-                                              gpu_count)
-
                 instances.append({
+                    **gpu_info,
                     'InstanceType': f'{gpu_count}x_{base_gpu_name}_SECURE',
-                    **get_gpu_info(detailed_gpu, gpu_count),
                     'SpotPrice': spot_price,
-                    'Price': format_price(detailed_gpu['securePrice'] *
-                                          gpu_count),
+                    'Price': base_price,
                     'Region': region,
                     'AvailabilityZone': zone,
                 })
