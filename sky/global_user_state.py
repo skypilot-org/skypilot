@@ -1196,7 +1196,6 @@ def set_cluster_skylet_ssh_tunnel_metadata(
             skylet_ssh_tunnel_metadata
         ) if skylet_ssh_tunnel_metadata is not None else None
         count = session.query(cluster_table).filter_by(
-            # filter by old value too???
             name=cluster_name).update(
                 {cluster_table.c.skylet_ssh_tunnel_metadata: value})
         session.commit()
