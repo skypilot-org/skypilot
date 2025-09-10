@@ -473,7 +473,7 @@ class FakeRetryingVmProvisioner(RealRetryingVmProvisioner):
         stream_logs: bool, logging_info: dict, use_spot: bool
     ) -> Tuple[cloud_vm_ray_backend.GangSchedulingStatus, str, str, Optional[str], Optional[str]]:
         time.sleep(self.backend_latency.provision_latency_s)
-        return cloud_vm_ray_backend.GangSchedulingStatus.SUCCESS, "", "", None, None
+        return cloud_vm_ray_backend.GangSchedulingStatus.CLUSTER_READY, "", "", None, None
 
     def _ensure_cluster_ray_started(self, handle: 'backends.CloudVmRayResourceHandle',
                                     log_abs_path) -> None:
@@ -558,10 +558,12 @@ class FakeBackend(cloud_vm_ray_backend.CloudVmRayBackend):
 
 class FakeCloud(sky.clouds.Cloud):
     _REPR = 'FakeCloud'
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
     _REGION = sky.clouds.Region(name="FakeRegion")
     _ZONE = sky.clouds.Zone(name="FakeZone")
     def __init__(self, provision_latency_s: float = 3):
         self.name = "FakeCloud"
+        self.cluster_to_num_nodes = {}
         self.provision_latency_s = provision_latency_s
 
     def regions_with_offering(self, instance_type: str, accelerators: Optional[Dict[str, int]], use_spot: bool, region: Optional[str], zone: Optional[str]) -> List[sky.clouds.Region]:
@@ -598,7 +600,7 @@ class FakeCloud(sky.clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        return {}
+        return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return True
@@ -619,6 +621,7 @@ class FakeCloud(sky.clouds.Cloud):
         volume_mounts: Optional[List['sky.volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
         # return {}
+        self.cluster_to_num_nodes[cluster_name] = num_nodes
         return { 
             'instance_type': "FakeInstance",
             'custom_resources': None,
@@ -674,7 +677,16 @@ class FakeCloud(sky.clouds.Cloud):
             'k8s_max_run_duration_seconds': 100,
             'k8s_network_type': 0,
         }
-    
+
+    def query_instances(
+        self,
+        cluster_name: str,
+    ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
+
+        return {
+            "FakeInstance": (status_lib.ClusterStatus.UP, None)
+            for _ in range(self.cluster_to_num_nodes[cluster_name])
+        }
 
 class TestScaleSDKAPI:
     def test_sdk_scale_launch(self,
@@ -700,7 +712,9 @@ class TestScaleSDKAPI:
             return {"default": {"FakeCloud": ["compute"]}}
         monkeypatch.setattr(sky.check, 'check_capabilities', check_capabilities)
 
-        monkeypatch.setattr(sky.check, 'get_cached_enabled_clouds_or_refresh', lambda *args, **kwargs: [FakeCloud()])
+        fake_cloud = FakeCloud()
+
+        monkeypatch.setattr(sky.check, 'get_cached_enabled_clouds_or_refresh', lambda *args, **kwargs: [fake_cloud])
 
         # task_dag = dag.Dag()
         # task_dag.add(task)
@@ -736,6 +750,8 @@ class TestScaleSDKAPI:
         monkeypatch.setattr('sky.backends.cloud_vm_ray_backend._get_cluster_config_template', lambda *args: 'kubernetes-ray.yml.j2')
 
         monkeypatch.setattr('sky.backends.backend_utils._add_auth_to_cluster_config', lambda *args: {})
+
+        monkeypatch.setattr('sky.provision.query_instances', lambda *args, **kwargs: fake_cloud.query_instances(args[1]))
 
 
         backend = FakeBackend(cluster_name, backend_latency)
