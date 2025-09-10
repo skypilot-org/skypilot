@@ -3634,10 +3634,9 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
                 'if (( SECONDS >= end )); then exit 1; fi; '
                 'sleep 0.1; '
                 'done')
-            returncode = head_runner.run(port_check_cmd,
-                                         stream_logs=False,
-                                         process_stream=False,
-                                         require_outputs=False)
+            returncode, stdout, stderr = head_runner.run(port_check_cmd,
+                                                         require_outputs=True,
+                                                         stream_logs=False)
             if returncode != 0:
                 try:
                     ssh_tunnel_proc.terminate()
@@ -3646,12 +3645,13 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
                     ssh_tunnel_proc.kill()
                     ssh_tunnel_proc.wait()
                 finally:
-                    raise exceptions.CommandError(
-                        returncode=returncode,
-                        command=cmd_str,
-                        error_msg=(f'Port forward established but remote port '
-                                   f'{remote_port} not open after {timeout}s'),
-                        detailed_reason=None)
+                    error_msg = (f'Failed to check remote port {remote_port}')
+                    if stdout:
+                        error_msg += f'\n-- stdout --\n{stdout}\n'
+                    raise exceptions.CommandError(returncode=returncode,
+                                                  command=cmd_str,
+                                                  error_msg=error_msg,
+                                                  detailed_reason=stderr)
             break
 
     if ssh_tunnel_proc.poll() is not None:
