@@ -433,9 +433,7 @@ def test_multi_echo(generic_cloud: str):
     if generic_cloud == 'kubernetes':
         # EKS does not support spot instances
         # Assume tests using a remote api server endpoint do not support spot instances
-        use_spot = not smoke_tests_utils.is_eks_cluster(
-        ) and not smoke_tests_utils.api_server_endpoint_configured_in_env_file(
-        )
+        use_spot = not smoke_tests_utils.is_eks_cluster()
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     test = smoke_tests_utils.Test(
         'multi_echo',

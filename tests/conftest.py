@@ -6,7 +6,7 @@ import socket
 import subprocess
 import tempfile
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import filelock
 import pytest
@@ -280,6 +280,9 @@ def pytest_collection_modifyitems(config, items):
     generic_cloud = _generic_cloud(config)
     generic_cloud_keyword = cloud_to_pytest_keyword[generic_cloud]
 
+    # Check if we need to dynamically add no_remote_server mark
+    should_add_no_remote_server_mark = _should_add_no_remote_server_mark(config)
+
     for item in items:
         if 'smoke_tests' not in item.location[0]:
             # Only mark smoke test cases
@@ -319,6 +322,12 @@ def pytest_collection_modifyitems(config, items):
         if 'resource_heavy' not in marks and config.getoption(
                 '--resource-heavy'):
             item.add_marker(skip_marks['resource_heavy'])
+        # Dynamically add no_remote_server mark if api_server is configured in env file
+        if should_add_no_remote_server_mark:
+            item.add_marker(pytest.mark.no_remote_server)
+            marks.append(
+                'no_remote_server')  # Update marks list for subsequent checks
+
         # Skip tests marked as no_remote_server if --remote-server is set
         if 'no_remote_server' in marks and config.getoption('--remote-server'):
             item.add_marker(skip_marks['no_remote_server'])
@@ -367,6 +376,70 @@ def _generic_cloud(config) -> str:
     if generic_cloud_option is not None:
         return generic_cloud_option
     return _get_cloud_to_run(config)[0]
+
+
+@common_utils.lru_cache(maxsize=1)
+def _get_and_check_env_file(env_file_path: str) -> Tuple[bool, Optional[str]]:
+    """Download/get env file and check if it contains api_server configuration.
+
+    Returns:
+        tuple: (has_api_server_config, local_file_path)
+    """
+    assert isinstance(
+        env_file_path,
+        str), f'env_file_path must be a string, got {type(env_file_path)}'
+
+    # Check if it's a local file or directory (same logic as prepare_env_file)
+    expanded_path = os.path.expanduser(env_file_path)
+    if os.path.exists(expanded_path):
+        # It's a local file
+        local_file_path = expanded_path
+    else:
+        # It's a cloud storage URL - download it (same logic as prepare_env_file)
+        logger.info(
+            f'Downloading env file from cloud storage for collection: {env_file_path}'
+        )
+
+        # Create temporary directory for downloaded files
+        temp_dir = tempfile.mkdtemp(prefix='skypilot_env_collection_')
+
+        # Get the appropriate CloudStorage handler for the URL
+        cloud_storage = cloud_stores.get_storage_from_path(env_file_path)
+
+        # Generate the download command - assert it's a file
+        assert not cloud_storage.is_directory(env_file_path), (
+            f'Expected file but got directory: {env_file_path}')
+        download_cmd = cloud_storage.make_sync_file_command(
+            env_file_path, temp_dir)
+
+        # Execute the download command
+        subprocess.run(download_cmd, shell=True, check=True)
+
+        # Get the filename from the original URL
+        file_name = os.path.basename(env_file_path)
+        local_file_path = os.path.join(temp_dir, file_name)
+
+    # Check if the file contains api_server configuration
+    with open(local_file_path, 'r') as f:
+        content = f.read()
+        has_api_server = 'endpoint' in content and ('api_server' in content)
+
+    return has_api_server, local_file_path
+
+
+def _should_add_no_remote_server_mark(config) -> bool:
+    """Check if we should dynamically add no_remote_server mark to tests.
+
+    Returns True if --env-file option is set and the config file contains
+    api_server configuration.
+    """
+    # Get the --env-file option directly from pytest config during collection
+    env_file_path = config.getoption('--env-file')
+    if env_file_path is None:
+        return False
+
+    has_api_server, _ = _get_and_check_env_file(env_file_path)
+    return has_api_server
 
 
 @pytest.fixture
@@ -680,46 +753,10 @@ def prepare_env_file(request):
         yield
         return
 
-    # Check if it's a local file or directory
-    expanded_path = os.path.expanduser(env_file_path)
-    if os.path.exists(expanded_path):
-        # It's a local file/directory, use it directly
-        logger.info(f'Using local env file: {expanded_path}')
-        os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = expanded_path
-        yield expanded_path
-        return
+    # Use the cached function to get/download the env file
+    # This avoids duplicate downloads if collection phase already downloaded it
+    has_api_server, local_file_path = _get_and_check_env_file(env_file_path)
 
-    # Not a local file, treat as cloud storage URL (e.g., s3://bucket/path)
-
-    logger.info(
-        f'Attempting to download env file from cloud storage: {env_file_path}')
-
-    # Create temporary directory for downloaded files
-    temp_dir = tempfile.mkdtemp(prefix='skypilot_env_')
-
-    try:
-        # Get the appropriate CloudStorage handler for the URL
-        cloud_storage = cloud_stores.get_storage_from_path(env_file_path)
-
-        # Generate the download command - assert it's a file
-        assert not cloud_storage.is_directory(env_file_path), (
-            f'Expected file but got directory: {env_file_path}')
-        download_cmd = cloud_storage.make_sync_file_command(
-            env_file_path, temp_dir)
-
-        logger.info(f'Executing download command: {download_cmd}')
-
-        # Execute the download command
-        subprocess.run(download_cmd, shell=True, check=True)
-
-        # Get the filename from the original URL
-        file_name = os.path.basename(env_file_path)
-        file_path = os.path.join(temp_dir, file_name)
-
-        logger.info(f'Downloaded env file to: {file_path}')
-        os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = file_path
-        yield file_path
-    finally:
-        # Clean up temporary directory
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir, ignore_errors=True)
+    logger.info(f'Using env file: {local_file_path}')
+    os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = local_file_path
+    yield local_file_path
