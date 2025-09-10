@@ -587,8 +587,8 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
 
 
 def event_callback_func(
-        job_id: int, task_id: int,
-        task: 'sky.Task') -> managed_job_state.AsyncCallbackType:
+        job_id: int, task_id: Optional[int],
+        task: Optional['sky.Task']) -> managed_job_state.AsyncCallbackType:
     """Run event callback for the task."""
 
     def callback_func(status: str):

@@ -737,20 +737,21 @@ def set_pending_cancelled(job_id: int):
         # Subquery to get the spot_job_ids that match the joined condition
         subquery = session.query(spot_table.c.job_id).join(
             job_info_table,
-            spot_table.c.spot_job_id == job_info_table.c.spot_job_id).filter(
-                spot_table.c.spot_job_id == job_id,
-                spot_table.c.status == ManagedJobStatus.PENDING.value,
-                # Note: it's possible that a WAITING job actually needs to be
-                # cleaned up, if we are in the middle of an upgrade/recovery and
-                # the job is waiting to be reclaimed by a new controller. But,
-                # in this case the status will not be PENDING.
-                sqlalchemy.or_(
-                    job_info_table.c.schedule_state ==
-                    ManagedJobScheduleState.WAITING.value,
-                    job_info_table.c.schedule_state ==
-                    ManagedJobScheduleState.INACTIVE.value,
-                ),
-            ).subquery()
+            spot_table.c.spot_job_id == job_info_table.c.spot_job_id
+        ).filter(
+            spot_table.c.spot_job_id == job_id,
+            spot_table.c.status == ManagedJobStatus.PENDING.value,
+            # Note: it's possible that a WAITING job actually needs to be
+            # cleaned up, if we are in the middle of an upgrade/recovery and
+            # the job is waiting to be reclaimed by a new controller. But,
+            # in this case the status will not be PENDING.
+            sqlalchemy.or_(
+                job_info_table.c.schedule_state ==
+                ManagedJobScheduleState.WAITING.value,
+                job_info_table.c.schedule_state ==
+                ManagedJobScheduleState.INACTIVE.value,
+            ),
+        ).subquery()
 
         count = session.query(spot_table).filter(
             spot_table.c.job_id.in_(subquery)).update(
@@ -1112,12 +1113,10 @@ async def set_job_id_on_pool_cluster_async(job_id: int,
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         await session.execute(
-            sqlalchemy.update(job_info_table).where(
-                job_info_table.c.spot_job_id == job_id
-            ).values({
+            sqlalchemy.update(job_info_table).
+            where(job_info_table.c.spot_job_id == job_id).values({
                 job_info_table.c.job_id_on_pool_cluster: job_id_on_pool_cluster
-            })
-        )
+            }))
         await session.commit()
 
 
@@ -1145,8 +1144,7 @@ async def get_pool_submit_info_async(
         result = await session.execute(
             sqlalchemy.select(job_info_table.c.current_cluster_name,
                               job_info_table.c.job_id_on_pool_cluster).where(
-                                  job_info_table.c.spot_job_id == job_id)
-        )
+                                  job_info_table.c.spot_job_id == job_id))
         info = result.fetchone()
         if info is None:
             return None, None
