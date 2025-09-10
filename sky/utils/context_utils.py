@@ -175,12 +175,12 @@ def cancellation_guard(func: F) -> F:
     return typing.cast(F, wrapper)
 
 
-# TODO(aylei): replace this with asyncio.to_thread once we drop support for
-# python 3.8
 P = ParamSpec('P')
 T = TypeVar('T')
 
 
+# TODO(aylei): replace this with asyncio.to_thread once we drop support for
+# python 3.8
 def to_thread(func: Callable[P, T], /, *args: P.args,
               **kwargs: P.kwargs) -> 'asyncio.Future[T]':
     """Asynchronously run function *func* in a separate thread.
