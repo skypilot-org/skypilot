@@ -223,7 +223,7 @@ def _patch_p4de(region: str, df: 'pd.DataFrame',
     # Price,SpotPrice,Region,AvailabilityZone
     records = []
     for zone in df[df['Region'] == region]['AvailabilityZone'].unique():
-        # As of 2025-09-09, p4de.24xlarge may be returned so we should check so 
+        # As of 2025-09-09, p4de.24xlarge may be returned so we should check so
         # that we don't have it twice in the catalog.
         # See https://github.com/skypilot-org/skypilot/issues/7091
 
