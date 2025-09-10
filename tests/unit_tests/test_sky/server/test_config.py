@@ -4,6 +4,7 @@ import pytest
 
 from sky.server import config
 
+
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=8)
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=4)
 def test_compute_server_config_on_minimal_deployment(cpu_count, mem_size_gb):
@@ -16,6 +17,7 @@ def test_compute_server_config_on_minimal_deployment(cpu_count, mem_size_gb):
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
+
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=784)
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=196)
 def test_compute_server_config_on_large_deployment(cpu_count, mem_size_gb):
@@ -27,6 +29,7 @@ def test_compute_server_config_on_large_deployment(cpu_count, mem_size_gb):
     assert c.short_worker_config.garanteed_parallelism == 2084
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
+
 
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=16)
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=4)
@@ -99,7 +102,6 @@ def test_parallel_size_short():
     expected = 3
     assert config._max_short_worker_parallism(mem_size_gb,
                                               blocking_size) == expected
-    
 
     # Test with sufficient memory
     blocking_size = 8

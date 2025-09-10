@@ -6,8 +6,8 @@ from typing import Optional
 
 from sky import sky_logging
 from sky.server import constants as server_constants
-from sky.utils import common_utils
 from sky.server import daemons
+from sky.utils import common_utils
 
 # Constants based on profiling the peak memory usage while serving various
 # sky commands. These estimation are highly related to usage patterns
@@ -39,7 +39,6 @@ _MAX_MEM_PERCENT_FOR_BLOCKING = 0.6
 _MIN_LONG_WORKERS = 1
 # Minimal number of idle short workers to ensure responsiveness.
 _MIN_IDLE_SHORT_WORKERS = 1
-
 
 # Default number of burstable workers for local API server. A heuristic number
 # that is large enough for most local cases.
@@ -216,6 +215,7 @@ def _max_long_worker_parallism(cpu_count: int,
         return min(n, _MAX_LONG_WORKERS_LOCAL)
     return n
 
+
 def _get_min_short_workers() -> int:
     """Min number of short workers."""
     daemon_count = 0
@@ -223,6 +223,7 @@ def _get_min_short_workers() -> int:
         if not daemon.should_skip():
             daemon_count += 1
     return _MIN_IDLE_SHORT_WORKERS + daemon_count
+
 
 def _max_short_worker_parallism(mem_size_gb: float,
                                 long_worker_parallism: int) -> int:
