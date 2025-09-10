@@ -162,6 +162,84 @@ class LazyDataFrame:
         self._load_df()[key] = value
 
 
+def _update_catalog(
+        filename: str,
+        url: str,
+        url_fallback: Optional[str] = None,
+        pull_frequency_hours: Optional[int] = None) -> bool:
+
+    catalog_path = get_catalog_path(filename)
+    cloud = os.path.dirname(filename)
+    if cloud != 'common':
+        cloud = str(registry.CLOUD_REGISTRY.from_str(cloud))
+
+    meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
+    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+
+    def _need_update():
+        if not os.path.exists(catalog_path):
+            return True
+        if pull_frequency_hours is None:
+            return False
+        if is_catalog_modified(filename):
+            # If the catalog is modified by a user manually, we should
+            # avoid overwriting the catalog by fetching from GitHub.
+            return False
+
+        last_update = os.path.getmtime(catalog_path)
+        return last_update + pull_frequency_hours * 3600 < time.time()
+
+    # Fast path: Exit early to avoid lock contention.
+    if not _need_update():
+        return False
+
+    # Atomic check, to avoid conflicts with other processes.
+    with filelock.FileLock(meta_path + '.lock'):
+        # Double check after acquiring the lock.
+        if not _need_update():
+            return False
+
+        headers = {'User-Agent': 'SkyPilot/0.7'}
+        update_frequency_str = ''
+        if pull_frequency_hours is not None:
+            update_frequency_str = (
+                f' (every {pull_frequency_hours} hours)')
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(
+                    f'Updating {cloud} catalog: {filename}') +
+                f'{update_frequency_str}'):
+            try:
+                r = requests.get(url=url, headers=headers)
+                if r.status_code == 429 and url_fallback is not None:
+                    # fallback to s3 mirror, github introduced rate
+                    # limit after 2025-05, see
+                    # https://github.com/skypilot-org/skypilot/issues/5438
+                    # for more details
+                    r = requests.get(url=url_fallback, headers=headers)
+                r.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                error_str = (f'Failed to fetch {cloud} catalog {filename}. ')
+                if os.path.exists(catalog_path):
+                    logger.warning(
+                        f'{error_str}Using cached catalog files.')
+                    # Update catalog file modification time.
+                    os.utime(catalog_path, None)  # Sets to current time
+                else:
+                    logger.error(f'{error_str}Please check your internet '
+                                    'connection.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise e
+            else:
+                # Download successful, save the catalog to a local file.
+                os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
+                with open(catalog_path, 'w', encoding='utf-8') as f:
+                    f.write(r.text)
+                with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
+                    f.write(hashlib.md5(r.text.encode()).hexdigest())
+        logger.debug(f'Updated {cloud} catalog {filename}.')
+    return True
+
+
 def read_catalog(filename: str,
                  pull_frequency_hours: Optional[int] = None) -> LazyDataFrame:
     """Reads the catalog from a local CSV file.
@@ -177,81 +255,41 @@ def read_catalog(filename: str,
     assert (pull_frequency_hours is None or
             pull_frequency_hours >= 0), pull_frequency_hours
     catalog_path = get_catalog_path(filename)
-    cloud = os.path.dirname(filename)
-    if cloud != 'common':
-        cloud = str(registry.CLOUD_REGISTRY.from_str(cloud))
 
-    meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
-    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+    url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+    url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
 
-    def _need_update() -> bool:
-        if not os.path.exists(catalog_path):
-            return True
-        if pull_frequency_hours is None:
-            return False
-        if is_catalog_modified(filename):
-            # If the catalog is modified by a user manually, we should
-            # avoid overwriting the catalog by fetching from GitHub.
-            return False
+    def update_catalog_wrapper():
+        return _update_catalog(
+            filename=filename,
+            url=url,
+            url_fallback=url_fallback,
+            pull_frequency_hours=pull_frequency_hours)
 
-        last_update = os.path.getmtime(catalog_path)
-        return last_update + pull_frequency_hours * 3600 < time.time()
+    return LazyDataFrame(catalog_path, update_if_stale_func=update_catalog_wrapper)
 
-    def _update_catalog():
-        # Fast path: Exit early to avoid lock contention.
-        if not _need_update():
-            return False
 
-        # Atomic check, to avoid conflicts with other processes.
-        with filelock.FileLock(meta_path + '.lock'):
-            # Double check after acquiring the lock.
-            if not _need_update():
-                return False
+def read_catalog_from_url(filename: str, url: str, pull_frequency_hours: Optional[int] = None):
+    """Reads the catalog from a local CSV file. Development purposes only.
 
-            url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
-            url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
-            headers = {'User-Agent': 'SkyPilot/0.7'}
-            update_frequency_str = ''
-            if pull_frequency_hours is not None:
-                update_frequency_str = (
-                    f' (every {pull_frequency_hours} hours)')
-            with rich_utils.safe_status(
-                    ux_utils.spinner_message(
-                        f'Updating {cloud} catalog: {filename}') +
-                    f'{update_frequency_str}'):
-                try:
-                    r = requests.get(url=url, headers=headers)
-                    if r.status_code == 429:
-                        # fallback to s3 mirror, github introduced rate
-                        # limit after 2025-05, see
-                        # https://github.com/skypilot-org/skypilot/issues/5438
-                        # for more details
-                        r = requests.get(url=url_fallback, headers=headers)
-                    r.raise_for_status()
-                except requests.exceptions.RequestException as e:
-                    error_str = (f'Failed to fetch {cloud} catalog '
-                                 f'{filename}. ')
-                    if os.path.exists(catalog_path):
-                        logger.warning(
-                            f'{error_str}Using cached catalog files.')
-                        # Update catalog file modification time.
-                        os.utime(catalog_path, None)  # Sets to current time
-                    else:
-                        logger.error(f'{error_str}Please check your internet '
-                                     'connection.')
-                        with ux_utils.print_exception_no_traceback():
-                            raise e
-                else:
-                    # Download successful, save the catalog to a local file.
-                    os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-                    with open(catalog_path, 'w', encoding='utf-8') as f:
-                        f.write(r.text)
-                    with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
-                        f.write(hashlib.md5(r.text.encode()).hexdigest())
-            logger.debug(f'Updated {cloud} catalog {filename}.')
-        return True
+    If the file does not exist, download the up-to-date catalog from the
+    given url. Note that this function DOES NOT care if the url contains
+    a csv file that doesn't match with the current catalog. This function
+    is designed to be used by cloud providers adding their cloud to SkyPilot
+    to allow testing before the catalog is merged into `skypilot-catalog`.
+    """
+    assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
+    assert (pull_frequency_hours is None or
+            pull_frequency_hours >= 0), pull_frequency_hours
+    catalog_path = get_catalog_path(filename)
 
-    return LazyDataFrame(catalog_path, update_if_stale_func=_update_catalog)
+    def update_catalog_wrapper():
+        return _update_catalog(
+            filename=filename,
+            url=url,
+            pull_frequency_hours=pull_frequency_hours)
+
+    return LazyDataFrame(catalog_path, update_if_stale_func=update_catalog_wrapper) 
 
 
 def _get_instance_type(
