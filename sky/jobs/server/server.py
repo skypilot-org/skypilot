@@ -5,6 +5,7 @@ import pathlib
 import fastapi
 
 from sky import sky_logging
+from sky.jobs import utils as managed_jobs_utils
 from sky.jobs.server import core
 from sky.server import common as server_common
 from sky.server import stream_utils
@@ -22,12 +23,14 @@ router = fastapi.APIRouter()
 @router.post('/launch')
 async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody) -> None:
+    consolidation_mode = managed_jobs_utils.is_consolidation_mode()
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.launch',
         request_body=jobs_launch_body,
         func=core.launch,
-        schedule_type=api_requests.ScheduleType.LONG,
+        schedule_type=(api_requests.ScheduleType.SHORT if consolidation_mode
+                       else api_requests.ScheduleType.LONG),
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
 
