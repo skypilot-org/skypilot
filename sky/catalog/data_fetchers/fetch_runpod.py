@@ -159,7 +159,8 @@ def format_gpu_name(gpu_type: Dict[str, Any]) -> str:
     return base_name
 
 
-def get_gpu_info(gpu_type: Dict, gpu_count: int) -> Dict:
+def get_gpu_info(gpu_type: Dict[str, Any],
+                 gpu_count: int) -> Optional[Dict[str, Any]]:
     """Extract relevant GPU information from RunPod GPU type data."""
     # Use minVcpu lowestPrice if available, otherwise use defaults
     vcpus = gpu_type.get('lowestPrice', {}).get('minVcpu')
@@ -169,10 +170,12 @@ def get_gpu_info(gpu_type: Dict, gpu_count: int) -> Dict:
     # Return None if memory or vcpus not valid
     gpu_name = format_gpu_name(gpu_type)
     if not isinstance(vcpus, (float, int)) or vcpus <= 0:
-        print(f"Skipping GPU {gpu_name}: vCPUs must be a positive number, not {vcpus}")
+        print(f'Skipping GPU {gpu_name}:'
+              ' vCPUs must be a positive number, not {vcpus}')
         return None
     if not isinstance(memory, (float, int)) or memory <= 0:
-        print(f"Skipping GPU {gpu_name}: Memory must be a positive number, not {memory}")
+        print(f'Skipping GPU {gpu_name}:'
+              ' Memory must be a positive number, not {memory}')
         return None
 
     # Convert the counts, vCPUs, and memory to float
@@ -202,7 +205,7 @@ def get_instance_configurations(gpu_id: str) -> List[Dict]:
             detailed_gpu = get_gpu_details(gpu_id, gpu_count)
 
         # only add secure clouds. skipping community cloud instances.
-        if not detailed_gpu["secureCloud"]:
+        if not detailed_gpu['secureCloud']:
             continue
 
         # Get basic info including memory & vcpu from the returned data
@@ -213,7 +216,8 @@ def get_instance_configurations(gpu_id: str) -> List[Dict]:
 
         spot_price = base_price = None
         if detailed_gpu['secureSpotPrice'] is not None:
-            spot_price = format_price(detailed_gpu['secureSpotPrice'] * gpu_count)
+            spot_price = format_price(detailed_gpu['secureSpotPrice'] *
+                                      gpu_count)
         if detailed_gpu['securePrice'] is not None:
             base_price = format_price(detailed_gpu['securePrice'] * gpu_count)
 
