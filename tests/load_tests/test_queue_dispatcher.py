@@ -82,7 +82,8 @@ def benchmark_queue_dispatcher(queue_backend: str,
                 func=dummy_func,
                 schedule_type=api_requests.ScheduleType.LONG)
 
-    enqueue_thread = threading.Thread(target=asyncio.run, args=(enqueue_requests(),))
+    enqueue_thread = threading.Thread(target=asyncio.run,
+                                      args=(enqueue_requests(),))
     enqueue_thread.start()
     enqueue_thread.join()
 
