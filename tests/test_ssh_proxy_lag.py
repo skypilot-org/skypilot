@@ -230,8 +230,8 @@ async def run_endpoint_test(
             test_tasks.append(task)
 
         results = await asyncio.gather(*test_tasks,
-                                    ssh_task,
-                                    return_exceptions=True)
+                                       ssh_task,
+                                       return_exceptions=True)
         for result in results:
             if isinstance(result, Exception):
                 raise result
@@ -244,7 +244,8 @@ async def run_endpoint_test(
         # Report results
         status = "❌ BLOCKING" if degradation > expected_degradation_threshold else "✅ OK"
         print(
-            f"   Latency: {avg_latency*1000:.1f}ms ({degradation:.1f}x) - {status}")
+            f"   Latency: {avg_latency*1000:.1f}ms ({degradation:.1f}x) - {status}"
+        )
 
         blocking = degradation > expected_degradation_threshold
         if not blocking:
