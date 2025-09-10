@@ -3615,13 +3615,43 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
             break
         elif isinstance(head_runner, command_runner.KubernetesCommandRunner
                        ) and _FORWARDING_FROM_MESSAGE in ack:
-            # For Kind clusters, there seems to be a race condition.
-            # Calling grpc.channel_ready_future immediately after
-            # results in a connection refused error, leading to
-            # the process dying and the health check timing out.
-            # We did not observe this for non-Kind clusters.
-            # TODO(kevin): Find a better way to handle this.
-            time.sleep(0.5)
+            # On kind clusters, this error occurs if we make a request
+            # immediately after the port-forward is established on a new pod:
+            # "Unhandled Error" err="an error occurred forwarding ... -> 46590:
+            # failed to execute portforward in network namespace
+            # "/var/run/netns/cni-...": failed to connect to localhost:46590
+            # inside namespace "...", IPv4: dial tcp4 127.0.0.1:46590:
+            # connect: connection refused
+            # So we need to poll the port on the pod to check if it is open.
+            # We did not observe this with real Kubernetes clusters.
+            timeout = 5
+            port_check_cmd = (
+                # We install netcat in our ray-node container,
+                # so we can use it here.
+                # (See kubernetes-ray.yml.j2)
+                f'end=$((SECONDS+{timeout})); '
+                f'while ! nc -z -w 1 localhost {remote_port}; do '
+                'if (( SECONDS >= end )); then exit 1; fi; '
+                'sleep 0.1; '
+                'done')
+            returncode = head_runner.run(port_check_cmd,
+                                         stream_logs=False,
+                                         process_stream=False,
+                                         require_outputs=False)
+            if returncode != 0:
+                try:
+                    ssh_tunnel_proc.terminate()
+                    ssh_tunnel_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    ssh_tunnel_proc.kill()
+                    ssh_tunnel_proc.wait()
+                finally:
+                    raise exceptions.CommandError(
+                        returncode=returncode,
+                        command=cmd_str,
+                        error_msg=(f'Port forward established but remote port '
+                                   f'{remote_port} not open after {timeout}s'),
+                        detailed_reason=None)
             break
 
     if ssh_tunnel_proc.poll() is not None:
