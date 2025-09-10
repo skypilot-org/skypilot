@@ -156,7 +156,9 @@ def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
     try:
         client = aws.client('ec2', region_name=region_name)
         response = client.describe_instance_types(
-            InstanceTypes=[instance_type],
+            # TODO(cooperc): fix the types for mypy 1.16
+            # Boto3 type stubs expect Literal instance types; using str list here.
+            InstanceTypes=[instance_type],  # type: ignore
             Filters=[{
                 'Name': 'network-info.efa-supported',
                 'Values': ['true']

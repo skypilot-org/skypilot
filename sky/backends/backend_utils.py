@@ -539,7 +539,7 @@ def get_expirable_clouds(
             # get all custom contexts
             contexts = kubernetes_utils.get_custom_config_k8s_contexts()
             # add remote_identity of each context if it exists
-            remote_identities = None
+            remote_identities: Optional[Union[str, List[Dict[str, str]]]] = None
             for context in contexts:
                 context_remote_identity = skypilot_config.get_effective_region_config(
                     cloud='kubernetes',
@@ -550,9 +550,11 @@ def get_expirable_clouds(
                     if remote_identities is None:
                         remote_identities = []
                     if isinstance(context_remote_identity, str):
+                        assert isinstance(remote_identities, list)
                         remote_identities.append(
                             {context: context_remote_identity})
                     elif isinstance(context_remote_identity, list):
+                        assert isinstance(remote_identities, list)
                         remote_identities.extend(context_remote_identity)
             # add global kubernetes remote identity if it exists, if not, add default
             global_remote_identity = skypilot_config.get_effective_region_config(
@@ -564,8 +566,10 @@ def get_expirable_clouds(
                 if remote_identities is None:
                     remote_identities = []
                 if isinstance(global_remote_identity, str):
+                    assert isinstance(remote_identities, list)
                     remote_identities.append({'*': global_remote_identity})
                 elif isinstance(global_remote_identity, list):
+                    assert isinstance(remote_identities, list)
                     remote_identities.extend(global_remote_identity)
             if remote_identities is None:
                 remote_identities = schemas.get_default_remote_identity(

@@ -1425,12 +1425,12 @@ def load_managed_job_queue(
     """Load job queue from json string."""
     result = message_utils.decode_payload(payload)
     result_type = ManagedJobQueueResultType.DICT
-    status_counts = {}
+    status_counts: Dict[str, int] = {}
     if isinstance(result, dict):
-        jobs = result['jobs']
-        total = result['total']
+        jobs: List[Dict[str, Any]] = result['jobs']
+        total: int = result['total']
         status_counts = result.get('status_counts', {})
-        total_no_filter = result.get('total_no_filter', total)
+        total_no_filter: int = result.get('total_no_filter', total)
     else:
         jobs = result
         total = len(jobs)
