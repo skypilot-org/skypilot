@@ -1,4 +1,5 @@
 import pytest
+from unittest import mock
 from smoke_tests.smoke_tests_utils import get_cluster_name, BenchmarkTest, run_one_benchmark, LOW_RESOURCE_ARG
 from pytest_benchmark.fixture import BenchmarkFixture
 
@@ -559,12 +560,23 @@ class FakeBackend(cloud_vm_ray_backend.CloudVmRayBackend):
 class FakeCloud(sky.clouds.Cloud):
     _REPR = 'FakeCloud'
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    _INDENT_PREFIX = '    '
+    _STATIC_CREDENTIAL_HELP_STR = (
+        'Run the following commands:'
+        f'\n{_INDENT_PREFIX}  $ aws configure'
+        f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
+        f'\n{_INDENT_PREFIX}For more info: '
+        'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
+    )
+    _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
     _REGION = sky.clouds.Region(name="FakeRegion")
     _ZONE = sky.clouds.Zone(name="FakeZone")
-    def __init__(self, provision_latency_s: float = 3):
+    
+    def __init__(self, backend_latency: BackendLatency):
         self.name = "FakeCloud"
         self.cluster_to_num_nodes = {}
-        self.provision_latency_s = provision_latency_s
+        self.backend_latency = backend_latency
 
     def regions_with_offering(self, instance_type: str, accelerators: Optional[Dict[str, int]], use_spot: bool, region: Optional[str], zone: Optional[str]) -> List[sky.clouds.Region]:
         return [self._REGION]
@@ -578,7 +590,7 @@ class FakeCloud(sky.clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Optional[List[sky.clouds.Zone]]]:
-        time.sleep(cls.provision_latency_s)
+        time.sleep(cls.backend_latency.provision_latency_s)
         yield [cls._ZONE]
     
     def check_features_are_supported(
@@ -621,7 +633,11 @@ class FakeCloud(sky.clouds.Cloud):
         volume_mounts: Optional[List['sky.volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
         # return {}
-        self.cluster_to_num_nodes[cluster_name] = num_nodes
+        # print(f"LLOYD: cluster_to_num_nodes in make_deploy_resources_variables: {self.cluster_to_num_nodes}")
+        # print(f"LLOYD: cluster_name in make_deploy_resources_variables: {cluster_name}")
+        # print(f"LLOYD: cluster_name type in make_deploy_resources_variables: {type(cluster_name)}")
+        self.cluster_to_num_nodes[str(cluster_name)] = num_nodes
+        # print(f"LLOYD: cluster_to_num_nodes in make_deploy_resources_variables: {self.cluster_to_num_nodes}")
         return { 
             'instance_type': "FakeInstance",
             'custom_resources': None,
@@ -683,10 +699,75 @@ class FakeCloud(sky.clouds.Cloud):
         cluster_name: str,
     ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
 
-        return {
-            "FakeInstance": (status_lib.ClusterStatus.UP, None)
-            for _ in range(self.cluster_to_num_nodes[cluster_name])
-        }
+        if cluster_name in self.cluster_to_num_nodes:
+            print(f"LLOYD: cluster_to_num_nodes: {self.cluster_to_num_nodes}")
+            return {
+                f"FakeInstance-{i}": (status_lib.ClusterStatus.UP, None)
+                for i in range(self.cluster_to_num_nodes[cluster_name])
+            }
+        else:
+            return {}       
+
+    def bootstrap_instances(
+        self,
+        region: str, cluster_name: str,
+        config: sky.provision.common.ProvisionConfig) -> sky.provision.common.ProvisionConfig:
+        return config
+    
+    def run_instances(
+        self,
+        region: str, cluster_name: str,
+        config: sky.provision.common.ProvisionConfig) -> sky.provision.common.ProvisionRecord:
+        self.cluster_to_num_nodes[cluster_name] = config.count
+            # simplified_cluster_name = cluster_name[:cluster_name.rfind('-')]
+            # print(f"LLOYD: simplified_cluster_name: {simplified_cluster_name}")
+        print(f"LLOYD: cluster_to_num_nodes: {self.cluster_to_num_nodes}")
+        num_nodes = self.cluster_to_num_nodes.get(cluster_name)
+        return sky.provision.common.ProvisionRecord(
+            provider_name='FakeCloud', 
+            region=region, 
+            zone=self._ZONE.name,
+            cluster_name=cluster_name,
+            head_instance_id=0,
+            resumed_instance_ids=[],
+            created_instance_ids=[i for i in range(1, num_nodes + 1)])
+    
+    def wait_instances(
+        self,
+        provider_name: str, region: str, cluster_name_on_cloud: str,
+        state: Optional['status_lib.ClusterStatus']) -> None:
+        return None
+
+    def get_cluster_info(
+        self,
+        region: str,
+        cluster_name_on_cloud: str,
+        provider_config: Optional[Dict[str, Any]] = None) -> sky.provision.common.ClusterInfo:
+        num_nodes = self.cluster_to_num_nodes.get(cluster_name_on_cloud)
+        head_instance_id = 0 if num_nodes > 0 else None
+
+        instances = {}
+        for inst in range(num_nodes):
+            instances[inst] = [
+                sky.provision.common.InstanceInfo(
+                    instance_id=inst,
+                    internal_ip=f"127.0.0.{inst}",
+                    external_ip=f"127.0.0.{inst}",
+                    tags={},
+                )
+            ]
+        return sky.provision.common.ClusterInfo(
+            instances=instances,
+            head_instance_id=head_instance_id,
+            provider_name='FakeCloud',
+            provider_config=provider_config,
+            docker_user='ubuntu',
+            ssh_user='ubuntu',
+            custom_ray_options={},
+        )
+
+    def wait_for_ssh(self, cluster_info: sky.provision.common.ClusterInfo, ssh_credentials: Dict[str, str]) -> None:
+        return
 
 class TestScaleSDKAPI:
     def test_sdk_scale_launch(self,
@@ -695,8 +776,10 @@ class TestScaleSDKAPI:
                                 generic_cloud: str,
                                 num_clusters: int = 1,
                                 check_capabilities_latency_s: float = 0):
-        # monkeypatch.setattr(sky.backends, 'CloudVmRayBackend', FakeBackend)
-        monkeypatch.setattr(sky.utils.registry.CLOUD_REGISTRY, 'from_str', lambda *args, **kwargs: FakeCloud())
+        backend_latency = FAST_BACKEND_LATENCY
+        fake_cloud = FakeCloud(backend_latency=backend_latency)
+
+        monkeypatch.setattr(sky.utils.registry.CLOUD_REGISTRY, 'from_str', lambda *args, **kwargs: fake_cloud)
         task = sky.Task(
             run='echo hello SkyPilot',
             resources=sky.Resources(cpus='2', memory='4GB', infra='FakeCloud/FakeRegion/FakeZone', instance_type="FakeInstance")
@@ -705,14 +788,14 @@ class TestScaleSDKAPI:
         cluster_name = f"cluster-1"
 
         # Monkeypatch this so that isinstance(backend, backends.CloudVmRayBackend) is True
-        monkeypatch.setattr(sky.backends, 'CloudVmRayBackend', FakeBackend)
+        # monkeypatch.setattr(sky.backends, 'CloudVmRayBackend', FakeBackend)
 
         def check_capabilities(*args, **kwargs):
             time.sleep(check_capabilities_latency_s)
             return {"default": {"FakeCloud": ["compute"]}}
         monkeypatch.setattr(sky.check, 'check_capabilities', check_capabilities)
 
-        fake_cloud = FakeCloud()
+        # print(f"LLOYD: fake_cloud cluster_to_num_nodes: {fake_cloud.cluster_to_num_nodes}")
 
         monkeypatch.setattr(sky.check, 'get_cached_enabled_clouds_or_refresh', lambda *args, **kwargs: [fake_cloud])
 
@@ -736,8 +819,6 @@ class TestScaleSDKAPI:
 
         monkeypatch.setattr('sky.resources.Resources.is_launchable', lambda self: True)
 
-        backend_latency = FAST_BACKEND_LATENCY
-
         extra = {"backend_latency": backend_latency}
         fake_provisioner_factory = functools.partial(FakeRetryingVmProvisioner, **extra)
         # Add the ToProvisionConfig as a class attribute to the partial
@@ -750,8 +831,36 @@ class TestScaleSDKAPI:
         monkeypatch.setattr('sky.backends.cloud_vm_ray_backend._get_cluster_config_template', lambda *args: 'kubernetes-ray.yml.j2')
 
         monkeypatch.setattr('sky.backends.backend_utils._add_auth_to_cluster_config', lambda *args: {})
+        monkeypatch.setattr('sky.backends.backend_utils._query_head_ip_with_retries', lambda *args, **kwargs: '127.0.0.1')
+        # _query_head_ip_with_retries
+
+        mock_command_runner = mock.Mock()
+        mock_command_runner.run = lambda *args, **kwargs: 0
+        monkeypatch.setattr('sky.provision.get_command_runners', lambda *args, **kwargs: [mock_command_runner])
 
         monkeypatch.setattr('sky.provision.query_instances', lambda *args, **kwargs: fake_cloud.query_instances(args[1]))
+        monkeypatch.setattr('sky.provision.bootstrap_instances', lambda *args, **kwargs: fake_cloud.bootstrap_instances(args[1], args[2], args[3]))
+        monkeypatch.setattr('sky.provision.run_instances', lambda *args, **kwargs: fake_cloud.run_instances(args[1], args[2], config=kwargs['config']))
+        monkeypatch.setattr('sky.provision.wait_instances', lambda *args, **kwargs: fake_cloud.wait_instances(args[1], args[2], cluster_name_on_cloud=kwargs.get('cluster_name_on_cloud'), state=kwargs.get('state')))
+        monkeypatch.setattr('sky.provision.get_cluster_info', lambda *args, **kwargs: fake_cloud.get_cluster_info(args[1], args[2], provider_config=kwargs.get('provider_config')))
+        monkeypatch.setattr('sky.provision.provisioner.wait_for_ssh', lambda *args, **kwargs: fake_cloud.wait_for_ssh(args[0], args[1]))
+        monkeypatch.setattr('sky.provision.instance_setup.internal_file_mounts', lambda *args, **kwargs: None)
+        monkeypatch.setattr('sky.provision.instance_setup.setup_runtime_on_cluster', lambda *args, **kwargs: None)
+        monkeypatch.setattr('sky.provision.instance_setup.setup_logging_on_cluster', lambda *args, **kwargs: None)
+        monkeypatch.setattr('sky.provision.instance_setup.start_ray_on_head_node', lambda *args, **kwargs: None)
+        monkeypatch.setattr('sky.provision.instance_setup.start_ray_on_worker_nodes', lambda *args, **kwargs: None)
+        monkeypatch.setattr('sky.provision.instance_setup.start_skylet_on_head_node', lambda *args, **kwargs: None)
+        monkeypatch.setattr('sky.provision.instance_setup.setup_runtime_on_cluster', lambda *args, **kwargs: None)
+        monkeypatch.setattr('sky.provision.instance_setup.setup_logging_on_cluster', lambda *args, **kwargs: None)
+
+        monkeypatch.setattr('sky.provision.common.ProvisionRecord.is_instance_just_booted', lambda self, instance_id: True)
+        extra = {"backend_latency": backend_latency, "cluster_name": cluster_name}
+        fake_backend_factory = functools.partial(FakeBackend, **extra)
+        # Patch the constructor for CloudVmRayBackend.
+        monkeypatch.setattr(cloud_vm_ray_backend, 'CloudVmRayBackend', fake_backend_factory)
+
+        monkeypatch.setattr('sky.provision.cleanup_ports', lambda *args, **kwargs: None)
+        monkeypatch.setattr('sky.provision.cleanup_custom_multi_network', lambda *args, **kwargs: None)
 
 
         backend = FakeBackend(cluster_name, backend_latency)
