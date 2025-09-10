@@ -67,7 +67,7 @@ US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 # The following columns will be included in the final catalog.
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone'
+    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone', 'Arch'
 ]
 
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
@@ -275,6 +275,17 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 return None, np.nan
             return accelerator['Name'], accelerator['Count']
 
+        def get_arch(row) -> Optional[str]:
+            if 'ProcessorInfo' in row:
+                processor = row['ProcessorInfo']
+                if 'SupportedArchitectures' in processor:
+                    archs=processor['SupportedArchitectures']
+                    if isinstance(archs, list):
+                        return archs[0]
+                    elif isinstance(archs, str):
+                        return archs
+            return None
+
         def get_vcpus(row) -> float:
             if not np.isnan(row['vCPU']):
                 return float(row['vCPU'])
@@ -332,6 +343,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 'AcceleratorCount': acc_count,
                 'vCPUs': get_vcpus(row),
                 'MemoryGiB': get_memory_gib(row),
+                'Arch': get_arch(row),
             })
 
         # The AWS API may not have all the instance types in the pricing table,
