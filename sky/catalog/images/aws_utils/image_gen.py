@@ -116,8 +116,7 @@ def write_image_to_csv(image_id, region):
         else:
             tag = f'skypilot:custom-{args.processor}-{args.os_type}'
         row = [
-            tag, region,
-            args.os_type, args.os_version, image_id,
+            tag, region, args.os_type, args.os_version, image_id,
             time.strftime('%Y%m%d'), args.base_image_id
         ]
         writer.writerow(row)
