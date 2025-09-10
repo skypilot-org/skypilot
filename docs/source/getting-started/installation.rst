@@ -11,7 +11,7 @@ Before installing SkyPilot, we recommend creating a new environment to avoid pac
 .. tab-set::
 
     .. tab-item:: uv
-        :sync: uv-env
+        :sync: uv-tab
 
         .. code-block:: shell
 
@@ -28,7 +28,7 @@ Before installing SkyPilot, we recommend creating a new environment to avoid pac
           SkyPilot needs ``pip`` to build wheels for remote cluster setup.
 
     .. tab-item:: venv
-        :sync: venv-env
+        :sync: venv-tab
 
         .. code-block:: shell
 
@@ -37,7 +37,7 @@ Before installing SkyPilot, we recommend creating a new environment to avoid pac
           source sky-env/bin/activate  # On Windows: sky-env\Scripts\activate
 
     .. tab-item:: conda
-        :sync: conda-env
+        :sync: conda-tab
 
         .. code-block:: shell
 
@@ -48,12 +48,91 @@ Before installing SkyPilot, we recommend creating a new environment to avoid pac
 Install SkyPilot
 ----------------
 
-After setting up your environment, install SkyPilot:
+After setting up your environment, install SkyPilot with the appropriate command for your environment:
 
 .. tab-set::
 
-    .. tab-item:: pip / venv / conda
-        :sync: venv-env conda-env
+    .. tab-item:: uv
+        :sync: uv-tab
+
+        .. tab-set::
+
+            .. tab-item:: Latest Release
+
+                .. code-block:: shell
+
+                  # Choose your infra:
+                  uv pip install "skypilot[kubernetes]"
+                  uv pip install "skypilot[aws]"
+                  uv pip install "skypilot[gcp]"
+                  # Azure CLI requires '--prerelease allow' with uv
+                  uv pip install --prerelease allow azure-cli; uv pip install "skypilot[azure]"
+                  uv pip install "skypilot[oci]"
+                  uv pip install "skypilot[nebius]"
+                  uv pip install "skypilot[lambda]"
+                  uv pip install "skypilot[runpod]"
+                  uv pip install "skypilot[fluidstack]"
+                  uv pip install "skypilot[paperspace]"
+                  uv pip install "skypilot[cudo]"
+                  # IBM is only supported for Python <= 3.11
+                  uv pip install "skypilot[ibm]"
+                  # SCP is only supported for Python <= 3.11
+                  uv pip install "skypilot[scp]"
+                  uv pip install "skypilot[vsphere]"
+                  # Nebius is only supported for Python >= 3.10
+
+                  uv pip install "skypilot[all]"
+
+            .. tab-item:: Nightly
+
+                .. code-block:: shell
+
+                  # Choose your infra:
+                  uv pip install "skypilot-nightly[kubernetes]"
+                  uv pip install "skypilot-nightly[aws]"
+                  uv pip install "skypilot-nightly[gcp]"
+                  # Azure CLI requires '--prerelease allow' with uv
+                  uv pip install --prerelease allow azure-cli; uv pip install "skypilot-nightly[azure]"
+                  uv pip install "skypilot-nightly[oci]"
+                  uv pip install "skypilot-nightly[nebius]"
+                  uv pip install "skypilot-nightly[lambda]"
+                  uv pip install "skypilot-nightly[runpod]"
+                  uv pip install "skypilot-nightly[fluidstack]"
+                  uv pip install "skypilot-nightly[paperspace]"
+                  uv pip install "skypilot-nightly[do]"
+                  uv pip install "skypilot-nightly[cudo]"
+                  uv pip install "skypilot-nightly[ibm]"
+                  uv pip install "skypilot-nightly[scp]"
+                  uv pip install "skypilot-nightly[vsphere]"
+                  uv pip install "skypilot-nightly[all]"
+
+            .. tab-item:: From Source
+
+                .. code-block:: shell
+
+                  git clone https://github.com/skypilot-org/skypilot.git
+                  cd skypilot
+
+                  # Choose your infra:
+                  uv pip install -e ".[kubernetes]"
+                  uv pip install -e ".[aws]"
+                  uv pip install -e ".[gcp]"
+                  # Azure CLI requires '--prerelease allow' with uv
+                  uv pip install --prerelease allow azure-cli; uv pip install -e ".[azure]"
+                  uv pip install -e ".[oci]"
+                  uv pip install -e ".[nebius]"
+                  uv pip install -e ".[lambda]"
+                  uv pip install -e ".[runpod]"
+                  uv pip install -e ".[fluidstack]"
+                  uv pip install -e ".[paperspace]"
+                  uv pip install -e ".[cudo]"
+                  uv pip install -e ".[ibm]"
+                  uv pip install -e ".[scp]"
+                  uv pip install -e ".[vsphere]"
+                  uv pip install -e ".[all]"
+
+    .. tab-item:: venv
+        :sync: venv-tab
 
         .. tab-set::
 
@@ -128,8 +207,8 @@ After setting up your environment, install SkyPilot:
                   pip install -e ".[vsphere]"
                   pip install -e ".[all]"
 
-    .. tab-item:: uv
-        :sync: uv-env
+    .. tab-item:: conda
+        :sync: conda-tab
 
         .. tab-set::
 
@@ -138,51 +217,47 @@ After setting up your environment, install SkyPilot:
                 .. code-block:: shell
 
                   # Choose your infra:
-                  uv pip install "skypilot[kubernetes]"
-                  uv pip install "skypilot[aws]"
-                  uv pip install "skypilot[gcp]"
-                  # Azure CLI requires '--prerelease allow' with uv
-                  uv pip install --prerelease allow azure-cli
-                  uv pip install "skypilot[azure]"
-                  uv pip install "skypilot[oci]"
-                  uv pip install "skypilot[nebius]"
-                  uv pip install "skypilot[lambda]"
-                  uv pip install "skypilot[runpod]"
-                  uv pip install "skypilot[fluidstack]"
-                  uv pip install "skypilot[paperspace]"
-                  uv pip install "skypilot[cudo]"
+                  pip install "skypilot[kubernetes]"
+                  pip install "skypilot[aws]"
+                  pip install "skypilot[gcp]"
+                  pip install "skypilot[azure]"
+                  pip install "skypilot[oci]"
+                  pip install "skypilot[nebius]"
+                  pip install "skypilot[lambda]"
+                  pip install "skypilot[runpod]"
+                  pip install "skypilot[fluidstack]"
+                  pip install "skypilot[paperspace]"
+                  pip install "skypilot[cudo]"
                   # IBM is only supported for Python <= 3.11
-                  uv pip install "skypilot[ibm]"
+                  pip install "skypilot[ibm]"
                   # SCP is only supported for Python <= 3.11
-                  uv pip install "skypilot[scp]"
-                  uv pip install "skypilot[vsphere]"
+                  pip install "skypilot[scp]"
+                  pip install "skypilot[vsphere]"
                   # Nebius is only supported for Python >= 3.10
 
-                  uv pip install "skypilot[all]"
+                  pip install "skypilot[all]"
 
             .. tab-item:: Nightly
 
                 .. code-block:: shell
 
                   # Choose your infra:
-                  uv pip install "skypilot-nightly[kubernetes]"
-                  uv pip install "skypilot-nightly[aws]"
-                  uv pip install "skypilot-nightly[gcp]"
-                  # Azure CLI requires '--prerelease allow' with uv
-                  uv pip install --prerelease allow azure-cli
-                  uv pip install "skypilot-nightly[azure]"
-                  uv pip install "skypilot-nightly[oci]"
-                  uv pip install "skypilot-nightly[nebius]"
-                  uv pip install "skypilot-nightly[lambda]"
-                  uv pip install "skypilot-nightly[runpod]"
-                  uv pip install "skypilot-nightly[fluidstack]"
-                  uv pip install "skypilot-nightly[paperspace]"
-                  uv pip install "skypilot-nightly[do]"
-                  uv pip install "skypilot-nightly[cudo]"
-                  uv pip install "skypilot-nightly[ibm]"
-                  uv pip install "skypilot-nightly[scp]"
-                  uv pip install "skypilot-nightly[vsphere]"
-                  uv pip install "skypilot-nightly[all]"
+                  pip install "skypilot-nightly[kubernetes]"
+                  pip install "skypilot-nightly[aws]"
+                  pip install "skypilot-nightly[gcp]"
+                  pip install "skypilot-nightly[azure]"
+                  pip install "skypilot-nightly[oci]"
+                  pip install "skypilot-nightly[nebius]"
+                  pip install "skypilot-nightly[lambda]"
+                  pip install "skypilot-nightly[runpod]"
+                  pip install "skypilot-nightly[fluidstack]"
+                  pip install "skypilot-nightly[paperspace]"
+                  pip install "skypilot-nightly[do]"
+                  pip install "skypilot-nightly[cudo]"
+                  pip install "skypilot-nightly[ibm]"
+                  pip install "skypilot-nightly[scp]"
+                  pip install "skypilot-nightly[vsphere]"
+                  pip install "skypilot-nightly[all]"
 
             .. tab-item:: From Source
 
@@ -192,53 +267,28 @@ After setting up your environment, install SkyPilot:
                   cd skypilot
 
                   # Choose your infra:
-                  uv pip install -e ".[kubernetes]"
-                  uv pip install -e ".[aws]"
-                  uv pip install -e ".[gcp]"
-                  # Azure CLI requires '--prerelease allow' with uv
-                  uv pip install --prerelease allow azure-cli
-                  uv pip install -e ".[azure]"
-                  uv pip install -e ".[oci]"
-                  uv pip install -e ".[nebius]"
-                  uv pip install -e ".[lambda]"
-                  uv pip install -e ".[runpod]"
-                  uv pip install -e ".[fluidstack]"
-                  uv pip install -e ".[paperspace]"
-                  uv pip install -e ".[cudo]"
-                  uv pip install -e ".[ibm]"
-                  uv pip install -e ".[scp]"
-                  uv pip install -e ".[vsphere]"
-                  uv pip install -e ".[all]"
+                  pip install -e ".[kubernetes]"
+                  pip install -e ".[aws]"
+                  pip install -e ".[gcp]"
+                  pip install -e ".[azure]"
+                  pip install -e ".[oci]"
+                  pip install -e ".[nebius]"
+                  pip install -e ".[lambda]"
+                  pip install -e ".[runpod]"
+                  pip install -e ".[fluidstack]"
+                  pip install -e ".[paperspace]"
+                  pip install -e ".[cudo]"
+                  pip install -e ".[ibm]"
+                  pip install -e ".[scp]"
+                  pip install -e ".[vsphere]"
+                  pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
 
 .. tab-set::
 
-    .. tab-item:: pip / venv / conda
-        :sync: venv-env conda-env
-
-        .. tab-set::
-
-            .. tab-item:: Latest Release
-
-                .. code-block:: shell
-
-                  pip install -U "skypilot[kubernetes,aws,gcp]"
-
-            .. tab-item:: Nightly
-
-                .. code-block:: shell
-
-                  pip install -U "skypilot-nightly[kubernetes,aws,gcp]"
-
-            .. tab-item:: From Source
-
-                .. code-block:: shell
-
-                  pip install -e ".[kubernetes,aws,gcp]"
-
     .. tab-item:: uv
-        :sync: uv-env
+        :sync: uv-tab
 
         .. tab-set::
 
@@ -260,6 +310,51 @@ To use more than one cloud, combine the pip extras:
 
                   uv pip install -e ".[kubernetes,aws,gcp]"
 
+    .. tab-item:: venv
+        :sync: venv-tab
+
+        .. tab-set::
+
+            .. tab-item:: Latest Release
+
+                .. code-block:: shell
+
+                  pip install -U "skypilot[kubernetes,aws,gcp]"
+
+            .. tab-item:: Nightly
+
+                .. code-block:: shell
+
+                  pip install -U "skypilot-nightly[kubernetes,aws,gcp]"
+
+            .. tab-item:: From Source
+
+                .. code-block:: shell
+
+                  pip install -e ".[kubernetes,aws,gcp]"
+
+    .. tab-item:: conda
+        :sync: conda-tab
+
+        .. tab-set::
+
+            .. tab-item:: Latest Release
+
+                .. code-block:: shell
+
+                  pip install -U "skypilot[kubernetes,aws,gcp]"
+
+            .. tab-item:: Nightly
+
+                .. code-block:: shell
+
+                  pip install -U "skypilot-nightly[kubernetes,aws,gcp]"
+
+            .. tab-item:: From Source
+
+                .. code-block:: shell
+
+                  pip install -e ".[kubernetes,aws,gcp]"
 
 Alternative installation methods
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
