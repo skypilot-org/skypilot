@@ -1,11 +1,12 @@
 import asyncio
-from typing import Tuple
+from typing import Dict, List, Tuple
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky.jobs import state
+from sky.skylet import constants as sky_constants
 
 
 @pytest.fixture
@@ -63,12 +64,95 @@ def _seed_one_job(_mock_jobs_db_conn) -> int:
     return job_id
 
 
+@pytest.fixture
+def _seed_complex_job(_mock_jobs_db_conn) -> int:
+    # Create a job with multiple tasks inserted in PENDING status
+    job_id = state.set_job_info_without_job_id(name='complex_job',
+                                               workspace='default',
+                                               entrypoint='echo',
+                                               pool=None,
+                                               pool_hash=None)
+    # Create gaps in task ids to test ordering
+    state.set_pending(job_id=job_id,
+                      task_id=0,
+                      task_name='t0',
+                      resources_str='{}',
+                      metadata='{}')
+    state.set_pending(job_id=job_id,
+                      task_id=2,
+                      task_name='t2',
+                      resources_str='{}',
+                      metadata='{}')
+    state.set_pending(job_id=job_id,
+                      task_id=5,
+                      task_name='t5',
+                      resources_str='{}',
+                      metadata='{}')
+    return job_id
+
+
+def _set_statuses(job_id: int, updates: Dict[int, state.ManagedJobStatus]):
+    """Helper to set statuses for specific task_ids for the mocked DB."""
+    engine = state._SQLALCHEMY_ENGINE
+    assert engine is not None
+    from sqlalchemy import and_
+    from sqlalchemy import orm as sa_orm
+    from sqlalchemy import update
+    with sa_orm.Session(engine) as session:
+        for task_id, status in updates.items():
+            session.execute(
+                update(state.spot_table).where(
+                    and_(state.spot_table.c.spot_job_id == job_id,
+                         state.spot_table.c.task_id == task_id)).values(
+                             {state.spot_table.c.status: status.value}))
+        session.commit()
+
+
 @pytest.mark.asyncio
 async def test_get_latest_task_id_status_same(_seed_one_job: int):
     job_id = _seed_one_job
     sync_result = state.get_latest_task_id_status(job_id)
     async_result = await state.get_latest_task_id_status_async(job_id)
     assert sync_result == async_result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'status_updates,expected',
+    [
+        # First non-terminal should be returned
+        ({
+            0: state.ManagedJobStatus.SUCCEEDED,
+            2: state.ManagedJobStatus.RUNNING
+        }, (2, state.ManagedJobStatus.RUNNING)),
+        # All terminal: return the last task (by ascending id order)
+        ({
+            0: state.ManagedJobStatus.SUCCEEDED,
+            2: state.ManagedJobStatus.FAILED,
+            5: state.ManagedJobStatus.SUCCEEDED
+        }, (5, state.ManagedJobStatus.SUCCEEDED)),
+        # All pending: the first task id
+        ({
+            0: state.ManagedJobStatus.PENDING,
+            2: state.ManagedJobStatus.PENDING,
+            5: state.ManagedJobStatus.PENDING
+        }, (0, state.ManagedJobStatus.PENDING)),
+        # Gap in ids: ensure ordering by task_id (make 2 terminal so 5 is next non-terminal)
+        ({
+            0: state.ManagedJobStatus.SUCCEEDED,
+            2: state.ManagedJobStatus.SUCCEEDED,
+            5: state.ManagedJobStatus.PENDING
+        }, (5, state.ManagedJobStatus.PENDING)),
+    ])
+async def test_latest_task_id_status_edge_cases(
+        _seed_complex_job: int, status_updates: Dict[int,
+                                                     state.ManagedJobStatus],
+        expected: Tuple[int, state.ManagedJobStatus]):
+    job_id = _seed_complex_job
+    _set_statuses(job_id, status_updates)
+    sync_result = state.get_latest_task_id_status(job_id)
+    async_result = await state.get_latest_task_id_status_async(job_id)
+    assert sync_result == async_result == expected
 
 
 @pytest.mark.asyncio
@@ -110,3 +194,137 @@ async def test_get_job_schedule_state_same(_seed_one_job: int):
     sync_state = state.get_job_schedule_state(job_id)
     async_state = await state.get_job_schedule_state_async(job_id)
     assert sync_state == async_state
+
+
+@pytest.mark.asyncio
+async def test_schedule_state_transitions_same(_mock_jobs_db_conn):
+    # Start from INACTIVE after job creation
+    job_id = state.set_job_info_without_job_id(name='sched_job',
+                                               workspace='default',
+                                               entrypoint='echo',
+                                               pool=None,
+                                               pool_hash=None)
+
+    # INACTIVE
+    assert state.get_job_schedule_state(
+        job_id) == await state.get_job_schedule_state_async(job_id)
+
+    # WAITING
+    state.scheduler_set_waiting(
+        job_id,
+        dag_yaml_path='d.yaml',
+        original_user_yaml_path='u.yaml',
+        env_file_path='e.env',
+        user_hash='u',
+        priority=10,
+    )
+    assert state.get_job_schedule_state(
+        job_id) == await state.get_job_schedule_state_async(job_id)
+
+    # LAUNCHING
+    from sqlalchemy import orm as sa_orm
+    from sqlalchemy import update as sa_update
+    eng = state._SQLALCHEMY_ENGINE
+    assert eng is not None
+    with sa_orm.Session(eng) as sess:
+        sess.execute(
+            sa_update(state.job_info_table).where(
+                state.job_info_table.c.spot_job_id == job_id).values({
+                    state.job_info_table.c.schedule_state:
+                        state.ManagedJobScheduleState.LAUNCHING.value
+                }))
+        sess.commit()
+    assert state.get_job_schedule_state(
+        job_id) == await state.get_job_schedule_state_async(job_id)
+
+    # ALIVE
+    with sa_orm.Session(eng) as sess:
+        sess.execute(
+            sa_update(state.job_info_table).where(
+                state.job_info_table.c.spot_job_id == job_id).values({
+                    state.job_info_table.c.schedule_state:
+                        state.ManagedJobScheduleState.ALIVE.value
+                }))
+        sess.commit()
+    assert state.get_job_schedule_state(
+        job_id) == await state.get_job_schedule_state_async(job_id)
+
+    # ALIVE_BACKOFF
+    with sa_orm.Session(eng) as sess:
+        sess.execute(
+            sa_update(state.job_info_table).where(
+                state.job_info_table.c.spot_job_id == job_id).values({
+                    state.job_info_table.c.schedule_state:
+                        state.ManagedJobScheduleState.ALIVE_BACKOFF.value
+                }))
+        sess.commit()
+    assert state.get_job_schedule_state(
+        job_id) == await state.get_job_schedule_state_async(job_id)
+
+    # ALIVE_WAITING
+    with sa_orm.Session(eng) as sess:
+        sess.execute(
+            sa_update(state.job_info_table).where(
+                state.job_info_table.c.spot_job_id == job_id).values({
+                    state.job_info_table.c.schedule_state:
+                        state.ManagedJobScheduleState.ALIVE_WAITING.value
+                }))
+        sess.commit()
+    assert state.get_job_schedule_state(
+        job_id) == await state.get_job_schedule_state_async(job_id)
+
+    # DONE
+    state.scheduler_set_done(job_id, idempotent=True)
+    assert state.get_job_schedule_state(
+        job_id) == await state.get_job_schedule_state_async(job_id)
+
+
+@pytest.mark.asyncio
+async def test_get_status_no_tasks_returns_none(_mock_jobs_db_conn):
+    # Create a job with no tasks; status should be (None, None) -> None
+    job_id = state.set_job_info_without_job_id(name='empty_job',
+                                               workspace='default',
+                                               entrypoint='echo',
+                                               pool=None,
+                                               pool_hash=None)
+    assert state.get_latest_task_id_status(job_id) == (None, None)
+    assert await state.get_latest_task_id_status_async(job_id) == (None, None)
+    assert state.get_status(job_id) is None
+    assert await state.get_status_async(job_id) is None
+
+
+@pytest.mark.asyncio
+async def test_missing_job_status_and_ids_same(_mock_jobs_db_conn):
+    missing_id = 9999
+    # latest task id + status
+    assert state.get_latest_task_id_status(missing_id) == (None, None)
+    assert await state.get_latest_task_id_status_async(missing_id) == (None,
+                                                                       None)
+    # status
+    assert state.get_status(missing_id) is None
+    assert await state.get_status_async(missing_id) is None
+
+
+@pytest.mark.xfail(
+    reason=
+    'get_pool_submit_info_async uses sync Session; needs fix in sky/jobs/state.py'
+)
+@pytest.mark.asyncio
+async def test_missing_job_pool_submit_info_same(_mock_jobs_db_conn):
+    missing_id = 9999
+    assert state.get_pool_submit_info(missing_id) == (None, None)
+    assert await state.get_pool_submit_info_async(missing_id) == (None, None)
+
+
+def test_missing_job_other_helpers(_mock_jobs_db_conn):
+    missing_id = 9999
+    # workspace defaults to SKY default for non-existent job
+    assert state.get_workspace(
+        missing_id) == sky_constants.SKYPILOT_DEFAULT_WORKSPACE
+    # failure reason is None
+    assert state.get_failure_reason(missing_id) is None
+    # pool is None
+    assert state.get_pool_from_job_id(missing_id) is None
+    # num tasks and ids list
+    assert state.get_num_tasks(missing_id) == 0
+    assert state.get_all_task_ids_names_statuses_logs(missing_id) == []
