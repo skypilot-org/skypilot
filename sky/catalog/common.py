@@ -248,10 +248,10 @@ def read_catalog(filename: str,
     # https://github.com/skypilot-org/skypilot/issues/5438 for details.
     url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
 
-    return read_catalog_from_url(filename,
-                                 url,
-                                 url_fallback,
-                                 pull_frequency_hours)
+    return read_catalog_from_url(filename=filename,
+                                 url=url,
+                                 url_fallback=url_fallback,
+                                 pull_frequency_hours=pull_frequency_hours)
 
 
 def read_catalog_from_url(filename: str,
