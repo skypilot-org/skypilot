@@ -243,41 +243,49 @@ def read_catalog(filename: str,
     `pull_frequency_hours` and no changes to the local catalog file are
     made after the last pull.
     """
-    assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
-    assert (pull_frequency_hours is None or
-            pull_frequency_hours >= 0), pull_frequency_hours
-    catalog_path = get_catalog_path(filename)
-
     url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
     # fallback to s3 mirror, github introduced rate limit after 2025-05, see
     # https://github.com/skypilot-org/skypilot/issues/5438 for details.
     url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
 
-    def update_catalog_wrapper():
-        return _update_catalog(filename=filename,
-                               url=url,
-                               url_fallback=url_fallback,
-                               pull_frequency_hours=pull_frequency_hours)
-
-    return LazyDataFrame(catalog_path,
-                         update_if_stale_func=update_catalog_wrapper)
+    return read_catalog_from_url(filename,
+                                 url,
+                                 url_fallback,
+                                 pull_frequency_hours)
 
 
 def read_catalog_from_url(filename: str,
                           url: str,
+                          url_fallback: Optional[str] = None,
                           pull_frequency_hours: Optional[int] = None):
-    """Reads the catalog from a local CSV file. Development purposes only.
+    """Reads the catalog from a local CSV file, pulling from the url and
+    fallback url if necessary.
 
-    If the file does not exist, download the up-to-date catalog from the
-    given url. Note that this function DOES NOT care if the url contains
-    a csv file that doesn't match with the current catalog. This function
-    is designed to be used by cloud providers adding their cloud to SkyPilot
-    to allow testing before the catalog is merged into `skypilot-catalog`.
+    For most purposes, use `read_catalog` defined above. Using this function
+    directly and thus customizing urls is reserved for development purposes
+    only, specifically for new providers that haven't merged catalog files to
+    `skypilot-catalog`.
 
-    Recommendations:
-        filename: pass in the exact same value to be passed to `read_catalog`.
-            Refer to other cloud implementations for an idea.
-        pull_frequency_hours: just set to None.
+    Recommendations for new cloud providers:
+        This function will not check if the csv file is in the correct format
+        nor the correct schema version. This is up to the developer.
+        No need to include the `url_fallback` for development and testing.
+
+    Note: this function should not be used directly after the catalog becomes
+        available in `skypilot-catalog`.
+
+    For clouds that are fully integrated into SkyPilot:
+    ```
+    _df = common.read_catalog('<cloud>/vms.csv')
+    ```
+
+    For cloud integrations being currently developed:
+    ```
+    # TODO: Change to `read_catalog` prior to merge.
+    _df = common.read_catalog_from_url(
+        '<cloud>/vms.csv`,
+        'https://your-domain.com/static/your-csv.csv')
+    ```
     """
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     assert (pull_frequency_hours is None or
@@ -287,6 +295,7 @@ def read_catalog_from_url(filename: str,
     def update_catalog_wrapper():
         return _update_catalog(filename=filename,
                                url=url,
+                               url_fallback=url_fallback,
                                pull_frequency_hours=pull_frequency_hours)
 
     return LazyDataFrame(catalog_path,
