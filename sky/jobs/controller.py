@@ -781,7 +781,7 @@ class JobsController:
 class Controller:
     """Controller for managing jobs."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Global state for active jobs
         self.job_tasks: Dict[int, asyncio.Task] = {}
         self.starting: Set[int] = set()
@@ -984,12 +984,14 @@ class Controller:
                 job_logger.info(
                     f'Cluster of managed job {job_id} has been cleaned up.')
             except Exception as e:  # pylint: disable=broad-except
+                failure_reason = ('Failed to clean up: '
+                                  f'{common_utils.format_exception(e)}')
                 await managed_job_state.set_failed_async(
                     job_id,
                     task_id=None,
                     failure_type=managed_job_state.ManagedJobStatus.
                     FAILED_CONTROLLER,
-                    failure_reason=e,
+                    failure_reason=failure_reason,
                     override_terminal=True)
 
             if cancelling:
