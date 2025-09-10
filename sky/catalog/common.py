@@ -162,11 +162,10 @@ class LazyDataFrame:
         self._load_df()[key] = value
 
 
-def _update_catalog(
-        filename: str,
-        url: str,
-        url_fallback: Optional[str] = None,
-        pull_frequency_hours: Optional[int] = None) -> bool:
+def _update_catalog(filename: str,
+                    url: str,
+                    url_fallback: Optional[str] = None,
+                    pull_frequency_hours: Optional[int] = None) -> bool:
 
     catalog_path = get_catalog_path(filename)
     cloud = os.path.dirname(filename)
@@ -202,8 +201,7 @@ def _update_catalog(
         headers = {'User-Agent': 'SkyPilot/0.7'}
         update_frequency_str = ''
         if pull_frequency_hours is not None:
-            update_frequency_str = (
-                f' (every {pull_frequency_hours} hours)')
+            update_frequency_str = (f' (every {pull_frequency_hours} hours)')
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
                     f'Updating {cloud} catalog: {filename}') +
@@ -220,13 +218,12 @@ def _update_catalog(
             except requests.exceptions.RequestException as e:
                 error_str = (f'Failed to fetch {cloud} catalog {filename}. ')
                 if os.path.exists(catalog_path):
-                    logger.warning(
-                        f'{error_str}Using cached catalog files.')
+                    logger.warning(f'{error_str}Using cached catalog files.')
                     # Update catalog file modification time.
                     os.utime(catalog_path, None)  # Sets to current time
                 else:
                     logger.error(f'{error_str}Please check your internet '
-                                    'connection.')
+                                 'connection.')
                     with ux_utils.print_exception_no_traceback():
                         raise e
             else:
@@ -260,16 +257,18 @@ def read_catalog(filename: str,
     url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
 
     def update_catalog_wrapper():
-        return _update_catalog(
-            filename=filename,
-            url=url,
-            url_fallback=url_fallback,
-            pull_frequency_hours=pull_frequency_hours)
+        return _update_catalog(filename=filename,
+                               url=url,
+                               url_fallback=url_fallback,
+                               pull_frequency_hours=pull_frequency_hours)
 
-    return LazyDataFrame(catalog_path, update_if_stale_func=update_catalog_wrapper)
+    return LazyDataFrame(catalog_path,
+                         update_if_stale_func=update_catalog_wrapper)
 
 
-def read_catalog_from_url(filename: str, url: str, pull_frequency_hours: Optional[int] = None):
+def read_catalog_from_url(filename: str,
+                          url: str,
+                          pull_frequency_hours: Optional[int] = None):
     """Reads the catalog from a local CSV file. Development purposes only.
 
     If the file does not exist, download the up-to-date catalog from the
@@ -284,12 +283,12 @@ def read_catalog_from_url(filename: str, url: str, pull_frequency_hours: Optiona
     catalog_path = get_catalog_path(filename)
 
     def update_catalog_wrapper():
-        return _update_catalog(
-            filename=filename,
-            url=url,
-            pull_frequency_hours=pull_frequency_hours)
+        return _update_catalog(filename=filename,
+                               url=url,
+                               pull_frequency_hours=pull_frequency_hours)
 
-    return LazyDataFrame(catalog_path, update_if_stale_func=update_catalog_wrapper) 
+    return LazyDataFrame(catalog_path,
+                         update_if_stale_func=update_catalog_wrapper)
 
 
 def _get_instance_type(
