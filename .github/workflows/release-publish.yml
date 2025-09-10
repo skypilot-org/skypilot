@@ -122,21 +122,61 @@ jobs:
           git tag -a "v${VERSION}" -m "Release v${VERSION}"
           git push origin "v${VERSION}"
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "Release v${{ needs.extract-version.outputs.version }}"
-          tag_name: "v${{ needs.extract-version.outputs.version }}"
-          body: |
-            ## SkyPilot v${{ needs.extract-version.outputs.version }}
+      - name: Find previous release from PyPI
+        id: find_previous_release
+        run: |
+          VERSION="${{ needs.extract-version.outputs.version }}"
+          echo "Current release version: ${VERSION}"
 
-            Get it now with:
+          # Get all versions from PyPI using JSON API
+          ALL_VERSIONS=$(curl -s https://pypi.org/pypi/skypilot/json | jq -r '.releases | keys[]' | sort -V)
+          echo "All PyPI versions:"
+          echo "$ALL_VERSIONS"
 
-            ```bash
-            uv pip install "skypilot>=${{ needs.extract-version.outputs.version }}"
-            ```
-          draft: true
-          token: ${{ secrets.GH_PAT_FOR_RELEASE }}
+          # Find the version just before the current one
+          PREVIOUS_VERSION=$(echo "$ALL_VERSIONS" | grep -B1 "^${VERSION}$" | head -1 || echo "")
+
+          if [ -n "$PREVIOUS_VERSION" ] && [ "$PREVIOUS_VERSION" != "$VERSION" ]; then
+            PREVIOUS_TAG="v${PREVIOUS_VERSION}"
+            echo "Found previous release version: ${PREVIOUS_VERSION}"
+            echo "Previous tag: ${PREVIOUS_TAG}"
+            echo "previous_tag=${PREVIOUS_TAG}" >> $GITHUB_OUTPUT
+          else
+            echo "Error: No previous release version found on PyPI for comparison"
+            echo "Current version: ${VERSION}"
+            echo "Available versions:"
+            echo "$ALL_VERSIONS"
+            exit 1
+          fi
+
+      - name: Create GitHub Release with Previous Tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
+        run: |
+          VERSION="${{ needs.extract-version.outputs.version }}"
+          PREVIOUS_TAG="${{ steps.find_previous_release.outputs.previous_tag }}"
+
+          # Create release notes prefix
+          cat > release_prefix.md << EOF
+          ## SkyPilot v$VERSION
+
+          Get it now with:
+
+          \`\`\`bash
+          uv pip install "skypilot>=$VERSION"
+          \`\`\`
+
+          ---
+
+          EOF
+
+          echo "Creating release from $PREVIOUS_TAG to v$VERSION"
+          gh release create "v$VERSION" \
+            --title "Release v$VERSION" \
+            --notes-file release_prefix.md \
+            --generate-notes \
+            --previous-tag "$PREVIOUS_TAG" \
+            --draft
 
   cleanup-branches:
     needs: extract-version
