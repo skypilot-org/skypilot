@@ -92,7 +92,8 @@ else:
     grpc = adaptors_common.LazyImport(
         'grpc',
         # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
-        set_loggers=lambda: os.environ.update({'GRPC_VERBOSITY': 'NONE'}))
+        set_loggers=lambda: os.environ.update({'GRPC_VERBOSITY': 'NONE'})
+        if not env_options.Options.SHOW_DEBUG_INFO.get() else None)
     autostopv1_pb2 = adaptors_common.LazyImport(
         'sky.schemas.generated.autostopv1_pb2')
     autostopv1_pb2_grpc = adaptors_common.LazyImport(
@@ -2654,12 +2655,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         return SSHTunnelInfo(port=metadata[0], pid=metadata[1])
 
     def _set_skylet_ssh_tunnel(self, tunnel: Optional[SSHTunnelInfo]) -> None:
-        if tunnel is None:
-            global_user_state.set_cluster_skylet_ssh_tunnel_metadata(
-                self.cluster_name, None)
-        else:
-            global_user_state.set_cluster_skylet_ssh_tunnel_metadata(
-                self.cluster_name, (tunnel.port, tunnel.pid))
+        global_user_state.set_cluster_skylet_ssh_tunnel_metadata(
+            self.cluster_name,
+            (tunnel.port, tunnel.pid) if tunnel is not None else None)
 
     def get_grpc_channel(self) -> 'grpc.Channel':
         # It's fine to not grab the lock here, as we're only reading,
