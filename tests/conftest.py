@@ -204,6 +204,18 @@ def pytest_addoption(parser):
         default=None,
         help='Path to the env file to override the default env file',
     )
+    parser.addoption(
+        '--num-clusters',
+        type=int,
+        default=1,
+        help='Number of clusters to launch',
+    )
+    parser.addoption(
+        '--rounds',
+        type=int,
+        default=1,
+        help='Number of rounds to run',
+    )
 
 
 def pytest_configure(config):
@@ -372,6 +384,14 @@ def _generic_cloud(config) -> str:
 @pytest.fixture
 def generic_cloud(request) -> str:
     return _generic_cloud(request.config)
+
+@pytest.fixture
+def num_clusters(request):
+    return request.config.getoption("--num-clusters")
+
+@pytest.fixture
+def rounds(request):
+    return request.config.getoption("--rounds")
 
 
 @pytest.fixture(scope='session', autouse=True)
