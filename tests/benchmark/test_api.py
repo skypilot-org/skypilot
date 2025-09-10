@@ -16,11 +16,111 @@ from sky.data import storage as storage_lib
 from sky import resources as resources_lib
 from sky.utils import resources_utils
 from sky.clouds.cloud import CloudImplementationFeatures
+from sky import clouds
+from sky.backends import cloud_vm_ray_backend
+from sky.backends.cloud_vm_ray_backend import RetryingVmProvisioner as RealRetryingVmProvisioner
 from sky import execution
 from sky import dag
 from sky.client import sdk
 import time
 from itertools import chain
+from dataclasses import dataclass
+from sky.utils import status_lib
+import copy
+import dataclasses
+import enum
+import inspect
+import json
+import math
+import os
+import pathlib
+import re
+import shlex
+import signal
+import subprocess
+import sys
+import tempfile
+import textwrap
+import threading
+import time
+import typing
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
+                    Union)
+
+import colorama
+import psutil
+
+from sky import backends
+from sky import catalog
+from sky import check as sky_check
+from sky import cloud_stores
+from sky import clouds
+from sky import exceptions
+from sky import global_user_state
+from sky import jobs as managed_jobs
+from sky import optimizer
+from sky import provision as provision_lib
+from sky import resources as resources_lib
+from sky import sky_logging
+from sky import skypilot_config
+from sky import task as task_lib
+from sky.adaptors import common as adaptors_common
+from sky.backends import backend_utils
+from sky.backends import wheel_utils
+from sky.clouds import cloud as sky_cloud
+from sky.clouds.utils import gcp_utils
+from sky.data import data_utils
+from sky.data import storage as storage_lib
+from sky.provision import common as provision_common
+from sky.provision import instance_setup
+from sky.provision import metadata_utils
+from sky.provision import provisioner
+from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.server.requests import requests as requests_lib
+from sky.skylet import autostop_lib
+from sky.skylet import constants
+from sky.skylet import job_lib
+from sky.skylet import log_lib
+from sky.usage import usage_lib
+from sky.utils import accelerator_registry
+from sky.utils import annotations
+from sky.utils import cluster_utils
+from sky.utils import command_runner
+from sky.utils import common
+from sky.utils import common_utils
+from sky.utils import context_utils
+from sky.utils import controller_utils
+from sky.utils import directory_utils
+from sky.utils import env_options
+from sky.utils import lock_events
+from sky.utils import locks
+from sky.utils import log_utils
+from sky.utils import message_utils
+from sky.utils import registry
+from sky.utils import resources_utils
+from sky.utils import rich_utils
+from sky.utils import status_lib
+from sky.utils import subprocess_utils
+from sky.utils import timeline
+from sky.utils import ux_utils
+from sky.utils import volume as volume_lib
+from sky.utils import yaml_utils
+
+import functools
+
+if typing.TYPE_CHECKING:
+    import grpc
+
+    from sky import dag
+    from sky.schemas.generated import autostopv1_pb2
+    from sky.schemas.generated import autostopv1_pb2_grpc
+else:
+    # To avoid requiring grpcio to be installed on the client side.
+    grpc = adaptors_common.LazyImport('grpc')
+    autostopv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.autostopv1_pb2')
+    autostopv1_pb2_grpc = adaptors_common.LazyImport(
+        'sky.schemas.generated.autostopv1_pb2_grpc')
 
 # def test_api_launch(benchmark: BenchmarkFixture, generic_cloud: str):
 #     name = get_cluster_name()
@@ -238,48 +338,176 @@ class FakeResourceHandle(sky.backends.ResourceHandle):
     def get_cluster_name(self) -> str:
         return self.cluster_name
 
-class FakeBackend(sky.backends.Backend):
+@dataclass
+class BackendLatency:    
+    provision_latency_s: float
+    setup_latency_s: float
+    sync_workdir_latency_s: float
+    add_storage_objects_latency_s: float
+    sync_file_mounts_latency_s: float
+    exec_code_on_head_latency_s: float
+    execute_latency_s: float
+    teardown_latency_s: float
+
+KUBERNETES_BACKEND_LATENCY = BackendLatency(
+    provision_latency_s=30,
+    setup_latency_s=1, 
+    sync_workdir_latency_s=1, #TODO: Check if this is correct
+    add_storage_objects_latency_s=1, #TODO: Check if this is correct
+    sync_file_mounts_latency_s=1, 
+    exec_code_on_head_latency_s=1,
+    execute_latency_s=1,
+    teardown_latency_s=6.5)
+
+FAST_BACKEND_LATENCY = BackendLatency(
+    provision_latency_s=1,
+    setup_latency_s=0.1,
+    sync_workdir_latency_s=0.1,
+    add_storage_objects_latency_s=0.1,
+    sync_file_mounts_latency_s=0.1,
+    exec_code_on_head_latency_s=0.1,
+    execute_latency_s=0.1,
+    teardown_latency_s=0.1)
+
+# class FakeBackend(sky.backends.Backend):
+#     def __init__(self, cluster_name: str,
+#                  backend_latency: BackendLatency):
+#         self.cluster_name = cluster_name
+#         self.backend_latency = backend_latency
+#         self.job_id = 0
+#         self.resource_handle = FakeResourceHandle(cluster_name)
+
+#     def check_resource_fit_cluster(self, handle: sky.backends.ResourceHandle, task: sky.Task):
+#         return task.resources
+
+#     def _provision(
+#         self,
+#         task: task_lib.Task,
+#         to_provision: Optional['resources.Resources'],
+#         dryrun: bool,
+#         stream_logs: bool,
+#         cluster_name: str,
+#         retry_until_up: bool = False,
+#         skip_unnecessary_provisioning: bool = False,
+#     ) -> Tuple[Optional[FakeResourceHandle], bool]:
+#         time.sleep(self.backend_latency.provision_latency_s)
+#         return self.resource_handle, False
+    
+#     def _sync_workdir(self, handle: FakeResourceHandle,
+#                       workdir: Union[Path, Dict[str, Any]],
+#                       envs_and_secrets: Dict[str, str]) -> None:
+#         time.sleep(self.backend_latency.sync_workdir_latency_s)
+    
+#     def _sync_file_mounts(
+#         self,
+#         handle: FakeResourceHandle,
+#         all_file_mounts: Optional[Dict[Path, Path]],
+#         storage_mounts: Optional[Dict[Path, 'storage_lib.Storage']],
+#     ) -> None:
+#         time.sleep(self.backend_latency.sync_file_mounts_latency_s)
+
+#     def add_storage_objects(self, task: task_lib.Task) -> None:
+#         time.sleep(self.backend_latency.add_storage_objects_latency_s)
+
+#     def _setup(self, handle: FakeResourceHandle, task: task_lib.Task,
+#                detach_setup: bool) -> None:
+#         time.sleep(self.backend_latency.setup_latency_s)
+
+#     def _exec_code_on_head(
+#         self,
+#         handle: FakeResourceHandle,
+#         codegen: str,
+#         job_id: int,
+#         detach_run: bool = False,
+#         managed_job_dag: Optional[dag.Dag] = None,
+#         remote_log_dir: Optional[str] = None,
+#     ) -> None:
+#         time.sleep(self.backend_latency.exec_code_on_head_latency_s)
+
+#     def _execute(self,
+#                 handle: FakeResourceHandle,
+#                 task: task_lib.Task,
+#                 detach_run: bool,
+#                 dryrun: bool = False) -> Optional[int]:
+#         job_id = self.job_id
+#         self.job_id += 1
+#         print(f"Submitting job {job_id}")
+#         time.sleep(self.backend_latency.execute_latency_s)
+#         print(f"Job {job_id} completed")
+#         return job_id
+    
+#     def _post_execute(self, handle: FakeResourceHandle, down: bool) -> None:
+#         pass
+
+#     def _teardown_ephemeral_storage(self, task: task_lib.Task) -> None:
+#         pass
+    
+#     def _teardown(self, handle: FakeResourceHandle, terminate: bool, purge: bool = False) -> None:
+#         time.sleep(self.backend_latency.teardown_latency_s)
+
+class FakeRetryingVmProvisioner(RealRetryingVmProvisioner):
+    def __init__(self,
+                log_dir: str,
+                 dag: dag.Dag,
+                 optimize_target: common.OptimizeTarget,
+                 requested_features: Set[clouds.CloudImplementationFeatures],
+                 local_wheel_path: Path,
+                 wheel_hash: str,
+                 blocked_resources: Optional[Iterable[
+                 resources_lib.Resources]] = None,
+                 is_managed: Optional[bool] = None,
+                 backend_latency: BackendLatency = KUBERNETES_BACKEND_LATENCY):
+        self.backend_latency = backend_latency
+        super().__init__(log_dir,
+                         dag,
+                         optimize_target,
+                         requested_features,
+                         local_wheel_path,
+                         wheel_hash,
+                         blocked_resources,
+                         is_managed)
+
+    def _gang_schedule_ray_up(
+        self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
+        cluster_handle: 'backends.CloudVmRayResourceHandle', log_abs_path: str,
+        stream_logs: bool, logging_info: dict, use_spot: bool
+    ) -> Tuple[cloud_vm_ray_backend.GangSchedulingStatus, str, str, Optional[str], Optional[str]]:
+        time.sleep(self.backend_latency.provision_latency_s)
+        return cloud_vm_ray_backend.GangSchedulingStatus.SUCCESS, "", "", None, None
+
+    def _ensure_cluster_ray_started(self, handle: 'backends.CloudVmRayResourceHandle',
+                                    log_abs_path) -> None:
+        return
+
+class FakeBackend(cloud_vm_ray_backend.CloudVmRayBackend):
     def __init__(self, cluster_name: str,
-                 provision_latency_s: float = 30,
-                 setup_latency_s: float = 5,
-                 sync_workdir_latency_s: float = 30,
-                 add_storage_objects_latency_s: float = 5,
-                 sync_file_mounts_latency_s: float = 5,
-                 exec_code_on_head_latency_s: float = 5,
-                 execute_latency_s: float = 5,
-                 teardown_latency_s: float = 5):
-        self.cluster_name = cluster_name
-        self.provision_latency_s = provision_latency_s
-        self.setup_latency_s = setup_latency_s
-        self.sync_workdir_latency_s = sync_workdir_latency_s
-        self.add_storage_objects_latency_s = add_storage_objects_latency_s
-        self.sync_file_mounts_latency_s = sync_file_mounts_latency_s
-        self.exec_code_on_head_latency_s = exec_code_on_head_latency_s
-        self.execute_latency_s = execute_latency_s
-        self.teardown_latency_s = teardown_latency_s
+                 backend_latency: BackendLatency):
+        self.cluster_name = "FAKE-" + cluster_name
+        self.backend_latency = backend_latency
         self.job_id = 0
         self.resource_handle = FakeResourceHandle(cluster_name)
+        super().__init__()
 
     def check_resource_fit_cluster(self, handle: sky.backends.ResourceHandle, task: sky.Task):
         return task.resources
 
-    def _provision(
-        self,
-        task: task_lib.Task,
-        to_provision: Optional['resources.Resources'],
-        dryrun: bool,
-        stream_logs: bool,
-        cluster_name: str,
-        retry_until_up: bool = False,
-        skip_unnecessary_provisioning: bool = False,
-    ) -> Tuple[Optional[FakeResourceHandle], bool]:
-        time.sleep(self.provision_latency_s)
-        return self.resource_handle, False
+    # def _provision(
+    #     self,
+    #     task: task_lib.Task,
+    #     to_provision: Optional['resources.Resources'],
+    #     dryrun: bool,
+    #     stream_logs: bool,
+    #     cluster_name: str,
+    #     retry_until_up: bool = False,
+    #     skip_unnecessary_provisioning: bool = False,
+    # ) -> Tuple[Optional[FakeResourceHandle], bool]:
+    #     time.sleep(self.backend_latency.provision_latency_s)
+    #     return self.resource_handle, False
     
     def _sync_workdir(self, handle: FakeResourceHandle,
                       workdir: Union[Path, Dict[str, Any]],
                       envs_and_secrets: Dict[str, str]) -> None:
-        time.sleep(self.sync_workdir_latency_s)
+        time.sleep(self.backend_latency.sync_workdir_latency_s)
     
     def _sync_file_mounts(
         self,
@@ -287,14 +515,14 @@ class FakeBackend(sky.backends.Backend):
         all_file_mounts: Optional[Dict[Path, Path]],
         storage_mounts: Optional[Dict[Path, 'storage_lib.Storage']],
     ) -> None:
-        time.sleep(self.sync_file_mounts_latency_s)
+        time.sleep(self.backend_latency.sync_file_mounts_latency_s)
 
     def add_storage_objects(self, task: task_lib.Task) -> None:
-        time.sleep(self.add_storage_objects_latency_s)
+        time.sleep(self.backend_latency.add_storage_objects_latency_s)
 
     def _setup(self, handle: FakeResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
-        time.sleep(self.setup_latency_s)
+        time.sleep(self.backend_latency.setup_latency_s)
 
     def _exec_code_on_head(
         self,
@@ -305,7 +533,7 @@ class FakeBackend(sky.backends.Backend):
         managed_job_dag: Optional[dag.Dag] = None,
         remote_log_dir: Optional[str] = None,
     ) -> None:
-        time.sleep(self.exec_code_on_head_latency_s)
+        time.sleep(self.backend_latency.exec_code_on_head_latency_s)
 
     def _execute(self,
                 handle: FakeResourceHandle,
@@ -314,7 +542,9 @@ class FakeBackend(sky.backends.Backend):
                 dryrun: bool = False) -> Optional[int]:
         job_id = self.job_id
         self.job_id += 1
-        time.sleep(self.execute_latency_s)
+        print(f"Submitting job {job_id}")
+        time.sleep(self.backend_latency.execute_latency_s)
+        print(f"Job {job_id} completed")
         return job_id
     
     def _post_execute(self, handle: FakeResourceHandle, down: bool) -> None:
@@ -324,15 +554,18 @@ class FakeBackend(sky.backends.Backend):
         pass
     
     def _teardown(self, handle: FakeResourceHandle, terminate: bool, purge: bool = False) -> None:
-        time.sleep(self.teardown_latency_s)
+        time.sleep(self.backend_latency.teardown_latency_s)
 
 class FakeCloud(sky.clouds.Cloud):
+    _REPR = 'FakeCloud'
+    _REGION = sky.clouds.Region(name="FakeRegion")
+    _ZONE = sky.clouds.Zone(name="FakeZone")
     def __init__(self, provision_latency_s: float = 3):
         self.name = "FakeCloud"
         self.provision_latency_s = provision_latency_s
 
     def regions_with_offering(self, instance_type: str, accelerators: Optional[Dict[str, int]], use_spot: bool, region: Optional[str], zone: Optional[str]) -> List[sky.clouds.Region]:
-        return [sky.clouds.Region(name="FakeRegion")]
+        return [self._REGION]
 
     def zones_provision_loop(
         cls,
@@ -344,17 +577,103 @@ class FakeCloud(sky.clouds.Cloud):
         use_spot: bool = False,
     ) -> Iterator[Optional[List[sky.clouds.Zone]]]:
         time.sleep(cls.provision_latency_s)
-        yield [sky.clouds.Zone(name="FakeZone")]
+        yield [cls._ZONE]
     
     def check_features_are_supported(
         cls, resources: resources_lib.Resources,
         requested_features: Set[CloudImplementationFeatures]) -> None:
         pass
 
-    def _get_feasible_launchable_resources(
-        self, resources: resources_lib.Resources
-    ) -> resources_utils.FeasibleResources:
+    def get_feasible_launchable_resources(
+            self,
+            resources: 'resources_lib.Resources',
+            num_nodes: int = 1) -> 'resources_utils.FeasibleResources':
         return resources_utils.FeasibleResources([resources], [], None)
+
+    def check_quota_available(self, resources: resources_lib.Resources) -> bool:
+        return True
+
+    @classmethod
+    def get_accelerators_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[Dict[str, Union[int, float]]]:
+        return {}
+
+    def instance_type_exists(self, instance_type: str) -> bool:
+        return True
+
+    def get_vcpus_mem_from_instance_type(
+            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+        """Returns the #vCPUs and memory that the instance type offers."""
+        return (2.0, 4.0)
+    
+    def make_deploy_resources_variables(
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['sky.volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
+        # return {}
+        return { 
+            'instance_type': "FakeInstance",
+            'custom_resources': None,
+            'cpus': str(2.0),
+            'memory': str(4.0),
+            'accelerator_count': str(0),
+            'timeout': str(100),
+            'k8s_port_mode': 0,
+            'k8s_networking_mode': 0,
+            'k8s_ssh_key_secret_name': "FakeSSHKeySecretName",
+            'k8s_acc_label_key': "FakeAccLabelKey",
+            'k8s_acc_label_values': "FakeAccLabelValues",
+            'k8s_ssh_jump_name': "FakeSSHJumpName",
+            'k8s_ssh_jump_image': "FakeSSHJumpImage",
+            'k8s_service_account_name': "FakeServiceAccountName",
+            'k8s_automount_sa_token': 'true',
+            'k8s_fuse_device_required': False,
+            'k8s_kueue_local_queue_name': "FakeKueueLocalQueueName",
+            # Namespace to run the fusermount-server daemonset in
+            'k8s_skypilot_system_namespace': "FakeSkypilotSystemNamespace",
+            'k8s_fusermount_shared_dir': "FakeFusermountSharedDir",
+            'k8s_spot_label_key': "FakeSpotLabelKey",
+            'k8s_spot_label_value': "FakeSpotLabelValue",
+            'tpu_requested': False,
+            'k8s_topology_label_key': "FakeTopologyLabelKey",
+            'k8s_topology_label_value': "FakeTopologyLabelValue",
+            'k8s_resource_key': "FakeResourceKey",
+            'k8s_env_vars': {},
+            'image_id': "FakeImageId",
+            'ray_installation_commands': constants.RAY_INSTALLATION_COMMANDS,
+            'ray_head_start_command': "FakeRayHeadStartCommand",
+            'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
+            'ray_worker_start_command': "FakeRayWorkerStartCommand",
+            'k8s_high_availability_deployment_volume_mount_name':
+                (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME
+                ),
+            'k8s_high_availability_deployment_volume_mount_path':
+                (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
+                ),
+            'k8s_high_availability_deployment_setup_script_path':
+                (constants.PERSISTENT_SETUP_SCRIPT_PATH),
+            'k8s_high_availability_deployment_run_script_dir':
+                (constants.PERSISTENT_RUN_SCRIPT_DIR),
+            'k8s_high_availability_restarting_signal_file':
+                (constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE),
+            'ha_recovery_log_path':
+                constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(''),
+            'sky_python_cmd': constants.SKY_PYTHON_CMD,
+            'k8s_high_availability_storage_class_name':
+                ("FakeK8sHaStorageClassName"),
+            'avoid_label_keys': None,
+            'k8s_enable_flex_start': False,
+            'k8s_max_run_duration_seconds': 100,
+            'k8s_network_type': 0,
+        }
     
 
 class TestScaleSDKAPI:
@@ -365,8 +684,12 @@ class TestScaleSDKAPI:
                                 num_clusters: int = 1,
                                 check_capabilities_latency_s: float = 0):
         # monkeypatch.setattr(sky.backends, 'CloudVmRayBackend', FakeBackend)
-        task = SIMPLE_TASK
-        task.best_resources = task.resources
+        monkeypatch.setattr(sky.utils.registry.CLOUD_REGISTRY, 'from_str', lambda *args, **kwargs: FakeCloud())
+        task = sky.Task(
+            run='echo hello SkyPilot',
+            resources=sky.Resources(cpus='2', memory='4GB', infra='FakeCloud/FakeRegion/FakeZone', instance_type="FakeInstance")
+        )
+        print(f"task before dag insertion: {task}")
         cluster_name = f"cluster-1"
 
         # Monkeypatch this so that isinstance(backend, backends.CloudVmRayBackend) is True
@@ -379,13 +702,47 @@ class TestScaleSDKAPI:
 
         monkeypatch.setattr(sky.check, 'get_cached_enabled_clouds_or_refresh', lambda *args, **kwargs: [FakeCloud()])
 
-        monkeypatch.setattr(sky.optimizer.Optimizer, '_optimize_dag', lambda *args, **kwargs: {task: task.resources})
+        # task_dag = dag.Dag()
+        # task_dag.add(task)
+        # print(f"task_dag at test begin: {task_dag}")
 
-        backend = FakeBackend(cluster_name, provision_latency_s=1, setup_latency_s=1, sync_workdir_latency_s=0, add_storage_objects_latency_s=0, sync_file_mounts_latency_s=0, exec_code_on_head_latency_s=0, execute_latency_s=0, teardown_latency_s=0)
+        def optimize_dag(*args, **kwargs):
+            task_dag = kwargs['dag']
+            best_plan = {}
+            for idx, task in enumerate(task_dag.tasks):
+                task_dag.tasks[idx].best_resources = list(task_dag.tasks[idx].resources)[0]
+                best_plan[task_dag.tasks[idx]] = task_dag.tasks[idx].best_resources
+                print(f"LLOYD: task_dag.tasks[0].best_resources at optimize_dag: {task_dag.tasks[0].best_resources}")
+            print(f"LLOYD: best_plan at optimize_dag: {best_plan}")
+            return best_plan
+        monkeypatch.setattr(sky.optimizer.Optimizer, '_optimize_dag', lambda *args, **kwargs: optimize_dag(*args, **kwargs))
+        # monkeypatch.setattr(sky.optimizer.Optimizer, '_optimize_dag', lambda *args, **kwargs: task_dag)
+
+        monkeypatch.setattr('sky.backends.backend_utils.wait_until_ray_cluster_ready', lambda *args, **kwargs: (True, None))
+
+        monkeypatch.setattr('sky.resources.Resources.is_launchable', lambda self: True)
+
+        backend_latency = FAST_BACKEND_LATENCY
+
+        extra = {"backend_latency": backend_latency}
+        fake_provisioner_factory = functools.partial(FakeRetryingVmProvisioner, **extra)
+        # Add the ToProvisionConfig as a class attribute to the partial
+        fake_provisioner_factory.ToProvisionConfig = RealRetryingVmProvisioner.ToProvisionConfig
+
+        monkeypatch.setattr(cloud_vm_ray_backend, 'RetryingVmProvisioner', fake_provisioner_factory)
+        
+        monkeypatch.setattr('sky.resources.Resources._try_validate_and_set_region_zone', lambda self: None)
+
+        monkeypatch.setattr('sky.backends.cloud_vm_ray_backend._get_cluster_config_template', lambda *args: 'kubernetes-ray.yml.j2')
+
+        monkeypatch.setattr('sky.backends.backend_utils._add_auth_to_cluster_config', lambda *args: {})
+
+
+        backend = FakeBackend(cluster_name, backend_latency)
         benchmark.pedantic(
             execution.launch,
             kwargs={
-                "task": SIMPLE_TASK,
+                "task": task,
                 "cluster_name": cluster_name,
                 "stream_logs": False,
                 "backend": backend,
