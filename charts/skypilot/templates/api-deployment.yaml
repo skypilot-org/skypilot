@@ -361,47 +361,51 @@ spec:
           mountPath: /root/.aws
       {{- end }}
       {{- if .Values.r2Credentials.enabled }}
-      - name: create-r2-credentials
+      - name: setup-r2-credentials
         {{- with .Values.securityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
         image: {{ .Values.apiService.image }}
-        command: [ "/bin/sh", "-c" ]
+        command: ["/bin/sh", "-c"]
         args:
-          - |
-            echo "Setting up testing R2 credentials..."
-            mkdir -p /root/.cloudflare
-
-            # Copy r2.credentials file from the secret mount
-            if [ -f "/tmp/r2-secret/r2.credentials" ]; then
-              cp /tmp/r2-secret/r2.credentials /root/.cloudflare/r2.credentials
-              echo "R2 credentials file copied successfully."
-            else
-              echo "ERROR: r2.credentials file not found in secret."
-              exit 1
-            fi
-
-            # Copy accountid file if it exists
-            if [ -f "/tmp/r2-secret/accountid" ]; then
-              cp /tmp/r2-secret/accountid /root/.cloudflare/accountid
-              echo "R2 account ID file copied successfully."
-            else
-              echo "WARNING: accountid file not found in secret. This might be expected."
-            fi
-
-            # Set proper permissions
-            chmod 600 /root/.cloudflare/r2.credentials
-            [ -f /root/.cloudflare/accountid ] && chmod 600 /root/.cloudflare/accountid
-
-            echo "R2 credentials setup complete."
-            ls -la /root/.cloudflare/
+        - |
+          set -e
+          echo "Setting up R2 credentials..."
+          mkdir -p /root/.cloudflare
+          
+          # Direct echo of environment variables (no quotes around EOF)
+          cat > /root/.cloudflare/r2.credentials <<EOF
+          $R2_CREDENTIALS
+          EOF
+          
+          cat > /root/.cloudflare/accountid <<EOF
+          $R2_ACCOUNT_ID
+          EOF
+          
+          chmod 600 /root/.cloudflare/r2.credentials
+          chmod 600 /root/.cloudflare/accountid
+          
+          echo "R2 credentials setup complete:"
+          ls -la /root/.cloudflare/
+          echo "First line of r2.credentials:"
+          head -n 1 /root/.cloudflare/r2.credentials
+          echo "Account ID:"
+          cat /root/.cloudflare/accountid
+        env:
+        - name: R2_CREDENTIALS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.r2Credentials.r2SecretName }}
+              key: r2.credentials
+        - name: R2_ACCOUNT_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.r2Credentials.r2SecretName }}
+              key: accountid
         volumeMounts:
-          - name: r2-config
-            mountPath: /root/.cloudflare
-          - name: r2-credentials-secret
-            mountPath: /tmp/r2-secret
-            readOnly: true
+        - name: r2-config
+          mountPath: /root/.cloudflare
       {{- end }}
       {{- if .Values.gcpCredentials.enabled }}
       - name: setup-gcp-credentials
@@ -583,9 +587,5 @@ spec:
       {{- end }}
       {{- if .Values.r2Credentials.enabled }}
       - name: r2-config
-        emptyDir: { }
-      - name: r2-credentials-secret
-        secret:
-          secretName: {{ .Values.r2Credentials.r2SecretName }}
-          optional: true
+        emptyDir: {}
       {{- end }}
