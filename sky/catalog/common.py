@@ -275,6 +275,11 @@ def read_catalog_from_url(filename: str,
     a csv file that doesn't match with the current catalog. This function
     is designed to be used by cloud providers adding their cloud to SkyPilot
     to allow testing before the catalog is merged into `skypilot-catalog`.
+
+    Recommendations:
+        filename: pass in the exact same value to be passed to `read_catalog`.
+            Refer to other cloud implementations for an idea.
+        pull_frequency_hours: just set to None.
     """
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     assert (pull_frequency_hours is None or
