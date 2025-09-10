@@ -182,7 +182,7 @@ T = TypeVar('T')
 
 
 def to_thread(func: Callable[P, T], /, *args: P.args,
-              **kwargs: P.kwargs) -> asyncio.Future[T]:
+              **kwargs: P.kwargs) -> 'asyncio.Future[T]':
     """Asynchronously run function *func* in a separate thread.
 
     This is same as asyncio.to_thread added in python 3.9
