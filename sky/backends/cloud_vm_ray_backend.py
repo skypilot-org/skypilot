@@ -1354,34 +1354,25 @@ class RetryingVmProvisioner(object):
         insufficient_resources: Optional[List[str]],
     ) -> str:
         insufficent_resource_msg = ('' if insufficient_resources is None else
-                                    ' (' + ', '.join(insufficient_resources) +
-                                    ')')
+                                    f' ({", ".join(insufficient_resources)})')
+        message = f'Failed to acquire resources{insufficent_resource_msg} '
         if to_provision.zone is not None:
-            message = (
-                f'Failed to acquire resources{insufficent_resource_msg} in '
-                f'{to_provision.zone} for {requested_resources}. ')
+            message += (f'in {to_provision.zone} for {requested_resources}. ')
         elif to_provision.region is not None and to_provision.cloud is not None:
             # For public clouds, provision.region is always set.
             if clouds.SSH().is_same_cloud(to_provision.cloud):
-                message = (
-                    f'Failed to acquire resources{insufficent_resource_msg} '
+                message += (
                     f'in SSH Node Pool ({to_provision.region.lstrip("ssh-")}) '
                     f'for {requested_resources}. The SSH Node Pool may not '
                     'have enough resources.')
             elif clouds.Kubernetes().is_same_cloud(to_provision.cloud):
-                message = (
-                    f'Failed to acquire resources{insufficent_resource_msg} '
-                    f'in context {to_provision.region} for '
-                    f'{requested_resources}. ')
+                message += (f'in context {to_provision.region} for '
+                            f'{requested_resources}. ')
             else:
-                message = (
-                    f'Failed to acquire resources{insufficent_resource_msg} '
-                    f'in all zones in {to_provision.region} for '
-                    f'{requested_resources}. ')
+                message += (f'in all zones in {to_provision.region} for '
+                            f'{requested_resources}. ')
         else:
-            message = (
-                f'Failed to acquire resources{insufficent_resource_msg} in '
-                f'{to_provision.cloud} for {requested_resources}. ')
+            message += (f'{to_provision.cloud} for {requested_resources}. ')
         return message
 
     def _retry_zones(
@@ -1680,7 +1671,7 @@ class RetryingVmProvisioner(object):
                         insufficient_resources = e.insufficent_resources
                     # NOTE: We try to cleanup the cluster even if the previous
                     # cluster does not exist. Also we are fast at
-                    # cleaning up clusters now if there is no existing node..
+                    # cleaning up clusters now if there is no existing node.
                     CloudVmRayBackend().post_teardown_cleanup(
                         handle,
                         terminate=not prev_cluster_ever_up,

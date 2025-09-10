@@ -200,7 +200,11 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                                      'CPU:.status.allocatable.cpu\' to check '
                                      'the available CPUs on the node.', 'CPUs')
                 if 'Insufficient memory' in event_message:
-                    out_of['memory'] = (None, 'Memory')
+                    out_of['memory'] = (': Run \'kubectl get nodes -o '
+                                        'custom-columns=NAME:.metadata.name,'
+                                        'MEMORY:.status.allocatable.memory\' '
+                                        'to check the available memory on the '
+                                        'node.', 'Memory')
 
                 # TODO(aylei): after switching from smarter-device-manager to
                 # fusermount-server, we need a new way to check whether the

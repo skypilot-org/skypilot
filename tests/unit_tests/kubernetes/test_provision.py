@@ -330,7 +330,7 @@ def test_out_of_memory(monkeypatch):
 
     assert error_output[0] == '⨯ Insufficient resource capacity on the cluster:'
     assert error_output[
-        1] == '└── Cluster does not have sufficient Memory for your request'
+        1] == '└── Cluster does not have sufficient Memory for your request: Run \'kubectl get nodes -o custom-columns=NAME:.metadata.name,MEMORY:.status.allocatable.memory\' to check the available memory on the node.'
 
     assert len(error_output) == 2
 
