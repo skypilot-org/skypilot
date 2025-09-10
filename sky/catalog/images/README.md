@@ -3,12 +3,12 @@
 ## Prerequisites
 You only need to do this once.
 1. Install [Packer](https://developer.hashicorp.com/packer/tutorials/aws-get-started/get-started-install-cli)
-2. Download plugins used by Packer
+2. Setup cloud credentials
+3. `cd sky/catalog/images/`
+4. Download plugins used by Packer
 ```bash
 packer init plugins.pkr.hcl
 ```
-3. Setup cloud credentials
-4. `cd sky/catalog/images/`
 
 ## Generate Images
 FYI time to packer build images:

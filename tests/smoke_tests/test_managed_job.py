@@ -1150,7 +1150,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
             # Test that logs are still available after the job finishes.
             'unset SKYPILOT_DEBUG; s=$(sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
             # Make sure we skip the unnecessary logs.
-            'echo "$s" | head -n1 | grep "Waiting for"',
+            'echo "$s" | head -n2 | grep "Waiting for"',
         ],
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -1212,15 +1212,32 @@ def test_managed_jobs_logs_sync_down(generic_cloud: str):
 def _get_ha_kill_test(name: str, generic_cloud: str,
                       status: sky.ManagedJobStatus, first_timeout: int,
                       second_timeout: int) -> smoke_tests_utils.Test:
+    skypilot_config_path = 'tests/test_yamls/managed_jobs_ha_config.yaml'
+
+    pytest_config_file_override = smoke_tests_utils.pytest_config_file_override(
+    )
+    if pytest_config_file_override is not None:
+        with open(pytest_config_file_override, 'r') as f:
+            base_config = f.read()
+        with open(skypilot_config_path, 'r') as f:
+            ha_config = f.read()
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                         delete=False) as f:
+            f.write(base_config)
+            f.write(ha_config)
+            f.flush()
+            skypilot_config_path = f.name
+
     return smoke_tests_utils.Test(
         f'test-managed-jobs-ha-kill-{status.value.lower()}',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(generic_cloud, name),
             f'sky jobs launch -n {name} --infra {generic_cloud} '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}', job_status=[status], timeout=first_timeout),
-            smoke_tests_utils.kill_and_wait_controller('jobs'),
+            smoke_tests_utils.kill_and_wait_controller(name, 'jobs'),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}',
@@ -1230,9 +1247,7 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "SUCCEEDED"',
         ],
         f'sky jobs cancel -y -n {name}',
-        env={
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/managed_jobs_ha_config.yaml'
-        },
+        env={skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_path},
         timeout=20 * 60,
     )
 

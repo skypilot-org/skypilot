@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+import asyncio
 from datetime import datetime
 import enum
 import fnmatch
@@ -17,6 +18,9 @@ from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
                     TypeVar, Union)
 import uuid
 
+import aiohttp
+from aiohttp import ClientTimeout
+from aiohttp import TCPConnector
 import colorama
 from packaging import version
 import psutil
@@ -767,6 +771,52 @@ def write_cluster_config(
             assert region_name in ssh_proxy_command_config, (
                 region_name, ssh_proxy_command_config)
             ssh_proxy_command = ssh_proxy_command_config[region_name]
+
+    use_internal_ips = skypilot_config.get_effective_region_config(
+        cloud=str(cloud).lower(),
+        region=region.name,
+        keys=('use_internal_ips',),
+        default_value=False)
+    if isinstance(cloud, clouds.AWS):
+        # If the use_ssm flag is set to true, we use the ssm proxy command.
+        use_ssm = skypilot_config.get_effective_region_config(
+            cloud=str(cloud).lower(),
+            region=region.name,
+            keys=('use_ssm',),
+            default_value=False)
+
+        if use_ssm and ssh_proxy_command is not None:
+            raise exceptions.InvalidCloudConfigs(
+                'use_ssm is set to true, but ssh_proxy_command '
+                f'is already set to {ssh_proxy_command!r}. Please remove '
+                'ssh_proxy_command or set use_ssm to false.')
+
+        if not use_ssm and use_internal_ips and ssh_proxy_command is None:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}'
+                'use_internal_ips is set to true, '
+                'but ssh_proxy_command is not set. Defaulting to '
+                'using SSM. Specify ssh_proxy_command to use a different '
+                'https://docs.skypilot.co/en/latest/reference/config.html#'
+                f'aws.ssh_proxy_command.{colorama.Style.RESET_ALL}')
+            use_ssm = True
+        if use_ssm:
+            aws_profile = os.environ.get('AWS_PROFILE', None)
+            profile_str = f'--profile {aws_profile}' if aws_profile else ''
+            ip_address_filter = ('Name=private-ip-address,Values=%h'
+                                 if use_internal_ips else
+                                 'Name=ip-address,Values=%h')
+            get_instance_id_command = 'aws ec2 describe-instances ' + \
+                f'--region {region_name} --filters {ip_address_filter} ' + \
+                '--query \"Reservations[].Instances[].InstanceId\" ' + \
+                f'{profile_str} --output text'
+            ssm_proxy_command = 'aws ssm start-session --target ' + \
+                f'\"$({get_instance_id_command})\" ' + \
+                f'--region {region_name} {profile_str} ' + \
+                '--document-name AWS-StartSSHSession ' + \
+                '--parameters portNumber=%p'
+            ssh_proxy_command = ssm_proxy_command
+            region_name = 'ssm-session'
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
@@ -810,6 +860,7 @@ def write_cluster_config(
                 'name': vol.volume_name,
                 'path': vol.path,
                 'volume_name_on_cloud': vol.volume_config.name_on_cloud,
+                'volume_id_on_cloud': vol.volume_config.id_on_cloud,
             })
 
     runcmd = skypilot_config.get_effective_region_config(
@@ -1735,6 +1786,32 @@ def check_network_connection():
     # Assume network connection is down
     raise exceptions.NetworkError('Could not refresh the cluster. '
                                   'Network seems down.')
+
+
+async def async_check_network_connection():
+    """Check if the network connection is available.
+
+    Tolerates 3 retries as it is observed that connections can fail.
+    Uses aiohttp for async HTTP requests.
+    """
+    # Create a session with retry logic
+    timeout = ClientTimeout(total=15)
+    connector = TCPConnector(limit=1)  # Limit to 1 connection at a time
+
+    async with aiohttp.ClientSession(timeout=timeout,
+                                     connector=connector) as session:
+        for i, ip in enumerate(_TEST_IP_LIST):
+            try:
+                async with session.head(ip) as response:
+                    if response.status < 400:  # Any 2xx or 3xx status is good
+                        return
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                if i == len(_TEST_IP_LIST) - 1:
+                    raise exceptions.NetworkError(
+                        'Could not refresh the cluster. '
+                        'Network seems down.') from e
+                # If not the last IP, continue to try the next one
+                continue
 
 
 @timeline.event
@@ -3098,9 +3175,10 @@ def get_clusters(
         # Refactor this to use some other info to
         # determine if a launch is in progress.
         request = requests_lib.get_request_tasks(
-            status=[requests_lib.RequestStatus.RUNNING],
-            cluster_names=[cluster_name],
-            include_request_names=['sky.launch'])
+            req_filter=requests_lib.RequestTaskFilter(
+                status=[requests_lib.RequestStatus.RUNNING],
+                cluster_names=[cluster_name],
+                include_request_names=['sky.launch']))
         if len(request) > 0:
             # There is an active launch request on the cluster,
             # so we don't want to update the cluster status until

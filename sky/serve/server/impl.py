@@ -280,8 +280,7 @@ def up(
             ]
             run_script = '\n'.join(env_cmds + [run_script])
             # Dump script for high availability recovery.
-            if controller_utils.high_availability_specified(controller_name):
-                serve_state.set_ha_recovery_script(service_name, run_script)
+            serve_state.set_ha_recovery_script(service_name, run_script)
             backend.run_on_head(controller_handle, run_script)
 
         style = colorama.Style
