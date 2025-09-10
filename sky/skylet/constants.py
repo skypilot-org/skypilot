@@ -68,7 +68,8 @@ SKY_UV_RUN_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run')
 # not work when conda is used.
 DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
     'export PATH='
-    f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||")')
+    f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||") && '
+    'unset VIRTUAL_ENV && unset VIRTUAL_ENV_PROMPT')
 
 # Prefix for SkyPilot environment variables
 SKYPILOT_ENV_VAR_PREFIX = 'SKYPILOT_'
