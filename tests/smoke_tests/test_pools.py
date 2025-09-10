@@ -1095,8 +1095,7 @@ def test_pools_setup_num_gpus():
         accelerators: {{L4:2}}
 
     setup: |
-        echo "SKYPILOT_NUM_GPUS_PER_NODE is $SKYPILOT_NUM_GPUS_PER_NODE"
-        if [[ "$SKYPILOT_NUM_GPUS_PER_NODE" != "2" ]]; then
+        if [[ "$SKYPILOT_SETUP_NUM_GPUS_PER_NODE" != "2" ]]; then
             exit 1
         fi
     """)
@@ -1138,6 +1137,6 @@ def test_pools_setup_num_gpus():
             ],
             timeout=smoke_tests_utils.get_timeout('gcp'),
             teardown=
-            f'sky jobs pool down {pool} -y && sleep 5 && controller=$(sky status -u | grep sky-jobs-controller- | awk \'NR==1{{print $1}}\') && echo "$controller" && echo delete | sky down "$controller" && exit 1 || true'
+            f'sky jobs pool down {pool} -y && sleep 5 && controller=$(sky status -u | grep sky-jobs-controller- | awk \'NR==1{{print $1}}\') && echo "$controller" && echo delete | sky down "$controller" -y && exit 1 || true'
         )
         smoke_tests_utils.run_one_test(test)
