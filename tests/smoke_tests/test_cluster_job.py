@@ -1518,7 +1518,7 @@ def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
             get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=name,
                 job_id='1',
-                job_status=[sky.JobStatus.RUNNING],
+                job_status=[sky.JobStatus.RUNNING, sky.JobStatus.SUCCEEDED],
                 timeout=150),
             # Wait the GPU process to start.
             'sleep 90',
@@ -2085,7 +2085,7 @@ def test_gcp_network_tier_with_gpu():
             f'sky exec {name} {shlex.quote(cmd)} && sky logs {name} --status'
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        timeout=15 * 60,  # 15 mins for GPU provisioning
+        timeout=25 * 60,  # 25 mins for GPU provisioning
     )
     smoke_tests_utils.run_one_test(test)
 

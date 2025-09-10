@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+import asyncio
 from datetime import datetime
 import enum
 import fnmatch
@@ -17,6 +18,9 @@ from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
                     TypeVar, Union)
 import uuid
 
+import aiohttp
+from aiohttp import ClientTimeout
+from aiohttp import TCPConnector
 import colorama
 from packaging import version
 import psutil
@@ -535,7 +539,7 @@ def get_expirable_clouds(
             # get all custom contexts
             contexts = kubernetes_utils.get_custom_config_k8s_contexts()
             # add remote_identity of each context if it exists
-            remote_identities = None
+            remote_identities: Optional[Union[str, List[Dict[str, str]]]] = None
             for context in contexts:
                 context_remote_identity = skypilot_config.get_effective_region_config(
                     cloud='kubernetes',
@@ -546,9 +550,11 @@ def get_expirable_clouds(
                     if remote_identities is None:
                         remote_identities = []
                     if isinstance(context_remote_identity, str):
+                        assert isinstance(remote_identities, list)
                         remote_identities.append(
                             {context: context_remote_identity})
                     elif isinstance(context_remote_identity, list):
+                        assert isinstance(remote_identities, list)
                         remote_identities.extend(context_remote_identity)
             # add global kubernetes remote identity if it exists, if not, add default
             global_remote_identity = skypilot_config.get_effective_region_config(
@@ -560,8 +566,10 @@ def get_expirable_clouds(
                 if remote_identities is None:
                     remote_identities = []
                 if isinstance(global_remote_identity, str):
+                    assert isinstance(remote_identities, list)
                     remote_identities.append({'*': global_remote_identity})
                 elif isinstance(global_remote_identity, list):
+                    assert isinstance(remote_identities, list)
                     remote_identities.extend(global_remote_identity)
             if remote_identities is None:
                 remote_identities = schemas.get_default_remote_identity(
@@ -1784,6 +1792,32 @@ def check_network_connection():
     # Assume network connection is down
     raise exceptions.NetworkError('Could not refresh the cluster. '
                                   'Network seems down.')
+
+
+async def async_check_network_connection():
+    """Check if the network connection is available.
+
+    Tolerates 3 retries as it is observed that connections can fail.
+    Uses aiohttp for async HTTP requests.
+    """
+    # Create a session with retry logic
+    timeout = ClientTimeout(total=15)
+    connector = TCPConnector(limit=1)  # Limit to 1 connection at a time
+
+    async with aiohttp.ClientSession(timeout=timeout,
+                                     connector=connector) as session:
+        for i, ip in enumerate(_TEST_IP_LIST):
+            try:
+                async with session.head(ip) as response:
+                    if response.status < 400:  # Any 2xx or 3xx status is good
+                        return
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                if i == len(_TEST_IP_LIST) - 1:
+                    raise exceptions.NetworkError(
+                        'Could not refresh the cluster. '
+                        'Network seems down.') from e
+                # If not the last IP, continue to try the next one
+                continue
 
 
 @timeline.event

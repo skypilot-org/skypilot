@@ -91,7 +91,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '17'
+SKYLET_VERSION = '18'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -374,6 +374,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('ssh', 'pod_config'),
     ('kubernetes', 'custom_metadata'),
     ('kubernetes', 'pod_config'),
+    ('kubernetes', 'context_configs'),
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
@@ -421,6 +422,7 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 # TODO(cooperc): Update all env vars to begin with SKYPILOT_ or SKYPILOT_SERVER_
 # Environment variable that is set to 'true' if this is a skypilot server.
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
+OVERRIDE_CONSOLIDATION_MODE = 'IS_SKYPILOT_JOB_CONTROLLER'
 
 # Environment variable that is set to 'true' if metrics are enabled.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'

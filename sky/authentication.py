@@ -208,6 +208,24 @@ def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
+def parse_gcp_project_oslogin(project):
+    """Helper function to parse GCP project metadata."""
+    common_metadata = project.get('commonInstanceMetadata', {})
+    if not isinstance(common_metadata, dict):
+        common_metadata = {}
+
+    metadata_items = common_metadata.get('items', [])
+    if not isinstance(metadata_items, list):
+        metadata_items = []
+
+    project_oslogin = next(
+        (item for item in metadata_items
+         if isinstance(item, dict) and item.get('key') == 'enable-oslogin'),
+        {}).get('value', 'False')
+
+    return project_oslogin
+
+
 # Snippets of code inspired from
 # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
@@ -265,10 +283,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                      'Please check your network connection.')
         raise
 
-    project_oslogin: str = next(  # type: ignore
-        (item for item in project['commonInstanceMetadata'].get('items', [])
-         if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
-
+    project_oslogin = parse_gcp_project_oslogin(project)
     if project_oslogin.lower() == 'true':
         logger.info(
             f'OS Login is enabled for GCP project {project_id}. Running '
