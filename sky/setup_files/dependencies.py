@@ -63,6 +63,8 @@ install_requires = [
     'setproctitle',
     'sqlalchemy',
     'psycopg2-binary',
+    'aiosqlite',
+    'asyncpg',
     # TODO(hailong): These three dependencies should be removed after we make
     # the client-side actually not importing them.
     'casbin',
@@ -108,9 +110,9 @@ server_dependencies = [
 local_ray = [
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
-    # Excluded 2.6.0 as it has a bug in the cluster launcher:
+    # Ray 2.6.1+ resolved cluster launcher bugs and grpcio issues on Apple Silicon.
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
-    'ray[default] >= 2.2.0, != 2.6.0',
+    'ray[default] >= 2.6.1',
 ]
 
 remote = [

@@ -131,7 +131,7 @@ def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
 def encode_jobs_queue_v2(
         jobs_or_tuple) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     # Support returning either a plain jobs list or a (jobs, total) tuple
-    status_counts = {}
+    status_counts: Dict[str, int] = {}
     if isinstance(jobs_or_tuple, tuple):
         if len(jobs_or_tuple) == 2:
             jobs, total = jobs_or_tuple
