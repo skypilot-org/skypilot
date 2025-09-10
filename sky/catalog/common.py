@@ -166,7 +166,6 @@ def _update_catalog(filename: str,
                     url: str,
                     url_fallback: Optional[str] = None,
                     pull_frequency_hours: Optional[int] = None) -> bool:
-
     catalog_path = get_catalog_path(filename)
     cloud = os.path.dirname(filename)
     if cloud != 'common':
