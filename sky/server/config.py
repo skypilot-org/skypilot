@@ -7,6 +7,7 @@ from typing import Optional
 from sky import sky_logging
 from sky.server import constants as server_constants
 from sky.utils import common_utils
+from sky.server import daemons
 
 # Constants based on profiling the peak memory usage while serving various
 # sky commands. These estimation are highly related to usage patterns
@@ -21,7 +22,7 @@ from sky.utils import common_utils
 # in the future.
 # TODO(luca): The future is now! ^^^
 LONG_WORKER_MEM_GB = 0.4
-SHORT_WORKER_MEM_GB = 0.25
+SHORT_WORKER_MEM_GB = 0.3
 # To control the number of long workers.
 _CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
 # Limit the number of long workers of local API server, since local server is
@@ -36,9 +37,9 @@ _MAX_LONG_WORKERS_LOCAL = 4
 _MAX_MEM_PERCENT_FOR_BLOCKING = 0.6
 # Minimal number of long workers to ensure responsiveness.
 _MIN_LONG_WORKERS = 1
-# Minimal number of short workers, there is a daemon task running on short
-# workers so at least 2 workers are needed to ensure responsiveness.
-_MIN_SHORT_WORKERS = 2
+# Minimal number of idle short workers to ensure responsiveness.
+_MIN_IDLE_SHORT_WORKERS = 1
+
 
 # Default number of burstable workers for local API server. A heuristic number
 # that is large enough for most local cases.
@@ -215,6 +216,13 @@ def _max_long_worker_parallism(cpu_count: int,
         return min(n, _MAX_LONG_WORKERS_LOCAL)
     return n
 
+def _get_min_short_workers() -> int:
+    """Min number of short workers."""
+    daemon_count = 0
+    for daemon in daemons.INTERNAL_REQUEST_DAEMONS:
+        if not daemon.should_skip():
+            daemon_count += 1
+    return _MIN_IDLE_SHORT_WORKERS + daemon_count
 
 def _max_short_worker_parallism(mem_size_gb: float,
                                 long_worker_parallism: int) -> int:
@@ -227,5 +235,5 @@ def _max_short_worker_parallism(mem_size_gb: float,
                   server_constants.MIN_AVAIL_MEM_GB)
     reserved_mem = max_memory + (long_worker_parallism * LONG_WORKER_MEM_GB)
     available_mem = max(0, mem_size_gb - reserved_mem)
-    n = max(_MIN_SHORT_WORKERS, int(available_mem / SHORT_WORKER_MEM_GB))
+    n = max(_get_min_short_workers(), int(available_mem / SHORT_WORKER_MEM_GB))
     return n
