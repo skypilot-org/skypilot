@@ -36,9 +36,9 @@ def ssh_options_list(
 
 
 class SshMode(enum.Enum):
-    NON_INTERACTIVE: int
-    INTERACTIVE: int
-    LOGIN: int
+    NON_INTERACTIVE = ...
+    INTERACTIVE = ...
+    LOGIN = ...
 
 
 class CommandRunner:
