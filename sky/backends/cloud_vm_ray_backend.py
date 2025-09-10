@@ -4107,7 +4107,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_envs.update(self._skypilot_predefined_env_vars(handle))
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
-            setup_envs[constants.SKYPILOT_NUM_GPUS_PER_NODE] = (str(
+            setup_envs[constants.SKYPILOT_SETUP_NUM_GPUS_PER_NODE] = (str(
                 _get_num_gpus(backend_utils.get_task_demands_dict(task))))
 
             runner = runners[node_id]

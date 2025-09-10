@@ -1749,8 +1749,7 @@ def test_cluster_setup_num_gpus():
         accelerators: {{L4:2}}
 
     setup: |
-        echo "SKYPILOT_NUM_GPUS_PER_NODE is $SKYPILOT_NUM_GPUS_PER_NODE"
-        if [[ "$SKYPILOT_NUM_GPUS_PER_NODE" != "2" ]]; then
+        if [[ "$SKYPILOT_SETUP_NUM_GPUS_PER_NODE" != "2" ]]; then
             exit 1
         fi
 
