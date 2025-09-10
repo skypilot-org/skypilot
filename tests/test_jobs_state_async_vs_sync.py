@@ -163,10 +163,6 @@ async def test_get_status_same(_seed_one_job: int):
     assert sync_status == async_status
 
 
-@pytest.mark.xfail(
-    reason=
-    'get_pool_submit_info_async uses sync Session; needs fix in sky/jobs/state.py'
-)
 @pytest.mark.asyncio
 async def test_get_pool_submit_info_same(_seed_one_job: int):
     job_id = _seed_one_job
@@ -305,10 +301,6 @@ async def test_missing_job_status_and_ids_same(_mock_jobs_db_conn):
     assert await state.get_status_async(missing_id) is None
 
 
-@pytest.mark.xfail(
-    reason=
-    'get_pool_submit_info_async uses sync Session; needs fix in sky/jobs/state.py'
-)
 @pytest.mark.asyncio
 async def test_missing_job_pool_submit_info_same(_mock_jobs_db_conn):
     missing_id = 9999
