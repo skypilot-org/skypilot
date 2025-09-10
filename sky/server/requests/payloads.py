@@ -106,6 +106,16 @@ def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     # Remove the admin policy, as the policy has been applied on the client
     # side.
     config.pop_nested(('admin_policy',), default_value=None)
+    # Remove configuration for the jobs and serve controllers, as the controller
+    # is shared by all users and should be configured on the API server.
+    config.pop_nested((
+        'jobs',
+        'controller',
+    ), default_value=None)
+    config.pop_nested((
+        'serve',
+        'controller',
+    ), default_value=None)
     return config
 
 
