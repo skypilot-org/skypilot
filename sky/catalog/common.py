@@ -208,10 +208,6 @@ def _update_catalog(filename: str,
             try:
                 r = requests.get(url=url, headers=headers)
                 if r.status_code == 429 and url_fallback is not None:
-                    # fallback to s3 mirror, github introduced rate
-                    # limit after 2025-05, see
-                    # https://github.com/skypilot-org/skypilot/issues/5438
-                    # for more details
                     r = requests.get(url=url_fallback, headers=headers)
                 r.raise_for_status()
             except requests.exceptions.RequestException as e:
@@ -253,6 +249,8 @@ def read_catalog(filename: str,
     catalog_path = get_catalog_path(filename)
 
     url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+    # fallback to s3 mirror, github introduced rate limit after 2025-05, see
+    # https://github.com/skypilot-org/skypilot/issues/5438 for details.
     url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
 
     def update_catalog_wrapper():
