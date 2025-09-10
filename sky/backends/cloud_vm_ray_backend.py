@@ -3784,7 +3784,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         codegen: str,
         job_id: int,
-        detach_run: bool = False,
         managed_job_dag: Optional['dag.Dag'] = None,
         remote_log_dir: Optional[str] = None,
     ) -> None:
@@ -3900,14 +3899,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
-        if not detach_run:
-            if (handle.cluster_name == controller_utils.Controllers.
-                    JOBS_CONTROLLER.value.cluster_name):
-                self.tail_managed_job_logs(handle, job_id)
-            else:
-                # Sky logs. Not using subprocess.run since it will make the
-                # ssh keep connected after ctrl-c.
-                self.tail_logs(handle, job_id)
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str,
@@ -3954,7 +3945,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self,
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
-        detach_run: bool,
         dryrun: bool = False,
     ) -> Optional[int]:
         """Executes the task on the cluster.
@@ -4006,12 +3996,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
-            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run,
-                                       log_dir)
+            self._execute_task_n_nodes(handle, task_copy, job_id, log_dir)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task_copy, job_id, detach_run,
-                                        log_dir)
+            self._execute_task_one_node(handle, task_copy, job_id, log_dir)
 
         return job_id
 
@@ -5653,7 +5641,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
-                               detach_run: bool, remote_log_dir: str) -> None:
+                               remote_log_dir: str) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(remote_log_dir, 'tasks')
 
@@ -5692,13 +5680,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,
-                                detach_run=detach_run,
                                 managed_job_dag=task.managed_job_dag,
                                 remote_log_dir=remote_log_dir)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
-                              detach_run: bool, remote_log_dir: str) -> None:
+                              remote_log_dir: str) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
@@ -5748,6 +5735,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,
-                                detach_run=detach_run,
                                 managed_job_dag=task.managed_job_dag,
                                 remote_log_dir=remote_log_dir)
