@@ -221,15 +221,17 @@ def _patch_p4de(region: str, df: 'pd.DataFrame',
     # Columns:
     # InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,
     # Price,SpotPrice,Region,AvailabilityZone
-
-    # As of 2025-09-09, p4de.24xlarge may be returned so we should check so that
-    # we don't have it twice in the catalog.
-    # See https://github.com/skypilot-org/skypilot/issues/7091
-    if not df[df['InstanceType'] == 'p4de.24xlarge'].empty:
-        return df
-
     records = []
     for zone in df[df['Region'] == region]['AvailabilityZone'].unique():
+        # As of 2025-09-09, p4de.24xlarge may be returned so we should check so that
+        # we don't have it twice in the catalog.
+        # See https://github.com/skypilot-org/skypilot/issues/7091
+
+        # Check if p4de.24xlarge already exists in this zone to avoid duplicates
+        existing_p4de = df[(df['InstanceType'] == 'p4de.24xlarge') & 
+                          (df['AvailabilityZone'] == zone)]
+        if not existing_p4de.empty:
+            continue
         records.append({
             'InstanceType': 'p4de.24xlarge',
             'AcceleratorName': 'A100-80GB',
