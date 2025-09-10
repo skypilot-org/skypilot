@@ -334,15 +334,6 @@ class RayCodeGen:
             from sky.utils import log_utils
             from sky.utils import subprocess_utils
 
-            @ray.remote
-            def run_bash_command_with_log_and_return_pid(bash_command: str,
-                                                         log_path: str,
-                                                         env_vars: Optional[Dict[str, str]] = None,
-                                                         stream_logs: bool = False,
-                                                         with_ray: bool = False):
-                return_code = run_bash_command_with_log(bash_command, log_path, env_vars, stream_logs, with_ray)
-                return {{"return_code": return_code, "pid": os.getpid()}}
-
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
 
             CANCELLED_RETURN_CODE = 137
@@ -422,6 +413,10 @@ class RayCodeGen:
             inspect.getsource(log_lib.make_task_bash_script),
             inspect.getsource(log_lib.add_ray_env_vars),
             inspect.getsource(log_lib.run_bash_command_with_log),
+            inspect.getsource(log_lib.run_bash_command_with_log_and_return_pid),
+            'run_bash_command_with_log = run_bash_command_with_log',
+            'run_bash_command_with_log_and_return_pid = \
+                ray.remote(run_bash_command_with_log_and_return_pid)',
         ]
         # Currently, the codegen program is/can only be submitted to the head
         # node, due to using job_lib for updating job statuses, and using
