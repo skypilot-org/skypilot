@@ -74,7 +74,7 @@ def benchmark_queue_dispatcher(queue_backend: str,
             body.env_vars = dict({
                 constants.USER_ID_ENV_VAR: common_utils.generate_user_hash(),
             })
-            await await executor.schedule_request(
+            await executor.schedule_request(
                 request_id=str(uuid.uuid4()),
                 request_name='status',
                 is_skypilot_system=False,

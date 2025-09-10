@@ -190,8 +190,8 @@ class TestCostReportServer(unittest.TestCase):
         # Import and test the server function
         from sky.server import server
 
-        with mock.patch(
-                'sky.server.server.await executor.schedule_request') as mock_schedule:
+        with mock.patch('sky.server.server.await executor.schedule_request'
+                       ) as mock_schedule:
             # Call the server endpoint
             import asyncio
             asyncio.run(server.cost_report(mock_request, cost_report_body))

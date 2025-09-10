@@ -554,18 +554,18 @@ async def prepare_request(
     return request
 
 
-async def schedule_request(
-    request_id: str,
-                     request_name: str,
-                     request_body: payloads.RequestBody,
-                     func: Callable[P, Any],
-                     request_cluster_name: Optional[str] = None,
-                     ignore_return_value: bool = False,
-                     schedule_type: api_requests.ScheduleType = (
-                         api_requests.ScheduleType.LONG),
-                     is_skypilot_system: bool = False,
-                     precondition: Optional[preconditions.Precondition] = None,
-                     retryable: bool = False) -> None:
+async def schedule_request(request_id: str,
+                           request_name: str,
+                           request_body: payloads.RequestBody,
+                           func: Callable[P, Any],
+                           request_cluster_name: Optional[str] = None,
+                           ignore_return_value: bool = False,
+                           schedule_type: api_requests.ScheduleType = (
+                               api_requests.ScheduleType.LONG),
+                           is_skypilot_system: bool = False,
+                           precondition: Optional[
+                               preconditions.Precondition] = None,
+                           retryable: bool = False) -> None:
     """Enqueue a request to the request queue.
 
     Args:
@@ -587,7 +587,8 @@ async def schedule_request(
             caller.
     """
     await prepare_request(request_id, request_name, request_body, func,
-                    request_cluster_name, schedule_type, is_skypilot_system)
+                          request_cluster_name, schedule_type,
+                          is_skypilot_system)
 
     def enqueue():
         input_tuple = (request_id, ignore_return_value, retryable)
