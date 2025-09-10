@@ -434,7 +434,7 @@ class SeewebNodeProvider:
                 self.ecs.turn_on_server,
                 max_retries=_API_RETRY_MAX_RETRIES,
                 initial_backoff=_API_RETRY_INITIAL_BACKOFF)(server_id)
-        except Exception as e:
+        except seeweb_adaptor.SeewebError as e:
             logger.error(f'Error in _power_on for {server_id}: {e}')
             raise
 
@@ -444,7 +444,7 @@ class SeewebNodeProvider:
                 self.ecs.turn_off_server,
                 max_retries=_API_RETRY_MAX_RETRIES,
                 initial_backoff=_API_RETRY_INITIAL_BACKOFF)(server_id)
-        except Exception as e:
+        except seeweb_adaptor.SeewebError as e:
             logger.error(f'\n\nError in _power_off for {server_id}: {e}')
             raise
 
@@ -653,7 +653,7 @@ def _ping_server_standalone(server_ip: str) -> bool:
                                 check=False)
         return result.returncode == 0
     except Exception as e:  # pylint: disable=broad-except
-        print(f'Error pinging {server_ip}: {e}')
+        logger.error(f'Error pinging {server_ip}: {e}')
         return False
 
 

@@ -227,17 +227,6 @@ class Seeweb(clouds.Cloud):
             # CPU-only instance - use standard Ubuntu image
             image_id = 'ubuntu-2204'
 
-        # Handle custom image_id if specified (though not supported)
-        if resources.image_id is not None:
-            # Even though custom images aren't supported, we
-            # should handle the case where someone tries to
-            # specify one and provide a clear error
-            if None in resources.image_id:
-                image_id = resources.image_id[None]
-            else:
-                assert region.name in resources.image_id, resources.image_id
-                image_id = resources.image_id[region.name]
-
         result = {
             'instance_type': resources.instance_type,
             'region': region.name,
