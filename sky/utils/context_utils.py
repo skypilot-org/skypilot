@@ -10,6 +10,8 @@ import sys
 import typing
 from typing import Any, Callable, IO, Optional, Tuple, TypeVar
 
+from typing_extensions import ParamSpec
+
 from sky import sky_logging
 from sky.utils import context
 from sky.utils import subprocess_utils
@@ -175,7 +177,12 @@ def cancellation_guard(func: F) -> F:
 
 # TODO(aylei): replace this with asyncio.to_thread once we drop support for
 # python 3.8
-def to_thread(func, /, *args, **kwargs):
+P = ParamSpec('P')
+T = TypeVar('T')
+
+
+def to_thread(func: Callable[P, T], /, *args: P.args,
+              **kwargs: P.kwargs) -> asyncio.Future[T]:
     """Asynchronously run function *func* in a separate thread.
 
     This is same as asyncio.to_thread added in python 3.9
@@ -183,5 +190,11 @@ def to_thread(func, /, *args, **kwargs):
     loop = asyncio.get_running_loop()
     # This is critical to pass the current coroutine context to the new thread
     pyctx = contextvars.copy_context()
-    func_call = functools.partial(pyctx.run, func, *args, **kwargs)
+    func_call = functools.partial[T](
+        # partial deletes arguments type and thus can't figure out the return
+        # type of pyctx.run
+        pyctx.run,  # type: ignore
+        func,
+        *args,
+        **kwargs)
     return loop.run_in_executor(None, func_call)
