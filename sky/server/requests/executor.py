@@ -520,7 +520,7 @@ async def execute_request_coroutine(request: api_requests.Request):
         raise
 
 
-def prepare_request(
+async def prepare_request(
     request_id: str,
     request_name: str,
     request_body: payloads.RequestBody,
@@ -554,7 +554,8 @@ def prepare_request(
     return request
 
 
-def schedule_request(request_id: str,
+async def schedule_request(
+    request_id: str,
                      request_name: str,
                      request_body: payloads.RequestBody,
                      func: Callable[P, Any],
@@ -585,7 +586,7 @@ def schedule_request(request_id: str,
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    prepare_request(request_id, request_name, request_body, func,
+    await prepare_request(request_id, request_name, request_body, func,
                     request_cluster_name, schedule_type, is_skypilot_system)
 
     def enqueue():
