@@ -170,7 +170,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`use_static_ip_address <config-yaml-nebius-use-static-ip-address>`: true
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
-    :ref:`domain <config-yaml-nebius-domain>`: api.nebius.com:443
+    :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -1493,7 +1493,7 @@ Example:
 .. code-block:: yaml
 
   nebius:
-    domain: api.nebius.com:443
+    domain: api.nebius.cloud:443
 
 
 .. _config-yaml-rbac:
