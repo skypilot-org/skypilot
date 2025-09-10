@@ -156,8 +156,15 @@ jobs:
           VERSION="${{ needs.extract-version.outputs.version }}"
           PREVIOUS_TAG="${{ steps.find_previous_release.outputs.previous_tag }}"
 
-          # Create release notes prefix
-          cat > release_prefix.md << EOF
+          # Generate release notes using GitHub API
+          echo "Generating release notes from $PREVIOUS_TAG to v$VERSION"
+          GENERATED_NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name="v$VERSION" \
+            -f previous_tag_name="$PREVIOUS_TAG" \
+            --jq '.body')
+
+          # Create final release notes with custom prefix
+          cat > final_release_notes.md << EOF
           ## SkyPilot v$VERSION
 
           Get it now with:
@@ -168,14 +175,13 @@ jobs:
 
           ---
 
+          $GENERATED_NOTES
           EOF
 
           echo "Creating release from $PREVIOUS_TAG to v$VERSION"
           gh release create "v$VERSION" \
             --title "Release v$VERSION" \
-            --notes-file release_prefix.md \
-            --generate-notes \
-            --notes-start-tag "$PREVIOUS_TAG" \
+            --notes-file final_release_notes.md \
             --draft
 
   cleanup-branches:
