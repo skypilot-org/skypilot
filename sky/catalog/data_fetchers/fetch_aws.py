@@ -279,7 +279,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             if 'ProcessorInfo' in row:
                 processor = row['ProcessorInfo']
                 if 'SupportedArchitectures' in processor:
-                    archs=processor['SupportedArchitectures']
+                    archs = processor['SupportedArchitectures']
                     if isinstance(archs, list):
                         return archs[0]
                     elif isinstance(archs, str):
