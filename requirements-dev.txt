@@ -16,7 +16,7 @@ isort==5.12.0
 
 # type checking
 # match the version with .pre-commit-config.yaml
-mypy==1.16.1
+mypy==1.14.1
 types-PyYAML
 types-paramiko
 # 2.31 requires urlib3>2, which is incompatible with IBM and
