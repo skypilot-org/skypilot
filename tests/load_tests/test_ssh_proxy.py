@@ -3,6 +3,7 @@
 
 import argparse
 import concurrent.futures
+import logging
 import statistics
 import subprocess
 import sys
@@ -10,7 +11,6 @@ import time
 from typing import List, Tuple
 
 from sky import sky_logging
-import logging
 
 logger = sky_logging.init_logger(__name__)
 logger.handlers.clear()
@@ -19,6 +19,7 @@ stream_handler = logging.StreamHandler(sys.stdout)
 stream_handler.flush = sys.stdout.flush  # type: ignore
 stream_handler.setFormatter(sky_logging.FORMATTER)
 logger.addHandler(stream_handler)
+
 
 class SSHClient:
     """A persistent SSH client for executing commands."""
