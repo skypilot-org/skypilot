@@ -272,6 +272,11 @@ spec:
           mountPath: /root/.aws
           readOnly: true
         {{- end }}
+        {{- if .Values.r2Credentials.enabled }}
+        - name: r2-config
+          mountPath: /root/.cloudflare
+          readOnly: true
+        {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: gcp-config
           mountPath: /root/.config/gcloud
@@ -354,6 +359,49 @@ spec:
         volumeMounts:
         - name: aws-config
           mountPath: /root/.aws
+      {{- end }}
+      {{- if .Values.r2Credentials.enabled }}
+      - name: create-r2-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: [ "/bin/sh", "-c" ]
+        args:
+          - |
+            echo "Setting up testing R2 credentials..."
+            mkdir -p /root/.cloudflare
+
+            # Copy r2.credentials file from the secret mount
+            if [ -f "/tmp/r2-secret/r2.credentials" ]; then
+              cp /tmp/r2-secret/r2.credentials /root/.cloudflare/r2.credentials
+              echo "R2 credentials file copied successfully."
+            else
+              echo "ERROR: r2.credentials file not found in secret."
+              exit 1
+            fi
+
+            # Copy accountid file if it exists
+            if [ -f "/tmp/r2-secret/accountid" ]; then
+              cp /tmp/r2-secret/accountid /root/.cloudflare/accountid
+              echo "R2 account ID file copied successfully."
+            else
+              echo "WARNING: accountid file not found in secret. This might be expected."
+            fi
+
+            # Set proper permissions
+            chmod 600 /root/.cloudflare/r2.credentials
+            [ -f /root/.cloudflare/accountid ] && chmod 600 /root/.cloudflare/accountid
+
+            echo "R2 credentials setup complete."
+            ls -la /root/.cloudflare/
+        volumeMounts:
+          - name: r2-config
+            mountPath: /root/.cloudflare
+          - name: r2-credentials-secret
+            mountPath: /tmp/r2-secret
+            readOnly: true
       {{- end }}
       {{- if .Values.gcpCredentials.enabled }}
       - name: setup-gcp-credentials
@@ -532,4 +580,12 @@ spec:
       {{- end }}
       {{- if .Values.apiService.extraVolumes }}
       {{- toYaml .Values.apiService.extraVolumes | nindent 6 }}
+      {{- end }}
+      {{- if .Values.r2Credentials.enabled }}
+      - name: r2-config
+        emptyDir: { }
+      - name: r2-credentials-secret
+        secret:
+          secretName: {{ .Values.r2Credentials.r2SecretName }}
+          optional: true
       {{- end }}
