@@ -504,6 +504,23 @@ def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.aws
+def test_huggingface_arm64(generic_cloud: str):
+    accelerator = 'T4g'
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'huggingface_glue_imdb_app_arm',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --gpus {accelerator} examples/huggingface_glue_imdb_app_arm.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} --gpus {accelerator} examples/huggingface_glue_imdb_app_arm.yaml',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.lambda_cloud
 def test_lambda_huggingface(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
