@@ -190,7 +190,7 @@ def to_thread(func: Callable[P, T], /, *args: P.args,
     loop = asyncio.get_running_loop()
     # This is critical to pass the current coroutine context to the new thread
     pyctx = contextvars.copy_context()
-    func_call = functools.partial[T](
+    func_call: Callable[..., T] = functools.partial(
         # partial deletes arguments type and thus can't figure out the return
         # type of pyctx.run
         pyctx.run,  # type: ignore
