@@ -16,6 +16,7 @@ from smoke_tests.docker import docker_utils
 
 from sky import cloud_stores
 from sky import sky_logging
+from sky.utils import annotations
 from sky.utils import common_utils
 
 # Initialize logger at the top level
@@ -280,9 +281,6 @@ def pytest_collection_modifyitems(config, items):
     generic_cloud = _generic_cloud(config)
     generic_cloud_keyword = cloud_to_pytest_keyword[generic_cloud]
 
-    # Check if we need to dynamically add no_remote_server mark
-    should_add_no_remote_server_mark = _should_add_no_remote_server_mark(config)
-
     for item in items:
         if 'smoke_tests' not in item.location[0]:
             # Only mark smoke test cases
@@ -322,15 +320,16 @@ def pytest_collection_modifyitems(config, items):
         if 'resource_heavy' not in marks and config.getoption(
                 '--resource-heavy'):
             item.add_marker(skip_marks['resource_heavy'])
-        # Dynamically add no_remote_server mark if api_server is configured in env file
-        if should_add_no_remote_server_mark:
-            item.add_marker(pytest.mark.no_remote_server)
-            marks.append(
-                'no_remote_server')  # Update marks list for subsequent checks
-
         # Skip tests marked as no_remote_server if --remote-server is set
         if 'no_remote_server' in marks and config.getoption('--remote-server'):
             item.add_marker(skip_marks['no_remote_server'])
+        # Skip tests marked as no_remote_server if --env-file is set and the env file contains
+        # api_server configuration. (max line length 80)
+        env_file = config.getoption('--env-file')
+        if env_file:
+            has_api_server, _ = _get_and_check_env_file(env_file)
+            if has_api_server:
+                item.add_marker(skip_marks['no_remote_server'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -378,7 +377,7 @@ def _generic_cloud(config) -> str:
     return _get_cloud_to_run(config)[0]
 
 
-@common_utils.lru_cache(maxsize=1)
+@annotations.lru_cache(scope='session')
 def _get_and_check_env_file(env_file_path: str) -> Tuple[bool, Optional[str]]:
     """Download/get env file and check if it contains api_server configuration.
 
@@ -425,21 +424,6 @@ def _get_and_check_env_file(env_file_path: str) -> Tuple[bool, Optional[str]]:
         has_api_server = 'endpoint' in content and ('api_server' in content)
 
     return has_api_server, local_file_path
-
-
-def _should_add_no_remote_server_mark(config) -> bool:
-    """Check if we should dynamically add no_remote_server mark to tests.
-
-    Returns True if --env-file option is set and the config file contains
-    api_server configuration.
-    """
-    # Get the --env-file option directly from pytest config during collection
-    env_file_path = config.getoption('--env-file')
-    if env_file_path is None:
-        return False
-
-    has_api_server, _ = _get_and_check_env_file(env_file_path)
-    return has_api_server
 
 
 @pytest.fixture
