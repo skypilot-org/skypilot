@@ -445,6 +445,8 @@ def launch(
                     managed_job_state.set_ha_recovery_script(
                         consolidation_mode_job_id, run_script)
                     backend.run_on_head(local_handle, run_script)
+                    ux_utils.starting_message(
+                        f'Job submitted, ID: {consolidation_mode_job_id}')
                     return consolidation_mode_job_id, local_handle
 
     if pool is None:
