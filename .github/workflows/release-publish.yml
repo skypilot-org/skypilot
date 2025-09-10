@@ -122,19 +122,19 @@ jobs:
           git tag -a "v${VERSION}" -m "Release v${VERSION}"
           git push origin "v${VERSION}"
 
-      - name: Find previous release from PyPI
+      - name: Find previous release from git tags
         id: find_previous_release
         run: |
           VERSION="${{ needs.extract-version.outputs.version }}"
           echo "Current release version: ${VERSION}"
 
-          # Get all versions from PyPI using JSON API
-          ALL_VERSIONS=$(curl -s https://pypi.org/pypi/skypilot/json | jq -r '.releases | keys[]' | sort -V)
-          echo "All PyPI versions:"
-          echo "$ALL_VERSIONS"
+          # Get all git tags starting with 'v' and sort them
+          ALL_TAGS=$(git tag | grep "^v" | sort -V)
+          echo "All git tags:"
+          echo "$ALL_TAGS"
 
-          # Find the version just before the current one
-          PREVIOUS_VERSION=$(echo "$ALL_VERSIONS" | grep -B1 "^${VERSION}$" | head -1 || echo "")
+          # Find the highest version that's less than the current one
+          PREVIOUS_VERSION=$(echo "$ALL_TAGS" | grep -v "^v${VERSION}$" | sort -V | tail -1 | sed 's/^v//' || echo "")
 
           if [ -n "$PREVIOUS_VERSION" ] && [ "$PREVIOUS_VERSION" != "$VERSION" ]; then
             PREVIOUS_TAG="v${PREVIOUS_VERSION}"
@@ -142,10 +142,10 @@ jobs:
             echo "Previous tag: ${PREVIOUS_TAG}"
             echo "previous_tag=${PREVIOUS_TAG}" >> $GITHUB_OUTPUT
           else
-            echo "Error: No previous release version found on PyPI for comparison"
+            echo "Error: No previous release version found in git tags for comparison"
             echo "Current version: ${VERSION}"
-            echo "Available versions:"
-            echo "$ALL_VERSIONS"
+            echo "Available tags:"
+            echo "$ALL_TAGS"
             exit 1
           fi
 
@@ -175,7 +175,7 @@ jobs:
             --title "Release v$VERSION" \
             --notes-file release_prefix.md \
             --generate-notes \
-            --previous-tag "$PREVIOUS_TAG" \
+            --notes-start-tag "$PREVIOUS_TAG" \
             --draft
 
   cleanup-branches:
