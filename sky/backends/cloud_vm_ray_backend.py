@@ -5962,7 +5962,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
                 mount_cmd = store.mount_cached_command(dst)
                 action_message = 'Mounting cached mode'
-
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
