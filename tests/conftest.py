@@ -205,6 +205,13 @@ def pytest_addoption(parser):
         default=None,
         help='Path to the env file to override the default env file',
     )
+    parser.addoption(
+        '--backend-test-cluster',
+        type=str,
+        default=None,
+        help=
+        'Use existing cluster for backend integration tests instead of creating a new one',
+    )
 
 
 def pytest_configure(config):
