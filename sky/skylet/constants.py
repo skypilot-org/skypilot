@@ -62,6 +62,7 @@ SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
                       'curl -LsSf https://astral.sh/uv/install.sh '
                       f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh')
 SKY_UV_PIP_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip')
+SKY_UV_RUN_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run')
 # Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH and unsetting relevant
 # VIRTUAL_ENV envvars to deactivate the environment. `deactivate` command does
 # not work when conda is used.
@@ -231,7 +232,7 @@ RAY_INSTALLATION_COMMANDS = (
     'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
-    f'{{ {ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
+    f'{{ {SKY_UV_RUN_CMD} '
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
