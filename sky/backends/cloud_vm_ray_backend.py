@@ -336,6 +336,8 @@ class RayCodeGen:
 
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
 
+            CANCELLED_RETURN_CODE = 137
+
             kwargs = dict()
             # Only set the `_temp_dir` to SkyPilot's ray cluster directory when
             # the directory exists for backward compatibility for the VM
@@ -351,8 +353,10 @@ class RayCodeGen:
             def get_or_fail(futures, pg) -> List[int]:
                 \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
                 if not futures:
-                    return []
+                    return [], []
                 returncodes = [1] * len(futures)
+                pids = [None] * len(futures)
+                failed = False
                 # Wait for 1 task to be ready.
                 ready = []
                 # Keep invoking ray.wait if ready is empty. This is because
@@ -361,12 +365,22 @@ class RayCodeGen:
                 # before becoming ready.
                 # (Such tasks are common in serving jobs.)
                 # Reference: https://github.com/ray-project/ray/blob/ray-2.9.3/python/ray/_private/worker.py#L2845-L2846
+
+                def handle_ready_tasks(tasks: List[ray.ObjectRef]) -> None:
+                    nonlocal returncodes, pids, failed
+                    for task in tasks:
+                        idx = futures.index(task)
+                        res = ray.get(task)
+                        returncodes[idx] = res['return_code']
+                        pids[idx] = res['pid']
+                        if res['return_code'] != 0:
+                            failed = True
+
                 while not ready:
                     ready, unready = ray.wait(futures)
-                idx = futures.index(ready[0])
-                returncodes[idx] = ray.get(ready[0])
+                handle_ready_tasks(ready)
                 while unready:
-                    if returncodes[idx] != 0:
+                    if failed:
                         for task in unready:
                             # ray.cancel without force fails to kill tasks.
                             # We use force=True to kill unready tasks.
@@ -374,17 +388,16 @@ class RayCodeGen:
                             # Use SIGKILL=128+9 to indicate the task is forcely
                             # killed.
                             idx = futures.index(task)
-                            returncodes[idx] = 137
+                            returncodes[idx] = CANCELLED_RETURN_CODE
                         break
                     ready, unready = ray.wait(unready)
-                    idx = futures.index(ready[0])
-                    returncodes[idx] = ray.get(ready[0])
+                    handle_ready_tasks(ready)
                 # Remove the placement group after all tasks are done, so that
                 # the next job can be scheduled on the released resources
                 # immediately.
                 ray_util.remove_placement_group(pg)
                 sys.stdout.flush()
-                return returncodes
+                return returncodes, pids
 
             run_fn = None
             futures = []
@@ -400,7 +413,10 @@ class RayCodeGen:
             inspect.getsource(log_lib.make_task_bash_script),
             inspect.getsource(log_lib.add_ray_env_vars),
             inspect.getsource(log_lib.run_bash_command_with_log),
-            'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
+            inspect.getsource(log_lib.run_bash_command_with_log_and_return_pid),
+            'run_bash_command_with_log = run_bash_command_with_log',
+            'run_bash_command_with_log_and_return_pid = \
+                ray.remote(run_bash_command_with_log_and_return_pid)',
         ]
         # Currently, the codegen program is/can only be submitted to the head
         # node, due to using job_lib for updating job statuses, and using
@@ -505,7 +521,7 @@ class RayCodeGen:
                 total_num_nodes = len(ray.nodes())
                 setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
                 setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
-                setup_workers = [run_bash_command_with_log \\
+                setup_workers = [run_bash_command_with_log_and_return_pid \\
                     .options(
                         name='setup',
                         num_cpus=_SETUP_CPUS,
@@ -520,15 +536,25 @@ class RayCodeGen:
                         stream_logs=True,
                         with_ray=True,
                     ) for i in range(total_num_nodes)]
-                setup_returncodes = get_or_fail(setup_workers, setup_pg)
-                if sum(setup_returncodes) != 0:
+                setup_returncodes, setup_pids = get_or_fail(setup_workers, setup_pg)
+                success = True
+                failed_workers_and_returncodes = []
+                for i in range(len(setup_returncodes)):
+                    returncode = setup_returncodes[i]
+                    pid = setup_pids[i]
+                    if pid == None:
+                        pid = os.getpid()
+                    if returncode != 0 and returncode != CANCELLED_RETURN_CODE:
+                        success = False
+                        failed_workers_and_returncodes.append((pid, returncode))
+                if not success:
+                    msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed. '
+                    msg += f'Failed workers: ' + ', '.join([f'(pid={{pid}}, returncode={{returncode}})' for pid, returncode in failed_workers_and_returncodes])
+                    msg += f'. See error logs above for more details.{colorama.Style.RESET_ALL}'
+                    print(msg, flush=True)
                     job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
                     # This waits for all streaming logs to finish.
                     time.sleep(1)
-                    print('ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with '
-                        'return code list:{colorama.Style.RESET_ALL}',
-                        setup_returncodes,
-                        flush=True)
                     # Need this to set the job status in ray job to be FAILED.
                     sys.exit(1)
                 """)
@@ -701,7 +727,7 @@ class RayCodeGen:
 
             sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
 
-            futures.append(run_bash_command_with_log \\
+            futures.append(run_bash_command_with_log_and_return_pid \\
                     .options(name=name_str, {options_str}) \\
                     .remote(
                         script,
@@ -720,7 +746,7 @@ class RayCodeGen:
 
         self._code += [
             textwrap.dedent(f"""\
-            returncodes = get_or_fail(futures, pg)
+            returncodes, _ = get_or_fail(futures, pg)
             if sum(returncodes) != 0:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # Schedule the next pending job immediately to make the job
