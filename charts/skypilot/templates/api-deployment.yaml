@@ -317,10 +317,6 @@ spec:
         - name: nebius-credentials
           mountPath: /root/.nebius_credentials
         {{- end }}
-        {{- if .Values.r2Credentials.enabled }}
-        - name: r2-credentials
-          mountPath: /root/.cloudflare
-        {{- end }}
         {{- if .Values.apiService.extraVolumeMounts }}
         {{- toYaml .Values.apiService.extraVolumeMounts | nindent 8 }}
         {{- end }}
