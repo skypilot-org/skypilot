@@ -45,6 +45,8 @@ extensions = [
     'notfound.extension',
     'sphinx.ext.autosectionlabel',
     'extension.linting',
+    'extension.markdown_export',
+    'extension.dynamic_llms_txt',
 ]
 # Needed for admonitions in markdown:
 # https://myst-parser.readthedocs.io/en/latest/syntax/admonitions.html
