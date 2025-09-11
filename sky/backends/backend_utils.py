@@ -7,11 +7,13 @@ import hashlib
 import os
 import pathlib
 import pprint
+import queue as queue_lib
 import re
 import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
@@ -23,7 +25,6 @@ from aiohttp import ClientTimeout
 from aiohttp import TCPConnector
 import colorama
 from packaging import version
-import psutil
 from typing_extensions import Literal
 
 import sky
@@ -111,8 +112,12 @@ _LAUNCHED_RESERVED_WORKER_PATTERN = re.compile(
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
+SSH_CONNECTION_ERROR_PATTERN = re.compile(
+    r'^ssh:.*(timed out|connection refused)$', re.IGNORECASE)
 _SSH_CONNECTION_TIMED_OUT_PATTERN = re.compile(r'^ssh:.*timed out$',
                                                re.IGNORECASE)
+K8S_PODS_NOT_FOUND_PATTERN = re.compile(r'.*(NotFound|pods .* not found).*',
+                                        re.IGNORECASE)
 _RAY_CLUSTER_NOT_FOUND_MESSAGE = 'Ray cluster is not found'
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
@@ -135,6 +140,7 @@ _CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 WORKSPACE_LOCK_TIMEOUT_SECONDS = 10
+CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -212,6 +218,9 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
     # actually in.
     ('provider', 'availability_zone'),
 ]
+
+_ACK_MESSAGE = 'ack'
+_FORWARDING_FROM_MESSAGE = 'Forwarding from'
 
 
 def is_ip(s: str) -> bool:
@@ -3584,19 +3593,126 @@ def workspace_lock_id(workspace_name: str) -> str:
     return f'{workspace_name}_workspace'
 
 
+def cluster_tunnel_lock_id(cluster_name: str) -> str:
+    """Get the lock ID for cluster tunnel operations."""
+    return f'{cluster_name}_ssh_tunnel'
+
+
+def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
+                                       command_runner.KubernetesCommandRunner],
+                    port_forward: Tuple[int, int]) -> subprocess.Popen:
+    local_port, remote_port = port_forward
+    if isinstance(head_runner, command_runner.SSHCommandRunner):
+        # Disabling ControlMaster makes things easier to reason about
+        # with respect to resource management/ownership,
+        # as killing the process will close the tunnel too.
+        head_runner.disable_control_master = True
+        head_runner.port_forward_execute_remote_command = True
+
+    # The default connect_timeout of 1s is too short for
+    # connecting to clusters using a jump server.
+    # We use NON_INTERACTIVE mode to avoid allocating a pseudo-tty,
+    # which is counted towards non-idleness.
+    cmd: List[str] = head_runner.port_forward_command(
+        [(local_port, remote_port)],
+        connect_timeout=5,
+        ssh_mode=command_runner.SshMode.NON_INTERACTIVE)
+    if isinstance(head_runner, command_runner.SSHCommandRunner):
+        # cat so the command doesn't exit until we kill it
+        cmd += [f'"echo {_ACK_MESSAGE} && cat"']
+    cmd_str = ' '.join(cmd)
+    logger.debug(f'Running port forward command: {cmd_str}')
+    ssh_tunnel_proc = subprocess.Popen(cmd_str,
+                                       shell=True,
+                                       stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       start_new_session=True,
+                                       text=True)
+    # Wait until we receive an ack from the remote cluster or
+    # the SSH connection times out.
+    queue: queue_lib.Queue = queue_lib.Queue()
+    stdout_thread = threading.Thread(
+        target=lambda queue, stdout: queue.put(stdout.readline()),
+        args=(queue, ssh_tunnel_proc.stdout),
+        daemon=True)
+    stdout_thread.start()
+    while ssh_tunnel_proc.poll() is None:
+        try:
+            ack = queue.get_nowait()
+        except queue_lib.Empty:
+            ack = None
+            time.sleep(0.1)
+            continue
+        assert ack is not None
+        if isinstance(
+                head_runner,
+                command_runner.SSHCommandRunner) and ack == f'{_ACK_MESSAGE}\n':
+            break
+        elif isinstance(head_runner, command_runner.KubernetesCommandRunner
+                       ) and _FORWARDING_FROM_MESSAGE in ack:
+            # On kind clusters, this error occurs if we make a request
+            # immediately after the port-forward is established on a new pod:
+            # "Unhandled Error" err="an error occurred forwarding ... -> 46590:
+            # failed to execute portforward in network namespace
+            # "/var/run/netns/cni-...": failed to connect to localhost:46590
+            # inside namespace "...", IPv4: dial tcp4 127.0.0.1:46590:
+            # connect: connection refused
+            # So we need to poll the port on the pod to check if it is open.
+            # We did not observe this with real Kubernetes clusters.
+            timeout = 5
+            port_check_cmd = (
+                # We install netcat in our ray-node container,
+                # so we can use it here.
+                # (See kubernetes-ray.yml.j2)
+                f'end=$((SECONDS+{timeout})); '
+                f'while ! nc -z -w 1 localhost {remote_port}; do '
+                'if (( SECONDS >= end )); then exit 1; fi; '
+                'sleep 0.1; '
+                'done')
+            returncode, stdout, stderr = head_runner.run(port_check_cmd,
+                                                         require_outputs=True,
+                                                         stream_logs=False)
+            if returncode != 0:
+                try:
+                    ssh_tunnel_proc.terminate()
+                    ssh_tunnel_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    ssh_tunnel_proc.kill()
+                    ssh_tunnel_proc.wait()
+                finally:
+                    error_msg = (f'Failed to check remote port {remote_port}')
+                    if stdout:
+                        error_msg += f'\n-- stdout --\n{stdout}\n'
+                    raise exceptions.CommandError(returncode=returncode,
+                                                  command=cmd_str,
+                                                  error_msg=error_msg,
+                                                  detailed_reason=stderr)
+            break
+
+    if ssh_tunnel_proc.poll() is not None:
+        stdout, stderr = ssh_tunnel_proc.communicate()
+        error_msg = 'Port forward failed'
+        if stdout:
+            error_msg += f'\n-- stdout --\n{stdout}\n'
+        raise exceptions.CommandError(returncode=ssh_tunnel_proc.returncode,
+                                      command=cmd_str,
+                                      error_msg=error_msg,
+                                      detailed_reason=stderr)
+    return ssh_tunnel_proc
+
+
 T = TypeVar('T')
 
 
-def invoke_skylet_with_retries(
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-        func: Callable[..., T]) -> T:
+def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     """Generic helper for making Skylet gRPC requests.
 
     This method handles the common pattern of:
     1. Try the gRPC request
     2. If SSH tunnel is closed, recreate it and retry
     """
-    max_attempts = 3
+    max_attempts = 5
     backoff = common_utils.Backoff(initial_backoff=0.5)
     last_exception: Optional[Exception] = None
 
@@ -3609,22 +3725,9 @@ def invoke_skylet_with_retries(
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.SkyletInternalError(e.details())
             elif e.code() == grpc.StatusCode.UNAVAILABLE:
-                recreate_tunnel = True
-                try:
-                    if handle.skylet_ssh_tunnel is not None:
-                        proc = psutil.Process(handle.skylet_ssh_tunnel.pid)
-                        if proc.is_running(
-                        ) and proc.status() != psutil.STATUS_ZOMBIE:
-                            recreate_tunnel = False
-                except psutil.NoSuchProcess:
-                    pass
-
-                if recreate_tunnel:
-                    handle.open_and_update_skylet_tunnel()
-
                 time.sleep(backoff.current_backoff())
             else:
                 raise e
-
-    raise RuntimeError(f'Failed to invoke Skylet after {max_attempts} attempts'
-                      ) from last_exception
+    raise RuntimeError(
+        f'Failed to invoke Skylet after {max_attempts} attempts: {last_exception}'
+    ) from last_exception
