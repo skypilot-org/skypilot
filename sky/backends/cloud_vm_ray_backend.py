@@ -2267,8 +2267,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Skylet SSH tunnel info.
     """
     # Bump if any fields get added/removed/changed, and add backward
-    # compaitibility logic in __setstate__.
-    _VERSION = 11
+    # compatibility logic in __setstate__ and/or __getstate__.
+    _VERSION = 12
 
     def __init__(
             self,
@@ -2836,6 +2836,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """Returns whether this handle has gRPC enabled and gRPC flag is set."""
         return env_options.Options.ENABLE_GRPC.get() and self.is_grpc_enabled
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # For backwards compatibility. Refer to
+        # https://github.com/skypilot-org/skypilot/pull/7133
+        state.setdefault('skylet_ssh_tunnel', None)
+        return state
+
     def __setstate__(self, state):
         self._version = self._VERSION
 
@@ -2893,8 +2900,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             state['is_grpc_enabled'] = False
             state['skylet_ssh_tunnel'] = None
 
-        # DEPRECATED in favor of skylet_ssh_tunnel_metadata column in the DB
-        state.pop('skylet_ssh_tunnel', None)
+        if version >= 12:
+            # DEPRECATED in favor of skylet_ssh_tunnel_metadata column in the DB
+            state.pop('skylet_ssh_tunnel', None)
 
         self.__dict__.update(state)
 
