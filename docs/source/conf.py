@@ -87,6 +87,7 @@ def render_svg_logo(path):
 
     return content
 
+
 # Add extra paths that contain custom files here, relative to this directory.
 # These files are copied directly to the root of the documentation.
 html_extra_path = ['robots.txt']
