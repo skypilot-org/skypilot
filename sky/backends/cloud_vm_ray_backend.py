@@ -2894,8 +2894,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 12:
             state['skylet_ssh_tunnel'] = None
-
-        if version >= 12:
+        else:
             # DEPRECATED in favor of skylet_ssh_tunnel_metadata column in the DB
             state.pop('skylet_ssh_tunnel', None)
 
