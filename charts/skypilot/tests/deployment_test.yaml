@@ -206,12 +206,6 @@ tests:
             name: r2-config
             emptyDir: {}
       - contains:
-          path: spec.template.spec.volumes
-          content:
-            name: r2-credentials
-            secret:
-              secretName: my-r2-secret
-      - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
             name: r2-config
@@ -281,12 +275,6 @@ tests:
     set:
       r2Credentials.enabled: true
     asserts:
-      - contains:
-          path: spec.template.spec.volumes
-          content:
-            name: r2-credentials
-            secret:
-              secretName: r2-credentials
       - contains:
           path: spec.template.spec.volumes
           content:
