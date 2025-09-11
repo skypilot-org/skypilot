@@ -335,7 +335,7 @@ def pytest_collection_modifyitems(config, items):
         env_file = config.getoption('--env-file')
         if env_file:
             has_api_server, _ = _get_and_check_env_file(env_file)
-            if has_api_server:
+            if has_api_server and 'no_remote_server' in marks:
                 item.add_marker(skip_marks['no_remote_server'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
