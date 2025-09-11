@@ -23,7 +23,7 @@ import {
   openGrafana,
 } from '@/utils/grafana';
 import {
-  getGPUs,
+  getWorkspaceInfrastructure,
   getCloudInfrastructure,
   getContextJobs,
 } from '@/data/connectors/infra';
@@ -76,6 +76,7 @@ export function InfrastructureSection({
   isJobsDataLoading = true,
   isSSH = false, // To differentiate between SSH and Kubernetes
   actionButton = null, // Optional action button for the header
+  contextWorkspaceMap = {}, // Mapping of contexts to workspaces
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
@@ -212,11 +213,17 @@ export function InfrastructureSection({
                         ? context.replace(/^ssh-/, '')
                         : context;
 
+                      // Get workspace information for this context
+                      const workspaces = contextWorkspaceMap[context] || [];
+                      const workspaceDisplay = workspaces.length > 0 
+                        ? ` (${workspaces.join(', ')})` 
+                        : '';
+
                       return (
                         <tr key={context} className="hover:bg-gray-50">
                           <td className="p-3">
                             <NonCapitalizedTooltip
-                              content={displayName}
+                              content={`${displayName}${workspaceDisplay}`}
                               className="text-sm text-muted-foreground"
                             >
                               <span
@@ -226,6 +233,11 @@ export function InfrastructureSection({
                                 {displayName.length > NAME_TRUNCATE_LENGTH
                                   ? `${displayName.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${displayName.substring(displayName.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
                                   : displayName}
+                                {workspaceDisplay && (
+                                  <span className="text-xs text-gray-500 ml-1">
+                                    {workspaceDisplay}
+                                  </span>
+                                )}
                               </span>
                             </NonCapitalizedTooltip>
                           </td>
@@ -267,7 +279,12 @@ export function InfrastructureSection({
                                 <CircularProgress size={16} />
                               </div>
                             ) : (
-                              nodes.length
+                              <span 
+                                className={nodes.length === 0 ? 'text-gray-400' : ''}
+                                title={nodes.length === 0 ? 'Context may be unavailable or timed out' : ''}
+                              >
+                                {nodes.length === 0 ? '0*' : nodes.length}
+                              </span>
                             )}
                           </td>
                           <td className="p-3">
@@ -285,7 +302,12 @@ export function InfrastructureSection({
                                 <CircularProgress size={16} />
                               </div>
                             ) : (
-                              totalGpus
+                              <span 
+                                className={totalGpus === 0 && nodes.length === 0 ? 'text-gray-400' : ''}
+                                title={totalGpus === 0 && nodes.length === 0 ? 'Context may be unavailable or timed out' : ''}
+                              >
+                                {totalGpus === 0 && nodes.length === 0 ? '0*' : totalGpus}
+                              </span>
                             )}
                           </td>
                         </tr>
@@ -1538,6 +1560,12 @@ export function GPUs() {
   const [totalClouds, setTotalClouds] = useState(0);
   const [enabledClouds, setEnabledClouds] = useState(0);
   const [contextStats, setContextStats] = useState({});
+  const [contextWorkspaceMap, setContextWorkspaceMap] = useState({});
+
+  // Workspace-aware infrastructure state
+  const [workspaceInfrastructure, setWorkspaceInfrastructure] = useState({});
+  const [selectedWorkspace, setSelectedWorkspace] = useState('all');
+  const [availableWorkspaces, setAvailableWorkspaces] = useState([]);
 
   // SSH Node Pool state
   const [sshNodePools, setSshNodePools] = useState({});
@@ -1579,11 +1607,14 @@ export function GPUs() {
       } catch (error) {
         console.error('Error in fetchData:', error);
         // On error, we should still mark data as loaded but with empty values
+        setWorkspaceInfrastructure({});
         setAllKubeContextNames([]);
         setAllGPUs([]);
         setPerContextGPUs([]);
         setPerNodeGPUs([]);
         setContextStats({});
+        setContextWorkspaceMap({});
+        setAvailableWorkspaces([]);
         setKubeDataLoaded(true);
         setKubeLoading(false);
         setCloudInfraData([]);
@@ -1615,41 +1646,58 @@ export function GPUs() {
 
   const fetchKubernetesData = async (forceRefresh) => {
     try {
-      const gpuData = forceRefresh
-        ? await getGPUs()
-        : await dashboardCache.get(getGPUs);
-      if (gpuData) {
+      // Use the new workspace-aware infrastructure fetching
+      const infraData = forceRefresh
+        ? await getWorkspaceInfrastructure()
+        : await dashboardCache.get(getWorkspaceInfrastructure);
+      
+      if (infraData) {
         const {
+          workspaces: fetchedWorkspaceInfrastructure,
           allContextNames: fetchedAllKubeContextNames,
           allGPUs: fetchedAllGPUs,
           perContextGPUs: fetchedPerContextGPUs,
           perNodeGPUs: fetchedPerNodeGPUs,
           contextStats: fetchedContextStats,
-        } = gpuData;
+          contextWorkspaceMap: fetchedContextWorkspaceMap,
+        } = infraData;
 
+        setWorkspaceInfrastructure(fetchedWorkspaceInfrastructure || {});
         setAllKubeContextNames(fetchedAllKubeContextNames || []);
         setAllGPUs(fetchedAllGPUs || []);
         setPerContextGPUs(fetchedPerContextGPUs || []);
         setPerNodeGPUs(fetchedPerNodeGPUs || []);
         setContextStats(fetchedContextStats || {});
+        setContextWorkspaceMap(fetchedContextWorkspaceMap || {});
+        
+        // Extract available workspaces from the workspace infrastructure data
+        const workspaceNames = Object.keys(fetchedWorkspaceInfrastructure || {});
+        setAvailableWorkspaces(workspaceNames.sort());
+        
         setKubeDataLoaded(true);
         setKubeLoading(false);
-      } else if (gpuData === null) {
+      } else if (infraData === null) {
+        setWorkspaceInfrastructure({});
         setAllKubeContextNames([]);
         setAllGPUs([]);
         setPerContextGPUs([]);
         setPerNodeGPUs([]);
         setContextStats({});
+        setContextWorkspaceMap({});
+        setAvailableWorkspaces([]);
         setKubeDataLoaded(true);
         setKubeLoading(false);
       }
     } catch (error) {
       console.error('Error in fetchKubernetesData:', error);
+      setWorkspaceInfrastructure({});
       setAllKubeContextNames([]);
       setAllGPUs([]);
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
       setContextStats({});
+      setContextWorkspaceMap({});
+      setAvailableWorkspaces([]);
       setKubeDataLoaded(true);
       setKubeLoading(false);
     }
@@ -1821,7 +1869,7 @@ export function GPUs() {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
-    dashboardCache.invalidate(getGPUs);
+    dashboardCache.invalidate(getWorkspaceInfrastructure);
     dashboardCache.invalidate(getCloudInfrastructure, [false]);
     dashboardCache.invalidate(getSSHNodePools);
 
@@ -1874,6 +1922,17 @@ export function GPUs() {
     }, {});
   }, [perContextGPUs]);
 
+  // Filter contexts based on selected workspace
+  const filterContextsByWorkspace = React.useCallback((contexts) => {
+    if (selectedWorkspace === 'all') {
+      return contexts;
+    }
+    return contexts.filter(context => {
+      const workspaces = contextWorkspaceMap[context] || [];
+      return workspaces.includes(selectedWorkspace);
+    });
+  }, [selectedWorkspace, contextWorkspaceMap]);
+
   // Separate SSH contexts from Kubernetes contexts using allKubeContextNames
   const sshContexts = React.useMemo(() => {
     if (!allKubeContextNames || !Array.isArray(allKubeContextNames)) {
@@ -1882,8 +1941,8 @@ export function GPUs() {
     const contexts = allKubeContextNames.filter((context) =>
       context.startsWith('ssh-')
     );
-    return contexts;
-  }, [allKubeContextNames]);
+    return filterContextsByWorkspace(contexts);
+  }, [allKubeContextNames, filterContextsByWorkspace]);
 
   const kubeContexts = React.useMemo(() => {
     if (!allKubeContextNames || !Array.isArray(allKubeContextNames)) {
@@ -1892,8 +1951,8 @@ export function GPUs() {
     const contexts = allKubeContextNames.filter(
       (context) => !context.startsWith('ssh-')
     );
-    return contexts;
-  }, [allKubeContextNames]);
+    return filterContextsByWorkspace(contexts);
+  }, [allKubeContextNames, filterContextsByWorkspace]);
 
   // Filter GPUs by context type (SSH vs Kubernetes)
   const sshGPUs = React.useMemo(() => {
@@ -2121,6 +2180,7 @@ export function GPUs() {
         jobsData={sshAndKubeJobsData}
         isJobsDataLoading={sshAndKubeJobsDataLoading}
         isSSH={true}
+        contextWorkspaceMap={contextWorkspaceMap}
         actionButton={
           // TODO: Add back when SSH Node Pool add operation is more robust
           // <button
@@ -2151,6 +2211,7 @@ export function GPUs() {
         jobsData={sshAndKubeJobsData}
         isJobsDataLoading={sshAndKubeJobsDataLoading}
         isSSH={false}
+        contextWorkspaceMap={contextWorkspaceMap}
       />
     );
   };
@@ -2280,6 +2341,28 @@ export function GPUs() {
           )}
         </div>
         <div className="flex items-center">
+          {/* Workspace Selector */}
+          {availableWorkspaces.length > 0 && (
+            <div className="flex items-center mr-4">
+              <label htmlFor="workspace-selector" className="text-sm font-medium text-gray-700 mr-2">
+                Workspace:
+              </label>
+              <select
+                id="workspace-selector"
+                value={selectedWorkspace}
+                onChange={(e) => setSelectedWorkspace(e.target.value)}
+                className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-blue focus:border-transparent"
+              >
+                <option value="all">All Workspaces</option>
+                {availableWorkspaces.map((workspace) => (
+                  <option key={workspace} value={workspace}>
+                    {workspace}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          
           {isAnyLoading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
