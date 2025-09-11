@@ -3267,7 +3267,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                  colorama.Style.RESET_ALL +
                                                  colorama.Style.DIM +
                                                  'Check concurrent requests: ' +
-                                                 'sky api status '))
+                                                 'sky api status -v | grep '
+                                                 f'{cluster_name}'))
 
     def _locked_provision(
         self,
