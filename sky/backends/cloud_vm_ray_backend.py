@@ -2268,7 +2268,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 11
+    _VERSION = 12
 
     def __init__(
             self,
@@ -2893,8 +2893,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             state['is_grpc_enabled'] = False
             state['skylet_ssh_tunnel'] = None
 
-        # DEPRECATED in favor of skylet_ssh_tunnel_metadata column in the DB
-        state.pop('skylet_ssh_tunnel', None)
+        if version >= 12:
+            # DEPRECATED in favor of skylet_ssh_tunnel_metadata column in the DB
+            state.pop('skylet_ssh_tunnel', None)
 
         self.__dict__.update(state)
 
