@@ -1448,7 +1448,8 @@ def test_launch_with_failing_setup(generic_cloud: str):
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
         )
         smoke_tests_utils.run_one_test(test)
-        
+
+
 @pytest.mark.gcp
 def test_cluster_setup_num_gpus():
     """Test that the number of GPUs is set correctly in the setup script."""
