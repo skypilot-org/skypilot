@@ -51,6 +51,7 @@ from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.serve import constants as serve_constants
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -87,6 +88,8 @@ if typing.TYPE_CHECKING:
     from sky import dag
     from sky.schemas.generated import autostopv1_pb2
     from sky.schemas.generated import autostopv1_pb2_grpc
+    from sky.schemas.generated import servev1_pb2
+    from sky.schemas.generated import servev1_pb2_grpc
 else:
     # To avoid requiring grpcio to be installed on the client side.
     grpc = adaptors_common.LazyImport(
@@ -98,6 +101,10 @@ else:
         'sky.schemas.generated.autostopv1_pb2')
     autostopv1_pb2_grpc = adaptors_common.LazyImport(
         'sky.schemas.generated.autostopv1_pb2_grpc')
+    servev1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.servev1_pb2')
+    servev1_pb2_grpc = adaptors_common.LazyImport(
+        'sky.schemas.generated.servev1_pb2_grpc')
 
 Path = str
 
@@ -2981,6 +2988,7 @@ class SkyletClient:
 
     def __init__(self, channel: 'grpc.Channel'):
         self._autostop_stub = autostopv1_pb2_grpc.AutostopServiceStub(channel)
+        self._serve_stub = servev1_pb2_grpc.ServeServiceStub(channel)
 
     def set_autostop(
         self,
@@ -2995,6 +3003,54 @@ class SkyletClient:
         timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'autostopv1_pb2.IsAutostoppingResponse':
         return self._autostop_stub.IsAutostopping(request, timeout=timeout)
+
+    def get_service_status(
+        self,
+        request: 'servev1_pb2.GetServiceStatusRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'servev1_pb2.GetServiceStatusResponse':
+        return self._serve_stub.GetServiceStatus(request, timeout=timeout)
+
+    def add_serve_version(
+        self,
+        request: 'servev1_pb2.AddVersionRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'servev1_pb2.AddVersionResponse':
+        return self._serve_stub.AddVersion(request, timeout=timeout)
+
+    def terminate_services(
+        self,
+        request: 'servev1_pb2.TerminateServiceRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'servev1_pb2.TerminateServiceResponse':
+        return self._serve_stub.TerminateServices(request, timeout=timeout)
+
+    def terminate_replica(
+        self,
+        request: 'servev1_pb2.TerminateReplicaRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'servev1_pb2.TerminateReplicaResponse':
+        return self._serve_stub.TerminateReplica(request, timeout=timeout)
+
+    def wait_service_registration(
+        self,
+        request: 'servev1_pb2.WaitRegistrationRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'servev1_pb2.WaitRegistrationResponse':
+        # set timeout to at least 10 seconds more than service register
+        # constant to make sure that timeouts will not occur.
+        if timeout is not None:
+            timeout = max(timeout,
+                          serve_constants.SERVICE_REGISTER_TIMEOUT_SECONDS + 10)
+        return self._serve_stub.WaitServiceRegistration(request,
+                                                        timeout=timeout)
+
+    def update_service(
+        self,
+        request: 'servev1_pb2.UpdateServiceRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'servev1_pb2.UpdateServiceResponse':
+        return self._serve_stub.UpdateService(request, timeout=timeout)
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
