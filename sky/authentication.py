@@ -25,7 +25,6 @@ import re
 import socket
 import subprocess
 import sys
-import typing
 from typing import Any, Dict, Optional, Tuple
 import uuid
 
@@ -37,7 +36,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
@@ -51,6 +49,7 @@ from sky.utils import config_utils
 from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -66,11 +65,6 @@ MAX_TRIALS = 64
 # because ssh key pair need to persist across API server restarts, while
 # the former dir is empheral.
 _SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
-
-if typing.TYPE_CHECKING:
-    import yaml
-else:
-    yaml = adaptors_common.LazyImport('yaml')
 
 
 def get_ssh_key_and_lock_path(
@@ -204,13 +198,31 @@ def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
-    config_str = common_utils.dump_yaml_str(config)
+    config_str = yaml_utils.dump_yaml_str(config)
     config_str = config_str.replace('skypilot:ssh_user',
                                     config['auth']['ssh_user'])
     config_str = config_str.replace('skypilot:ssh_public_key_content',
                                     public_key)
-    config = yaml.safe_load(config_str)
+    config = yaml_utils.safe_load(config_str)
     return config
+
+
+def parse_gcp_project_oslogin(project):
+    """Helper function to parse GCP project metadata."""
+    common_metadata = project.get('commonInstanceMetadata', {})
+    if not isinstance(common_metadata, dict):
+        common_metadata = {}
+
+    metadata_items = common_metadata.get('items', [])
+    if not isinstance(metadata_items, list):
+        metadata_items = []
+
+    project_oslogin = next(
+        (item for item in metadata_items
+         if isinstance(item, dict) and item.get('key') == 'enable-oslogin'),
+        {}).get('value', 'False')
+
+    return project_oslogin
 
 
 # Snippets of code inspired from
@@ -270,10 +282,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                      'Please check your network connection.')
         raise
 
-    project_oslogin: str = next(  # type: ignore
-        (item for item in project['commonInstanceMetadata'].get('items', [])
-         if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
-
+    project_oslogin = parse_gcp_project_oslogin(project)
     if project_oslogin.lower() == 'true':
         logger.info(
             f'OS Login is enabled for GCP project {project_id}. Running '
@@ -289,7 +298,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         os_login_username = None
         if proc.returncode == 0:
             try:
-                profile = yaml.safe_load(proc.stdout)
+                profile = yaml_utils.safe_load(proc.stdout)
                 username = profile['posixAccounts'][0]['username']
                 if username:
                     os_login_username = username

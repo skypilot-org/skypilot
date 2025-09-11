@@ -20,7 +20,6 @@ import uuid
 
 import colorama
 import filelock
-import yaml
 
 from sky import backends
 from sky import exceptions
@@ -43,6 +42,7 @@ from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
@@ -294,6 +294,11 @@ def is_consolidation_mode(pool: bool = False) -> bool:
     # We should only do this check on API server, as the controller will not
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
+    if (os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None
+            and controller.controller_type == 'jobs'):
+        # if we are in the job controller, we must always be in consolidation
+        # mode.
+        return True
     if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         _validate_consolidation_mode_config(consolidation_mode, pool)
     return consolidation_mode
@@ -699,7 +704,7 @@ def _get_service_status(
     if record['pool']:
         latest_yaml_path = generate_task_yaml_file_name(service_name,
                                                         record['version'])
-        raw_yaml_config = common_utils.read_yaml(latest_yaml_path)
+        raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
         original_config = raw_yaml_config.get('_user_specified_yaml')
         if original_config is None:
             # Fall back to old display format.
@@ -710,8 +715,8 @@ def _get_service_status(
                 svc.pop('pool', None)  # Remove pool from service config
                 original_config['pool'] = svc  # Add pool to root config
         else:
-            original_config = yaml.safe_load(original_config)
-        record['pool_yaml'] = common_utils.dump_yaml_str(original_config)
+            original_config = yaml_utils.safe_load(original_config)
+        record['pool_yaml'] = yaml_utils.dump_yaml_str(original_config)
 
     record['target_num_replicas'] = 0
     try:

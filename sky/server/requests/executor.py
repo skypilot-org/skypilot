@@ -41,6 +41,7 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -55,6 +56,8 @@ from sky.utils import context_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
+from sky.utils import yaml_utils
+from sky.utils.db import db_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -127,6 +130,9 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    threading.Thread(target=metrics_lib.process_monitor,
+                     args=(f'worker:{proc_group}',),
+                     daemon=True).start()
 
 
 class RequestWorker:
@@ -150,6 +156,8 @@ class RequestWorker:
         self.schedule_type = schedule_type
         self.garanteed_parallelism = config.garanteed_parallelism
         self.burstable_parallelism = config.burstable_parallelism
+        self.num_db_connections_per_worker = (
+            config.num_db_connections_per_worker)
         self._thread: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
 
@@ -188,8 +196,9 @@ class RequestWorker:
             # multiple requests can share the same process pid, which may cause
             # issues with SkyPilot core functions if they rely on the exit of
             # the process, such as subprocess_daemon.py.
-            fut = executor.submit_until_success(_request_execution_wrapper,
-                                                request_id, ignore_return_value)
+            fut = executor.submit_until_success(
+                _request_execution_wrapper, request_id, ignore_return_value,
+                self.num_db_connections_per_worker)
             # Monitor the result of the request execution.
             threading.Thread(target=self.handle_task_result,
                              args=(fut, request_element),
@@ -275,27 +284,34 @@ def override_request_env_and_config(
         request_id: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
-    os.environ.update(request_body.env_vars)
-    # Note: may be overridden by AuthProxyMiddleware.
-    # TODO(zhwu): we need to make the entire request a context available to the
-    # entire request execution, so that we can access info like user through
-    # the execution.
-    user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
-                       name=request_body.env_vars[constants.USER_ENV_VAR])
-    global_user_state.add_or_update_user(user)
-    # Refetch the user to get the latest user info, including the created_at
-    # field.
-    user = global_user_state.get_user(user.id)
-
-    # Force color to be enabled.
-    os.environ['CLICOLOR_FORCE'] = '1'
-    server_common.reload_for_new_request(
-        client_entrypoint=request_body.entrypoint,
-        client_command=request_body.entrypoint_command,
-        using_remote_api_server=request_body.using_remote_api_server,
-        user=user,
-        request_id=request_id)
     try:
+        # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API
+        # server affecting client requests. If set on the client side, it will
+        # be overridden by the request body.
+        os.environ.pop('SKYPILOT_DEBUG', None)
+        # Remove the db connection uri from client supplied env vars, as the
+        # client should not set the db string on server side.
+        request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+        os.environ.update(request_body.env_vars)
+        # Note: may be overridden by AuthProxyMiddleware.
+        # TODO(zhwu): we need to make the entire request a context available to
+        # the entire request execution, so that we can access info like user
+        # through the execution.
+        user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
+                           name=request_body.env_vars[constants.USER_ENV_VAR])
+        global_user_state.add_or_update_user(user)
+        # Refetch the user to get the latest user info, including the created_at
+        # field.
+        user = global_user_state.get_user(user.id)
+
+        # Force color to be enabled.
+        os.environ['CLICOLOR_FORCE'] = '1'
+        server_common.reload_for_new_request(
+            client_entrypoint=request_body.entrypoint,
+            client_command=request_body.entrypoint_command,
+            using_remote_api_server=request_body.using_remote_api_server,
+            user=user,
+            request_id=request_id)
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
@@ -345,7 +361,8 @@ def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
 
 
 def _request_execution_wrapper(request_id: str,
-                               ignore_return_value: bool) -> None:
+                               ignore_return_value: bool,
+                               num_db_connections_per_worker: int = 0) -> None:
     """Wrapper for a request execution.
 
     It wraps the execution of a request to:
@@ -356,6 +373,7 @@ def _request_execution_wrapper(request_id: str,
     4. Handle the SIGTERM signal to abort the request gracefully.
     5. Maintain the lifecycle of the temp dir used by the request.
     """
+    db_utils.set_max_connections(num_db_connections_per_worker)
     # Handle the SIGTERM signal to abort the request processing gracefully.
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
@@ -368,6 +386,7 @@ def _request_execution_wrapper(request_id: str,
         request_task.status = api_requests.RequestStatus.RUNNING
         func = request_task.entrypoint
         request_body = request_task.request_body
+        request_name = request_task.name
 
     # Append to the log file instead of overwriting it since there might be
     # logs from previous retries.
@@ -378,13 +397,18 @@ def _request_execution_wrapper(request_id: str,
         # config, as there can be some logs during override that needs to be
         # captured in the log file.
         try:
-            with override_request_env_and_config(request_body, request_id), \
+            with sky_logging.add_debug_log_handler(request_id), \
+                override_request_env_and_config(request_body, request_id), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
-                                 f'{common_utils.dump_yaml_str(dict(config))}')
-                return_value = func(**request_body.to_kwargs())
+                                 f'{yaml_utils.dump_yaml_str(dict(config))}')
+                metrics_lib.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.labels(
+                    request=request_name, pid=pid).inc()
+                with metrics_lib.time_it(name=request_name,
+                                         group='request_execution'):
+                    return_value = func(**request_body.to_kwargs())
                 f.flush()
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
@@ -418,6 +442,9 @@ def _request_execution_wrapper(request_id: str,
                 request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
+        finally:
+            with metrics_lib.time_it(name='release_memory', group='internal'):
+                common_utils.release_memory()
 
 
 async def execute_request_coroutine(request: api_requests.Request):
@@ -427,9 +454,9 @@ async def execute_request_coroutine(request: api_requests.Request):
     event loop. This is designed for executing tasks that are not CPU
     intensive, e.g. sky logs.
     """
+    context.initialize()
     ctx = context.get()
-    if ctx is None:
-        raise ValueError('Context is not initialized')
+    assert ctx is not None, 'Context is not initialized'
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
@@ -447,7 +474,7 @@ async def execute_request_coroutine(request: api_requests.Request):
                                                   **request_body.to_kwargs())
 
     async def poll_task(request_id: str) -> bool:
-        request = api_requests.get_request(request_id)
+        request = await api_requests.get_request_async(request_id)
         if request is None:
             raise RuntimeError('Request not found')
 

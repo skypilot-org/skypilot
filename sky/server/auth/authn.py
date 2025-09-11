@@ -14,6 +14,10 @@ logger = sky_logging.init_logger(__name__)
 # TODO(hailong): Remove this function and use request.state.auth_user instead.
 async def override_user_info_in_request_body(request: fastapi.Request,
                                              auth_user: Optional[models.User]):
+    # Skip for upload requests to avoid consuming the body prematurely, which
+    # will break the streaming upload.
+    if request.url.path.startswith('/upload'):
+        return
     if auth_user is None:
         return
 

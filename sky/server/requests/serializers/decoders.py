@@ -60,6 +60,8 @@ def decode_status(
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
         cluster['storage_mounts_metadata'] = decode_and_unpickle(
             cluster['storage_mounts_metadata'])
+        if 'is_managed' not in cluster:
+            cluster['is_managed'] = False
         response.append(responses.StatusResponse.model_validate(cluster))
     return response
 
@@ -107,7 +109,13 @@ def decode_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
 
 
 @register_decoders('jobs.queue')
-def decode_jobs_queue(return_value):
+def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
+    # To keep backward compatibility with v0.10.2
+    return decode_jobs_queue_v2(return_value)
+
+
+@register_decoders('jobs.queue_v2')
+def decode_jobs_queue_v2(return_value) -> List[Dict[str, Any]]:
     """Decode jobs queue response.
 
     Supports legacy list, or a dict {jobs, total}.
@@ -203,3 +211,8 @@ def decode_job_status(
 def decode_kubernetes_node_info(
         return_value: Dict[str, Any]) -> models.KubernetesNodesInfo:
     return models.KubernetesNodesInfo.from_dict(return_value)
+
+
+@register_decoders('endpoints')
+def decode_endpoints(return_value: Dict[int, str]) -> Dict[int, str]:
+    return {int(k): v for k, v in return_value.items()}

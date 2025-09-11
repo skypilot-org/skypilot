@@ -1,16 +1,20 @@
 """ Vast Cloud. """
 
+import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky.adaptors import common
 from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import volume as volume_lib
+
+_CREDENTIAL_PATH = '~/.config/vastai/vast_api_key'
 
 
 @registry.CLOUD_REGISTRY.register
@@ -253,32 +257,27 @@ class Vast(clouds.Cloud):
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has valid credentials for
-        Vast's compute service. """
-        try:
-            import vastai_sdk as _vast  # pylint: disable=import-outside-toplevel
-            vast = _vast.VastAI()
+        Vast's compute service."""
 
-            # We only support file pased credential passing
-            if vast.creds_source != 'FILE':
-                return False, (
-                    'error \n'  # First line is indented by 4 spaces
-                    '    Credentials can be set up by running: \n'
-                    '        $ pip install vastai\n'
-                    '        $ mkdir -p ~/.config/vastai\n'
-                    '        $ echo [key] > ~/.config/vastai/vast_api_key\n'
-                    '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
-                )
+        dependency_error_msg = ('Failed to import vast. '
+                                'To install, run: pip install skypilot[vast]')
+        if not common.can_import_modules(['vastai_sdk']):
+            return False, dependency_error_msg
 
-            return True, None
+        if not os.path.exists(os.path.expanduser(_CREDENTIAL_PATH)):
+            return False, (
+                'error \n'  # First line is indented by 4 spaces
+                '    Credentials can be set up by running: \n'
+                '        $ pip install vastai\n'
+                '        $ mkdir -p ~/.config/vastai\n'
+                f'        $ echo [key] > {_CREDENTIAL_PATH}\n'
+                '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
+            )
 
-        except ImportError:
-            return False, ('Failed to import vast. '
-                           'To install, run: pip install skypilot[vast]')
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {
-            '~/.config/vastai/vast_api_key': '~/.config/vastai/vast_api_key'
-        }
+        return {f'{_CREDENTIAL_PATH}': f'{_CREDENTIAL_PATH}'}
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:

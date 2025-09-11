@@ -4,7 +4,7 @@ import collections
 import dataclasses
 import getpass
 import os
-from typing import Any, Dict, Optional
+from typing import Any, ClassVar, Dict, Optional
 
 import pydantic
 
@@ -100,6 +100,11 @@ class KubernetesNodesInfo:
 
 class VolumeConfig(pydantic.BaseModel):
     """Configuration for creating a volume."""
+    # If any fields changed, increment the version. For backward compatibility,
+    # modify the __setstate__ method to handle the old version.
+    _VERSION: ClassVar[int] = 1
+
+    _version: int
     name: str
     type: str
     cloud: str
@@ -108,3 +113,23 @@ class VolumeConfig(pydantic.BaseModel):
     name_on_cloud: str
     size: Optional[str]
     config: Dict[str, Any] = {}
+    labels: Optional[Dict[str, str]] = None
+    id_on_cloud: Optional[str] = None
+
+    def __getstate__(self) -> Dict[str, Any]:
+        state = super().__getstate__()
+        state['_version'] = self._VERSION
+        return state
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        """Set state from pickled state, for backward compatibility."""
+        super().__setstate__(state)
+        version = state.pop('_version', None)
+        if version is None:
+            version = -1
+
+        if version < 0:
+            state['id_on_cloud'] = None
+
+        state['_version'] = self._VERSION
+        self.__dict__.update(state)
