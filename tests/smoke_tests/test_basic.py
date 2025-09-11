@@ -140,6 +140,48 @@ def test_minimal_with_git_workdir(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+def test_minimal_with_git_workdir_docker(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'minimal_with_git_workdir',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Output validation done.
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+            # Checkout to releases/0.10.0
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',
+            # Checkout to default branch
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+            # Checkout to releases/0.10.0
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',
+            # Checkout to tag v0.10.0
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref v0.10.0 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "v0\.10\.0" || exit 1\'',
+            # Checkout to commit 41c25f40
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref 41c25f40 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "41c25f40" || exit 1\'',
+            # Checkout to default branch
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Test fast launch ----------
 def test_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()

@@ -3,15 +3,21 @@
 import enum
 import os
 import re
+import typing
 from typing import List, Optional, Union
 
-import git
 import requests
 
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 
 logger = sky_logging.init_logger(__name__)
+
+if typing.TYPE_CHECKING:
+    import git
+else:
+    git = adaptors_common.LazyImport('git')
 
 GIT_TOKEN_ENV_VAR = 'GIT_TOKEN'
 GIT_SSH_KEY_PATH_ENV_VAR = 'GIT_SSH_KEY_PATH'
