@@ -2068,7 +2068,8 @@ def stream_and_get(
         T]] = server_common.get_stream_request_id(response)
     if request_id is not None and stream_request_id is not None:
         assert request_id == stream_request_id
-    request_id = stream_request_id
+    if request_id is None:
+        request_id = stream_request_id
     if response.status_code in [404, 400]:
         detail = response.json().get('detail')
         with ux_utils.print_exception_no_traceback():
