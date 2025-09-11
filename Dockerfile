@@ -9,6 +9,7 @@ RUN apt-get update && \
     apt-get install --no-install-recommends -y \
         google-cloud-cli \
         google-cloud-cli-gke-gcloud-auth-plugin && \
+    apt-get install -y google-perftools libgoogle-perftools-dev && \
     apt-get clean && rm -rf /usr/lib/google-cloud-sdk/platform/bundledpythonunix \
     /var/lib/apt/lists/*
 
