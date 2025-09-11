@@ -2267,7 +2267,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Skylet SSH tunnel info.
     """
     # Bump if any fields get added/removed/changed, and add backward
-    # compaitibility logic in __setstate__ and/or __getstate__.
+    # compatibility logic in __setstate__ and/or __getstate__.
     _VERSION = 12
 
     def __init__(
