@@ -43,5 +43,6 @@ class KubernetesAutoscalerType(enum.Enum):
     GKE = 'gke'
     KARPENTER = 'karpenter'
     COREWEAVE = 'coreweave'
+    NEBIUS = 'nebius'
     NVIDIA = 'nvidia'
     GENERIC = 'generic'
