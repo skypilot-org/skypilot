@@ -1136,7 +1136,5 @@ def test_pools_setup_num_gpus():
                     timeout=smoke_tests_utils.get_timeout('gcp')),
             ],
             timeout=smoke_tests_utils.get_timeout('gcp'),
-            teardown=
-            f'sky jobs pool down {pool} -y && sleep 5 && controller=$(sky status -u | grep sky-jobs-controller- | awk \'NR==1{{print $1}}\') && echo "$controller" && echo delete | sky down "$controller" -y && exit 1 || true'
-        )
+            teardown=f'sky jobs pool down {pool} -y')
         smoke_tests_utils.run_one_test(test)
