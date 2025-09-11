@@ -59,7 +59,6 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
-from sky.client.cli import git
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -79,7 +78,6 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import directory_utils
 from sky.utils import env_options
-from sky.utils import git as git_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -783,8 +781,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
     # Update the workdir config from the command line parameters.
     # And update the envs and secrets from the workdir.
-    _update_task_workdir(task, workdir, git_url, git_ref)
-    _update_task_workdir_and_secrets_from_workdir(task)
+    task.update_workdir(workdir, git_url, git_ref)
+    task.update_envs_and_secrets_from_workdir()
 
     # job launch specific.
     if job_recovery is not None:
@@ -797,73 +795,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if name is not None:
         task.name = name
     return task
-
-
-def _update_task_workdir(task: task_lib.Task, workdir: Optional[str],
-                         git_url: Optional[str], git_ref: Optional[str]):
-    """Updates the task workdir.
-
-    Args:
-        task: The task to update.
-        workdir: The workdir to update.
-        git_url: The git url to update.
-        git_ref: The git ref to update.
-    """
-    if task.workdir is None or isinstance(task.workdir, str):
-        if workdir is not None:
-            task.workdir = workdir
-            return
-        if git_url is not None:
-            task.workdir = {}
-            task.workdir['url'] = git_url
-            if git_ref is not None:
-                task.workdir['ref'] = git_ref
-            return
-        return
-    if git_url is not None:
-        task.workdir['url'] = git_url
-    if git_ref is not None:
-        task.workdir['ref'] = git_ref
-    return
-
-
-def _update_task_workdir_and_secrets_from_workdir(task: task_lib.Task):
-    """Updates the task secrets from the workdir.
-
-    Args:
-        task: The task to update.
-    """
-    if task.workdir is None:
-        return
-    if not isinstance(task.workdir, dict):
-        return
-    url = task.workdir['url']
-    ref = task.workdir.get('ref', '')
-    token = os.environ.get(git_utils.GIT_TOKEN_ENV_VAR)
-    ssh_key_path = os.environ.get(git_utils.GIT_SSH_KEY_PATH_ENV_VAR)
-    try:
-        git_repo = git.GitRepo(url, ref, token, ssh_key_path)
-        clone_info = git_repo.get_repo_clone_info()
-        if clone_info is None:
-            return
-        task.envs[git_utils.GIT_URL_ENV_VAR] = clone_info.url
-        if ref:
-            ref_type = git_repo.get_ref_type()
-            if ref_type == git.GitRefType.COMMIT:
-                task.envs[git_utils.GIT_COMMIT_HASH_ENV_VAR] = ref
-            elif ref_type == git.GitRefType.BRANCH:
-                task.envs[git_utils.GIT_BRANCH_ENV_VAR] = ref
-            elif ref_type == git.GitRefType.TAG:
-                task.envs[git_utils.GIT_TAG_ENV_VAR] = ref
-        if clone_info.token is None and clone_info.ssh_key is None:
-            return
-        if clone_info.token is not None:
-            task.secrets[git_utils.GIT_TOKEN_ENV_VAR] = clone_info.token
-        if clone_info.ssh_key is not None:
-            task.secrets[git_utils.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
-    except exceptions.GitError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'{str(e)}') from None
 
 
 class _NaturalOrderGroup(click.Group):
