@@ -546,7 +546,7 @@ async def prepare_request(
                                    user_id=user_id,
                                    cluster_name=request_cluster_name)
 
-    if not api_requests.create_if_not_exists(request):
+    if not await api_requests.create_if_not_exists_async(request):
         raise exceptions.RequestAlreadyExistsError(
             f'Request {request_id} already exists.')
 
