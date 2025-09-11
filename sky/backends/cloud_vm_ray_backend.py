@@ -7,9 +7,11 @@ import json
 import math
 import os
 import pathlib
+import random
 import re
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -87,7 +89,11 @@ if typing.TYPE_CHECKING:
     from sky.schemas.generated import autostopv1_pb2_grpc
 else:
     # To avoid requiring grpcio to be installed on the client side.
-    grpc = adaptors_common.LazyImport('grpc')
+    grpc = adaptors_common.LazyImport(
+        'grpc',
+        # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
+        set_loggers=lambda: os.environ.update({'GRPC_VERBOSITY': 'NONE'})
+        if not env_options.Options.SHOW_DEBUG_INFO.get() else None)
     autostopv1_pb2 = adaptors_common.LazyImport(
         'sky.schemas.generated.autostopv1_pb2')
     autostopv1_pb2_grpc = adaptors_common.LazyImport(
@@ -2296,7 +2302,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
         self.is_grpc_enabled = True
-        self.skylet_ssh_tunnel: Optional[SSHTunnelInfo] = None
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2313,8 +2318,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
                 f'\n\tssh_user={self.ssh_user},'
-                f'\n\tis_grpc_enabled={self.is_grpc_enabled},'
-                f'\n\tskylet_ssh_tunnel={self.skylet_ssh_tunnel}')
+                f'\n\tis_grpc_enabled={self.is_grpc_enabled},')
 
     def get_cluster_name(self):
         return self.cluster_name
@@ -2643,11 +2647,74 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                                     cluster_config_file)
         self.docker_user = docker_user
 
+    def _get_skylet_ssh_tunnel(self) -> Optional[SSHTunnelInfo]:
+        metadata = global_user_state.get_cluster_skylet_ssh_tunnel_metadata(
+            self.cluster_name)
+        if metadata is None:
+            return None
+        return SSHTunnelInfo(port=metadata[0], pid=metadata[1])
+
+    def _set_skylet_ssh_tunnel(self, tunnel: Optional[SSHTunnelInfo]) -> None:
+        global_user_state.set_cluster_skylet_ssh_tunnel_metadata(
+            self.cluster_name,
+            (tunnel.port, tunnel.pid) if tunnel is not None else None)
+
     def get_grpc_channel(self) -> 'grpc.Channel':
-        if self.skylet_ssh_tunnel is None:
-            self.open_and_update_skylet_tunnel()
-        assert self.skylet_ssh_tunnel is not None
-        return grpc.insecure_channel(f'localhost:{self.skylet_ssh_tunnel.port}')
+        # It's fine to not grab the lock here, as we're only reading,
+        # and writes are very rare.
+        # It's acceptable to read while another process is opening a tunnel,
+        # because it will only happen on:
+        # 1. A new cluster who has no tunnel yet, or
+        # 2. A cluster with an unhealthy tunnel
+        # For (2), for processes that read the "stale" tunnel, it will fail
+        # and on the next retry, it will call get_grpc_channel again
+        # and get the new tunnel.
+        tunnel = self._get_skylet_ssh_tunnel()
+        if tunnel is not None:
+            try:
+                # Check if the tunnel is open.
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.5)
+                    s.connect(('localhost', tunnel.port))
+                return grpc.insecure_channel(f'localhost:{tunnel.port}')
+            except socket.error as e:
+                logger.warning(
+                    'Failed to connect to SSH tunnel for cluster '
+                    f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
+                    'acquiring lock')
+                pass
+        lock_id = backend_utils.cluster_tunnel_lock_id(self.cluster_name)
+        lock_timeout = backend_utils.CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS
+        lock = locks.get_lock(lock_id, lock_timeout)
+        try:
+            with lock.acquire(blocking=True):
+                # Re-read the tunnel from the DB.
+                tunnel = self._get_skylet_ssh_tunnel()
+                if tunnel is None:
+                    logger.debug('No SSH tunnel found for cluster '
+                                 f'{self.cluster_name!r}, '
+                                 'opening the tunnel')
+                    tunnel = self._open_and_update_skylet_tunnel()
+                    return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.settimeout(0.5)
+                        s.connect(('localhost', tunnel.port))
+                        return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                except socket.error as e:
+                    logger.warning(
+                        'Failed to connect to SSH tunnel for cluster '
+                        f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
+                        'opening new tunnel')
+                    tunnel = self._open_and_update_skylet_tunnel()
+                    return grpc.insecure_channel(f'localhost:{tunnel.port}')
+        except locks.LockTimeout as e:
+            raise RuntimeError(
+                'Failed to get gRPC channel for cluster '
+                f'{self.cluster_name!r} due to a timeout when waiting for the '
+                'SSH tunnel to be opened. Please try again or manually remove '
+                f'the lock at {lock_id}. '
+                f'{common_utils.format_exception(e)}') from e
 
     def _cleanup_ssh_tunnel(self, tunnel_info: SSHTunnelInfo) -> None:
         """Clean up an SSH tunnel by terminating the process."""
@@ -2668,31 +2735,48 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             logger.warning(
                 f'Failed to cleanup SSH tunnel process {tunnel_info.pid}: {e}')
 
-    def open_and_update_skylet_tunnel(self) -> None:
+    def _open_and_update_skylet_tunnel(self) -> SSHTunnelInfo:
         """Opens an SSH tunnel to the Skylet on the head node,
         updates the cluster handle, and persists it to the database."""
-        local_port = common_utils.find_free_port(10000)
-        runners = self.get_command_runners()
-        head_runner = runners[0]
-        if isinstance(head_runner, command_runner.SSHCommandRunner):
-            # Disabling ControlMaster makes things easier to reason about
-            # with respect to resource management/ownership,
-            # as killing the process will close the tunnel too.
-            head_runner.disable_control_master = True
+        max_attempts = 3
+        # There could be a race condition here, as multiple processes may
+        # attempt to open the same port at the same time.
+        for attempt in range(max_attempts):
+            runners = self.get_command_runners()
+            head_runner = runners[0]
+            local_port = random.randint(10000, 65535)
+            try:
+                ssh_tunnel_proc = backend_utils.open_ssh_tunnel(
+                    head_runner, (local_port, constants.SKYLET_GRPC_PORT))
+            except exceptions.CommandError as e:
+                # Don't retry if the error is due to timeout,
+                # connection refused, Kubernetes pods not found,
+                # or an in-progress termination.
+                if (e.detailed_reason is not None and
+                    (backend_utils.SSH_CONNECTION_ERROR_PATTERN.search(
+                        e.detailed_reason) or
+                     backend_utils.K8S_PODS_NOT_FOUND_PATTERN.search(
+                         e.detailed_reason) or attempt == max_attempts - 1)):
+                    raise e
+                logger.warning(
+                    f'Failed to open SSH tunnel on port {local_port} '
+                    f'({attempt + 1}/{max_attempts}). '
+                    f'{e.error_msg}\n{e.detailed_reason}')
+                continue
+            tunnel_info = SSHTunnelInfo(port=local_port,
+                                        pid=ssh_tunnel_proc.pid)
+            break
 
-        cmd = head_runner.port_forward_command([(local_port,
-                                                 constants.SKYLET_GRPC_PORT)])
-        ssh_tunnel_proc = subprocess.Popen(cmd)
-        tunnel_info = SSHTunnelInfo(port=local_port, pid=ssh_tunnel_proc.pid)
         try:
             grpc.channel_ready_future(
                 grpc.insecure_channel(f'localhost:{tunnel_info.port}')).result(
                     timeout=constants.SKYLET_GRPC_TIMEOUT_SECONDS)
             # Clean up existing tunnel before setting up the new one.
-            if self.skylet_ssh_tunnel is not None:
-                self._cleanup_ssh_tunnel(self.skylet_ssh_tunnel)
-            self.skylet_ssh_tunnel = tunnel_info
-            global_user_state.update_cluster_handle(self.cluster_name, self)
+            old_tunnel = self._get_skylet_ssh_tunnel()
+            if old_tunnel is not None:
+                self._cleanup_ssh_tunnel(old_tunnel)
+            self._set_skylet_ssh_tunnel(tunnel_info)
+            return tunnel_info
         except grpc.FutureTimeoutError as e:
             self._cleanup_ssh_tunnel(tunnel_info)
             logger.warning(
@@ -2808,6 +2892,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version < 11:
             state['is_grpc_enabled'] = False
             state['skylet_ssh_tunnel'] = None
+
+        # DEPRECATED in favor of skylet_ssh_tunnel_metadata column in the DB
+        state.pop('skylet_ssh_tunnel', None)
 
         self.__dict__.update(state)
 
@@ -4974,9 +5061,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
                     down=down,
                 )
-                backend_utils.invoke_skylet_with_retries(
-                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
-                    set_autostop(request))
+                backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
+                    handle.get_grpc_channel()).set_autostop(request))
             else:
                 code = autostop_lib.AutostopCodeGen.set_autostop(
                     idle_minutes_to_autostop, self.NAME, wait_for, down)
@@ -5015,8 +5101,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             try:
                 request = autostopv1_pb2.IsAutostoppingRequest()
                 response = backend_utils.invoke_skylet_with_retries(
-                    handle, lambda: SkyletClient(handle.get_grpc_channel()).
-                    is_autostopping(request))
+                    lambda: SkyletClient(handle.get_grpc_channel()
+                                        ).is_autostopping(request))
                 return response.is_autostopping
             except Exception as e:  # pylint: disable=broad-except
                 # The cluster may have been terminated, causing the gRPC call
