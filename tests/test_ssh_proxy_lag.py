@@ -221,34 +221,40 @@ async def run_endpoint_test(
 
     monitor.clear()
 
-    # Run concurrent requests while monitoring SSH
-    ssh_task = asyncio.create_task(monitor.monitor_during_operation())
-    test_tasks = []
-    for _ in range(num_concurrent):
-        task = asyncio.create_task(endpoint_func())
-        test_tasks.append(task)
+    for _ in range(3):
+        # Run concurrent requests while monitoring SSH
+        ssh_task = asyncio.create_task(monitor.monitor_during_operation())
+        test_tasks = []
+        for _ in range(num_concurrent):
+            task = asyncio.create_task(endpoint_func())
+            test_tasks.append(task)
 
-    results = await asyncio.gather(*test_tasks,
-                                   ssh_task,
-                                   return_exceptions=True)
-    for result in results:
-        if isinstance(result, Exception):
-            raise result
+        results = await asyncio.gather(*test_tasks,
+                                       ssh_task,
+                                       return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                raise result
 
-    # Calculate results
-    avg_latency = sum(monitor.latencies) / len(
-        monitor.latencies) if monitor.latencies else 0
-    degradation = monitor.get_degradation(avg_latency)
+        # Calculate results
+        avg_latency = sum(monitor.latencies) / len(
+            monitor.latencies) if monitor.latencies else 0
+        degradation = monitor.get_degradation(avg_latency)
 
-    # Report results
-    status = "❌ BLOCKING" if degradation > expected_degradation_threshold else "✅ OK"
-    print(
-        f"   Latency: {avg_latency*1000:.1f}ms ({degradation:.1f}x) - {status}")
+        # Report results
+        status = "❌ BLOCKING" if degradation > expected_degradation_threshold else "✅ OK"
+        print(
+            f"   Latency: {avg_latency*1000:.1f}ms ({degradation:.1f}x) - {status}"
+        )
+
+        blocking = degradation > expected_degradation_threshold
+        if not blocking:
+            break
 
     return {
         'latency': avg_latency,
         'degradation': degradation,
-        'blocking': degradation > expected_degradation_threshold
+        'blocking': blocking
     }
 
 

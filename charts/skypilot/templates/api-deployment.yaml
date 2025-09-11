@@ -126,6 +126,16 @@ spec:
         - name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
           value: {{ include "skypilot.oauth2ProxyURL" . }}
         {{- end }}
+        - name: SKYPILOT_POD_CPU_CORE_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: skypilot-api
+              resource: requests.cpu
+        - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: skypilot-api
+              resource: requests.memory
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:

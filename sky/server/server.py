@@ -625,6 +625,9 @@ app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
 app.include_router(ssh_node_pools_rest.router,
                    prefix='/ssh_node_pools',
                    tags=['ssh_node_pools'])
+# increase the resource limit for the server
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 
 # Increase the limit of files we can open to our hard limit. This fixes bugs
 # where we can not aquire file locks or open enough logs and the API server
@@ -1734,7 +1737,12 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             return
 
     logger.info(f'Starting port-forward to local port: {local_port}')
+    conn_gauge = metrics.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
+        pid=os.getpid())
+    ssh_failed = False
+    websocket_closed = False
     try:
+        conn_gauge.inc()
         # Connect to the local port
         reader, writer = await asyncio.open_connection('127.0.0.1', local_port)
 
@@ -1742,9 +1750,21 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             try:
                 async for message in websocket.iter_bytes():
                     writer.write(message)
-                    await writer.drain()
+                    try:
+                        await writer.drain()
+                    except Exception as e:  # pylint: disable=broad-except
+                        # Typically we will not reach here, if the ssh to pod
+                        # is disconnected, ssh_to_websocket will exit first.
+                        # But just in case.
+                        logger.error('Failed to write to pod through '
+                                     f'port-forward connection: {e}')
+                        nonlocal ssh_failed
+                        ssh_failed = True
+                        break
             except fastapi.WebSocketDisconnect:
                 pass
+            nonlocal websocket_closed
+            websocket_closed = True
             writer.close()
 
         async def ssh_to_websocket():
@@ -1752,15 +1772,44 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                 while True:
                     data = await reader.read(1024)
                     if not data:
+                        if not websocket_closed:
+                            logger.warning('SSH connection to pod is '
+                                           'disconnected before websocket '
+                                           'connection is closed')
+                            nonlocal ssh_failed
+                            ssh_failed = True
                         break
                     await websocket.send_bytes(data)
             except Exception:  # pylint: disable=broad-except
                 pass
-            await websocket.close()
+            try:
+                await websocket.close()
+            except Exception:  # pylint: disable=broad-except
+                # The websocket might has been closed by the client.
+                pass
 
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
     finally:
-        proc.terminate()
+        conn_gauge.dec()
+        reason = ''
+        try:
+            logger.info('Terminating kubectl port-forward process')
+            proc.terminate()
+        except ProcessLookupError:
+            stdout = await proc.stdout.read()
+            logger.error('kubectl port-forward was terminated before the '
+                         'ssh websocket connection was closed. Remaining '
+                         f'output: {str(stdout)}')
+            reason = 'KubectlPortForwardExit'
+            metrics.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
+                pid=os.getpid(), reason='KubectlPortForwardExit').inc()
+        else:
+            if ssh_failed:
+                reason = 'SSHToPodDisconnected'
+            else:
+                reason = 'ClientClosed'
+        metrics.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
+            pid=os.getpid(), reason=reason).inc()
 
 
 @app.get('/all_contexts')
@@ -1780,7 +1829,7 @@ async def all_contexts(request: fastapi.Request) -> None:
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
     contexts = core.get_all_contexts()
-    all_metrics = []
+    all_metrics: List[str] = []
     successful_contexts = 0
 
     tasks = [
@@ -1795,6 +1844,10 @@ async def gpu_metrics() -> fastapi.Response:
         if isinstance(result, Exception):
             logger.error(
                 f'Failed to get metrics for context {contexts[i]}: {result}')
+        elif isinstance(result, BaseException):
+            # Avoid changing behavior for non-Exception BaseExceptions
+            # like KeyboardInterrupt/SystemExit: re-raise them.
+            raise result
         else:
             metrics_text = result
             all_metrics.append(metrics_text)

@@ -86,6 +86,11 @@ def request_body_env_vars() -> dict:
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
+    # Remove the config related env vars, as the client config override
+    # should be passed in the request body.
+    # Any new environment variables that are server-specific should
+    # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
+    env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
     return env_vars
 
 
@@ -502,6 +507,14 @@ class JobsLaunchBody(RequestBody):
 
 
 class JobsQueueBody(RequestBody):
+    """The request body for the jobs queue endpoint."""
+    refresh: bool = False
+    skip_finished: bool = False
+    all_users: bool = False
+    job_ids: Optional[List[int]] = None
+
+
+class JobsQueueV2Body(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False
     skip_finished: bool = False

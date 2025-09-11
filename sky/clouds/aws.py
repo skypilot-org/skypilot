@@ -17,6 +17,7 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
+from sky.adaptors import common
 from sky.catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
@@ -155,7 +156,9 @@ def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
     try:
         client = aws.client('ec2', region_name=region_name)
         response = client.describe_instance_types(
-            InstanceTypes=[instance_type],
+            # TODO(cooperc): fix the types for mypy 1.16
+            # Boto3 type stubs expect Literal instance types; using str list here.
+            InstanceTypes=[instance_type],  # type: ignore
             Filters=[{
                 'Name': 'network-info.efa-supported',
                 'Values': ['true']
@@ -787,12 +790,9 @@ class AWS(clouds.Cloud):
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
             return False, dependency_installation_hints
-        try:
-            # Checks if aws boto is installed properly
-            # pylint: disable=import-outside-toplevel, unused-import
-            import boto3
-            import botocore
-        except ImportError:
+
+        # Checks if aws boto is installed properly
+        if not common.can_import_modules(['boto3', 'botocore']):
             return False, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.

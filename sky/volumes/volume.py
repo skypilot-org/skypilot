@@ -150,6 +150,8 @@ class Volume:
         self.region, self.zone = cloud_obj.validate_region_zone(
             self.region, self.zone)
 
+        # Name must be set by factory before validation.
+        assert self.name is not None
         valid, err_msg = cloud_obj.is_volume_name_valid(self.name)
         if not valid:
             raise ValueError(f'Invalid volume name: {err_msg}')

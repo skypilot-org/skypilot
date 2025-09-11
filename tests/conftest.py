@@ -145,7 +145,7 @@ def pytest_addoption(parser):
     parser.addoption(
         '--base-branch',
         type=str,
-        default='master',
+        default=None,
         help='Base branch to test backward compatibility against',
     )
     parser.addoption(
@@ -203,6 +203,13 @@ def pytest_addoption(parser):
         type=str,
         default=None,
         help='Path to the env file to override the default env file',
+    )
+    parser.addoption(
+        '--backend-test-cluster',
+        type=str,
+        default=None,
+        help=
+        'Use existing cluster for backend integration tests instead of creating a new one',
     )
 
 
