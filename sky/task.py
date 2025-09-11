@@ -1598,11 +1598,10 @@ class Task:
         return d
 
     def update_workdir(self, workdir: Optional[str], git_url: Optional[str],
-                       git_ref: Optional[str]):
+                       git_ref: Optional[str]) -> 'Task':
         """Updates the task workdir.
 
         Args:
-            task: The task to update.
             workdir: The workdir to update.
             git_url: The git url to update.
             git_ref: The git ref to update.
@@ -1624,12 +1623,8 @@ class Task:
             self.workdir['ref'] = git_ref
         return self
 
-    def update_envs_and_secrets_from_workdir(self):
-        """Updates the task envs and secrets from the workdir.
-
-        Args:
-            task: The task to update.
-        """
+    def update_envs_and_secrets_from_workdir(self) -> 'Task':
+        """Updates the task envs and secrets from the workdir."""
         if self.workdir is None:
             return self
         if not isinstance(self.workdir, dict):
