@@ -554,11 +554,6 @@ spec:
         secret:
           secretName: {{ .Values.nebiusCredentials.nebiusSecretName }}
       {{- end }}
-      {{- if .Values.r2Credentials.enabled }}
-      - name: r2-credentials
-        secret:
-          secretName: {{ .Values.r2Credentials.r2SecretName }}
-      {{- end }}
       {{- if .Values.kubernetesCredentials.useKubeconfig }}
       - name: kube-config
         secret:
