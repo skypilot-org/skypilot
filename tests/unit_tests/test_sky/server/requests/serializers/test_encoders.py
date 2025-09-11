@@ -50,9 +50,15 @@ class TestEncodeStatus:
         assert isinstance(encoded_handle, str)
         decoded_bytes = base64.b64decode(encoded_handle)
         unpickled_handle = pickle.loads(decoded_bytes)
-        # The handle should have SSH tunnel info removed
-        assert hasattr(unpickled_handle, 'skylet_ssh_tunnel')
-        assert unpickled_handle.skylet_ssh_tunnel is None
+
+        # NOTE: We have removed the skylet_ssh_tunnel attribute
+        # from the handle, but we keep this test for future reference.
+        assert not hasattr(unpickled_handle, 'skylet_ssh_tunnel')
+        # Previously, this test tests that the handle has SSH tunnel info
+        # removed for backwards compatibility.
+        # assert hasattr(unpickled_handle, 'skylet_ssh_tunnel')
+        # assert unpickled_handle.skylet_ssh_tunnel is None
+
         # Other attributes should be preserved
         assert unpickled_handle.cluster_name == "test-cluster"
         assert unpickled_handle.cluster_name_on_cloud == "test-cluster-123"

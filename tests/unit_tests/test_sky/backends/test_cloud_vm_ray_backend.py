@@ -1,6 +1,14 @@
-"""Unit tests for CloudVmRayBackend task configuration redaction functionality."""
+"""Unit tests for CloudVmRayBackend task configuration redaction and locking."""
+
+import multiprocessing
+import socket
+import time
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
 from sky import task
+from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
+from sky.backends.cloud_vm_ray_backend import SSHTunnelInfo
 
 
 class TestCloudVmRayBackendTaskRedaction:
@@ -283,3 +291,146 @@ class TestCloudVmRayBackendTaskRedaction:
         assert redacted_config['secrets']['API_KEY'] == '<redacted>'
         assert original_config['secrets']['DB_PASSWORD'] == 'secret-password'
         assert redacted_config['secrets']['DB_PASSWORD'] == '<redacted>'
+
+
+class TestCloudVmRayBackendGetGrpcChannel:
+    """Tests for CloudVmRayBackend get_grpc_channel."""
+    MOCK_HANDLE_KWARGS = {
+        'cluster_name': 'test-cluster',
+        'cluster_name_on_cloud': 'test-cluster-abc',
+        'cluster_yaml': None,
+        'launched_nodes': 1,
+        'launched_resources': MagicMock(),
+    }
+
+    INITIAL_TUNNEL_PORT = 10000
+    INITIAL_TUNNEL_PID = 12345
+
+    def _simulate_process_get_grpc_channel(self, queue, tunnel_creation_count,
+                                           tunnel_port, tunnel_pid,
+                                           socket_connect_side_effect):
+        """Simulate a process calling get_grpc_channel.
+
+        This test mocks:
+        - _get_skylet_ssh_tunnel: To avoid making an actual DB query
+        - _open_and_update_skylet_tunnel: To avoid actually opening an SSH tunnel
+        - grpc.insecure_channel: To just return the address instead of a Channel object
+        - socket.socket.connect: To avoid actually connecting to the tunnel
+
+        This test does not mock:
+        - lock.acquire
+        """
+        try:
+            # Different processes have different handle instances.
+            handle = CloudVmRayResourceHandle(**self.MOCK_HANDLE_KWARGS)
+
+            def mock_get_tunnel_side_effect():
+                # Return None if the tunnel is not created yet.
+                if tunnel_port.value == -1 or tunnel_pid.value == -1:
+                    return None
+                return SSHTunnelInfo(port=tunnel_port.value,
+                                     pid=tunnel_pid.value)
+
+            def mock_open_tunnel():
+                # Simulate time taken to create tunnel.
+                time.sleep(2)
+                with tunnel_creation_count.get_lock():
+                    tunnel_creation_count.value += 1
+                    created = tunnel_creation_count.value
+                with tunnel_port.get_lock(), tunnel_pid.get_lock():
+                    # First creation -> 10000/12345; second -> 10001/12346; and so on.
+                    tunnel_port.value = self.INITIAL_TUNNEL_PORT + (created - 1)
+                    tunnel_pid.value = self.INITIAL_TUNNEL_PID + (created - 1)
+                    return SSHTunnelInfo(port=tunnel_port.value,
+                                         pid=tunnel_pid.value)
+
+            with patch.object(handle, '_get_skylet_ssh_tunnel', side_effect=mock_get_tunnel_side_effect), \
+                patch.object(handle, '_open_and_update_skylet_tunnel', side_effect=mock_open_tunnel), \
+                patch('grpc.insecure_channel', side_effect=lambda addr: addr), \
+                patch('socket.socket') as mock_socket:
+
+                mock_socket.return_value.__enter__.return_value.connect.side_effect = socket_connect_side_effect
+
+                res = handle.get_grpc_channel()
+                assert res is not None
+                queue.put(res)
+
+        except Exception as e:
+            import traceback
+            error_msg = f"Error: {e}\nTraceback: {traceback.format_exc()}"
+            queue.put(error_msg)
+
+    def _socket_connect_side_effect(self, addr):
+        _, port = addr
+        # Force an error on the original port to test the retry logic.
+        if port == self.INITIAL_TUNNEL_PORT:
+            raise socket.error("Connection error")
+        return None
+
+    def test_get_grpc_channel_multiprocess_race_condition(self):
+        """Test get_grpc_channel with multiple processes racing for tunnel creation."""
+        tunnel_creation_count = multiprocessing.Value('i', 0)
+        tunnel_port = multiprocessing.Value('i', -1)
+        tunnel_pid = multiprocessing.Value('i', -1)
+
+        num_processes = 5
+        processes = []
+        queue = multiprocessing.Queue()
+        for _ in range(num_processes):
+            p = multiprocessing.Process(
+                target=self._simulate_process_get_grpc_channel,
+                args=(queue, tunnel_creation_count, tunnel_port, tunnel_pid,
+                      None))
+            processes.append(p)
+            p.start()
+
+        for p in processes:
+            p.join(timeout=15)
+            if p.is_alive():
+                p.terminate()
+                p.join()
+
+        results = []
+        while not queue.empty():
+            results.append(queue.get())
+        assert len(
+            results
+        ) == num_processes, f"Expected {num_processes} results, got {len(results)}"
+        # All processes should get the same channel (localhost:10000).
+        for item in results:
+            assert item == f'localhost:{self.INITIAL_TUNNEL_PORT}', f"Process {i} failed: {item}"
+
+        assert tunnel_creation_count.value == 1, f"Expected tunnel to be created exactly once, but was created {tunnel_creation_count.value} times"
+
+        # Try again, this tests the case where the tunnel is already created.
+        # This time, tunnel.port will be 10000, but the check should fail,
+        # as our _socket_connect_side_effect will raise an error. So we
+        # should invoke _open_and_update_skylet_tunnel again,
+        # this time returning another port.
+        for _ in range(num_processes):
+            p = multiprocessing.Process(
+                target=self._simulate_process_get_grpc_channel,
+                args=(queue, tunnel_creation_count, tunnel_port, tunnel_pid,
+                      self._socket_connect_side_effect))
+            processes.append(p)
+            p.start()
+
+        for p in processes:
+            p.join(timeout=15)
+            if p.is_alive():
+                p.terminate()
+                p.join()
+
+        results = []
+        while not queue.empty():
+            results.append(queue.get())
+        assert len(
+            results
+        ) == num_processes, f"Expected {num_processes} results, got {len(results)}"
+
+        # All processes should get the same channel (localhost:10001).
+        for i in range(num_processes):
+            assert results[
+                i] == f'localhost:{self.INITIAL_TUNNEL_PORT + 1}', f"Process {i} failed: {results[i]}"
+
+        assert tunnel_creation_count.value == 2, f"Expected tunnel to be created exactly once, but was created {tunnel_creation_count.value} times"
