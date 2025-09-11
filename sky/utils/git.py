@@ -272,7 +272,7 @@ class GitRepo:
                 logger.info(
                     f'Successfully validated repository {https_url} access '
                     'using token authentication')
-                return GitCloneInfo(url=auth_url, token=self.git_token)
+                return GitCloneInfo(url=https_url, token=self.git_token)
             except Exception as e:
                 logger.info(f'Token access failed: {str(e)}')
                 raise exceptions.GitError(
@@ -488,7 +488,10 @@ class GitRepo:
 
         try:
             # Get all remote refs
-            refs = git_cmd.ls_remote(clone_info.url).split('\n')
+            url = clone_info.url
+            if clone_info.token:
+                url = self.get_https_url(with_token=True)
+            refs = git_cmd.ls_remote(url).split('\n')
 
             # Collect all commit hashes from refs
             all_commit_hashes = set()
