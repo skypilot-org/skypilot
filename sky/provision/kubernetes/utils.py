@@ -615,7 +615,9 @@ class GFDLabelFormatter(GPULabelFormatter):
         # An accelerator can map to many Nvidia GFD labels
         # (e.g., A100-80GB-PCIE vs. A100-SXM4-80GB).
         # TODO implement get_label_values for GFDLabelFormatter
-        raise NotImplementedError
+        # TODO: We need a mapping from SkyPilot accelerator names (e.g., l40s)
+        # to GFD label values (e.g., NVIDIA-L40S).
+        return ['NVIDIA-L40S'] # HACK TO MANUALLY TEST AUTOSCALING ON A L40S POOL
 
     @classmethod
     def match_label_key(cls, label_key: str) -> bool:
@@ -1089,6 +1091,13 @@ class CoreweaveAutoscaler(Autoscaler):
     label_formatter: Any = CoreWeaveLabelFormatter
     can_query_backend: bool = False
 
+class NvidiaAutoscaler(Autoscaler):
+    """Generic autoscaler for clusters using Nvidia GFD
+    """
+
+    label_formatter: Any = GFDLabelFormatter
+    can_query_backend: bool = False
+
 
 class GenericAutoscaler(Autoscaler):
     """Generic autoscaler
@@ -1103,6 +1112,7 @@ AUTOSCALER_TYPE_TO_AUTOSCALER = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.COREWEAVE: CoreweaveAutoscaler,
+    kubernetes_enums.KubernetesAutoscalerType.NVIDIA: NvidiaAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.GENERIC: GenericAutoscaler,
 }
 
