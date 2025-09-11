@@ -201,29 +201,81 @@ tests:
       r2Credentials.r2SecretName: my-r2-secret
     asserts:
       - contains:
-          path: spec.template.spec.containers[0].volumeMounts
+          path: spec.template.spec.volumes
           content:
-            name: r2-credentials
-            mountPath: /root/.cloudflare
+            name: r2-config
+            emptyDir: {}
       - contains:
           path: spec.template.spec.volumes
           content:
             name: r2-credentials
             secret:
               secretName: my-r2-secret
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: r2-config
+            mountPath: /root/.cloudflare
+            readOnly: true
+
+  - it: should create r2 init container with correct configuration
+    set:
+      r2Credentials.enabled: true
+      r2Credentials.r2SecretName: my-r2-secret
+      apiService.image: test-image:latest
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: setup-r2-credentials
+
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "cat > /root/.cloudflare/r2.credentials"
+
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            env:
+              - name: R2_CREDENTIALS
+                valueFrom:
+                  secretKeyRef:
+                    name: my-r2-secret
+                    key: r2.credentials
+              - name: R2_ACCOUNT_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: my-r2-secret
+                    key: accountid
+
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            volumeMounts:
+              - name: r2-config
+                mountPath: /root/.cloudflare
 
   - it: should not mount r2 credentials when r2Credentials is disabled
     set:
       r2Credentials.enabled: false
     asserts:
       - notContains:
-          path: spec.template.spec.containers[0].volumeMounts
+          path: spec.template.spec.volumes
           content:
-            name: r2-credentials
+            name: r2-config
+            emptyDir: {}
       - notContains:
           path: spec.template.spec.volumes
           content:
             name: r2-credentials
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: r2-config
+            mountPath: /root/.cloudflare
 
   - it: should use default r2SecretName when not specified
     set:
@@ -235,3 +287,19 @@ tests:
             name: r2-credentials
             secret:
               secretName: r2-credentials
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: r2-config
+            emptyDir: {}
+
+  - it: should not create r2 init container when r2Credentials is disabled
+    set:
+      r2Credentials.enabled: false
+      # Other containers could exist, but r2 setup shouldn't happen
+      awsCredentials.enabled: true
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "setup-r2-credentials"
+      - notMatchRegexRaw:
+          pattern: "R2_CREDENTIALS"
