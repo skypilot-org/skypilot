@@ -215,9 +215,10 @@ export function InfrastructureSection({
 
                       // Get workspace information for this context
                       const workspaces = contextWorkspaceMap[context] || [];
-                      const workspaceDisplay = workspaces.length > 0 
-                        ? ` (${workspaces.join(', ')})` 
-                        : '';
+                      const workspaceDisplay =
+                        workspaces.length > 0
+                          ? ` (${workspaces.join(', ')})`
+                          : '';
 
                       return (
                         <tr key={context} className="hover:bg-gray-50">
@@ -279,9 +280,15 @@ export function InfrastructureSection({
                                 <CircularProgress size={16} />
                               </div>
                             ) : (
-                              <span 
-                                className={nodes.length === 0 ? 'text-gray-400' : ''}
-                                title={nodes.length === 0 ? 'Context may be unavailable or timed out' : ''}
+                              <span
+                                className={
+                                  nodes.length === 0 ? 'text-gray-400' : ''
+                                }
+                                title={
+                                  nodes.length === 0
+                                    ? 'Context may be unavailable or timed out'
+                                    : ''
+                                }
                               >
                                 {nodes.length === 0 ? '0*' : nodes.length}
                               </span>
@@ -302,11 +309,21 @@ export function InfrastructureSection({
                                 <CircularProgress size={16} />
                               </div>
                             ) : (
-                              <span 
-                                className={totalGpus === 0 && nodes.length === 0 ? 'text-gray-400' : ''}
-                                title={totalGpus === 0 && nodes.length === 0 ? 'Context may be unavailable or timed out' : ''}
+                              <span
+                                className={
+                                  totalGpus === 0 && nodes.length === 0
+                                    ? 'text-gray-400'
+                                    : ''
+                                }
+                                title={
+                                  totalGpus === 0 && nodes.length === 0
+                                    ? 'Context may be unavailable or timed out'
+                                    : ''
+                                }
                               >
-                                {totalGpus === 0 && nodes.length === 0 ? '0*' : totalGpus}
+                                {totalGpus === 0 && nodes.length === 0
+                                  ? '0*'
+                                  : totalGpus}
                               </span>
                             )}
                           </td>
@@ -1650,7 +1667,7 @@ export function GPUs() {
       const infraData = forceRefresh
         ? await getWorkspaceInfrastructure()
         : await dashboardCache.get(getWorkspaceInfrastructure);
-      
+
       if (infraData) {
         const {
           workspaces: fetchedWorkspaceInfrastructure,
@@ -1669,11 +1686,13 @@ export function GPUs() {
         setPerNodeGPUs(fetchedPerNodeGPUs || []);
         setContextStats(fetchedContextStats || {});
         setContextWorkspaceMap(fetchedContextWorkspaceMap || {});
-        
+
         // Extract available workspaces from the workspace infrastructure data
-        const workspaceNames = Object.keys(fetchedWorkspaceInfrastructure || {});
+        const workspaceNames = Object.keys(
+          fetchedWorkspaceInfrastructure || {}
+        );
         setAvailableWorkspaces(workspaceNames.sort());
-        
+
         setKubeDataLoaded(true);
         setKubeLoading(false);
       } else if (infraData === null) {
@@ -1923,15 +1942,18 @@ export function GPUs() {
   }, [perContextGPUs]);
 
   // Filter contexts based on selected workspace
-  const filterContextsByWorkspace = React.useCallback((contexts) => {
-    if (selectedWorkspace === 'all') {
-      return contexts;
-    }
-    return contexts.filter(context => {
-      const workspaces = contextWorkspaceMap[context] || [];
-      return workspaces.includes(selectedWorkspace);
-    });
-  }, [selectedWorkspace, contextWorkspaceMap]);
+  const filterContextsByWorkspace = React.useCallback(
+    (contexts) => {
+      if (selectedWorkspace === 'all') {
+        return contexts;
+      }
+      return contexts.filter((context) => {
+        const workspaces = contextWorkspaceMap[context] || [];
+        return workspaces.includes(selectedWorkspace);
+      });
+    },
+    [selectedWorkspace, contextWorkspaceMap]
+  );
 
   // Separate SSH contexts from Kubernetes contexts using allKubeContextNames
   const sshContexts = React.useMemo(() => {
@@ -2344,7 +2366,10 @@ export function GPUs() {
           {/* Workspace Selector */}
           {availableWorkspaces.length > 0 && (
             <div className="flex items-center mr-4">
-              <label htmlFor="workspace-selector" className="text-sm font-medium text-gray-700 mr-2">
+              <label
+                htmlFor="workspace-selector"
+                className="text-sm font-medium text-gray-700 mr-2"
+              >
                 Workspace:
               </label>
               <select
@@ -2362,7 +2387,7 @@ export function GPUs() {
               </select>
             </div>
           )}
-          
+
           {isAnyLoading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
