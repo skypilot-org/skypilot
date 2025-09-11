@@ -9,7 +9,6 @@ RUN apt-get update && \
     apt-get install --no-install-recommends -y \
         google-cloud-cli \
         google-cloud-cli-gke-gcloud-auth-plugin && \
-    apt-get install -y google-perftools libgoogle-perftools-dev && \
     apt-get clean && rm -rf /usr/lib/google-cloud-sdk/platform/bundledpythonunix \
     /var/lib/apt/lists/*
 
@@ -35,7 +34,8 @@ ARG INSTALL_FROM_SOURCE=true
 RUN apt-get update -y && \
     apt-get install --no-install-recommends -y \
         git gcc rsync sudo patch openssh-server \
-        pciutils nano fuse socat netcat-openbsd curl tini autossh jq && \
+        pciutils nano fuse socat netcat-openbsd curl tini autossh jq \
+        google-perftools libgoogle-perftools-dev && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install kubectl based on architecture
