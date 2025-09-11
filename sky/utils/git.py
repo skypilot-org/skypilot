@@ -272,7 +272,7 @@ class GitRepo:
                 logger.info(
                     f'Successfully validated repository {https_url} access '
                     'using token authentication')
-                return GitCloneInfo(url=https_url, token=self.git_token)
+                return GitCloneInfo(url=auth_url, token=self.git_token)
             except Exception as e:
                 logger.info(f'Token access failed: {str(e)}')
                 raise exceptions.GitError(
