@@ -2891,10 +2891,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 11:
             state['is_grpc_enabled'] = False
-
-        if version < 12:
             state['skylet_ssh_tunnel'] = None
-        else:
+
+        if version >= 12:
             # DEPRECATED in favor of skylet_ssh_tunnel_metadata column in the DB
             state.pop('skylet_ssh_tunnel', None)
 
