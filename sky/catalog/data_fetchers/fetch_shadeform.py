@@ -19,9 +19,8 @@ ENDPOINT = 'https://api.shadeform.ai/v1/instances/types'
 DEFAULT_SHADEFORM_API_KEY_PATH = os.path.expanduser('~/.shadeform/api_key')
 
 
-def parse_gpu_info(gpu_type: str, num_gpus: int, memory_gb: int) -> Dict:
+def parse_gpu_info(gpu_type: str, num_gpus: int) -> Dict:
     """Parse GPU information for the catalog."""
-    memory_mib = memory_gb * 1024
 
     manufacturer = 'NVIDIA'
     if gpu_type == 'MI300X':
@@ -33,12 +32,8 @@ def parse_gpu_info(gpu_type: str, num_gpus: int, memory_gb: int) -> Dict:
         'Gpus': [{
             'Name': gpu_type,
             'Manufacturer': manufacturer,
-            'Count': float(num_gpus),
-            'MemoryInfo': {
-                'SizeInMiB': memory_mib
-            },
-        }],
-        'TotalGpuMemoryInMiB': memory_mib
+            'Count': float(num_gpus)
+        }]
     }
 
 
@@ -81,8 +76,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
             # Create GPU info
             gpuinfo = None
             if gpu_count > 0:
-                gpuinfo_dict = parse_gpu_info(gpu_type, int(gpu_count),
-                                              memory_gb)
+                gpuinfo_dict = parse_gpu_info(gpu_type, int(gpu_count))
                 gpuinfo = json.dumps(gpuinfo_dict).replace('"', '\'')
 
             # Write entry for each available region
