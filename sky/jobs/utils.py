@@ -586,7 +586,9 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
             raise
 
 
-def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
+def event_callback_func(
+        job_id: int, task_id: Optional[int],
+        task: Optional['sky.Task']) -> managed_job_state.AsyncCallbackType:
     """Run event callback for the task."""
 
     def callback_func(status: str):
@@ -625,17 +627,10 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
             f'Bash:{event_callback},log_path:{log_path},result:{result}')
         logger.info(f'=== END: event callback for {status!r} ===')
 
-    try:
-        asyncio.get_running_loop()
+    async def async_callback_func(status: str):
+        return await context_utils.to_thread(callback_func, status)
 
-        # In async context
-        async def async_callback_func(status: str):
-            return await context_utils.to_thread(callback_func, status)
-
-        return async_callback_func
-    except RuntimeError:
-        # Not in async context
-        return callback_func
+    return async_callback_func
 
 
 # ======== user functions ========
