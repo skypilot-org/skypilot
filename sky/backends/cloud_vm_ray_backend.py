@@ -50,6 +50,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
+from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
@@ -1372,6 +1373,34 @@ class RetryingVmProvisioner(object):
                     zones = [clouds.Zone(name=to_provision.zone)]
                 yield zones
 
+    def _insufficient_resources_msg(
+        self,
+        to_provision: resources_lib.Resources,
+        requested_resources: Set[resources_lib.Resources],
+        insufficient_resources: Optional[List[str]],
+    ) -> str:
+        insufficent_resource_msg = ('' if insufficient_resources is None else
+                                    f' ({", ".join(insufficient_resources)})')
+        message = f'Failed to acquire resources{insufficent_resource_msg} '
+        if to_provision.zone is not None:
+            message += (f'in {to_provision.zone} for {requested_resources}. ')
+        elif to_provision.region is not None and to_provision.cloud is not None:
+            # For public clouds, provision.region is always set.
+            if clouds.SSH().is_same_cloud(to_provision.cloud):
+                message += (
+                    f'in SSH Node Pool ({to_provision.region.lstrip("ssh-")}) '
+                    f'for {requested_resources}. The SSH Node Pool may not '
+                    'have enough resources.')
+            elif clouds.Kubernetes().is_same_cloud(to_provision.cloud):
+                message += (f'in context {to_provision.region} for '
+                            f'{requested_resources}. ')
+            else:
+                message += (f'in all zones in {to_provision.region} for '
+                            f'{requested_resources}. ')
+        else:
+            message += (f'{to_provision.cloud} for {requested_resources}. ')
+        return message
+
     def _retry_zones(
         self,
         to_provision: resources_lib.Resources,
@@ -1450,6 +1479,7 @@ class RetryingVmProvisioner(object):
                 f'To request quotas, check the instruction: '
                 f'https://docs.skypilot.co/en/latest/cloud-setup/quota.html.')
 
+        insufficient_resources = None
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status,
                                        prev_cluster_ever_up):
@@ -1662,6 +1692,24 @@ class RetryingVmProvisioner(object):
                     # No teardown happens for this error.
                     with ux_utils.print_exception_no_traceback():
                         raise
+                except config_lib.KubernetesError as e:
+                    if e.insufficent_resources:
+                        insufficient_resources = e.insufficent_resources
+                    # NOTE: We try to cleanup the cluster even if the previous
+                    # cluster does not exist. Also we are fast at
+                    # cleaning up clusters now if there is no existing node.
+                    CloudVmRayBackend().post_teardown_cleanup(
+                        handle,
+                        terminate=not prev_cluster_ever_up,
+                        remove_from_db=False,
+                        failover=True,
+                    )
+                    # TODO(suquark): other clouds may have different zone
+                    #  blocking strategy. See '_update_blocklist_on_error'
+                    #  for details.
+                    FailoverCloudErrorHandlerV2.update_blocklist_on_error(
+                        self._blocked_resources, to_provision, region, zones, e)
+                    continue
                 except Exception as e:  # pylint: disable=broad-except
                     # NOTE: We try to cleanup the cluster even if the previous
                     # cluster does not exist. Also we are fast at
@@ -1792,26 +1840,9 @@ class RetryingVmProvisioner(object):
                                                  terminate=terminate_or_stop,
                                                  remove_from_db=False)
 
-        if to_provision.zone is not None:
-            message = (
-                f'Failed to acquire resources in {to_provision.zone} for '
-                f'{requested_resources}. ')
-        elif to_provision.region is not None:
-            # For public clouds, provision.region is always set.
-            if clouds.SSH().is_same_cloud(to_provision.cloud):
-                message = ('Failed to acquire resources in SSH Node Pool '
-                           f'({to_provision.region.lstrip("ssh-")}) for '
-                           f'{requested_resources}. The SSH Node Pool may not '
-                           'have enough resources.')
-            elif clouds.Kubernetes().is_same_cloud(to_provision.cloud):
-                message = ('Failed to acquire resources in context '
-                           f'{to_provision.region} for {requested_resources}. ')
-            else:
-                message = ('Failed to acquire resources in all zones in '
-                           f'{to_provision.region} for {requested_resources}. ')
-        else:
-            message = (f'Failed to acquire resources in {to_provision.cloud} '
-                       f'for {requested_resources}. ')
+        message = self._insufficient_resources_msg(to_provision,
+                                                   requested_resources,
+                                                   insufficient_resources)
         # Do not failover to other locations if the cluster was ever up, since
         # the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
