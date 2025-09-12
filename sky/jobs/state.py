@@ -715,7 +715,8 @@ def set_failed(
 
         # Handle failure_reason prepending when override_terminal is True
         if override_terminal:
-            # Get existing failure_reason with row lock to prevent race conditions
+            # Get existing failure_reason with row lock to prevent race
+            # conditions
             existing_reason_result = session.execute(
                 sqlalchemy.select(spot_table.c.failure_reason).where(
                     sqlalchemy.and_(*where_conditions)).with_for_update())
@@ -1665,7 +1666,8 @@ async def set_failed_async(
 
         # Handle failure_reason prepending when override_terminal is True
         if override_terminal:
-            # Get existing failure_reason with row lock to prevent race conditions
+            # Get existing failure_reason with row lock to prevent race
+            # conditions
             existing_reason_result = await session.execute(
                 sqlalchemy.select(spot_table.c.failure_reason).where(
                     sqlalchemy.and_(*where_conditions)).with_for_update())
