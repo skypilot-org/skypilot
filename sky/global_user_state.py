@@ -632,12 +632,17 @@ def add_or_update_cluster(cluster_name: str,
             raise ValueError('Unsupported database dialect')
 
         if update_only:
-            session.query(cluster_table).filter_by(name=cluster_name).update({
-                **conditional_values, cluster_table.c.handle: handle,
-                cluster_table.c.status: status.value,
-                cluster_table.c.cluster_hash: cluster_hash,
-                cluster_table.c.status_updated_at: status_updated_at
-            })
+            count = session.query(cluster_table).filter_by(
+                name=cluster_name).update({
+                    **conditional_values, cluster_table.c.handle: handle,
+                    cluster_table.c.status: status.value,
+                    cluster_table.c.cluster_hash: cluster_hash,
+                    cluster_table.c.status_updated_at: status_updated_at
+                })
+            print(f"count: {count}")
+            assert count <= 1
+            if count == 0:
+                raise ValueError(f'Cluster {cluster_name} not found.')
         else:
             insert_stmnt = insert_func(cluster_table).values(
                 name=cluster_name,
