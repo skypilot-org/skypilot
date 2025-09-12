@@ -183,8 +183,10 @@ def status(
         try:
             status_responses.append(
                 responses.StatusResponse.model_validate(cluster))
-        except Exception as e:
-            logger.error(f'Failed to validate status responses for cluster {cluster.get("name")}: {e}')
+        except Exception as e: # pylint: disable=broad-except
+            logger.error(
+                f'Failed to validate status responses for cluster {cluster.get("name")}: {e}'
+            )
     return status_responses
 
 
