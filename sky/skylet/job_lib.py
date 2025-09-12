@@ -22,7 +22,6 @@ import filelock
 from sky import global_user_state
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.schemas.generated import jobsv1_pb2
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -32,8 +31,11 @@ from sky.utils.db import db_utils
 
 if typing.TYPE_CHECKING:
     import psutil
+
+    from sky.schemas.generated import jobsv1_pb2
 else:
     psutil = adaptors_common.LazyImport('psutil')
+    jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
