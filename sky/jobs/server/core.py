@@ -396,9 +396,12 @@ def launch(
             job_identity = ''
             if job_rank is not None:
                 job_identity = f' (rank: {job_rank})'
-            logger.info(f'{colorama.Fore.YELLOW}'
-                        f'Launching managed job {dag.name!r}{job_identity} '
-                        f'from jobs controller...{colorama.Style.RESET_ALL}')
+            job_controller_postfix = (' from jobs controller' if
+                                      consolidation_mode_job_id is None else '')
+            logger.info(
+                f'{colorama.Fore.YELLOW}'
+                f'Launching managed job {dag.name!r}{job_identity}'
+                f'{job_controller_postfix}...{colorama.Style.RESET_ALL}')
 
             # Launch with the api server's user hash, so that sky status does
             # not show the owner of the controller as whatever user launched
