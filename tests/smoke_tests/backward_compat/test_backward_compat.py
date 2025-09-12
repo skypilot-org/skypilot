@@ -2,6 +2,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 from typing import Sequence
@@ -96,6 +97,10 @@ class TestBackwardCompatibility:
         """Session-wide setup that runs exactly once (concurrency limited to 1)."""
         # No locking mechanism needed since concurrency is limited to 1
         base_branch = request.config.getoption("--base-branch")
+        if not base_branch:
+            # Default to the minimum compatible version as the base branch
+            base_branch = f'v{constants.MIN_COMPATIBLE_VERSION}'
+        print(f'base_branch: {base_branch}', file=sys.stderr, flush=True)
 
         # Check if gcloud is installed
         if subprocess.run('gcloud --version', shell=True).returncode != 0:
@@ -682,6 +687,31 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} down --cluster-name {cluster_name}'
+        self.run_compatibility_test(cluster_name, commands, teardown)
+
+    def test_server_downgrade_upgrade_compatibility(self, generic_cloud: str):
+        """Test server compatibility between downgrade and upgrade."""
+        cluster_name = smoke_tests_utils.get_cluster_name()
+
+        commands = [
+            # Launch cluster with current (newer) server version
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky launch --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} examples/minimal.yaml',
+            f'{self.ACTIVATE_CURRENT} && sky stop -y {cluster_name}',
+
+            # Switch to base (older) server and try to start the cluster
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && sky start -y {cluster_name}',
+            f'{self.ACTIVATE_BASE} && sky status {cluster_name} | grep UP',
+            f'{self.ACTIVATE_BASE} && sky exec {cluster_name} "echo server-downgrade-test"',
+            f'{self.ACTIVATE_BASE} && sky logs {cluster_name} | grep "server-downgrade-test"',
+            f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
+
+            # Switch back to current (newer) server and try to start the cluster
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && sky start -y {cluster_name}',
+            f'{self.ACTIVATE_CURRENT} && sky status {cluster_name} | grep UP',
+        ]
+
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     @pytest.mark.kubernetes

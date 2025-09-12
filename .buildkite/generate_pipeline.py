@@ -26,11 +26,13 @@ import collections
 import os
 import re
 import subprocess
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import click
 from conftest import cloud_to_pytest_keyword
 from conftest import default_clouds_to_run
+import requests
 import yaml
 
 DEFAULT_CLOUDS_TO_RUN = default_clouds_to_run
@@ -78,6 +80,10 @@ def _get_buildkite_queue(cloud: str, remote_server: bool,
     Kubernetes has low concurrency on a single VM originally,
     so remote-server won't drain VM resources, we can reuse the same queue.
     """
+    env_queue = os.environ.get('BUILDKITE_QUEUE', None)
+    if env_queue:
+        return env_queue
+
     if '--env-file' in args:
         # TODO(zeping): Remove this when test requirements become more varied.
         # Currently, tests specifying --env-file and a custom API server endpoint are assigned to
@@ -371,17 +377,75 @@ def _convert_release(test_files: List[str], args: str, trigger_command: str):
                            trigger_command)
 
 
+def _rest_request(url: str,
+                  method: str,
+                  json: Optional[Dict[str, Any]] = None) -> Any:
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            resp = requests.request(method, url, json=json, timeout=10)
+        except Exception as e:  # pylint: disable=broad-except
+            # Retry on transient network errors
+            if attempt >= 3:
+                raise RuntimeError(f'network error: {e}') from e
+            time.sleep(1)
+            continue
+
+        # Retry on 5xx and 429
+        if resp.status_code >= 500 or resp.status_code == 429:
+            if attempt >= 3:
+                raise RuntimeError(f'error {resp.status_code}: {resp.text}')
+            time.sleep(1)
+            continue
+
+        if resp.status_code >= 400:
+            # Non-retryable client error
+            raise RuntimeError(f'error {resp.status_code}: {resp.text}')
+
+        if resp.text:
+            try:
+                return resp.json()
+            except Exception:  # pylint: disable=broad-except
+                return resp.text
+        return None
+
+
+def _get_latest_pypi_version():
+    resp = _rest_request('https://pypi.org/pypi/skypilot/json', 'GET')
+    if isinstance(resp, dict):
+        return resp.get('info', {}).get('version')
+    raise RuntimeError(f'Failed to get latest pypi version: {resp}')
+
+
 def _convert_quick_tests_core(test_files: List[str], args: str,
                               trigger_command: str):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_quick_tests_core.yaml'
+    base_branch = '--base-branch' in args
+    base_branches = []
+    if not base_branch:
+        latest_pypi_version = _get_latest_pypi_version()
+        print(f'latest_pypi_version: {latest_pypi_version}')
+        base_branches = ['master', f'v{latest_pypi_version}']
+    print(f'base_branches: {base_branches}')
     output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
         # We want enable all clouds by default for each test function
         # for pre-merge. And let the author controls which clouds
         # to run by parameter.
-        pipeline = _generate_pipeline(test_file, args, auto_retry=True)
-        output_file_pipelines.append(pipeline)
+        if base_branches:
+            for branch in base_branches:
+                if ('test_quick_tests_core.py' in test_file and
+                        branch != 'master'):
+                    continue
+                pipeline = _generate_pipeline(test_file,
+                                              args + f'--base-branch {branch}',
+                                              auto_retry=True)
+                output_file_pipelines.append(pipeline)
+        else:
+            pipeline = _generate_pipeline(test_file, args, auto_retry=True)
+            output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(yaml_file_path,
                            output_file_pipelines,
