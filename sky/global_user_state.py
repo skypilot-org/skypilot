@@ -621,6 +621,16 @@ def add_or_update_cluster(cluster_name: str,
                 'provision_log_path': provision_log_path,
             })
 
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            session.rollback()
+            raise ValueError('Unsupported database dialect')
+
         if update_only:
             session.query(cluster_table).filter_by(name=cluster_name).update({
                 **conditional_values, cluster_table.c.handle: handle,
@@ -629,15 +639,6 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_table.c.status_updated_at: status_updated_at
             })
         else:
-            if (_SQLALCHEMY_ENGINE.dialect.name ==
-                    db_utils.SQLAlchemyDialect.SQLITE.value):
-                insert_func = sqlite.insert
-            elif (_SQLALCHEMY_ENGINE.dialect.name ==
-                  db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-                insert_func = postgresql.insert
-            else:
-                session.rollback()
-                raise ValueError('Unsupported database dialect')
             insert_stmnt = insert_func(cluster_table).values(
                 name=cluster_name,
                 **conditional_values,
