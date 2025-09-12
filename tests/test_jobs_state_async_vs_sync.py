@@ -308,6 +308,56 @@ async def test_missing_job_pool_submit_info_same(_mock_jobs_db_conn):
     assert await state.get_pool_submit_info_async(missing_id) == (None, None)
 
 
+@pytest.mark.asyncio
+async def test_override_terminal_failure_reason_prepend(_mock_jobs_db_conn):
+    """Test that when override_terminal=True, new failure reasons are prepended to existing ones."""
+    # Create two identical jobs - one for sync, one for async testing
+    sync_job_id = state.set_job_info_without_job_id(name='sync_job',
+                                                   workspace='default',
+                                                   entrypoint='echo',
+                                                   pool=None,
+                                                   pool_hash=None)
+    async_job_id = state.set_job_info_without_job_id(name='async_job',
+                                                    workspace='default',
+                                                    entrypoint='echo',
+                                                    pool=None,
+                                                    pool_hash=None)
+
+    # Set up initial pending task for both jobs
+    state.set_pending(sync_job_id, task_id=0, task_name='task0',
+                     resources_str='{}', metadata='{}')
+    state.set_pending(async_job_id, task_id=0, task_name='task0',
+                     resources_str='{}', metadata='{}')
+
+    failure_reasons = [
+        "Initial failure: out of memory",
+        "Secondary failure: disk full",
+        "Final failure: network timeout",
+        "Ultimate failure: system crash"
+    ]
+
+    # Apply the same sequence to both jobs: sync to first job, async to second job
+    for reason in failure_reasons:
+        # All failures use override_terminal=True to test prepending behavior
+        state.set_failed(sync_job_id, task_id=0, failure_type=state.ManagedJobStatus.FAILED,
+                       failure_reason=reason, override_terminal=True)
+        await state.set_failed_async(async_job_id, task_id=0, failure_type=state.ManagedJobStatus.FAILED,
+                                   failure_reason=reason, override_terminal=True)
+
+    # Verify both jobs have identical failure reasons
+    sync_failure_reason = state.get_failure_reason(sync_job_id)
+    async_failure_reason = state.get_failure_reason(async_job_id)
+
+    assert sync_failure_reason == async_failure_reason
+    assert sync_failure_reason is not None
+
+    # Verify the structure contains all failure reasons in the correct order
+    assert "Ultimate failure: system crash" in sync_failure_reason
+    assert "Final failure: network timeout" in sync_failure_reason
+    assert "Secondary failure: disk full" in sync_failure_reason
+    assert "Initial failure: out of memory" in sync_failure_reason
+
+
 def test_missing_job_other_helpers(_mock_jobs_db_conn):
     missing_id = 9999
     # workspace defaults to SKY default for non-existent job
