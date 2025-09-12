@@ -978,6 +978,10 @@ def test_kubernetes_context_failover(unreachable_context):
                 f'sky launch -y -c {name}-4 --gpus H100 --cpus 1 --infra kubernetes/{unreachable_context} echo hi && exit 1 || true',
                 # Test failover from unreachable context
                 f'sky launch -y -c {name}-5 --cpus 1 echo hi',
+                # switch back to kind-skypilot where GPU cluster is launched
+                f'kubectl config use-context kind-skypilot',
+                # test if sky status --kubernetes shows H100
+                f'sky status --kubernetes',
             ],
             f'sky down -y {name}-1 {name}-3 {name}-5',
             env={
