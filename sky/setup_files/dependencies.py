@@ -110,8 +110,8 @@ server_dependencies = [
 local_ray = [
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
-    # Ray 2.6.1+ resolved cluster launcher bugs and grpcio issues on
-    # Apple Silicon.
+    # Ray 2.6.1+ resolved cluster launcher bugs
+    # and grpcio issues on Apple Silicon.
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
     'ray[default] >= 2.6.1',
 ]
