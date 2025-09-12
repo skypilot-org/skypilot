@@ -31,6 +31,7 @@ import time
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
+import psutil
 import setproctitle
 
 from sky import exceptions
@@ -374,11 +375,13 @@ def _request_execution_wrapper(request_id: str,
     4. Handle the SIGTERM signal to abort the request gracefully.
     5. Maintain the lifecycle of the temp dir used by the request.
     """
+    pid = multiprocessing.current_process().pid
+    proc = psutil.Process(pid)
+    rss_begin = proc.memory_info().rss
     db_utils.set_max_connections(num_db_connections_per_worker)
     # Handle the SIGTERM signal to abort the request processing gracefully.
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
-    pid = multiprocessing.current_process().pid
     logger.info(f'Running request {request_id} with pid {pid}')
     with api_requests.update_request(request_id) as request_task:
         assert request_task is not None, request_id
@@ -444,8 +447,41 @@ def _request_execution_wrapper(request_id: str,
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
         finally:
-            with metrics_lib.time_it(name='release_memory', group='internal'):
-                common_utils.release_memory()
+            try:
+                # Capture the peak RSS before GC.
+                peak_rss = max(proc.memory_info().rss,
+                               metrics_lib.peak_rss_bytes)
+                with metrics_lib.time_it(name='release_memory',
+                                         group='internal'):
+                    common_utils.release_memory()
+                _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Failed to record memory metrics: '
+                             f'{common_utils.format_exception(e)}')
+
+
+_first_request = True
+
+
+def _record_memory_metrics(request_name: str, proc: psutil.Process,
+                           rss_begin: int, peak_rss: int) -> None:
+    """Record the memory metrics for a request."""
+    # Do not record full memory delta for the first request as it
+    # will loads the sky core modules and make the memory usage
+    # estimation inaccurate.
+    global _first_request
+    if _first_request:
+        _first_request = False
+        return
+    rss_end = proc.memory_info().rss
+
+    # Answer "how much RSS this request contributed?"
+    metrics_lib.SKY_APISERVER_REQUEST_RSS_INCR_BYTES.labels(
+        name=request_name).observe(max(rss_end - rss_begin, 0))
+    # Estimate the memory usage by the request by capturing the
+    # peak memory delta during the request execution.
+    metrics_lib.SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES.labels(
+        name=request_name).observe(max(peak_rss - rss_begin, 0))
 
 
 async def execute_request_coroutine(request: api_requests.Request):
