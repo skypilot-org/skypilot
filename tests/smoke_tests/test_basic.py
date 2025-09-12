@@ -97,6 +97,52 @@ def test_minimal(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.aws
+def test_minimal_arm64(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'minimal_arm',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --instance-type m6g.large tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Output validation done.
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
+            # Test launch output again on existing cluster
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --instance-type m6g.large tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            # Check the logs downloading
+            f'log_path=$(sky logs {name} 1 --sync-down | grep "Job 1 logs:" | sed -E "s/^.*Job 1 logs: (.*)\\x1b\\[0m/\\1/g") && echo "$log_path" '
+            # We need to explicitly expand the log path as it starts with ~, and linux does not automatically
+            # expand it when having it in a variable.
+            '  && expanded_log_path=$(eval echo "$log_path") && echo "$expanded_log_path" '
+            '  && test -f $expanded_log_path/run.log',
+            # Ensure the raylet process has the correct file descriptor limit.
+            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+            # Install jq for the next test.
+            f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',
+            # Check the cluster info
+            f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cluster_name | grep {name}\'',
+            f'sky logs {name} 5 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cloud | grep -i {generic_cloud}\'',
+            f'sky logs {name} 6 --status',  # Ensure the job succeeded.
+            # Test '-c' for exec
+            f'sky exec -c {name} echo',
+            f'sky logs {name} 7 --status',
+            f'sky exec echo -c {name}',
+            f'sky logs {name} 8 --status',
+            f'sky exec -c {name} echo hi test',
+            f'sky logs {name} 9 | grep "hi test"',
+            f'sky exec {name} && exit 1 || true',
+            f'sky exec -c {name} && exit 1 || true',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- A minimal task with git repository workdir ----------
 def test_minimal_with_git_workdir(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
