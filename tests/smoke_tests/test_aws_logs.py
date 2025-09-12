@@ -16,10 +16,11 @@ from sky import skypilot_config
 @pytest.mark.no_fluidstack  # Requires AWS to be enabled
 @pytest.mark.no_nebius  # Requires AWS to be enabled
 def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
-    credential_file_config = ''
     if smoke_tests_utils.is_non_docker_remote_api_server():
-        # Helm api server deployment set credential_file instead of env vars
-        credential_file_config = 'credentials_file: ~/.aws/credentials'
+        pytest.skip(
+            'Skipping test in shared remote api server environment as '
+            'helm api server deployment set credential_file instead of env vars'
+        )
     name = smoke_tests_utils.get_cluster_name()
     # Calculate timestamp 1 hour ago in ISO format
     one_hour_ago = (datetime.now(timezone.utc) -
@@ -32,7 +33,6 @@ def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
                   store: aws
                   aws:
                     region: us-east-1
-                    {credential_file_config}
                 """))
         base.flush()
         additional_tags.write(
@@ -43,7 +43,6 @@ def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
                     region: us-east-1
                     additional_tags:
                       skypilot_smoke_test_case: {name}-case
-                    {credential_file_config}
                 """))
         additional_tags.flush()
         logs_cmd = 'for i in {1..10}; do echo $i; done'
