@@ -454,17 +454,34 @@ def _request_execution_wrapper(request_id: str,
                 with metrics_lib.time_it(name='release_memory',
                                          group='internal'):
                     common_utils.release_memory()
-                rss_end = proc.memory_info().rss
-                # Answer "how much RSS this request contributed?"
-                metrics_lib.SKY_APISERVER_REQUEST_RSS_INCR_BYTES.labels(
-                    name=request_name).observe(max(rss_end - rss_begin, 0))
-                # Estimate the memory usage by the request by capturing the
-                # peak memory delta during the request execution.
-                metrics_lib.SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES.labels(
-                    name=request_name).observe(max(peak_rss - rss_begin, 0))
+                _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Failed to record memory metrics: '
                              f'{common_utils.format_exception(e)}')
+
+
+_first_request = True
+
+
+def _record_memory_metrics(request_name: str, proc: psutil.Process,
+                           rss_begin: int, peak_rss: int) -> None:
+    """Record the memory metrics for a request."""
+    # Do not record full memory delta for the first request as it
+    # will loads the sky core modules and make the memory usage
+    # estimation inaccurate.
+    global _first_request
+    if _first_request:
+        _first_request = False
+        return
+    rss_end = proc.memory_info().rss
+
+    # Answer "how much RSS this request contributed?"
+    metrics_lib.SKY_APISERVER_REQUEST_RSS_INCR_BYTES.labels(
+        name=request_name).observe(max(rss_end - rss_begin, 0))
+    # Estimate the memory usage by the request by capturing the
+    # peak memory delta during the request execution.
+    metrics_lib.SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES.labels(
+        name=request_name).observe(max(peak_rss - rss_begin, 0))
 
 
 async def execute_request_coroutine(request: api_requests.Request):
