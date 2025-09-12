@@ -568,8 +568,9 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                       job_id: Optional[int], get_end_time: bool) -> float:
     """Get the submitted/ended time of the job."""
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-
-    if handle.is_grpc_enabled:
+    assert handle is not None, (
+        f'handle for cluster {cluster_name!r} should not be None')
+    if handle.is_grpc_enabled_with_flag:
         try:
             if get_end_time:
                 end_ts_request = jobsv1_pb2.GetJobEndedTimestampRequest(

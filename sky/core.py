@@ -823,9 +823,9 @@ def queue(cluster_name: str,
     )
     backend = backend_utils.get_backend_from_handle(handle)
 
-    use_legacy = not handle.is_grpc_enabled
+    use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if handle.is_grpc_enabled:
+    if handle.is_grpc_enabled_with_flag:
         try:
             request = jobsv1_pb2.GetJobQueueRequest(user_hash=user_hash,
                                                     all_jobs=all_jobs)
