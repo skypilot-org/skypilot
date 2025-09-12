@@ -140,6 +140,48 @@ def test_minimal_with_git_workdir(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+def test_minimal_with_git_workdir_docker(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'minimal_with_git_workdir',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Output validation done.
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+            # Checkout to releases/0.10.0
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',
+            # Checkout to default branch
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+            # Checkout to releases/0.10.0
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',
+            # Checkout to tag v0.10.0
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref v0.10.0 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "v0\.10\.0" || exit 1\'',
+            # Checkout to commit 41c25f40
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref 41c25f40 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "41c25f40" || exit 1\'',
+            # Checkout to default branch
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Test fast launch ----------
 def test_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -1299,3 +1341,48 @@ def test_sky_down_with_multiple_sgs():
         timeout=smoke_tests_utils.get_timeout('aws'),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+def test_launch_with_failing_setup(generic_cloud: str):
+    """Test that failing setup outputs the right error message."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    cluster_yaml = textwrap.dedent("""
+    num_nodes: 3
+
+    setup: |
+        echo "Running setup."
+        if [ "$SKYPILOT_SETUP_NODE_RANK" -eq 0 ]; then
+            echo "I'm a bad worker, failing..."
+            exit 1
+        fi
+        if [ "$SKYPILOT_SETUP_NODE_RANK" -eq 1 ]; then
+            echo "I'm a good worker, passing..."
+        fi
+        if [ "$SKYPILOT_SETUP_NODE_RANK" -eq 2 ]; then
+            echo "I'm a bad worker, failing..."
+            exit 1
+        fi
+
+    run: |
+        echo "Finished"
+    """)
+
+    validate_output = (
+        f'printf "%s" "$s" && echo "\n===Validating terminating output===" && '
+        f'printf "%s" "$s" | grep "See error logs above for more details." && '
+        f'printf "%s" "$s" | grep "setup failed. Failed workers: (pid="')
+
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(cluster_yaml.encode('utf-8'))
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'launch_with_failing_setup',
+            [
+                f's=$(SKYPILOT_DEBUG=1 sky launch -c {name} -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name} | tee /dev/stderr) && {validate_output}'
+            ],
+            teardown=f'sky down -y {name}',
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+        )
+        smoke_tests_utils.run_one_test(test)

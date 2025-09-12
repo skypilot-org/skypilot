@@ -2681,7 +2681,7 @@ def refresh_cluster_record(
                     'Refreshing status: Failed get the lock for cluster '
                     f'{cluster_name!r}. Using the cached status.')
                 return record
-            time.sleep(0.05)
+            time.sleep(lock.poll_interval)
 
             # Refresh for next loop iteration.
             record = global_user_state.get_cluster_from_name(cluster_name)

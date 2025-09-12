@@ -37,7 +37,15 @@ class FluentbitAgent(LoggingAgent):
             'if ! command -v fluent-bit >/dev/null 2>&1; then '
             'sudo apt-get update; sudo apt-get install -y gnupg; '
             # pylint: disable=line-too-long
-            'curl https://raw.githubusercontent.com/fluent/fluent-bit/master/install.sh | sh; '
+            'sudo sh -c \'curl https://packages.fluentbit.io/fluentbit.key | gpg --dearmor > /usr/share/keyrings/fluentbit-keyring.gpg\'; '
+            # pylint: disable=line-too-long
+            'os_id=$(grep -oP \'(?<=^ID=).*\' /etc/os-release 2>/dev/null || lsb_release -is 2>/dev/null | tr \'[:upper:]\' \'[:lower:]\'); '
+            # pylint: disable=line-too-long
+            'codename=$(grep -oP \'(?<=VERSION_CODENAME=).*\' /etc/os-release 2>/dev/null || lsb_release -cs 2>/dev/null); '
+            # pylint: disable=line-too-long
+            'echo "deb [signed-by=/usr/share/keyrings/fluentbit-keyring.gpg] https://packages.fluentbit.io/$os_id/$codename $codename main" | sudo tee /etc/apt/sources.list.d/fluent-bit.list; '
+            'sudo apt-get update; '
+            'sudo apt-get install -y fluent-bit; '
             'fi')
         cfg = self.fluentbit_config(cluster_name)
         cfg_path = os.path.join(constants.LOGGING_CONFIG_DIR, 'fluentbit.yaml')

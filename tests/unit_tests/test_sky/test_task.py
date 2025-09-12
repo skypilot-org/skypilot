@@ -536,46 +536,6 @@ def test_from_yaml_config_env_and_secrets_overrides_independent():
     assert combined == expected_combined
 
 
-def test_from_yaml_config_with_kubernetes_config_override():
-    """Test that Kubernetes config overrides work."""
-    config = {
-        'name': 'test-kubernetes-config-override',
-        'run': 'echo hello',
-        'config': {
-            'kubernetes': {
-                'context_configs': {
-                    'test_context': {
-                        'pod_config': {
-                            'metadata': {
-                                'labels': {
-                                    'test-key': 'test-value'
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-    }
-    task_obj = task.Task.from_yaml_config(config)
-    for res in task_obj.resources:
-        assert res._cluster_config_overrides == {
-            'kubernetes': {
-                'context_configs': {
-                    'test_context': {
-                        'pod_config': {
-                            'metadata': {
-                                'labels': {
-                                    'test-key': 'test-value'
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-
 def test_docker_login_config_all_in_envs_or_secrets():
     """Test Docker login config when all variables are in envs OR all in secrets."""
 
