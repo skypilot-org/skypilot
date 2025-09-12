@@ -455,7 +455,7 @@ def _request_execution_wrapper(request_id: str,
                                          group='internal'):
                     common_utils.release_memory()
                 rss_end = proc.memory_info().rss
-                # Answer how much RSS this request contributed after GC.
+                # Answer "how much RSS this request contributed?"
                 metrics_lib.SKY_APISERVER_REQUEST_RSS_INCR_BYTES.labels(
                     type=request_name).observe(max(rss_end - rss_begin, 0))
                 # Estimate the memory usage by the request by capturing the
