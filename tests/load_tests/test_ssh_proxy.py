@@ -3,6 +3,7 @@
 
 import argparse
 import concurrent.futures
+import logging
 import statistics
 import subprocess
 import sys
@@ -12,6 +13,12 @@ from typing import List, Tuple
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
+logger.handlers.clear()
+logger.propagate = False
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.flush = sys.stdout.flush  # type: ignore
+stream_handler.setFormatter(sky_logging.FORMATTER)
+logger.addHandler(stream_handler)
 
 
 class SSHClient:
@@ -99,6 +106,10 @@ class SSHClient:
                     logger.error(f'Error reading command output: {e}')
                     return time.time() - start_time, False, str(e)
 
+        except BrokenPipeError as e:
+            # Cannot write the packet, continue to retry
+            return 0.0, False, "BrokenPipeError"
+
         except Exception as e:
             logger.error(f'Error executing command {command}: {e}')
             return 0.0, False, str(e)
@@ -156,7 +167,12 @@ def worker_thread(cluster: str, size_bytes: int, num: int,
     try:
         command = generate_echo_command(size_bytes)
         for i in range(num):
-            latency, success = ssh_client.execute_command(command)
+            try:
+                latency, success = ssh_client.execute_command(command)
+            except BrokenPipeError as e:
+                logger.error(
+                    f"Thread {thread_id} disconnected at command {i+1}: {e}")
+                break
             results.append((latency, success))
             if not success:
                 logger.error(

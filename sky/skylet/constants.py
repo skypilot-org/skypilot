@@ -62,11 +62,14 @@ SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
                       'curl -LsSf https://astral.sh/uv/install.sh '
                       f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh')
 SKY_UV_PIP_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip')
-# Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH to deactivate the
-# environment. `deactivate` command does not work when conda is used.
+SKY_UV_RUN_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run')
+# Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH and unsetting relevant
+# VIRTUAL_ENV envvars to deactivate the environment. `deactivate` command does
+# not work when conda is used.
 DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
     'export PATH='
-    f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||")')
+    f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||") && '
+    'unset VIRTUAL_ENV && unset VIRTUAL_ENV_PROMPT')
 
 # Prefix for SkyPilot environment variables
 SKYPILOT_ENV_VAR_PREFIX = 'SKYPILOT_'
@@ -98,7 +101,7 @@ SKYLET_VERSION = '18'
 SKYLET_LIB_VERSION = 4
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 SKYLET_GRPC_PORT = 46590
-SKYLET_GRPC_TIMEOUT_SECONDS = 5
+SKYLET_GRPC_TIMEOUT_SECONDS = 10
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
@@ -229,7 +232,7 @@ RAY_INSTALLATION_COMMANDS = (
     'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
-    f'{{ {ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
+    f'{{ {SKY_UV_RUN_CMD} '
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
@@ -448,11 +451,11 @@ SKYPILOT_DEFAULT_WORKSPACE = 'default'
 # BEGIN constants used for service catalog.
 HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/catalogs'  # pylint: disable=line-too-long
 HOSTED_CATALOG_DIR_URL_S3_MIRROR = 'https://skypilot-catalog.s3.us-east-1.amazonaws.com/catalogs'  # pylint: disable=line-too-long
-CATALOG_SCHEMA_VERSION = 'v7'
+CATALOG_SCHEMA_VERSION = 'v8'
 CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
-              'paperspace', 'do', 'nebius', 'ssh', 'hyperbolic')
+              'paperspace', 'do', 'nebius', 'ssh', 'hyperbolic', 'seeweb')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.
@@ -509,3 +512,6 @@ SKY_LOCKS_DIR = os.path.expanduser('~/.sky/locks')
 
 ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
                                  'DEBUG_LOOP_LAG_THRESHOLD_MS')
+
+ARM64_ARCH = 'arm64'
+X86_64_ARCH = 'x86_64'
