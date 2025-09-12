@@ -36,9 +36,9 @@ def ssh_options_list(
 
 
 class SshMode(enum.Enum):
-    NON_INTERACTIVE: int
-    INTERACTIVE: int
-    LOGIN: int
+    NON_INTERACTIVE = ...
+    INTERACTIVE = ...
+    LOGIN = ...
 
 
 class CommandRunner:
@@ -104,6 +104,13 @@ class CommandRunner:
               log_path: str = ...,
               stream_logs: bool = ...,
               max_retry: int = ...) -> None:
+        ...
+
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         ...
 
     @classmethod
@@ -201,6 +208,13 @@ class SSHCommandRunner(CommandRunner):
               max_retry: int = ...) -> None:
         ...
 
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
+        ...
+
 
 class KubernetesCommandRunner(CommandRunner):
 
@@ -271,6 +285,13 @@ class KubernetesCommandRunner(CommandRunner):
               log_path: str = ...,
               stream_logs: bool = ...,
               max_retry: int = ...) -> None:
+        ...
+
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         ...
 
 

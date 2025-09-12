@@ -31,7 +31,7 @@ import {
   getPoolStatus,
 } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
-import { getClusters } from '@/data/connectors/clusters';
+import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import {
@@ -44,8 +44,12 @@ import {
   RotateCwIcon,
   MonitorPlay,
   RefreshCcw,
+  Download,
 } from 'lucide-react';
-import { handleJobAction } from '@/data/connectors/jobs';
+import {
+  handleJobAction,
+  downloadManagedJobLogs,
+} from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
@@ -430,7 +434,7 @@ export function ManagedJobsTable({
           statusCounts = {},
         } = jobsResponse || {};
 
-        let isControllerStopped = !!controllerStopped;
+        let isControllerStopped = false;
         let isLaunching = false;
         if (includeStatus && clustersData) {
           const jobControllerCluster = clustersData?.find((c) =>
@@ -1065,6 +1069,7 @@ export function ManagedJobsTable({
                             jobParent="/jobs"
                             jobId={item.id}
                             managed={true}
+                            workspace={item.workspace}
                           />
                         </TableCell>
                       </TableRow>
@@ -1253,6 +1258,7 @@ export function Status2Actions({
   jobParent,
   jobId,
   managed,
+  workspace = 'default',
 }) {
   const router = useRouter();
 
@@ -1265,8 +1271,32 @@ export function Status2Actions({
     });
   };
 
+  const handleDownloadLogs = (e, controller = false) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (managed) {
+      // For managed jobs
+      downloadManagedJobLogs({
+        jobId: parseInt(jobId),
+        controller: controller,
+      });
+    } else {
+      // For cluster jobs, extract cluster name from jobParent
+      const clusterNameMatch = jobParent.match(/\/clusters\/(.+)/);
+      if (clusterNameMatch) {
+        const clusterName = clusterNameMatch[1];
+        downloadJobLogs({
+          clusterName: clusterName,
+          jobIds: [jobId],
+          workspace: workspace,
+        });
+      }
+    }
+  };
+
   return (
-    <div className="flex items-center space-x-4">
+    <div className="flex items-center space-x-2">
       <Tooltip
         key="logs"
         content="View Job Logs"
@@ -1280,21 +1310,19 @@ export function Status2Actions({
           {withLabel && <span className="ml-1.5">Logs</span>}
         </button>
       </Tooltip>
-      {managed && (
-        <Tooltip
-          key="controllerlogs"
-          content="View Controller Logs"
-          className="capitalize text-sm text-muted-foreground"
+      <Tooltip
+        key="downloadlogs"
+        content="Download Job Logs"
+        className="capitalize text-sm text-muted-foreground"
+      >
+        <button
+          onClick={(e) => handleDownloadLogs(e, false)}
+          className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
         >
-          <button
-            onClick={(e) => handleLogsClick(e, 'controllerlogs')}
-            className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
-          >
-            <MonitorPlay className="w-4 h-4" />
-            {withLabel && <span className="ml-2">Controller Logs</span>}
-          </button>
-        </Tooltip>
-      )}
+          <Download className="w-4 h-4" />
+          {withLabel && <span className="ml-1.5">Download</span>}
+        </button>
+      </Tooltip>
     </div>
   );
 }
@@ -1306,6 +1334,7 @@ export function ClusterJobs({
   refreshClusterJobsOnly,
   userFilter = null,
   nameFilter = null,
+  workspace = 'default',
 }) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
@@ -1546,6 +1575,7 @@ export function ClusterJobs({
                         jobParent={`/clusters/${clusterName}`}
                         jobId={item.id}
                         managed={false}
+                        workspace={workspace}
                       />
                     </TableCell>
                   </TableRow>

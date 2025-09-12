@@ -44,7 +44,7 @@ class TestWorkspaceManagement(unittest.TestCase):
 
     @mock.patch('sky.skypilot_config.get_user_config_path')
     @mock.patch('sky.skypilot_config.to_dict')
-    @mock.patch('sky.utils.common_utils.dump_yaml')
+    @mock.patch('sky.utils.yaml_utils.dump_yaml')
     @mock.patch('sky.skypilot_config.reload_config')
     def test_internal_update_workspaces_config(self, mock_reload_config,
                                                mock_dump_yaml, mock_to_dict,
@@ -267,13 +267,14 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertEqual(result.added_users, [])
 
     @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     def test_compare_workspace_configs_private_changed_to_public(
-            self, mock_get_users):
+            self, mock_get_users_for_role, mock_get_users):
         """Test changing workspace from private to public."""
         mock_get_users.side_effect = lambda config: (['user1', 'user2']
                                                      if config.get('private')
                                                      else [])
-
+        mock_get_users_for_role.return_value = []
         current_config = {
             'private': True,
             'allowed_users': ['user1', 'user2'],
@@ -297,13 +298,14 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertEqual(set(result.added_users), set())
 
     @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     def test_compare_workspace_configs_private_changed_to_private(
-            self, mock_get_users):
+            self, mock_get_users_for_role, mock_get_users):
         """Test changing workspace from public to private."""
         mock_get_users.side_effect = lambda config: (['user1', 'user2']
                                                      if config.get('private')
                                                      else [])
-
+        mock_get_users_for_role.return_value = []
         current_config = {
             'private': False,
             'gcp': {
@@ -332,12 +334,13 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertEqual(set(result.added_users), {'user1', 'user2'})
 
     @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     def test_compare_workspace_configs_allowed_users_changed(
-            self, mock_get_users):
+            self, mock_get_users_for_role, mock_get_users):
         """Test changing allowed users without changing private setting."""
         mock_get_users.side_effect = lambda config: config.get(
             'allowed_users', [])
-
+        mock_get_users_for_role.return_value = []
         current_config = {
             'private': True,
             'allowed_users': ['user1', 'user2', 'user3'],
@@ -462,7 +465,7 @@ class TestWorkspaceManagement(unittest.TestCase):
             added_users=['user1', 'user2'])
 
         # Mock that all resources belong to allowed users
-        mock_check_resources.return_value = ('', [])
+        mock_check_resources.return_value = ('', [], {})
 
         # Should not raise any exception
         core._validate_workspace_config_changes('test-workspace', {}, {})
@@ -491,7 +494,8 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         # Mock that some resources don't belong to allowed users
         mock_check_resources.return_value = (
-            '2 active cluster(s): cluster-1, cluster-2', ['unauthorized-user'])
+            '2 active cluster(s): cluster-1, cluster-2', ['unauthorized-user'
+                                                         ], {})
 
         # Should raise ValueError
         with self.assertRaises(ValueError) as cm:
@@ -501,6 +505,40 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertIn("Cannot change workspace 'test-workspace' to private",
                       error_message)
         self.assertIn("unauthorized-user", error_message)
+        self.assertIn("2 active cluster(s): cluster-1, cluster-2",
+                      error_message)
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_remove_users_failure(
+            self, mock_compare_configs, mock_check_resources):
+        """Test validation when removing users from allowed_users."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=True,
+            private_changed=False,
+            private_old=False,
+            private_new=False,
+            allowed_users_new=['user1'],
+            removed_users=['user2'],
+            added_users=[],
+            allowed_users_old=['user1', 'user2'],
+            allowed_users_changed=True,
+        )
+
+        # Mock that some resources don't belong to allowed users
+        mock_check_resources.return_value = (
+            '2 active cluster(s): cluster-1, cluster-2', ['user2'], {
+                'user2': 'user2'
+            })
+
+        # Should raise ValueError
+        with self.assertRaises(ValueError) as cm:
+            core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        error_message = str(cm.exception)
+        self.assertIn("Cannot remove user", error_message)
+        self.assertIn("user2", error_message)
         self.assertIn("2 active cluster(s): cluster-1, cluster-2",
                       error_message)
 
@@ -525,7 +563,7 @@ class TestWorkspaceManagement(unittest.TestCase):
         # Mock multiple unauthorized users
         mock_check_resources.return_value = (
             '3 active cluster(s): cluster-1, cluster-2, cluster-3',
-            ['user2', 'user3'])
+            ['user2', 'user3'], {})
 
         # Should raise ValueError with proper plural form
         with self.assertRaises(ValueError) as cm:
@@ -536,8 +574,8 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertIn("user2", error_message)
         self.assertIn("user3", error_message)
 
-    @mock.patch('sky.utils.resource_checker.check_no_active_resources_for_users'
-               )
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
     @mock.patch('sky.workspaces.core._compare_workspace_configs')
     def test_validate_workspace_config_changes_removed_users(
             self, mock_compare_configs, mock_check_resources):
@@ -552,13 +590,13 @@ class TestWorkspaceManagement(unittest.TestCase):
             allowed_users_new=[],
             private_old=False,
             private_new=False)
+        mock_check_resources.return_value = ('', [], {})
 
         # Should not raise any exception
         core._validate_workspace_config_changes('test-workspace', {}, {})
 
         # Should call resource checker for removed users
-        expected_operations = [('user2', 'remove'), ('user3', 'remove')]
-        mock_check_resources.assert_called_once_with(expected_operations)
+        mock_check_resources.assert_called_once_with([], ['test-workspace'])
 
     @mock.patch(
         'sky.utils.resource_checker.check_no_active_resources_for_workspaces')

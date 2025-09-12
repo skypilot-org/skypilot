@@ -80,13 +80,13 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
-    dag.resolve_and_validate_volumes()
     # TODO: We apply the admin policy only on the first DAG optimization which
     # is shown on `sky launch`. The optimizer is also invoked during failover,
     # but we do not apply the admin policy there. We should apply the admin
     # policy in the optimizer, but that will require some refactoring.
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag, request_options=request_options) as dag:
+        dag.resolve_and_validate_volumes()
         return optimizer.Optimizer.optimize(dag=dag,
                                             minimize=minimize,
                                             blocked_resources=blocked_resources,
@@ -98,6 +98,7 @@ def status(
     cluster_names: Optional[Union[str, List[str]]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
+    include_credentials: bool = False,
 ) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
@@ -165,15 +166,19 @@ def status(
             provided, all clusters will be queried.
         refresh: whether to query the latest cluster statuses from the cloud
             provider(s).
+        include_credentials: whether to fetch ssh credentials for cluster
+            (credentials field in responses.StatusResponse)
 
     Returns:
         A list of dicts, with each dict containing the information of a
         cluster. If a cluster is found to be terminated or not found, it will
         be omitted from the returned list.
     """
-    clusters = backend_utils.get_clusters(refresh=refresh,
-                                          cluster_names=cluster_names,
-                                          all_users=all_users)
+    clusters = backend_utils.get_clusters(
+        refresh=refresh,
+        cluster_names=cluster_names,
+        all_users=all_users,
+        include_credentials=include_credentials)
     return [
         responses.StatusResponse.model_validate(cluster) for cluster in clusters
     ]
@@ -261,7 +266,7 @@ all_clusters, unmanaged_clusters, all_jobs, context
 
 
 def endpoints(cluster: str,
-              port: Optional[Union[int, str]] = None) -> Dict[str, str]:
+              port: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -269,7 +274,7 @@ def endpoints(cluster: str,
         port: The port number to get the endpoint for. If None, endpoints
             for all ports are returned..
 
-    Returns: A dictionary of port numbers to endpoints. If endpoint is None,
+    Returns: A dictionary of port numbers to endpoints. If port is None,
         the dictionary will contain all ports:endpoints exposed on the cluster.
 
     Raises:
@@ -281,9 +286,7 @@ def endpoints(cluster: str,
             ux_utils.spinner_message(
                 f'Fetching endpoints for cluster {cluster}')):
         result = backend_utils.get_endpoints(cluster=cluster, port=port)
-        # Convert int keys to str keys.
-        # In JSON serialization, each key must be a string.
-        return {str(k): v for k, v in result.items()}
+        return result
 
 
 @usage_lib.entrypoint
@@ -598,10 +601,7 @@ def down(cluster_name: str, purge: bool = False) -> None:
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
-    backend.teardown(handle,
-                     terminate=True,
-                     purge=purge,
-                     explicitly_requested=True)
+    backend.teardown(handle, terminate=True, purge=purge)
 
 
 @usage_lib.entrypoint
@@ -827,7 +827,7 @@ def queue(cluster_name: str,
             request = jobsv1_pb2.GetJobQueueRequest(user_hash=user_hash,
                                                     all_jobs=all_jobs)
             response = backend_utils.invoke_skylet_with_retries(
-                handle, lambda: cloud_vm_ray_backend.SkyletClient(
+                lambda: cloud_vm_ray_backend.SkyletClient(
                     handle.get_grpc_channel()).get_job_queue(request))
             jobs = []
             for job_info in response.jobs:
