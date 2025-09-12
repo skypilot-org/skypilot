@@ -43,6 +43,7 @@ from sky.utils import yaml_utils
 @pytest.mark.no_vast  #requires GCP and AWS set up
 @pytest.mark.no_fluidstack  #requires GCP and AWS set up
 @pytest.mark.no_hyperbolic  #requires GCP and AWS set up
+@pytest.mark.no_seeweb  #requires GCP and AWS set up
 def test_example_app():
     test = smoke_tests_utils.Test(
         'example_app',
@@ -263,6 +264,7 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
 @pytest.mark.no_hyperbolic
+@pytest.mark.no_seeweb
 def test_launch_fast_with_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -497,6 +499,7 @@ def test_gcp_stale_job_manual_restart():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
+@pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet.
 def test_env_check(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -520,6 +523,7 @@ def test_env_check(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet.
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet.
 def test_cli_logs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
@@ -636,6 +640,7 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autostop and host controllers
+@pytest.mark.no_seeweb  # Seeweb does not support host controllers
 def test_jobs_launch_and_logs(generic_cloud: str):
     # The first `with` is to override the sky api endpoint env if --remote-server
     # is specified, so the test knows it's running on the remote server, thats
@@ -741,6 +746,7 @@ class TestYamlSpecs:
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
 @pytest.mark.no_nebius  # Nebius does not support K80s
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_seeweb  # Seeweb does not support K80s
 def test_multiple_accelerators_ordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -760,6 +766,7 @@ def test_multiple_accelerators_ordered():
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_seeweb  # Seeweb does not support T4
 def test_multiple_accelerators_ordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -779,6 +786,7 @@ def test_multiple_accelerators_ordered_with_default():
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_seeweb  # Seeweb does not support T4
 def test_multiple_accelerators_unordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -797,6 +805,7 @@ def test_multiple_accelerators_unordered():
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_seeweb  # Seeweb does not support T4
 def test_multiple_accelerators_unordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -814,6 +823,7 @@ def test_multiple_accelerators_unordered_with_default():
 @pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 @pytest.mark.no_hyperbolic  # Requires other clouds to be enabled
+@pytest.mark.no_seeweb  # Requires other clouds to be enabled
 def test_multiple_resources():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -979,6 +989,7 @@ def test_kubernetes_context_failover(unreachable_context):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_seeweb  # Seeweb fails to provision resources
 def test_launch_and_exec_async(generic_cloud: str):
     """Test if the launch and exec commands work correctly with --async."""
     name = smoke_tests_utils.get_cluster_name()
