@@ -110,7 +110,8 @@ server_dependencies = [
 local_ray = [
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
-    # Ray 2.6.1+ resolved cluster launcher bugs and grpcio issues on Apple Silicon.
+    # Ray 2.6.1+ resolved cluster launcher bugs and grpcio issues on
+    # Apple Silicon.
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
     'ray[default] >= 2.6.1',
 ]
@@ -200,7 +201,11 @@ extras_require: Dict[str, List[str]] = {
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
     'nebius': [
+        # Nebius requires grpcio and protobuf, so we need to include
+        # our constraints here.
         'nebius>=0.2.47',
+        GRPC,
+        PROTOBUF,
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'server': server_dependencies,
