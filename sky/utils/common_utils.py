@@ -711,7 +711,7 @@ def is_wsl() -> bool:
 def find_free_port(start_port: int) -> int:
     """Finds first free local port starting with 'start_port'.
 
-    Returns: a free local port number.
+    Returns: a free local port.
 
     Raises:
       OSError: If no free ports are available.
