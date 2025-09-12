@@ -62,11 +62,16 @@ async function getWorkspaceClusters(workspaceName) {
       include_credentials: false,
       override_skypilot_config: { active_workspace: workspaceName },
     });
-    
+
     return clusters.map((cluster) => ({
-      status: cluster.status === 'UP' ? 'RUNNING' : 
-              cluster.status === 'STOPPED' ? 'STOPPED' :
-              cluster.status === 'INIT' ? 'LAUNCHING' : 'TERMINATED',
+      status:
+        cluster.status === 'UP'
+          ? 'RUNNING'
+          : cluster.status === 'STOPPED'
+            ? 'STOPPED'
+            : cluster.status === 'INIT'
+              ? 'LAUNCHING'
+              : 'TERMINATED',
       cluster: cluster.name,
       user: cluster.user_name,
       user_hash: cluster.user_hash,
@@ -83,7 +88,10 @@ async function getWorkspaceClusters(workspaceName) {
       resources_str: cluster.resources_str,
     }));
   } catch (error) {
-    console.error(`Error fetching clusters for workspace ${workspaceName}:`, error);
+    console.error(
+      `Error fetching clusters for workspace ${workspaceName}:`,
+      error
+    );
     return [];
   }
 }
@@ -95,14 +103,17 @@ async function getWorkspaceManagedJobs(workspaceName) {
       verbose: true,
       override_skypilot_config: { active_workspace: workspaceName },
     });
-    
+
     const id = response.headers.get('X-Skypilot-Request-ID');
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     const data = await fetchedData.json();
-    
+
     return data.return_value ? JSON.parse(data.return_value) : { jobs: [] };
   } catch (error) {
-    console.error(`Error fetching managed jobs for workspace ${workspaceName}:`, error);
+    console.error(
+      `Error fetching managed jobs for workspace ${workspaceName}:`,
+      error
+    );
     return { jobs: [] };
   }
 }
@@ -370,47 +381,51 @@ export function Workspaces() {
       const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
       // Fetch data for each workspace in parallel using workspace-aware API calls
-      const workspaceDataPromises = configuredWorkspaceNames.map(async (wsName) => {
-        const [enabledClouds, clusters, managedJobs] = await Promise.all([
-          dashboardCache.get(getEnabledClouds, [wsName]),
-          getWorkspaceClusters(wsName),
-          getWorkspaceManagedJobs(wsName),
-        ]);
-        
-        return {
-          workspaceName: wsName,
-          enabledClouds,
-          clusters: clusters || [],
-          managedJobs: managedJobs || { jobs: [] },
-        };
-      });
+      const workspaceDataPromises = configuredWorkspaceNames.map(
+        async (wsName) => {
+          const [enabledClouds, clusters, managedJobs] = await Promise.all([
+            dashboardCache.get(getEnabledClouds, [wsName]),
+            getWorkspaceClusters(wsName),
+            getWorkspaceManagedJobs(wsName),
+          ]);
+
+          return {
+            workspaceName: wsName,
+            enabledClouds,
+            clusters: clusters || [],
+            managedJobs: managedJobs || { jobs: [] },
+          };
+        }
+      );
 
       const workspaceDataArray = await Promise.all(workspaceDataPromises);
-      
+
       // Aggregate all clusters and jobs with workspace information
       const clustersResponse = [];
       const allJobs = [];
       const enabledCloudsMap = {};
-      
-      workspaceDataArray.forEach(({ workspaceName, enabledClouds, clusters, managedJobs }) => {
-        // Add workspace info to clusters
-        clusters.forEach(cluster => {
-          clustersResponse.push({
-            ...cluster,
-            workspace: workspaceName
+
+      workspaceDataArray.forEach(
+        ({ workspaceName, enabledClouds, clusters, managedJobs }) => {
+          // Add workspace info to clusters
+          clusters.forEach((cluster) => {
+            clustersResponse.push({
+              ...cluster,
+              workspace: workspaceName,
+            });
           });
-        });
-        
-        // Add workspace info to jobs
-        managedJobs.jobs.forEach(job => {
-          allJobs.push({
-            ...job,
-            workspace: workspaceName
+
+          // Add workspace info to jobs
+          managedJobs.jobs.forEach((job) => {
+            allJobs.push({
+              ...job,
+              workspace: workspaceName,
+            });
           });
-        });
-        
-        enabledCloudsMap[workspaceName] = enabledClouds;
-      });
+
+          enabledCloudsMap[workspaceName] = enabledClouds;
+        }
+      );
 
       const managedJobsResponse = { jobs: allJobs };
 
