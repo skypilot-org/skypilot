@@ -60,7 +60,8 @@ Add `--arch arm64` for `arm64` image:
 ```bash
 export TYPE=gpu  # Update this
 export IMAGE_ID=ami-0989556a89639b1bb   # Update this
-python aws_utils/image_gen.py --image-id ${IMAGE_ID} --processor ${TYPE} --arch arm64
+export BASE_IMAGE_ID=ami-01b2110eef525172b   # Update this
+python aws_utils/image_gen.py --image-id ${IMAGE_ID} --processor ${TYPE} --base-image-id ${BASE_IMAGE_ID} --arch arm64
 ```
 3. Add fallback images if any region failed \
 Look for "NEED_FALLBACK" in the output `images.csv` and edit. (You can use public [ubuntu images](https://cloud-images.ubuntu.com/locator/ec2/) as fallback.)

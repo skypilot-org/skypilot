@@ -11,7 +11,6 @@ setup: |
   git checkout v4.25.1
   pip3 install .
   cd examples/pytorch/text-classification
-  # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
   pip3 install -r requirements.txt tensorboard
 
 # The command to run.  Will be run under the working directory.
