@@ -1116,6 +1116,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_fluidstack_authentication(config)
     elif isinstance(cloud, clouds.Hyperbolic):
         config = auth.setup_hyperbolic_authentication(config)
+    elif isinstance(cloud, clouds.Seeweb):
+        config = auth.setup_seeweb_authentication(config)
     else:
         assert False, cloud
     yaml_utils.dump_yaml(tmp_yaml_path, config)
@@ -2333,7 +2335,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                                                 handle,
                                                 requested_resources=None,
                                                 ready=True,
-                                                is_launch=False)
+                                                is_launch=False,
+                                                update_only=True)
         return global_user_state.get_cluster_from_name(cluster_name)
 
     # All cases below are transitioning the cluster to non-UP states.
@@ -2543,7 +2546,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                                                 handle,
                                                 requested_resources=None,
                                                 ready=False,
-                                                is_launch=False)
+                                                is_launch=False,
+                                                update_only=True)
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
@@ -2681,7 +2685,7 @@ def refresh_cluster_record(
                     'Refreshing status: Failed get the lock for cluster '
                     f'{cluster_name!r}. Using the cached status.')
                 return record
-            time.sleep(0.05)
+            time.sleep(lock.poll_interval)
 
             # Refresh for next loop iteration.
             record = global_user_state.get_cluster_from_name(cluster_name)
