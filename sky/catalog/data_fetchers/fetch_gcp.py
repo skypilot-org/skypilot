@@ -182,9 +182,7 @@ TPU_V4_HOST_DF = pd.read_csv(
 SERIES_TO_DESCRIPTION = {
     'a2': 'A2 Instance',
     'a3': 'A3 Instance',
-    # TODO(zhwu): GCP does not have A4 instance in SKUs API yet. We keep it here
-    # for completeness.
-    'a4': 'A4 Instance',
+    'a4': 'A4 Nvidia B200 (1 gpu slice)',
     'c2': 'Compute optimized',
     'c2d': 'C2D AMD Instance',
     'c3': 'C3 Instance',
@@ -543,7 +541,7 @@ def get_gpu_df(skus: List[Dict[str, Any]],
             elif row_gpu_name == 'H200':
                 gpu_names = ['H200 141GB GPU']
             elif row_gpu_name == 'B200':
-                gpu_names = ['Nvidia B200 (1 gpu slice)']
+                gpu_names = ['A4 Nvidia B200 (1 gpu slice)']
             if not any(
                     gpu_name in sku['description'] for gpu_name in gpu_names):
                 continue
