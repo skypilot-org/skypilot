@@ -321,27 +321,21 @@ def override_request_env_and_config(
                 request_body.override_skypilot_config_path):
 
             try:
-                if (request_name is not None and 
-                    request_name != 'sky.workspaces.get'):
+                if (request_name is not None and
+                        request_name != 'sky.workspaces.get'):
                     # Rejecting requests to workspaces that the user does not have
                     # permission to access.
                     workspaces_core.reject_request_for_unauthorized_workspace(
                         user)
                 else:
-                    logger.debug(
-                        f'{request_id} permission granted to '
-                        f'sky.workspaces.get request'
-                    )
+                    logger.debug(f'{request_id} permission granted to '
+                                 f'sky.workspaces.get request')
             except exceptions.PermissionDeniedError as e:
-                logger.debug(
-                    f'{request_id} permission denied to workspace: '
-                    f'{skypilot_config.get_active_workspace()}: {e}'
-                )
+                logger.debug(f'{request_id} permission denied to workspace: '
+                             f'{skypilot_config.get_active_workspace()}: {e}')
                 raise e
-            logger.debug(
-                f'{request_id} permission granted to workspace: '
-                f'{skypilot_config.get_active_workspace()}'
-            )
+            logger.debug(f'{request_id} permission granted to workspace: '
+                         f'{skypilot_config.get_active_workspace()}')
             yield
     finally:
         # We need to call the save_timeline() since atexit will not be
