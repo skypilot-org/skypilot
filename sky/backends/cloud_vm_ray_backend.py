@@ -349,7 +349,7 @@ def _get_num_gpus(ray_resources_dict: Dict[str, float]) -> int:
         pass
     if len(dict_copy) == 0:
         return 0
-    return math.ceil(float(list(dict_copy.values())[0]))
+    return math.ceil(list(dict_copy.values())[0])
 
 
 class RayCodeGen:
@@ -735,7 +735,7 @@ class RayCodeGen:
             assert len(ray_resources_dict) == 1, (
                 'There can only be one type of accelerator per instance. '
                 f'Found: {ray_resources_dict}.')
-            num_gpus = _get_num_gpus(ray_resources_dict)
+            num_gpus = list(ray_resources_dict.values())[0]
             options.append(f'resources={json.dumps(ray_resources_dict)}')
 
             resources_key = list(ray_resources_dict.keys())[0]
