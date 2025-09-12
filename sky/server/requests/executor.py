@@ -321,22 +321,26 @@ def override_request_env_and_config(
                 request_body.override_skypilot_config_path):
 
             try:
-                if request_name is not None and request_name != 'sky.workspaces.get':
+                if (request_name is not None and 
+                    request_name != 'sky.workspaces.get'):
                     # Rejecting requests to workspaces that the user does not have
                     # permission to access.
                     workspaces_core.reject_request_for_unauthorized_workspace(
                         user)
                 else:
                     logger.debug(
-                        f'{request_id} permission granted to sky.workspaces.get request'
+                        f'{request_id} permission granted to '
+                        f'sky.workspaces.get request'
                     )
             except exceptions.PermissionDeniedError as e:
                 logger.debug(
-                    f'{request_id} permission denied to workspace: {skypilot_config.get_active_workspace()}: {e}'
+                    f'{request_id} permission denied to workspace: '
+                    f'{skypilot_config.get_active_workspace()}: {e}'
                 )
                 raise e
             logger.debug(
-                f'{request_id} permission granted to workspace: {skypilot_config.get_active_workspace()}'
+                f'{request_id} permission granted to workspace: '
+                f'{skypilot_config.get_active_workspace()}'
             )
             yield
     finally:
@@ -418,7 +422,8 @@ def _request_execution_wrapper(request_id: str,
         # captured in the log file.
         try:
             with sky_logging.add_debug_log_handler(request_id), \
-                override_request_env_and_config(request_body, request_id, request_name), \
+                override_request_env_and_config(
+                    request_body, request_id, request_name), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
