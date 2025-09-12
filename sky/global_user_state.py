@@ -639,7 +639,6 @@ def add_or_update_cluster(cluster_name: str,
                     cluster_table.c.cluster_hash: cluster_hash,
                     cluster_table.c.status_updated_at: status_updated_at
                 })
-            print(f"count: {count}")
             assert count <= 1
             if count == 0:
                 raise ValueError(f'Cluster {cluster_name} not found.')
