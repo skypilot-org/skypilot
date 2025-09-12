@@ -380,23 +380,23 @@ export function Workspaces() {
       setRawWorkspacesData(fetchedWorkspacesConfig);
       const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
-        // Fetch data for each workspace in parallel using workspace-aware API calls
-        const workspaceDataPromises = configuredWorkspaceNames.map(
-          async (wsName) => {
-            const [enabledClouds, clusters, managedJobs] = await Promise.all([
-              dashboardCache.get(getEnabledClouds, [wsName]),
-              dashboardCache.get(getWorkspaceClusters, [wsName]),
-              dashboardCache.get(getWorkspaceManagedJobs, [wsName]),
-            ]);
+      // Fetch data for each workspace in parallel using workspace-aware API calls
+      const workspaceDataPromises = configuredWorkspaceNames.map(
+        async (wsName) => {
+          const [enabledClouds, clusters, managedJobs] = await Promise.all([
+            dashboardCache.get(getEnabledClouds, [wsName]),
+            dashboardCache.get(getWorkspaceClusters, [wsName]),
+            dashboardCache.get(getWorkspaceManagedJobs, [wsName]),
+          ]);
 
-            return {
-              workspaceName: wsName,
-              enabledClouds,
-              clusters: clusters || [],
-              managedJobs: managedJobs || { jobs: [] },
-            };
-          }
-        );
+          return {
+            workspaceName: wsName,
+            enabledClouds,
+            clusters: clusters || [],
+            managedJobs: managedJobs || { jobs: [] },
+          };
+        }
+      );
 
       const workspaceDataArray = await Promise.all(workspaceDataPromises);
 
@@ -646,7 +646,7 @@ export function Workspaces() {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
-    
+
     // Invalidate workspace-specific caches
     dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
     dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
