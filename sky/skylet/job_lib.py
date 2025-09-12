@@ -225,7 +225,8 @@ class JobStatus(enum.Enum):
 
     @classmethod
     def from_protobuf(
-            cls, protobuf_value: jobsv1_pb2.JobStatus) -> Optional['JobStatus']:
+            cls,
+            protobuf_value: 'jobsv1_pb2.JobStatus') -> Optional['JobStatus']:
         """Convert protobuf JobStatus enum to Python enum value."""
         protobuf_to_enum = {
             jobsv1_pb2.JOB_STATUS_INIT: cls.INIT,
@@ -244,7 +245,7 @@ class JobStatus(enum.Enum):
                 f'Unknown protobuf JobStatus value: {protobuf_value}')
         return protobuf_to_enum[protobuf_value]
 
-    def to_protobuf(self) -> jobsv1_pb2.JobStatus:
+    def to_protobuf(self) -> 'jobsv1_pb2.JobStatus':
         """Convert this Python enum value to protobuf enum value."""
         enum_to_protobuf = {
             JobStatus.INIT: jobsv1_pb2.JOB_STATUS_INIT,
@@ -536,7 +537,7 @@ def get_statuses(job_ids: List[int]) -> Dict[int, Optional[str]]:
 
 @init_db
 def get_jobs_info(user_hash: Optional[str] = None,
-                  all_jobs: bool = False) -> List[jobsv1_pb2.JobInfo]:
+                  all_jobs: bool = False) -> List['jobsv1_pb2.JobInfo']:
     """Get detailed job information.
 
     Similar to dump_job_queue but returns structured protobuf objects instead

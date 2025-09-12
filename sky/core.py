@@ -20,6 +20,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import cloud as sky_cloud
@@ -27,7 +28,6 @@ from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
-from sky.schemas.generated import jobsv1_pb2
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -46,6 +46,9 @@ from sky.utils.kubernetes import kubernetes_deploy_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+    from sky.schemas.generated import jobsv1_pb2
+else:
+    jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 

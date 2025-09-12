@@ -3061,73 +3061,73 @@ class SkyletClient:
 
     def add_job(
         self,
-        request: jobsv1_pb2.AddJobRequest,
+        request: 'jobsv1_pb2.AddJobRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.AddJobResponse:
+    ) -> 'jobsv1_pb2.AddJobResponse':
         return self._jobs_stub.AddJob(request, timeout=timeout)
 
     def queue_job(
         self,
-        request: jobsv1_pb2.QueueJobRequest,
+        request: 'jobsv1_pb2.QueueJobRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.QueueJobResponse:
+    ) -> 'jobsv1_pb2.QueueJobResponse':
         return self._jobs_stub.QueueJob(request, timeout=timeout)
 
     def update_status(
         self,
-        request: jobsv1_pb2.UpdateStatusRequest,
+        request: 'jobsv1_pb2.UpdateStatusRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.UpdateStatusResponse:
+    ) -> 'jobsv1_pb2.UpdateStatusResponse':
         return self._jobs_stub.UpdateStatus(request, timeout=timeout)
 
     def get_job_queue(
         self,
-        request: jobsv1_pb2.GetJobQueueRequest,
+        request: 'jobsv1_pb2.GetJobQueueRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.GetJobQueueResponse:
+    ) -> 'jobsv1_pb2.GetJobQueueResponse':
         return self._jobs_stub.GetJobQueue(request, timeout=timeout)
 
     def cancel_jobs(
         self,
-        request: jobsv1_pb2.CancelJobsRequest,
+        request: 'jobsv1_pb2.CancelJobsRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.CancelJobsResponse:
+    ) -> 'jobsv1_pb2.CancelJobsResponse':
         return self._jobs_stub.CancelJobs(request, timeout=timeout)
 
     def fail_all_in_progress_jobs(
         self,
-        request: jobsv1_pb2.FailAllInProgressJobsRequest,
+        request: 'jobsv1_pb2.FailAllInProgressJobsRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.FailAllInProgressJobsResponse:
+    ) -> 'jobsv1_pb2.FailAllInProgressJobsResponse':
         return self._jobs_stub.FailAllInProgressJobs(request, timeout=timeout)
 
     def get_job_status(
         self,
-        request: jobsv1_pb2.GetJobStatusRequest,
+        request: 'jobsv1_pb2.GetJobStatusRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.GetJobStatusResponse:
+    ) -> 'jobsv1_pb2.GetJobStatusResponse':
         return self._jobs_stub.GetJobStatus(request, timeout=timeout)
 
     def get_job_submitted_timestamp(
         self,
-        request: jobsv1_pb2.GetJobSubmittedTimestampRequest,
+        request: 'jobsv1_pb2.GetJobSubmittedTimestampRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.GetJobSubmittedTimestampResponse:
+    ) -> 'jobsv1_pb2.GetJobSubmittedTimestampResponse':
         return self._jobs_stub.GetJobSubmittedTimestamp(request,
                                                         timeout=timeout)
 
     def get_job_ended_timestamp(
         self,
-        request: jobsv1_pb2.GetJobEndedTimestampRequest,
+        request: 'jobsv1_pb2.GetJobEndedTimestampRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.GetJobEndedTimestampResponse:
+    ) -> 'jobsv1_pb2.GetJobEndedTimestampResponse':
         return self._jobs_stub.GetJobEndedTimestamp(request, timeout=timeout)
 
     def get_log_dirs_for_jobs(
         self,
-        request: jobsv1_pb2.GetLogDirsForJobsRequest,
+        request: 'jobsv1_pb2.GetLogDirsForJobsRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> jobsv1_pb2.GetLogDirsForJobsResponse:
+    ) -> 'jobsv1_pb2.GetLogDirsForJobsResponse':
         return self._jobs_stub.GetLogDirsForJobs(request, timeout=timeout)
 
 
