@@ -5,6 +5,7 @@ import signal
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 from typing import List, Optional
 
@@ -730,3 +731,13 @@ def prepare_env_file(request):
         # Clean up temporary directory
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def no_thread_leak():
+    before = {t.name for t in threading.enumerate()}
+    yield
+    after = {t.name for t in threading.enumerate()}
+    leaked = after - before
+    if leaked:
+        raise AssertionError(f"Threads leaked: {leaked}")
