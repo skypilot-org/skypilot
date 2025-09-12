@@ -4,6 +4,7 @@ import contextlib
 import functools
 import multiprocessing
 import os
+import threading
 import time
 
 import fastapi
@@ -208,12 +209,12 @@ def time_me_async(func):
     return async_wrapper
 
 
-def process_monitor(process_type: str):
+def process_monitor(process_type: str, stop: threading.Event):
     pid = multiprocessing.current_process().pid
     proc = psutil.Process(pid)
     peak_rss = 0
     last_bucket_end = time.time()
-    while True:
+    while not stop.is_set():
         if time.time() - last_bucket_end >= 30:
             # Reset peak RSS every 30 seconds.
             last_bucket_end = time.time()

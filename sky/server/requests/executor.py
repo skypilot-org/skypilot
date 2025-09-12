@@ -130,8 +130,9 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
-                     args=(f'worker:{proc_group}',),
+                     args=(f'worker:{proc_group}', threading.Event()),
                      daemon=True).start()
 
 
