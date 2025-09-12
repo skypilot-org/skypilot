@@ -319,12 +319,11 @@ def override_request_env_and_config(
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config,
                 request_body.override_skypilot_config_path):
-            # Rejecting requests to workspaces that the user does not have
-            # permission to access.
-            if request_name is not None:
-                logger.debug(f'{request_id} request name: {request_name}')
+
             try:
                 if request_name is not None and request_name != 'sky.workspaces.get':
+                    # Rejecting requests to workspaces that the user does not have
+                    # permission to access.
                     workspaces_core.reject_request_for_unauthorized_workspace(
                         user)
                 else:
