@@ -711,16 +711,12 @@ def is_wsl() -> bool:
 def find_free_port(start_port: int) -> int:
     """Finds first free local port starting with 'start_port'.
 
-    Note that this function does not hold the socket open
-    after successfully binding to it, so concurrent calls
-    to this function may return the same port.
-
     Returns: a free local port number.
 
     Raises:
       OSError: If no free ports are available.
     """
-    for port in range(start_port, 65536):
+    for port in range(start_port, 65535):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
                 s.bind(('', port))
