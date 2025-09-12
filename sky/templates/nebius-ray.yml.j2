@@ -10,6 +10,7 @@ provider:
   module: sky.provision.nebius
   region: "{{region}}"
   use_internal_ips: {{use_internal_ips}}
+  use_static_ip_address: {{ use_static_ip_address }}
 
 {%- if docker_image is not none %}
 docker:

@@ -118,6 +118,9 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('provision_log_path',
                       sqlalchemy.Text,
                       server_default=None),
+    sqlalchemy.Column('skylet_ssh_tunnel_metadata',
+                      sqlalchemy.LargeBinary,
+                      server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -1164,6 +1167,37 @@ def set_cluster_storage_mounts_metadata(
                 cluster_table.c.storage_mounts_metadata:
                     pickle.dumps(storage_mounts_metadata)
             })
+        session.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
+
+
+@_init_db
+@metrics_lib.time_me
+def get_cluster_skylet_ssh_tunnel_metadata(
+        cluster_name: str) -> Optional[Tuple[int, int]]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+    if row is None or row.skylet_ssh_tunnel_metadata is None:
+        return None
+    return pickle.loads(row.skylet_ssh_tunnel_metadata)
+
+
+@_init_db
+@metrics_lib.time_me
+def set_cluster_skylet_ssh_tunnel_metadata(
+        cluster_name: str,
+        skylet_ssh_tunnel_metadata: Optional[Tuple[int, int]]) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        value = pickle.dumps(
+            skylet_ssh_tunnel_metadata
+        ) if skylet_ssh_tunnel_metadata is not None else None
+        count = session.query(cluster_table).filter_by(
+            name=cluster_name).update(
+                {cluster_table.c.skylet_ssh_tunnel_metadata: value})
         session.commit()
     assert count <= 1, count
     if count == 0:

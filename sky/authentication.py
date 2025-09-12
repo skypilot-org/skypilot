@@ -40,6 +40,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
 from sky.adaptors import runpod
+from sky.adaptors import seeweb as seeweb_adaptor
 from sky.adaptors import shadeform as shadeform_adaptor
 from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
@@ -208,6 +209,24 @@ def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
+def parse_gcp_project_oslogin(project):
+    """Helper function to parse GCP project metadata."""
+    common_metadata = project.get('commonInstanceMetadata', {})
+    if not isinstance(common_metadata, dict):
+        common_metadata = {}
+
+    metadata_items = common_metadata.get('items', [])
+    if not isinstance(metadata_items, list):
+        metadata_items = []
+
+    project_oslogin = next(
+        (item for item in metadata_items
+         if isinstance(item, dict) and item.get('key') == 'enable-oslogin'),
+        {}).get('value', 'False')
+
+    return project_oslogin
+
+
 # Snippets of code inspired from
 # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
@@ -265,10 +284,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                      'Please check your network connection.')
         raise
 
-    project_oslogin: str = next(  # type: ignore
-        (item for item in project['commonInstanceMetadata'].get('items', [])
-         if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
-
+    project_oslogin = parse_gcp_project_oslogin(project)
     if project_oslogin.lower() == 'true':
         logger.info(
             f'OS Login is enabled for GCP project {project_id}. Running '
@@ -628,3 +644,40 @@ def setup_shadeform_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_public_key'] = public_key_path
     config['auth']['ssh_key_id'] = ssh_key_id
     return configure_ssh_info(config)
+
+
+def setup_seeweb_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Registers the public key with Seeweb and notes the remote name."""
+    # 1. local key pair
+    get_or_generate_keys()
+
+    # 2. public key
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    # 3. Seeweb API client
+    client = seeweb_adaptor.client()
+
+    # 4. Check if key is already registered
+    prefix = f'sky-key-{common_utils.get_user_hash()}'
+    remote_name = None
+    for k in client.fetch_ssh_keys():
+        if k.key.strip() == public_key:
+            remote_name = k.label  # already present
+            break
+
+    # 5. doesn't exist, choose a unique name and create it
+    if remote_name is None:
+        suffix = 1
+        remote_name = prefix
+        existing_names = {k.label for k in client.fetch_ssh_keys()}
+        while remote_name in existing_names:
+            suffix += 1
+            remote_name = f'{prefix}-{suffix}'
+        client.create_ssh_key(label=remote_name, key=public_key)
+
+    # 6. Put the remote name in cluster-config (like for Lambda)
+    config['auth']['remote_key_name'] = remote_name
+
+    return config

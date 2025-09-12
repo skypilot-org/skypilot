@@ -9,7 +9,9 @@ from sky import skypilot_config
 from sky.server import constants as server_constants
 from sky.utils import annotations
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -73,6 +75,11 @@ class InternalRequestDaemon:
                 # using too much memory.
                 annotations.clear_request_level_cache()
                 timeline.save_timeline()
+                # Kill all children processes related to this request.
+                # Each executor handles a single request, so we can safely
+                # kill all children processes related to this request.
+                subprocess_utils.kill_children_processes()
+                common_utils.release_memory()
             except Exception:  # pylint: disable=broad-except
                 # It is OK to fail to run the event, as the event is not
                 # critical, but we should log the error.
@@ -121,21 +128,16 @@ def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
-    from sky.utils import controller_utils
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
-    if controller_utils.high_availability_specified(
-            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name):
-        managed_job_utils.ha_recovery_for_consolidation_mode()
+    managed_job_utils.ha_recovery_for_consolidation_mode()
 
     # After recovery, we start the event loop.
     from sky.skylet import events
     refresh_event = events.ManagedJobEvent()
-    scheduling_event = events.ManagedJobSchedulingEvent()
     logger.info('=== Running managed job event ===')
     refresh_event.run()
-    scheduling_event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 
 
@@ -150,14 +152,10 @@ def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.serve import serve_utils
-    from sky.utils import controller_utils
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
-    controller = controller_utils.get_controller_for_pool(pool)
-    if controller_utils.high_availability_specified(
-            controller.value.cluster_name):
-        serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
+    serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
 
     # After recovery, we start the event loop.
     from sky.skylet import events

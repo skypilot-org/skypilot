@@ -150,6 +150,7 @@ Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
 Shadeform = clouds.Shadeform
+Seeweb = clouds.Seeweb
 
 __all__ = [
     '__version__',
@@ -171,6 +172,7 @@ __all__ = [
     'Nebius',
     'Hyperbolic',
     'Shadeform',
+    'Seeweb',
     'Optimizer',
     'OptimizeTarget',
     'backends',

@@ -457,6 +457,7 @@ def test_image_no_conda():
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
 @pytest.mark.no_shadeform  # Shadeform does not support stopping instances
+@pytest.mark.no_seeweb  # Seeweb does not support autodown
 def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':

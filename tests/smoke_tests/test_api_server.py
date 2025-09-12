@@ -18,6 +18,7 @@ def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
 # ---------- Test multi-tenant ----------
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
 @pytest.mark.no_shadeform  # Shadeform does not support multi-tenant jobs
+@pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
 def test_multi_tenant(generic_cloud: str):
     if smoke_tests_utils.services_account_token_configured_in_env_file():
         pytest.skip(
@@ -108,6 +109,7 @@ def test_multi_tenant(generic_cloud: str):
 
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
 @pytest.mark.no_shadeform  # Shadeform does not support multi-tenant jobs
+@pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
 def test_multi_tenant_managed_jobs(generic_cloud: str):
     if smoke_tests_utils.services_account_token_configured_in_env_file():
         pytest.skip(

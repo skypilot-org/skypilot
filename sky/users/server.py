@@ -42,17 +42,23 @@ def users() -> List[Dict[str, Any]]:
     """Gets all users."""
     all_users = []
     user_list = global_user_state.get_all_users()
+
+    users_to_role = {}
+    for role in rbac.get_supported_roles():
+        user_ids = permission.permission_service.get_users_for_role(role)
+        for user_id in user_ids:
+            users_to_role[user_id] = role
+
     for user in user_list:
         # Filter out service accounts - they have IDs starting with "sa-"
         if user.is_service_account():
             continue
 
-        user_roles = permission.permission_service.get_user_roles(user.id)
         all_users.append({
             'id': user.id,
             'name': user.name,
             'created_at': user.created_at,
-            'role': user_roles[0] if user_roles else ''
+            'role': users_to_role.get(user.id, '')
         })
     return all_users
 

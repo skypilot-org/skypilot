@@ -14,6 +14,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.users import permission
+from sky.users import rbac
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -147,11 +148,15 @@ def _compare_workspace_configs(
     private_new = new_config.get('private', False)
     private_changed = private_old != private_new
 
+    admin_user_ids = permission.permission_service.get_users_for_role(
+        rbac.RoleName.ADMIN.value)
     # Get allowed users (resolve to user IDs for comparison)
     allowed_users_old = workspaces_utils.get_workspace_users(
         current_config) if private_old else []
+    allowed_users_old += admin_user_ids
     allowed_users_new = workspaces_utils.get_workspace_users(
         new_config) if private_new else []
+    allowed_users_new += admin_user_ids
 
     # Convert to sets for easier comparison
     old_users_set = set(allowed_users_old)
@@ -186,6 +191,24 @@ def _compare_workspace_configs(
         allowed_users_new=allowed_users_new,
         removed_users=removed_users,
         added_users=added_users)
+
+
+def _validate_workspace_config_changes_with_lock(
+        workspace_name: str, current_config: Dict[str, Any],
+        new_config: Dict[str, Any]) -> None:
+    lock_id = backend_utils.workspace_lock_id(workspace_name)
+    lock_timeout = backend_utils.WORKSPACE_LOCK_TIMEOUT_SECONDS
+    try:
+        with locks.get_lock(lock_id, lock_timeout):
+            # Validate the configuration changes based on active resources
+            _validate_workspace_config_changes(workspace_name, current_config,
+                                               new_config)
+    except locks.LockTimeout as e:
+        raise RuntimeError(
+            f'Failed to validate workspace {workspace_name!r} due to '
+            'a timeout when trying to access database. Please '
+            f'try again or manually remove the lock at {lock_id}. '
+            f'{common_utils.format_exception(e)}') from None
 
 
 def _validate_workspace_config_changes(workspace_name: str,
@@ -232,7 +255,7 @@ def _validate_workspace_config_changes(workspace_name: str,
                     f' private. Checking that all active resources belong'
                     f' to allowed users.')
 
-                error_summary, missed_users_names = (
+                error_summary, missed_users_names, _ = (
                     resource_checker.check_users_workspaces_active_resources(
                         config_comparison.allowed_users_new, [workspace_name]))
                 if error_summary:
@@ -259,11 +282,35 @@ def _validate_workspace_config_changes(workspace_name: str,
                     f'Checking that removed users'
                     f' {config_comparison.removed_users} do not have'
                     f' active resources in workspace {workspace_name!r}.')
-                user_operations = []
-                for user_id in config_comparison.removed_users:
-                    user_operations.append((user_id, 'remove'))
-                resource_checker.check_no_active_resources_for_users(
-                    user_operations)
+                error_summary, missed_users_names, missed_user_dict = (
+                    resource_checker.check_users_workspaces_active_resources(
+                        config_comparison.allowed_users_new, [workspace_name]))
+                if error_summary:
+                    error_user_ids = []
+                    for user_id in config_comparison.removed_users:
+                        if user_id in missed_user_dict:
+                            error_user_ids.append(user_id)
+                    error_user_names = []
+                    if error_user_ids:
+                        error_user_names = [
+                            missed_user_dict[user_id]
+                            for user_id in error_user_ids
+                        ]
+
+                    error_msg = 'Cannot '
+                    error_users_list = ', '.join(error_user_names)
+                    if len(error_user_names) == 1:
+                        error_msg += f'remove user {error_users_list!r} ' \
+                        f'from workspace {workspace_name!r} because the ' \
+                        f'user has {error_summary}'
+                    else:
+                        error_msg += f'remove users {error_users_list!r}' \
+                        f' from workspace {workspace_name!r} because the' \
+                        f' users have {error_summary}'
+                    error_msg += ', but not in the allowed_users list.' \
+                    ' Please either add the users to allowed_users or' \
+                    ' ask them to terminate their resources.'
+                    raise ValueError(error_msg)
     else:
         # Other configuration changes - check that workspace has no active
         # resources
@@ -310,20 +357,8 @@ def update_workspace(workspace_name: str, config: Dict[str,
                                                     default_value={})
     current_config = current_workspaces.get(workspace_name, {})
 
-    if current_config:
-        lock_id = backend_utils.workspace_lock_id(workspace_name)
-        lock_timeout = backend_utils.WORKSPACE_LOCK_TIMEOUT_SECONDS
-        try:
-            with locks.get_lock(lock_id, lock_timeout):
-                # Validate the configuration changes based on active resources
-                _validate_workspace_config_changes(workspace_name,
-                                                   current_config, config)
-        except locks.LockTimeout as e:
-            raise RuntimeError(
-                f'Failed to validate workspace {workspace_name!r} due to '
-                'a timeout when trying to access database. Please '
-                f'try again or manually remove the lock at {lock_id}. '
-                f'{common_utils.format_exception(e)}') from None
+    _validate_workspace_config_changes_with_lock(workspace_name, current_config,
+                                                 config)
 
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
@@ -510,7 +545,8 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
         # If workspace configuration is changing, validate and mark for checking
         if current_workspace_config != new_workspace_config:
             _validate_workspace_config(workspace_name, new_workspace_config)
-            workspaces_to_check.append((workspace_name, 'update'))
+            _validate_workspace_config_changes_with_lock(
+                workspace_name, current_workspace_config, new_workspace_config)
             users = workspaces_utils.get_workspace_users(new_workspace_config)
             workspaces_to_check_policy['update'][workspace_name] = users
 

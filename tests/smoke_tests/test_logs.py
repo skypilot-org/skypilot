@@ -15,6 +15,7 @@ from smoke_tests import smoke_tests_utils
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 @pytest.mark.no_nebius  # Requires GCP to be enabled
 @pytest.mark.no_kubernetes  # Requires GCP to be enabled
+@pytest.mark.no_seeweb  # Requires GCP to be enabled
 def test_log_collection_to_gcp(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Calculate timestamp 1 hour ago in ISO format

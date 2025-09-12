@@ -1,8 +1,10 @@
 """Utils shared between all of sky"""
 
+import ctypes
 import difflib
 import enum
 import functools
+import gc
 import getpass
 import hashlib
 import inspect
@@ -994,7 +996,17 @@ def get_mem_size_gb() -> float:
         except ValueError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Failed to parse the memory size from {mem_size}') from e
+                    f'Failed to parse the memory size from {mem_size} (GB)'
+                ) from e
+    mem_size = os.getenv('SKYPILOT_POD_MEMORY_BYTES_LIMIT')
+    if mem_size is not None:
+        try:
+            return float(mem_size) / (1024**3)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to parse the memory size from {mem_size} (bytes)'
+                ) from e
     return _mem_size_gb()
 
 
@@ -1090,3 +1102,21 @@ def removeprefix(string: str, prefix: str) -> str:
     if string.startswith(prefix):
         return string[len(prefix):]
     return string
+
+
+def release_memory():
+    """Release the process memory"""
+    # Do the best effort to release the python heap and let malloc_trim
+    # be more efficient.
+    try:
+        gc.collect()
+        if sys.platform.startswith('linux'):
+            # Will fail on musl (alpine), but at least it works on our
+            # offical docker images.
+            libc = ctypes.CDLL('libc.so.6')
+            return libc.malloc_trim(0)
+        return 0
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to release memory: '
+                     f'{format_exception(e)}')
+        return 0

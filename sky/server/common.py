@@ -538,12 +538,17 @@ def _start_api_server(deploy: bool = False,
 
         # Check available memory before starting the server.
         avail_mem_size_gb: float = common_utils.get_mem_size_gb()
-        if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
+        # pylint: disable=import-outside-toplevel
+        import sky.jobs.utils as job_utils
+        max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
+                      if job_utils.is_consolidation_mode() else
+                      server_constants.MIN_AVAIL_MEM_GB)
+        if avail_mem_size_gb <= max_memory:
             logger.warning(
                 f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only '
                 f'has {avail_mem_size_gb:.1f}GB memory available. '
-                f'At least {server_constants.MIN_AVAIL_MEM_GB}GB is '
-                'recommended to support higher load with better performance.'
+                f'At least {max_memory}GB is recommended to support higher '
+                'load with better performance.'
                 f'{colorama.Style.RESET_ALL}')
 
         args = [sys.executable, *API_SERVER_CMD.split()]

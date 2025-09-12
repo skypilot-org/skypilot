@@ -68,3 +68,14 @@ To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to sp
       ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no myself@my.proxy
 
 The ``nebius.ssh_proxy_command`` field is optional. If SkyPilot is run on a machine that can directly access the internal IPs of the instances, it can be omitted. Otherwise, it should be set to a command that can be used to proxy SSH connections to the internal IPs of the instances.
+
+Using static IPs
+-----------------------
+To ensure your VM’s IP address remains static across stop-start operations, set the `nebius.use_static_ip_address` field in SkyPilot's global config file (`~/.sky/config.yaml`). For a detailed syntax reference, see :ref:`config-yaml`.
+
+.. code-block:: yaml
+
+    nebius:
+      use_static_ip_address: true
+
+Not working with `use_internal_ips`

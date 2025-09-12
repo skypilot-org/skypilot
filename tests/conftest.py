@@ -60,7 +60,7 @@ from sky.server import common as server_common
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius', 'hyperbolic', 'shadeform'
+    'vast', 'nebius', 'hyperbolic', 'seeweb', 'shadeform'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -87,7 +87,8 @@ cloud_to_pytest_keyword = {
     'runpod': 'runpod',
     'nebius': 'nebius',
     'hyperbolic': 'hyperbolic',
-    'shadeform': 'shadeform'
+    'shadeform': 'shadeform',
+    'seeweb': 'seeweb'
 }
 
 
@@ -146,7 +147,7 @@ def pytest_addoption(parser):
     parser.addoption(
         '--base-branch',
         type=str,
-        default='master',
+        default=None,
         help='Base branch to test backward compatibility against',
     )
     parser.addoption(
@@ -204,6 +205,13 @@ def pytest_addoption(parser):
         type=str,
         default=None,
         help='Path to the env file to override the default env file',
+    )
+    parser.addoption(
+        '--backend-test-cluster',
+        type=str,
+        default=None,
+        help=
+        'Use existing cluster for backend integration tests instead of creating a new one',
     )
 
 
