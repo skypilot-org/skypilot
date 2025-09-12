@@ -420,10 +420,8 @@ def get_active_workspace(force_user_workspace: bool = False) -> str:
     active_workspace = get_nested(keys=('active_workspace',),
                                   default_value=None)
     if active_workspace is None:
-        logger.debug(
-            f'No active workspace found, using default workspace: '
-            f'{constants.SKYPILOT_DEFAULT_WORKSPACE}'
-        )
+        logger.debug(f'No active workspace found, using default workspace: '
+                     f'{constants.SKYPILOT_DEFAULT_WORKSPACE}')
         active_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
     else:
         logger.debug(f'Got active workspace: {active_workspace}')
