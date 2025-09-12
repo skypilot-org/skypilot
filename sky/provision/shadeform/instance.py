@@ -151,10 +151,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             f'{instance_type_full}'
 
         # Extract cloud provider (first part) and instance type (remaining)
-        # Example: "massedcompute_A6000_basex2" -> cloud="massedcompute",
-        # instance_type="A6000_basex2"
+        # Example: "massedcompute_A6000-basex2" -> cloud="massedcompute",
+        # instance_type="A6000-basex2"
         cloud = instance_type_split[0]
         instance_type = '_'.join(instance_type_split[1:])
+
+        # Shadeform uses underscores instead of hyphens
+        instance_type = instance_type.replace('-', '_')
 
         assert cloud, 'Cloud provider cannot be empty'
         assert instance_type, 'Instance type cannot be empty'
