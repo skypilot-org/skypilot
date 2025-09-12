@@ -457,11 +457,11 @@ def _request_execution_wrapper(request_id: str,
                 rss_end = proc.memory_info().rss
                 # Answer "how much RSS this request contributed?"
                 metrics_lib.SKY_APISERVER_REQUEST_RSS_INCR_BYTES.labels(
-                    type=request_name).observe(max(rss_end - rss_begin, 0))
+                    name=request_name).observe(max(rss_end - rss_begin, 0))
                 # Estimate the memory usage by the request by capturing the
                 # peak memory delta during the request execution.
                 metrics_lib.SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES.labels(
-                    type='request').observe(max(peak_rss - rss_begin, 0))
+                    name=request_name).observe(max(peak_rss - rss_begin, 0))
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Failed to record memory metrics: '
                              f'{common_utils.format_exception(e)}')
