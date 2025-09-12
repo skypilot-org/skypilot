@@ -1158,6 +1158,10 @@ def test_user_dependencies(generic_cloud: str):
 @pytest.mark.serve
 def test_skyserve_ha_kill_after_ready():
     """Test HA recovery when killing controller after replicas are READY."""
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-after-ready',
@@ -1191,6 +1195,10 @@ def test_skyserve_ha_kill_after_ready():
 @pytest.mark.serve
 def test_skyserve_ha_kill_during_provision():
     """Test HA recovery when killing controller during PROVISIONING."""
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-provision',
@@ -1231,6 +1239,10 @@ def test_skyserve_ha_kill_during_provision():
 @pytest.mark.serve
 def test_skyserve_ha_kill_during_pending():
     """Test HA recovery when killing controller during PENDING."""
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
     name = _get_service_name()
     replica_cluster_name = smoke_tests_utils.get_replica_cluster_name_on_gcp(
         name, 1)
@@ -1268,6 +1280,10 @@ def test_skyserve_ha_kill_during_pending():
 @pytest.mark.serve
 def test_skyserve_ha_kill_during_shutdown():
     """Test HA recovery when killing controller during replica shutdown."""
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
     name = _get_service_name()
     replica_cluster_name = smoke_tests_utils.get_replica_cluster_name_on_gcp(
         name, 1)

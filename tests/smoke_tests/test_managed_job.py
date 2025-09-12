@@ -1255,6 +1255,11 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 def test_managed_jobs_ha_kill_running(generic_cloud: str):
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
+
     name = smoke_tests_utils.get_cluster_name()
     test = _get_ha_kill_test(
         name,
@@ -1269,6 +1274,10 @@ def test_managed_jobs_ha_kill_running(generic_cloud: str):
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 def test_managed_jobs_ha_kill_starting(generic_cloud: str):
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
     name = smoke_tests_utils.get_cluster_name()
     test = _get_ha_kill_test(
         name,
