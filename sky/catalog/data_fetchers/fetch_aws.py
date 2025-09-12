@@ -74,10 +74,6 @@ USEFUL_COLUMNS = [
 # only available in this region, but it serves pricing information for all
 # regions.
 PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'  # pylint: disable=line-too-long
-# Hardcode the regions that offer p4de.24xlarge as our credential does not have
-# the permission to query the offerings of the instance.
-# Ref: https://aws.amazon.com/ec2/instance-types/p4/
-P4DE_REGIONS = ['us-east-1', 'us-west-2']
 # g6f instances have fractional GPUs, but the API returns Count: 1 under
 # GpuInfo. However, the GPU memory is properly scaled. Taking the instance GPU
 # divided by the total memory of an L4 will give us the fraction of the GPU.
@@ -213,45 +209,6 @@ def _get_spot_pricing_table(region: str) -> 'pd.DataFrame':
     df = df.set_index(['InstanceType', 'AvailabilityZoneName'])
     return df
 
-
-def _patch_p4de(region: str, df: 'pd.DataFrame',
-                pricing_df: 'pd.DataFrame') -> 'pd.DataFrame':
-    # Hardcoded patch for p4de.24xlarge, as our credentials doesn't have access
-    # to the instance type.
-    # Columns:
-    # InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,
-    # Price,SpotPrice,Region,AvailabilityZone
-    records = []
-    for zone in df[df['Region'] == region]['AvailabilityZone'].unique():
-        # As of 2025-09-09, p4de.24xlarge may be returned so we should check so
-        # that we don't have it twice in the catalog.
-        # See https://github.com/skypilot-org/skypilot/issues/7091
-
-        # Check if p4de.24xlarge already exists in this zone to avoid duplicates
-        existing_p4de = df[(df['InstanceType'] == 'p4de.24xlarge') &
-                           (df['AvailabilityZone'] == zone)]
-        if not existing_p4de.empty:
-            continue
-        records.append({
-            'InstanceType': 'p4de.24xlarge',
-            'AcceleratorName': 'A100-80GB',
-            'AcceleratorCount': 8,
-            'vCPUs': 96,
-            'MemoryGiB': 1152,
-            'GpuInfo':
-                ('{\'Gpus\': [{\'Name\': \'A100-80GB\', \'Manufacturer\': '
-                 '\'NVIDIA\', \'Count\': 8, \'MemoryInfo\': {\'SizeInMiB\': '
-                 '81920}}], \'TotalGpuMemoryInMiB\': 655360}'),
-            'AvailabilityZone': zone,
-            'Region': region,
-            'Price': pricing_df[pricing_df['InstanceType'] == 'p4de.24xlarge']
-                     ['Price'].values[0],
-            'SpotPrice': np.nan,
-        })
-    df = pd.concat([df, pd.DataFrame.from_records(records)])
-    return df
-
-
 def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
     try:
         # Fetch the zone info first to make sure the account has access to the
@@ -364,9 +321,6 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
         df = pd.concat(
             [df, df.apply(get_additional_columns, axis='columns')],
             axis='columns')
-        # patch the df for p4de.24xlarge
-        if region in P4DE_REGIONS:
-            df = _patch_p4de(region, df, pricing_df)
         if 'GpuInfo' not in df.columns:
             df['GpuInfo'] = np.nan
         df = df[USEFUL_COLUMNS]
