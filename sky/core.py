@@ -179,16 +179,12 @@ def status(
         include_credentials=include_credentials)
 
     status_responses = []
-    exceptions = []
     for cluster in clusters:
         try:
             status_responses.append(
                 responses.StatusResponse.model_validate(cluster))
         except Exception as e:
-            logger.error(f'Failed to validate status responses for cluster {cluster.name}: {e}')
-            exceptions.append(e)
-    if exceptions:
-        raise exceptions[0]
+            logger.error(f'Failed to validate status responses for cluster {cluster.get("name")}: {e}')
     return status_responses
 
 
