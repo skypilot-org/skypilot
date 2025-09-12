@@ -1148,7 +1148,7 @@ Custom labels and annotations to apply to all Kubernetes resources.
 
 Timeout for resource provisioning (optional).
 
-Timeout in minutes for resource provisioning.
+Timeout in seconds for resource provisioning.
 
 Default: ``10``.
 
