@@ -177,9 +177,19 @@ def status(
         cluster_names=cluster_names,
         all_users=all_users,
         include_credentials=include_credentials)
-    return [
-        responses.StatusResponse.model_validate(cluster) for cluster in clusters
-    ]
+
+    status_responses = []
+    exceptions = []
+    for cluster in clusters:
+        try:
+            status_responses.append(
+                responses.StatusResponse.model_validate(cluster))
+        except Exception as e:
+            logger.error(f'Failed to validate status responses for cluster {cluster.name}: {e}')
+            exceptions.append(e)
+    if exceptions:
+        raise exceptions[0]
+    return status_responses
 
 
 def status_kubernetes(
