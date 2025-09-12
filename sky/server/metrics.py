@@ -22,6 +22,24 @@ from sky.skylet import constants
 METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
                                  'false').lower() == 'true'
 
+_KB = 2**10
+_MB = 2**20
+_MEM_BUCKETS = [
+    _KB,
+    256 * _KB,
+    512 * _KB,
+    _MB,
+    2 * _MB,
+    4 * _MB,
+    8 * _MB,
+    16 * _MB,
+    32 * _MB,
+    64 * _MB,
+    128 * _MB,
+    256 * _MB,
+    float('inf'),
+]
+
 logger = sky_logging.init_logger(__name__)
 
 # Total number of API server requests, grouped by path, method, and status.
@@ -92,6 +110,16 @@ SKY_APISERVER_PROCESS_CPU_TOTAL = prom.Gauge(
     'Total CPU times a worker process has been running',
     ['pid', 'type', 'mode'],
 )
+
+SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES = prom.Histogram(
+    'sky_apiserver_request_memory_usage_bytes',
+    'Peak memory usage of requests', ['name'],
+    buckets=_MEM_BUCKETS)
+
+SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
+    'sky_apiserver_request_rss_incr_bytes',
+    'RSS increment after requests', ['name'],
+    buckets=_MEM_BUCKETS)
 
 metrics_app = fastapi.FastAPI()
 
@@ -209,19 +237,23 @@ def time_me_async(func):
     return async_wrapper
 
 
+peak_rss_bytes = 0
+
+
 def process_monitor(process_type: str, stop: threading.Event):
     pid = multiprocessing.current_process().pid
     proc = psutil.Process(pid)
-    peak_rss = 0
     last_bucket_end = time.time()
+    bucket_peak = 0
+    global peak_rss_bytes
     while not stop.is_set():
         if time.time() - last_bucket_end >= 30:
-            # Reset peak RSS every 30 seconds.
+            # Reset peak RSS for the next time bucket.
             last_bucket_end = time.time()
-            peak_rss = 0
-        peak_rss = max(peak_rss, proc.memory_info().rss)
-        SKY_APISERVER_PROCESS_PEAK_RSS.labels(pid=pid,
-                                              type=process_type).set(peak_rss)
+            bucket_peak = 0
+        peak_rss_bytes = max(bucket_peak, proc.memory_info().rss)
+        SKY_APISERVER_PROCESS_PEAK_RSS.labels(
+            pid=pid, type=process_type).set(peak_rss_bytes)
         ctimes = proc.cpu_times()
         SKY_APISERVER_PROCESS_CPU_TOTAL.labels(pid=pid,
                                                type=process_type,
