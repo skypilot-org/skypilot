@@ -206,8 +206,9 @@ def _get_spot_pricing_table(region: str) -> 'pd.DataFrame':
         ret = ret + response['SpotPriceHistory']
     df = pd.DataFrame(ret)[['InstanceType', 'AvailabilityZone', 'SpotPrice']]
     df = df.rename(columns={'AvailabilityZone': 'AvailabilityZoneName'})
-    df = df.set_index(['InstanceType', 'AvailabilityZoneName'])
+    df = df.set_index(['InstanceType', 'AvailabilityZoneName'])    
     return df
+
 
 def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
     try:
