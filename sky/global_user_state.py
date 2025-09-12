@@ -515,7 +515,8 @@ def add_or_update_cluster(cluster_name: str,
                           config_hash: Optional[str] = None,
                           task_config: Optional[Dict[str, Any]] = None,
                           is_managed: bool = False,
-                          provision_log_path: Optional[str] = None):
+                          provision_log_path: Optional[str] = None,
+                          update_only: bool = False):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -531,6 +532,8 @@ def add_or_update_cluster(cluster_name: str,
         is_managed: Whether the cluster is launched by the
             controller.
         provision_log_path: Absolute path to provision.log, if available.
+        update_only: Whether to update the cluster only. If True,
+            the cluster record will not be inserted if one does not exist.
     """
     assert _SQLALCHEMY_ENGINE is not None
     # FIXME: launched_at will be changed when `sky launch -c` is called.
@@ -618,42 +621,49 @@ def add_or_update_cluster(cluster_name: str,
                 'provision_log_path': provision_log_path,
             })
 
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
-        elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
+        if update_only:
+            session.query(cluster_table).filter_by(name=cluster_name).update(
+                {**conditional_values,
+                 cluster_table.c.handle: handle,
+                 cluster_table.c.status: status.value,
+                 cluster_table.c.cluster_hash: cluster_hash,
+                 cluster_table.c.status_updated_at: status_updated_at})
         else:
-            session.rollback()
-            raise ValueError('Unsupported database dialect')
-
-        insert_stmnt = insert_func(cluster_table).values(
-            name=cluster_name,
-            **conditional_values,
-            handle=handle,
-            status=status.value,
-            # set metadata to server default ('{}')
-            # set owner to server default (null)
-            cluster_hash=cluster_hash,
-            # set storage_mounts_metadata to server default (null)
-            status_updated_at=status_updated_at,
-            is_managed=int(is_managed),
-        )
-        do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[cluster_table.c.name],
-            set_={
+            if (_SQLALCHEMY_ENGINE.dialect.name ==
+                    db_utils.SQLAlchemyDialect.SQLITE.value):
+                insert_func = sqlite.insert
+            elif (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+                insert_func = postgresql.insert
+            else:
+                session.rollback()
+                raise ValueError('Unsupported database dialect')
+            insert_stmnt = insert_func(cluster_table).values(
+                name=cluster_name,
                 **conditional_values,
-                cluster_table.c.handle: handle,
-                cluster_table.c.status: status.value,
-                # do not update metadata value
-                # do not update owner value
-                cluster_table.c.cluster_hash: cluster_hash,
-                # do not update storage_mounts_metadata
-                cluster_table.c.status_updated_at: status_updated_at,
-                # do not update user_hash
-            })
-        session.execute(do_update_stmt)
+                handle=handle,
+                status=status.value,
+                # set metadata to server default ('{}')
+                # set owner to server default (null)
+                cluster_hash=cluster_hash,
+                # set storage_mounts_metadata to server default (null)
+                status_updated_at=status_updated_at,
+                is_managed=int(is_managed),
+            )
+            insert_or_update_stmt = insert_stmnt.on_conflict_do_update(
+                index_elements=[cluster_table.c.name],
+                set_={
+                    **conditional_values,
+                    cluster_table.c.handle: handle,
+                    cluster_table.c.status: status.value,
+                    # do not update metadata value
+                    # do not update owner value
+                    cluster_table.c.cluster_hash: cluster_hash,
+                    # do not update storage_mounts_metadata
+                    cluster_table.c.status_updated_at: status_updated_at,
+                    # do not update user_hash
+                })
+            session.execute(insert_or_update_stmt)
 
         # Modify cluster history table
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
