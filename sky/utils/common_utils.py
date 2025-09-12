@@ -1108,13 +1108,15 @@ def release_memory():
     """Release the process memory"""
     # Do the best effort to release the python heap and let malloc_trim
     # be more efficient.
-    gc.collect()
-    if sys.platform.startswith('linux'):
-        try:
+    try:
+        gc.collect()
+        if sys.platform.startswith('linux'):
             # Will fail on musl (alpine), but at least it works on our
             # offical docker images.
             libc = ctypes.CDLL('libc.so.6')
             return libc.malloc_trim(0)
-        except (AttributeError, OSError):
-            return 0
-    return 0
+        return 0
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to release memory: '
+                     f'{format_exception(e)}')
+        return 0
