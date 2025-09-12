@@ -328,7 +328,9 @@ def override_request_env_and_config(
                     workspaces_core.reject_request_for_unauthorized_workspace(
                         user)
                 else:
-                    logger.debug(f'{request_id} permission granted to sky.workspaces.get request')
+                    logger.debug(
+                        f'{request_id} permission granted to sky.workspaces.get request'
+                    )
             except exceptions.PermissionDeniedError as e:
                 logger.debug(
                     f'{request_id} permission denied to workspace: {skypilot_config.get_active_workspace()}: {e}'
