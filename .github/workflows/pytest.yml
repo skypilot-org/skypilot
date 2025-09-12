@@ -6,12 +6,10 @@ on:
     branches:
       - master
       - 'releases/**'
-      - seeweb-cloud-01
   pull_request:
     branches:
       - master
       - 'releases/**'
-      - seeweb-cloud-01
   merge_group:
 
 jobs:
