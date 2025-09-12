@@ -517,6 +517,7 @@ def test_huggingface_arm64(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
