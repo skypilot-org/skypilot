@@ -15,3 +15,4 @@ assignees: ''
 _Version & Commit info:_
 * `sky -v`: PLEASE_FILL_IN
 * `sky -c`: PLEASE_FILL_IN
+* `sky api info`: PLEASE_FILL_IN

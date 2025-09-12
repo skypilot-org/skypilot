@@ -711,3 +711,17 @@ def test_reload_config():
     with mock.patch('sky.skypilot_config.safe_reload_config') as mock_reload:
         client_sdk.reload_config()
         mock_reload.assert_called_once()
+
+
+def test_get_request_id():
+    """Test that get_request_id returns the request id from the correct 
+    header."""
+    mock_response = mock.MagicMock()
+    mock_response.headers = {
+        'X-Skypilot-Request-ID': 'test_request_id',
+        'X-Request-ID': 'test_request_id_2',
+    }
+    mock_response.status_code = 200
+    mock_response.reason = 'OK'
+    request_id = server_common.get_request_id(mock_response)
+    assert request_id == 'test_request_id'

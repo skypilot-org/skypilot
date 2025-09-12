@@ -7,12 +7,13 @@ import pathlib
 import sqlite3
 import threading
 import typing
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Literal, Optional, Union
 
 import aiosqlite
 import aiosqlite.context
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
+from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -334,6 +335,9 @@ class SQLiteConn(threading.local):
         """Execute the sql and commit the transaction in a sync block."""
         conn = await self._get_async_conn()
 
+        if parameters is None:
+            parameters = []
+
         def exec_and_commit(sql: str, parameters: Optional[Iterable[Any]]):
             # pylint: disable=protected-access
             conn._conn.execute(sql, parameters)
@@ -372,11 +376,34 @@ def get_max_connections():
     return _max_connections
 
 
-def get_engine(db_name: str):
+@typing.overload
+def get_engine(
+        db_name: str,
+        async_engine: Literal[False] = False) -> sqlalchemy.engine.Engine:
+    ...
+
+
+@typing.overload
+def get_engine(db_name: str,
+               async_engine: Literal[True]) -> sqlalchemy_async.AsyncEngine:
+    ...
+
+
+def get_engine(
+    db_name: str,
+    async_engine: bool = False
+) -> Union[sqlalchemy.engine.Engine, sqlalchemy_async.AsyncEngine]:
     conn_string = None
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
+        if async_engine:
+            conn_string = conn_string.replace('postgresql://',
+                                              'postgresql+asyncpg://')
+            # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
+            # so we should not put it in the cache. Instead, just return.
+            return sqlalchemy_async.create_async_engine(
+                conn_string, poolclass=sqlalchemy.NullPool)
         with _db_creation_lock:
             if conn_string not in _postgres_engine_cache:
                 if _max_connections == 0:
@@ -398,6 +425,11 @@ def get_engine(db_name: str):
     else:
         db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
+        if async_engine:
+            # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
+            # so we should not put it in the cache. Instead, just return.
+            return sqlalchemy_async.create_async_engine(
+                'sqlite+aiosqlite:///' + db_path, connect_args={'timeout': 30})
         if db_path not in _sqlite_engine_cache:
             _sqlite_engine_cache[db_path] = sqlalchemy.create_engine(
                 'sqlite:///' + db_path)

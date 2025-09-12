@@ -20,6 +20,7 @@ from sky.provision import docker_utils
 from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import git
 from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -1595,6 +1596,67 @@ class Task:
                     k) and data_utils.is_cloud_store_url(v):
                 d[k] = v
         return d
+
+    def update_workdir(self, workdir: Optional[str], git_url: Optional[str],
+                       git_ref: Optional[str]) -> 'Task':
+        """Updates the task workdir.
+
+        Args:
+            workdir: The workdir to update.
+            git_url: The git url to update.
+            git_ref: The git ref to update.
+        """
+        if self.workdir is None or isinstance(self.workdir, str):
+            if workdir is not None:
+                self.workdir = workdir
+                return self
+            if git_url is not None:
+                self.workdir = {}
+                self.workdir['url'] = git_url
+                if git_ref is not None:
+                    self.workdir['ref'] = git_ref
+                return self
+            return self
+        if git_url is not None:
+            self.workdir['url'] = git_url
+        if git_ref is not None:
+            self.workdir['ref'] = git_ref
+        return self
+
+    def update_envs_and_secrets_from_workdir(self) -> 'Task':
+        """Updates the task envs and secrets from the workdir."""
+        if self.workdir is None:
+            return self
+        if not isinstance(self.workdir, dict):
+            return self
+        url = self.workdir['url']
+        ref = self.workdir.get('ref', '')
+        token = os.environ.get(git.GIT_TOKEN_ENV_VAR)
+        ssh_key_path = os.environ.get(git.GIT_SSH_KEY_PATH_ENV_VAR)
+        try:
+            git_repo = git.GitRepo(url, ref, token, ssh_key_path)
+            clone_info = git_repo.get_repo_clone_info()
+            if clone_info is None:
+                return self
+            self.envs[git.GIT_URL_ENV_VAR] = clone_info.url
+            if ref:
+                ref_type = git_repo.get_ref_type()
+                if ref_type == git.GitRefType.COMMIT:
+                    self.envs[git.GIT_COMMIT_HASH_ENV_VAR] = ref
+                elif ref_type == git.GitRefType.BRANCH:
+                    self.envs[git.GIT_BRANCH_ENV_VAR] = ref
+                elif ref_type == git.GitRefType.TAG:
+                    self.envs[git.GIT_TAG_ENV_VAR] = ref
+            if clone_info.token is None and clone_info.ssh_key is None:
+                return self
+            if clone_info.token is not None:
+                self.secrets[git.GIT_TOKEN_ENV_VAR] = clone_info.token
+            if clone_info.ssh_key is not None:
+                self.secrets[git.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
+        except exceptions.GitError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'{str(e)}') from None
+        return self
 
     def to_yaml_config(self,
                        use_user_specified_yaml: bool = False) -> Dict[str, Any]:

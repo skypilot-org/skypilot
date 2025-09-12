@@ -635,6 +635,54 @@ class TestRunPodProvisionVolume:
         assert used_pods == ['cluster-a-user-hash-head']
         assert used_clusters == ['cluster-a']
 
+    def test_get_all_volumes_usedby_with_pods(self, monkeypatch):
+
+        class Cfg:
+            id_on_cloud = 'VID'
+            name_on_cloud = 'vol'
+
+        # Mock GraphQL response
+        class _API:
+
+            class api:
+
+                class graphql:
+
+                    @staticmethod
+                    def run_graphql_query(query):
+                        return {
+                            'data': {
+                                'myself': {
+                                    'pods': [{
+                                        'id': 'p1',
+                                        'name': 'cluster-a-user-hash-head',
+                                        'networkVolumeId': 'VID'
+                                    }, {
+                                        'id': 'p2',
+                                        'name': 'other',
+                                        'networkVolumeId': 'X'
+                                    }]
+                                }
+                            }
+                        }
+
+        monkeypatch.setattr('sky.adaptors.runpod.runpod', _API)
+        # Mock clusters
+        monkeypatch.setattr(
+            'sky.global_user_state.get_clusters', lambda: [{
+                'name': 'cluster-a'
+            }, {
+                'name': 'cluster-a-b'
+            }])
+        monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
+                            lambda: 'user-hash')
+        config = Cfg()
+        used_pods, used_clusters = runpod_prov.get_all_volumes_usedby([config])
+        used_pods, used_clusters = runpod_prov.map_all_volumes_usedby(
+            used_pods, used_clusters, config)
+        assert used_pods == ['cluster-a-user-hash-head']
+        assert used_clusters == ['cluster-a']
+
     def test_get_volume_usedby_resolve_id_missing_graphql_keys(
             self, monkeypatch):
 

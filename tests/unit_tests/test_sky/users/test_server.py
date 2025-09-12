@@ -36,18 +36,23 @@ class TestUsersEndpoints:
     """Test class for users server endpoints."""
 
     @mock.patch('sky.global_user_state.get_all_users')
-    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @pytest.mark.asyncio
-    async def test_users_endpoint_success(self, mock_get_user_roles,
+    async def test_users_endpoint_success(self, mock_get_users_for_role,
                                           mock_get_all_users, mock_users):
         """Test successful GET /users endpoint."""
         # Setup
         mock_get_all_users.return_value = mock_users
-        mock_get_user_roles.side_effect = [
-            ['admin'],  # Alice has admin role
-            ['user'],  # Bob has user role
-            []  # Charlie has no roles
-        ]
+
+        def mock_users_for_role_side_effect(role):
+            role_mappings = {
+                'admin': ['user1'],  # Alice has admin role
+                'user': ['user2'],  # Bob has user role
+                # Charlie (user3) has no roles
+            }
+            return role_mappings.get(role, [])
+
+        mock_get_users_for_role.side_effect = mock_users_for_role_side_effect
 
         # Execute
         result = server.users()
@@ -75,19 +80,20 @@ class TestUsersEndpoints:
 
         # Verify function calls
         mock_get_all_users.assert_called_once()
-        assert mock_get_user_roles.call_count == 3
-        mock_get_user_roles.assert_any_call('user1')
-        mock_get_user_roles.assert_any_call('user2')
-        mock_get_user_roles.assert_any_call('user3')
+        # Should call get_users_for_role for each supported role
+        assert mock_get_users_for_role.call_count == 2  # admin and user roles
+        mock_get_users_for_role.assert_any_call('admin')
+        mock_get_users_for_role.assert_any_call('user')
 
     @mock.patch('sky.global_user_state.get_all_users')
-    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @pytest.mark.asyncio
-    async def test_users_endpoint_empty(self, mock_get_user_roles,
+    async def test_users_endpoint_empty(self, mock_get_users_for_role,
                                         mock_get_all_users):
         """Test GET /users endpoint with no users."""
         # Setup
         mock_get_all_users.return_value = []
+        mock_get_users_for_role.return_value = []
 
         # Execute
         result = server.users()
@@ -95,7 +101,8 @@ class TestUsersEndpoints:
         # Verify
         assert result == []
         mock_get_all_users.assert_called_once()
-        mock_get_user_roles.assert_not_called()
+        # Should still call get_users_for_role for each supported role even with no users
+        assert mock_get_users_for_role.call_count == 2  # admin and user roles
 
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @pytest.mark.asyncio
@@ -286,25 +293,28 @@ class TestUsersEndpoints:
         mock_update_role.assert_called_once_with('test_user', 'admin')
 
     @mock.patch('sky.global_user_state.get_all_users')
-    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @pytest.mark.asyncio
-    async def test_users_endpoint_with_multiple_roles(self, mock_get_user_roles,
+    async def test_users_endpoint_with_multiple_roles(self,
+                                                      mock_get_users_for_role,
                                                       mock_get_all_users,
                                                       mock_users):
         """Test GET /users endpoint when user has multiple roles."""
         # Setup
         mock_get_all_users.return_value = mock_users
-        mock_get_user_roles.side_effect = [
-            ['admin', 'user'],  # Alice has multiple roles - should return first
-            ['user'],  # Bob has single role
-            ['viewer',
-             'guest']  # Charlie has multiple roles - should return first
-        ]
+
+        def mock_users_for_role_side_effect(role):
+            role_mappings = {
+                'admin': ['user1'],  # Alice has admin role
+                'user': ['user2', 'user3'],  # Bob and Charlie have user role
+            }
+            return role_mappings.get(role, [])
+
+        mock_get_users_for_role.side_effect = mock_users_for_role_side_effect
 
         # Execute
         result = server.users()
 
-        # Verify - should return the first role in the list
         assert len(result) == 3
         assert result[0] == {
             'id': 'user1',
@@ -321,7 +331,7 @@ class TestUsersEndpoints:
         assert result[2] == {
             'id': 'user3',
             'name': 'Charlie',
-            'role': 'viewer',
+            'role': 'user',
             'created_at': None
         }
 

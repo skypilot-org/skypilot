@@ -156,3 +156,25 @@ def get_volume_usedby(
             cluster_names.append(matched)
 
     return usedby_pod_names, cluster_names
+
+
+def get_all_volumes_usedby(
+    configs: List[models.VolumeConfig],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Gets the usedby resources of all volumes."""
+    used_by_results = [get_volume_usedby(config) for config in configs]
+    used_by_pods, used_by_clusters = {}, {}
+    for i in range(len(configs)):
+        config = configs[i]
+        used_by_pods[config.name_on_cloud] = used_by_results[i][0]
+        used_by_clusters[config.name_on_cloud] = used_by_results[i][1]
+    return used_by_pods, used_by_clusters
+
+
+def map_all_volumes_usedby(
+        used_by_pods: Dict[str, Any], used_by_clusters: Dict[str, Any],
+        config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
+    """Maps the usedby resources of a volume."""
+    return (used_by_pods.get(config.name_on_cloud,
+                             []), used_by_clusters.get(config.name_on_cloud,
+                                                       []))

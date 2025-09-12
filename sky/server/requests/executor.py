@@ -31,6 +31,7 @@ import time
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
+import psutil
 import setproctitle
 
 from sky import exceptions
@@ -130,6 +131,10 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Executor never stops, unless the whole process is killed.
+    threading.Thread(target=metrics_lib.process_monitor,
+                     args=(f'worker:{proc_group}', threading.Event()),
+                     daemon=True).start()
 
 
 class RequestWorker:
@@ -281,31 +286,34 @@ def override_request_env_and_config(
         request_id: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
-    # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API server
-    # affecting client requests. If set on the client side, it will be
-    # overridden by the request body.
-    os.environ.pop('SKYPILOT_DEBUG', None)
-    os.environ.update(request_body.env_vars)
-    # Note: may be overridden by AuthProxyMiddleware.
-    # TODO(zhwu): we need to make the entire request a context available to the
-    # entire request execution, so that we can access info like user through
-    # the execution.
-    user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
-                       name=request_body.env_vars[constants.USER_ENV_VAR])
-    global_user_state.add_or_update_user(user)
-    # Refetch the user to get the latest user info, including the created_at
-    # field.
-    user = global_user_state.get_user(user.id)
-
-    # Force color to be enabled.
-    os.environ['CLICOLOR_FORCE'] = '1'
-    server_common.reload_for_new_request(
-        client_entrypoint=request_body.entrypoint,
-        client_command=request_body.entrypoint_command,
-        using_remote_api_server=request_body.using_remote_api_server,
-        user=user,
-        request_id=request_id)
     try:
+        # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API
+        # server affecting client requests. If set on the client side, it will
+        # be overridden by the request body.
+        os.environ.pop('SKYPILOT_DEBUG', None)
+        # Remove the db connection uri from client supplied env vars, as the
+        # client should not set the db string on server side.
+        request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+        os.environ.update(request_body.env_vars)
+        # Note: may be overridden by AuthProxyMiddleware.
+        # TODO(zhwu): we need to make the entire request a context available to
+        # the entire request execution, so that we can access info like user
+        # through the execution.
+        user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
+                           name=request_body.env_vars[constants.USER_ENV_VAR])
+        global_user_state.add_or_update_user(user)
+        # Refetch the user to get the latest user info, including the created_at
+        # field.
+        user = global_user_state.get_user(user.id)
+
+        # Force color to be enabled.
+        os.environ['CLICOLOR_FORCE'] = '1'
+        server_common.reload_for_new_request(
+            client_entrypoint=request_body.entrypoint,
+            client_command=request_body.entrypoint_command,
+            using_remote_api_server=request_body.using_remote_api_server,
+            user=user,
+            request_id=request_id)
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
@@ -367,11 +375,13 @@ def _request_execution_wrapper(request_id: str,
     4. Handle the SIGTERM signal to abort the request gracefully.
     5. Maintain the lifecycle of the temp dir used by the request.
     """
+    pid = multiprocessing.current_process().pid
+    proc = psutil.Process(pid)
+    rss_begin = proc.memory_info().rss
     db_utils.set_max_connections(num_db_connections_per_worker)
     # Handle the SIGTERM signal to abort the request processing gracefully.
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
-    pid = multiprocessing.current_process().pid
     logger.info(f'Running request {request_id} with pid {pid}')
     with api_requests.update_request(request_id) as request_task:
         assert request_task is not None, request_id
@@ -398,6 +408,8 @@ def _request_execution_wrapper(request_id: str,
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
                                  f'{yaml_utils.dump_yaml_str(dict(config))}')
+                metrics_lib.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.labels(
+                    request=request_name, pid=pid).inc()
                 with metrics_lib.time_it(name=request_name,
                                          group='request_execution'):
                     return_value = func(**request_body.to_kwargs())
@@ -434,6 +446,42 @@ def _request_execution_wrapper(request_id: str,
                 request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
+        finally:
+            try:
+                # Capture the peak RSS before GC.
+                peak_rss = max(proc.memory_info().rss,
+                               metrics_lib.peak_rss_bytes)
+                with metrics_lib.time_it(name='release_memory',
+                                         group='internal'):
+                    common_utils.release_memory()
+                _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Failed to record memory metrics: '
+                             f'{common_utils.format_exception(e)}')
+
+
+_first_request = True
+
+
+def _record_memory_metrics(request_name: str, proc: psutil.Process,
+                           rss_begin: int, peak_rss: int) -> None:
+    """Record the memory metrics for a request."""
+    # Do not record full memory delta for the first request as it
+    # will loads the sky core modules and make the memory usage
+    # estimation inaccurate.
+    global _first_request
+    if _first_request:
+        _first_request = False
+        return
+    rss_end = proc.memory_info().rss
+
+    # Answer "how much RSS this request contributed?"
+    metrics_lib.SKY_APISERVER_REQUEST_RSS_INCR_BYTES.labels(
+        name=request_name).observe(max(rss_end - rss_begin, 0))
+    # Estimate the memory usage by the request by capturing the
+    # peak memory delta during the request execution.
+    metrics_lib.SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES.labels(
+        name=request_name).observe(max(peak_rss - rss_begin, 0))
 
 
 async def execute_request_coroutine(request: api_requests.Request):

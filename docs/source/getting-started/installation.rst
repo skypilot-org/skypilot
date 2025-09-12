@@ -3,10 +3,6 @@
 Installation
 ==================
 
-.. note::
-
-    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`pip uninstall grpcio; conda install -c conda-forge grpcio=1.43.0` prior to installing SkyPilot.
-
 Install SkyPilot using pip:
 
 .. tab-set::
@@ -228,6 +224,7 @@ This will produce a summary like:
     Cudo: enabled
     IBM: enabled
     SCP: enabled
+    Seeweb: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
@@ -438,6 +435,22 @@ Lambda Cloud
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
+
+Together AI
+~~~~~~~~~~~~~~~~~~
+
+`Together AI <https://together.ai/>`_ offers GPU *instant clusters*. Accessing them is similar to using :ref:`Kubernetes <kubernetes-installation>`:
+
+1. Launch a Together `Instant Cluster <https://api.together.ai/clusters/create>`_ with cluster type selected as Kubernetes
+2. Get the Kubernetes config for the cluster
+3. Save the kubeconfig to a file, e.g., ``./together.kubeconfig``
+4. Copy the kubeconfig to your ``~/.kube/config`` or merge the Kubernetes config with your existing kubeconfig file by running:
+
+.. code-block:: shell
+
+  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config    
+
+
 Paperspace
 ~~~~~~~~~~~~~~~~~~
 
@@ -628,6 +641,98 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 .. note::
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
+
+
+
+
+Seeweb
+~~~~~~~~~~~~~~~~~~
+
+`Seeweb <https://www.seeweb.it/>`_ Seeweb is your European Cloud Provider specialized in high-performance Cloud solutions and GPU servers ideal for powering artificial intelligence efficiently and sustainably. With a 100% renewable energy-powered infrastructure and an excellent price-performance ratio, Seeweb enables AI innovation with a responsible environmental impact.
+
+
+Setup
+======
+
+
+Prerequisites
+^^^^^^^^^^^^^^^
+
+* A Seeweb Cloud account.
+* A Seeweb API token with permissions to create servers.
+* (Recommended) An SSH public key added to your Seeweb profile.
+* **ecsapi** 0.2.0 installed <https://pypi.org/project/ecsapi/> :
+
+.. code-block:: bash
+
+   pip install ecsapi
+
+
+Flow to generate an API token for GPU compute access:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Create a `billing account by registering at <https://aop.seeweb.it/en#>`__.
+2. Log into your `Seeweb dashboard : <https://cloudcenter.seeweb.it/>`__.
+3. Navigate to *Compute → API Token* in the control panel. __.
+4. Click **`"NEW TOKEN"**, assign a name, and confirm.`__.
+5. **Copy the generated token** , it can now be used to authenticate all Seeweb services.
+
+
+Authentication
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+SkyPilot reads your credentials from a Seeweb key file.
+Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
+
+::
+
+    [DEFAULT]
+    api_key = <your-api-token>
+
+
+
+The directory :code:`~/.seeweb_cloud` must exist and be readable by you.
+
+
+
+Verify credentials:
+^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: bash
+
+   sky check seeweb
+
+If successful you will see::
+
+  Seeweb: enabled [compute]
+
+  🎉 Enabled infra 🎉
+  Seeweb [compute]
+
+
+
+Limitations
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **No spot instances** – ``use_spot`` is ignored on Seeweb.
+* **No Storage implemented** – ``--storage`` is not supported.
+* **Ports** – ``ports:`` stanza is not implemented; configure firewall rules manually via Seeweb.
+* **Custom Docker images** via ``--image`` are unsupported.
+
+Troubleshooting
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Authentication fails:** ensure ``api_key`` is configured correctly.
+* **SSH access denied:** confirm your public key is added to Seeweb before launching servers; otherwise retrieve the one‑time root password from the Seeweb panel.
+* **Instance type unavailable:** not all plans exist in every region. Either specify a region that supports the plan or let SkyPilot auto‑select.
+
+See also
+^^^^^^^^^^^^^^^^^^^^^
+
+* `Seeweb API docs <https://docs.seeweb.it/>`_
+* `SkyPilot GitHub <https://github.com/skypilot-org/skypilot>`_
+* `Example Seeweb integration <https://github.com/m4oc/skypilot/tree/SeewebSky>`_
+
 
 
 Request quotas for first time users
