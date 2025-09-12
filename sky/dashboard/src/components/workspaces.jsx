@@ -53,8 +53,8 @@ import { sortData } from '@/data/utils';
 import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
 import Link from 'next/link';
 
-// Workspace-aware API functions
-async function getWorkspaceClusters(workspaceName) {
+// Workspace-aware API functions (cacheable)
+export async function getWorkspaceClusters(workspaceName) {
   try {
     const clusters = await apiClient.fetch('/status', {
       cluster_names: null,
@@ -96,7 +96,7 @@ async function getWorkspaceClusters(workspaceName) {
   }
 }
 
-async function getWorkspaceManagedJobs(workspaceName) {
+export async function getWorkspaceManagedJobs(workspaceName) {
   try {
     const response = await apiClient.post('/jobs/queue/v2', {
       all_users: true,
@@ -380,23 +380,23 @@ export function Workspaces() {
       setRawWorkspacesData(fetchedWorkspacesConfig);
       const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
-      // Fetch data for each workspace in parallel using workspace-aware API calls
-      const workspaceDataPromises = configuredWorkspaceNames.map(
-        async (wsName) => {
-          const [enabledClouds, clusters, managedJobs] = await Promise.all([
-            dashboardCache.get(getEnabledClouds, [wsName]),
-            getWorkspaceClusters(wsName),
-            getWorkspaceManagedJobs(wsName),
-          ]);
+        // Fetch data for each workspace in parallel using workspace-aware API calls
+        const workspaceDataPromises = configuredWorkspaceNames.map(
+          async (wsName) => {
+            const [enabledClouds, clusters, managedJobs] = await Promise.all([
+              dashboardCache.get(getEnabledClouds, [wsName]),
+              dashboardCache.get(getWorkspaceClusters, [wsName]),
+              dashboardCache.get(getWorkspaceManagedJobs, [wsName]),
+            ]);
 
-          return {
-            workspaceName: wsName,
-            enabledClouds,
-            clusters: clusters || [],
-            managedJobs: managedJobs || { jobs: [] },
-          };
-        }
-      );
+            return {
+              workspaceName: wsName,
+              enabledClouds,
+              clusters: clusters || [],
+              managedJobs: managedJobs || { jobs: [] },
+            };
+          }
+        );
 
       const workspaceDataArray = await Promise.all(workspaceDataPromises);
 
@@ -625,6 +625,8 @@ export function Workspaces() {
 
       // Invalidate cache to ensure fresh data is fetched (same as manual refresh)
       dashboardCache.invalidate(getWorkspaces);
+      dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
+      dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
 
       await fetchData(true); // Show loading during refresh
     } catch (error) {
@@ -643,9 +645,11 @@ export function Workspaces() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
     dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
+    
+    // Invalidate workspace-specific caches
+    dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
+    dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
 
     fetchData(true); // Show loading on manual refresh
   };
