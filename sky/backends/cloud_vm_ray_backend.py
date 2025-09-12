@@ -3638,9 +3638,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.debug('Update job queue on remote cluster.')
             with rich_utils.safe_status(
                     ux_utils.spinner_message('Preparing SkyPilot runtime')):
-                use_legacy = not handle.is_grpc_enabled
+                use_legacy = not handle.is_grpc_enabled_with_flag
 
-                if handle.is_grpc_enabled:
+                if handle.is_grpc_enabled_with_flag:
                     try:
                         request = jobsv1_pb2.UpdateStatusRequest()
                         backend_utils.invoke_skylet_with_retries(
@@ -3662,9 +3662,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # 1. A job finishes RUNNING, but right before it update itself
             # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
             # 2. On next `sky start`, it gets reset to FAILED.
-            use_legacy = not handle.is_grpc_enabled
+            use_legacy = not handle.is_grpc_enabled_with_flag
 
-            if handle.is_grpc_enabled:
+            if handle.is_grpc_enabled_with_flag:
                 try:
                     fail_request = jobsv1_pb2.FailAllInProgressJobsRequest()
                     backend_utils.invoke_skylet_with_retries(
@@ -4039,7 +4039,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         remote_log_dir: Optional[str] = None,
     ) -> None:
         """Executes generated code on the head node."""
-        use_legacy = not handle.is_grpc_enabled
+        use_legacy = not handle.is_grpc_enabled_with_flag
         file_name = f'sky_job_{job_id}'
         script_path = os.path.join(SKY_REMOTE_APP_DIR, file_name)
         if remote_log_dir is None:
@@ -4084,7 +4084,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             _dump_code_to_file(job_submit_cmd,
                                constants.PERSISTENT_RUN_SCRIPT_DIR)
 
-        if handle.is_grpc_enabled:
+        if handle.is_grpc_enabled_with_flag:
             try:
                 managed_job_info: Optional[jobsv1_pb2.ManagedJobInfo] = None
                 if managed_job_dag is not None:
@@ -4214,9 +4214,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str,
                  metadata: str) -> Tuple[int, str]:
-        use_legacy = not handle.is_grpc_enabled
+        use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled:
+        if handle.is_grpc_enabled_with_flag:
             try:
                 request = jobsv1_pb2.AddJobRequest(
                     job_name=job_name,
@@ -4450,7 +4450,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_ids: Optional[List[int]] = None,
         stream_logs: bool = True
     ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
-        if handle.is_grpc_enabled:
+        if handle.is_grpc_enabled_with_flag:
             try:
                 request = jobsv1_pb2.GetJobStatusRequest(job_ids=job_ids)
                 response = backend_utils.invoke_skylet_with_retries(
@@ -4484,9 +4484,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         See `skylet.job_lib.cancel_jobs_encoded_results` for more details.
         """
-        use_legacy = not handle.is_grpc_enabled
+        use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled:
+        if handle.is_grpc_enabled_with_flag:
             try:
                 request = jobsv1_pb2.CancelJobsRequest(job_ids=jobs,
                                                        cancel_all=cancel_all,
@@ -4527,9 +4527,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             A dictionary mapping job_id to log path.
         """
         job_to_dir: Dict[str, str] = {}
-        use_legacy = not handle.is_grpc_enabled
+        use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled:
+        if handle.is_grpc_enabled_with_flag:
             try:
                 int_job_ids = []
                 if job_ids:
