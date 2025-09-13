@@ -2021,7 +2021,10 @@ def test_long_setup_run_script(generic_cloud: str):
 # ---------- Test min-gpt on Kubernetes ----------
 @pytest.mark.kubernetes
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('train_file', ['examples/distributed-pytorch/train.yaml', 'examples/distributed-pytorch/train-rdvz.yaml'])
+@pytest.mark.parametrize('train_file', [
+    'examples/distributed-pytorch/train.yaml',
+    'examples/distributed-pytorch/train-rdvz.yaml'
+])
 def test_min_gpt_kubernetes(train_file):
     accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     name = smoke_tests_utils.get_cluster_name()
@@ -2030,13 +2033,15 @@ def test_min_gpt_kubernetes(train_file):
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
         # Let the train exit after 1 epoch
-        modified_content = content.replace('main.py',
-                                        'main.py trainer_config.max_epochs=1')
+        modified_content = content.replace(
+            'main.py', 'main.py trainer_config.max_epochs=1')
         modified_content = re.sub(r'accelerators:\s*[^\n]+',
-                                f'accelerators: {accelerator}', modified_content)
+                                  f'accelerators: {accelerator}',
+                                  modified_content)
 
         # Create a temporary YAML file with the modified content
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
             f.write(read_and_modify(file_path))
             f.flush()
             train_file_path = f.name
@@ -2049,7 +2054,6 @@ def test_min_gpt_kubernetes(train_file):
         [
             f'sky launch -y -c {name} --infra kubernetes {dist_train_file}',
             f'sky logs {name} 1 --status',
-            
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
