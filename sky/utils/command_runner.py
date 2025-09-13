@@ -186,10 +186,20 @@ class CommandRunner:
         # Use `echo ~` to get the remote home directory, instead of pwd or
         # echo $HOME, because pwd can be `/` when the remote user is root
         # and $HOME is not always set.
+        # For command runners that support use_login parameter, avoid login shell
+        # to prevent MOTD output contamination.
+        extra_kwargs = {}
+        if hasattr(self, 'run'):
+            import inspect
+            sig = inspect.signature(self.run)
+            if 'use_login' in sig.parameters:
+                extra_kwargs['use_login'] = False
+        
         rc, remote_home_dir, stderr = self.run('echo ~',
                                                require_outputs=True,
                                                separate_stderr=True,
-                                               stream_logs=False)
+                                               stream_logs=False,
+                                               **extra_kwargs)
         if rc != 0:
             raise ValueError('Failed to get remote home directory: '
                              f'{remote_home_dir + stderr}')
@@ -913,6 +923,7 @@ class KubernetesCommandRunner(CommandRunner):
         else:
             return f'pod/{self.pod_name}'
 
+
     def port_forward_command(
             self,
             port_forward: List[Tuple[int, int]],
@@ -966,6 +977,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            use_login: bool = True,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod or deployment by its
         name and namespace.
@@ -990,7 +1002,8 @@ class KubernetesCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
-
+            use_login: Whether to use login shell. If False, avoids login shell
+                MOTD output that can contaminate command output.
 
         Returns:
             returncode
@@ -1031,7 +1044,8 @@ class KubernetesCommandRunner(CommandRunner):
                                                process_stream,
                                                separate_stderr,
                                                skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc)
+                                               source_bashrc=source_bashrc,
+                                               use_login=use_login)
         command = kubectl_base_command + [
             # It is important to use /bin/bash -c here to make sure we quote the
             # command to be run properly. Otherwise, directly appending commands
