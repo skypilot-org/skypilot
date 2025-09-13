@@ -1280,10 +1280,14 @@ def get_cluster_info(
     assert head_pod_name is not None
     runner = command_runner.KubernetesCommandRunner(
         ((namespace, context), head_pod_name))
+    # Use whoami without login shell to avoid MOTD output.
+    # Some container images (like CUDA-Q) print MOTD when using login shells,
+    # which can contaminate the whoami output.
     rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
-                                    stream_logs=False)
+                                    stream_logs=False,
+                                    use_login=False)
     _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
                                  head_pod_name, rc, stdout + stderr)
     ssh_user = stdout.strip()
