@@ -488,7 +488,10 @@ class GitRepo:
 
         try:
             # Get all remote refs
-            refs = git_cmd.ls_remote(clone_info.url).split('\n')
+            url = clone_info.url
+            if clone_info.token:
+                url = self.get_https_url(with_token=True)
+            refs = git_cmd.ls_remote(url).split('\n')
 
             # Collect all commit hashes from refs
             all_commit_hashes = set()

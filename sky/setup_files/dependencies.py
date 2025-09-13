@@ -110,7 +110,8 @@ server_dependencies = [
 local_ray = [
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
-    # Ray 2.6.1+ resolved cluster launcher bugs and grpcio issues on Apple Silicon.
+    # Ray 2.6.1+ resolved cluster launcher bugs
+    # and grpcio issues on Apple Silicon.
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
     'ray[default] >= 2.6.1',
 ]
@@ -203,6 +204,7 @@ extras_require: Dict[str, List[str]] = {
         'nebius>=0.2.47',
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
+    'seeweb': ['ecsapi>=0.2.0'],
     'server': server_dependencies,
 }
 
@@ -213,6 +215,7 @@ clouds_for_all.remove('remote')
 if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
     clouds_for_all.remove('nebius')
+    clouds_for_all.remove('seeweb')
 
 if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds

@@ -1214,6 +1214,7 @@ async def logs(
         request_body=cluster_job_body,
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        request_cluster_name=cluster_job_body.cluster_name,
     )
     task = asyncio.create_task(executor.execute_request_coroutine(request_task))
 

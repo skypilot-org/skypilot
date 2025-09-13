@@ -145,6 +145,7 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
 @mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
             return_value='/dev/sda1')
 @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='fake-arch')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
     os.environ[
@@ -233,6 +234,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
 @mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
             return_value='/dev/xvda')
 @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='fake-arch')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
     os.environ[
