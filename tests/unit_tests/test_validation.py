@@ -5,7 +5,7 @@ import pytest
 from sky import check as sky_check
 from sky import resources as resources_lib
 from sky import task as task_lib
-from sky.clouds.kubernetes import Kubernetes
+from sky.clouds.aws import AWS
 from sky.optimizer import _fill_in_launchable_resources
 
 
@@ -35,7 +35,7 @@ def test_resources_validate_with_cloud(monkeypatch):
 
     # Patch sky check so we don't fail if the cloud is not enabled.
     monkeypatch.setattr(sky_check, 'get_cached_enabled_clouds_or_refresh',
-                        lambda *args, **kwargs: [Kubernetes()])
+                        lambda *args, **kwargs: [AWS()])
 
     # Patch the validate method to intercept calls and check cloud is set
     with patch.object(resources_lib.Resources, 'validate', new=mock_validate):
