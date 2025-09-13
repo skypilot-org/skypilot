@@ -23,14 +23,24 @@ router = fastapi.APIRouter()
 @router.post('/launch')
 async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody) -> None:
+    # In consolidation mode, the jobs controller will use sky.launch on the same
+    # API server to launch the underlying job cluster. If you start run many
+    # jobs.launch requests, some may be blocked for a long time by sky.launch
+    # requests triggered by earlier jobs, which leads to confusing behavior as
+    # the jobs.launch requests trickle though. Also, since we don't have to
+    # actually launch a jobs controller sky cluster, the jobs.launch request is
+    # much quicker in consolidation mode. So we avoid the issue by just using
+    # the short executor instead - then jobs.launch will not be blocked by
+    # sky.launch.
     consolidation_mode = managed_jobs_utils.is_consolidation_mode()
+    schedule_type = (api_requests.ScheduleType.SHORT
+                     if consolidation_mode else api_requests.ScheduleType.LONG)
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.launch',
         request_body=jobs_launch_body,
         func=core.launch,
-        schedule_type=(api_requests.ScheduleType.SHORT if consolidation_mode
-                       else api_requests.ScheduleType.LONG),
+        schedule_type=schedule_type,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
 
