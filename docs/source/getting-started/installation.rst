@@ -3,27 +3,78 @@
 Installation
 ==================
 
-Install SkyPilot using pip:
+Install SkyPilot
+----------------
+
+SkyPilot requires Python 3.7 <= version <= 3.13. Choose your preferred installation method:
 
 .. tab-set::
 
-    .. tab-item:: Latest Release
-        :sync: latest-release-tab
+    .. tab-item:: uv tool (recommended)
+        :sync: uv-tab
+
+        First, install ``uv`` by following the `installation guide <https://docs.astral.sh/uv/getting-started/installation/>`_.
 
         .. code-block:: shell
 
-          # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.13.
+          # Choose your infra:
+          uv tool install --with pip "skypilot[kubernetes]"
+          uv tool install --with pip "skypilot[aws]"
+          uv tool install --with pip "skypilot[gcp]"
+          # For Azure, include azure-cli with prerelease allow
+          uv tool install --with pip "skypilot[azure]" --with azure-cli --prerelease allow
+          uv tool install --with pip "skypilot[oci]"
+          # Nebius is only supported for Python >= 3.10
+          uv tool install --with pip "skypilot[nebius]"
+          uv tool install --with pip "skypilot[lambda]"
+          uv tool install --with pip "skypilot[runpod]"
+          uv tool install --with pip "skypilot[fluidstack]"
+          uv tool install --with pip "skypilot[paperspace]"
+          uv tool install --with pip "skypilot[cudo]"
+          # IBM is only supported for Python <= 3.11
+          uv tool install --with pip "skypilot[ibm]"
+          # SCP is only supported for Python <= 3.11
+          uv tool install --with pip "skypilot[scp]"
+          uv tool install --with pip "skypilot[vsphere]"
+
+          uv tool install --with pip "skypilot[all]"
+        ..
+
+        .. note::
+          
+          The ``--with pip`` flag is **required** when using ``uv tool install``. 
+          Without it, SkyPilot will fail when building wheels for remote clusters.
+
+        To use more than one cloud, combine the extras:
+
+        .. code-block:: shell
+
+          uv tool install --with pip "skypilot[kubernetes,aws,gcp]"
+
+        or install all the clouds:
+
+        .. code-block:: shell
+
+          # For all clouds including Azure, include azure-cli with prerelease allow
+          uv tool install --with pip "skypilot[all]" --with azure-cli --prerelease allow
+
+
+    .. tab-item:: conda
+        :sync: conda-tab
+
+        .. code-block:: shell
+
+          # Create a new conda environment
           conda create -y -n sky python=3.10
           conda activate sky
 
           # Choose your infra:
-
           pip install "skypilot[kubernetes]"
           pip install "skypilot[aws]"
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
           pip install "skypilot[oci]"
+          # Nebius is only supported for Python >= 3.10
           pip install "skypilot[nebius]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
@@ -35,147 +86,107 @@ Install SkyPilot using pip:
           # SCP is only supported for Python <= 3.11
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
-          # Nebius is only supported for Python >= 3.10
+
+        To use more than one cloud, combine the extras:
+
+        .. code-block:: shell
+
+          pip install "skypilot[kubernetes,aws,gcp]"
+
+        or install all the clouds:
+
+        .. code-block:: shell
 
           pip install "skypilot[all]"
 
 
-    .. tab-item:: Nightly
-        :sync: nightly-tab
+Advanced installation methods
+-----------------------------
+
+Installing nightly build or from source
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For installing the nightly build or from source, we recommend using ``uv`` for the best experience. 
+
+**Set up environment:**
+
+First, install ``uv`` by following the `installation guide <https://docs.astral.sh/uv/getting-started/installation/>`_.
+
+.. code-block:: shell
+
+  uv venv --seed --python 3.10
+  source .venv/bin/activate
+
+**Choose installation type:**
+
+.. tab-set::
+
+    .. tab-item:: Nightly build
 
         .. code-block:: shell
-
-          # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.13.
-          conda create -y -n sky python=3.10
-          conda activate sky
 
           # Choose your infra:
+          uv pip install "skypilot-nightly[kubernetes]"
+          uv pip install "skypilot-nightly[aws]"
+          uv pip install "skypilot-nightly[gcp]"
+          # Azure CLI requires '--prerelease allow' with uv
+          uv pip install --prerelease allow azure-cli; uv pip install "skypilot-nightly[azure]"
+          uv pip install "skypilot-nightly[oci]"
+          # Nebius is only supported for Python >= 3.10
+          uv pip install "skypilot-nightly[nebius]"
+          uv pip install "skypilot-nightly[lambda]"
+          uv pip install "skypilot-nightly[runpod]"
+          uv pip install "skypilot-nightly[fluidstack]"
+          uv pip install "skypilot-nightly[paperspace]"
+          uv pip install "skypilot-nightly[cudo]"
+          # IBM is only supported for Python <= 3.11
+          uv pip install "skypilot-nightly[ibm]"
+          # SCP is only supported for Python <= 3.11
+          uv pip install "skypilot-nightly[scp]"
+          uv pip install "skypilot-nightly[vsphere]"
 
-          pip install "skypilot-nightly[kubernetes]"
-          pip install "skypilot-nightly[aws]"
-          pip install "skypilot-nightly[gcp]"
-          pip install "skypilot-nightly[azure]"
-          pip install "skypilot-nightly[oci]"
-          pip install "skypilot-nightly[nebius]"
-          pip install "skypilot-nightly[lambda]"
-          pip install "skypilot-nightly[runpod]"
-          pip install "skypilot-nightly[fluidstack]"
-          pip install "skypilot-nightly[paperspace]"
-          pip install "skypilot-nightly[do]"
-          pip install "skypilot-nightly[cudo]"
-          pip install "skypilot-nightly[ibm]"
-          pip install "skypilot-nightly[scp]"
-          pip install "skypilot-nightly[vsphere]"
-          pip install "skypilot-nightly[all]"
+          # To use more than one cloud, combine the extras:
+          uv pip install "skypilot-nightly[kubernetes,aws,gcp]"
 
+          # or install all the clouds
+          uv pip install --prerelease allow azure-cli; uv pip install "skypilot-nightly[all]"
 
-    .. tab-item:: From Source
-        :sync: from-source-tab
+    .. tab-item:: From source
 
         .. code-block:: shell
-
-          # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.13.
-          conda create -y -n sky python=3.10
-          conda activate sky
 
           git clone https://github.com/skypilot-org/skypilot.git
           cd skypilot
 
           # Choose your infra:
+          uv pip install -e ".[kubernetes]"
+          uv pip install -e ".[aws]"
+          uv pip install -e ".[gcp]"
+          # Azure CLI requires '--prerelease allow' with uv
+          uv pip install --prerelease allow azure-cli; uv pip install -e ".[azure]"
+          uv pip install -e ".[oci]"
+          # Nebius is only supported for Python >= 3.10
+          uv pip install -e ".[nebius]"
+          uv pip install -e ".[lambda]"
+          uv pip install -e ".[runpod]"
+          uv pip install -e ".[fluidstack]"
+          uv pip install -e ".[paperspace]"
+          uv pip install -e ".[cudo]"
+          # IBM is only supported for Python <= 3.11
+          uv pip install -e ".[ibm]"
+          # SCP is only supported for Python <= 3.11
+          uv pip install -e ".[scp]"
+          uv pip install -e ".[vsphere]"
 
-          pip install -e ".[kubernetes]"
-          pip install -e ".[aws]"
-          pip install -e ".[gcp]"
-          pip install -e ".[azure]"
-          pip install -e ".[oci]"
-          pip install -e ".[nebius]"
-          pip install -e ".[lambda]"
-          pip install -e ".[runpod]"
-          pip install -e ".[fluidstack]"
-          pip install -e ".[paperspace]"
-          pip install -e ".[cudo]"
-          pip install -e ".[ibm]"
-          pip install -e ".[scp]"
-          pip install -e ".[vsphere]"
-          pip install -e ".[all]"
+          # To use more than one cloud, combine the extras:
+          uv pip install -e ".[kubernetes,aws,gcp]"
 
-To use more than one cloud, combine the pip extras:
+          uv pip install --prerelease allow azure-cli; uv pip install -e ".[all]"
 
-.. tab-set::
+Other installation methods
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    .. tab-item:: Latest Release
-        :sync: latest-release-tab
-
-        .. code-block:: shell
-
-          pip install -U "skypilot[kubernetes,aws,gcp]"
-
-    .. tab-item:: Nightly
-        :sync: nightly-tab
-
-        .. code-block:: shell
-
-          pip install -U "skypilot-nightly[kubernetes,aws,gcp]"
-
-    .. tab-item:: From Source
-        :sync: from-source-tab
-
-        .. code-block:: shell
-
-          pip install -e ".[kubernetes,aws,gcp]"
-
-
-Installing via ``uv``
-----------------------
-
-SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast Python package installer:
-
-.. tab-set::
-
-    .. tab-item:: uv venv
-        :sync: uv-venv-tab
-
-        .. code-block:: shell
-
-          # Create a virtual environment with pip pre-installed (required for SkyPilot)
-          uv venv --seed --python 3.10
-          source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-          
-          # Install SkyPilot with your chosen cloud providers
-          uv pip install "skypilot[kubernetes,aws,gcp]"
-          
-          # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-          uv pip install --prerelease allow azure-cli
-          uv pip install "skypilot[azure]"
-
-        .. note::
-          
-          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment. 
-          SkyPilot needs ``pip`` to build wheels for remote cluster setup.
-
-    .. tab-item:: uv tool
-        :sync: uv-tool-tab
-
-        .. code-block:: shell
-
-          # Install as a globally available tool with pip included
-          uv tool install --with pip "skypilot[aws,gcp]"
-          
-          # Or with all cloud providers
-          uv tool install --with pip "skypilot[all]"
-          
-          # Now you can use sky directly
-          sky check
-
-        .. note::
-          
-          The ``--with pip`` flag is **required** when using ``uv tool install``. 
-          Without it, SkyPilot will fail when building wheels for remote clusters.
-
-
-Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
+**Docker**: We also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
 .. note::
 
@@ -320,7 +331,7 @@ GCP
     Here some commonly encountered errors and their fixes:
 
     * ``RemoveError: 'requests' is a dependency of conda and cannot be removed from conda's operating environment`` when running :code:`conda install -c conda-forge google-cloud-sdk` --- run :code:`conda update --force conda` first and rerun the command.
-    * ``Authorization Error (Error 400: invalid_request)`` with the url generated by :code:`gcloud auth login` --- install the latest version of the `Google Cloud SDK <https://cloud.google.com/sdk/docs/install>`_ (e.g., with :code:`conda install -c conda-forge google-cloud-sdk`) on your local machine (which opened the browser) and rerun the command.
+    * ``Authorization Error (Error 400: invalid_request)`` with the url generated by :code:`gcloud auth login` --- install the latest version of the `Google Cloud SDK <https://cloud.google.com/sdk/docs/install>`__ (e.g., with :code:`conda install -c conda-forge google-cloud-sdk`) on your local machine (which opened the browser) and rerun the command.
 
 **Optional**: To create and use a long-lived service account on your local machine, see :ref:`here<gcp-service-account>`.
 
@@ -361,7 +372,7 @@ To use `Nebius Managed Kubernetes <https://nebius.com/services/managed-kubernete
 
   nebius mk8s cluster get-credentials --id <cluster_id> --external --kubeconfig $HOME/.kube/config
 
-Nebius also offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
+Nebius also offers `Object Storage <https://nebius.com/services/storage>`__, an S3-compatible object storage without any egress charges.
 SkyPilot can download/upload data to Nebius buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Nebius support, run:
 
 .. code-block:: shell
