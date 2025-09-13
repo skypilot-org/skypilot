@@ -1214,6 +1214,7 @@ async def logs(
         request_body=cluster_job_body,
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        request_cluster_name=cluster_job_body.cluster_name,
     )
     task = asyncio.create_task(executor.execute_request_coroutine(request_task))
 
@@ -1829,7 +1830,7 @@ async def all_contexts(request: fastapi.Request) -> None:
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
     contexts = core.get_all_contexts()
-    all_metrics = []
+    all_metrics: List[str] = []
     successful_contexts = 0
 
     tasks = [
@@ -1844,6 +1845,10 @@ async def gpu_metrics() -> fastapi.Response:
         if isinstance(result, Exception):
             logger.error(
                 f'Failed to get metrics for context {contexts[i]}: {result}')
+        elif isinstance(result, BaseException):
+            # Avoid changing behavior for non-Exception BaseExceptions
+            # like KeyboardInterrupt/SystemExit: re-raise them.
+            raise result
         else:
             metrics_text = result
             all_metrics.append(metrics_text)

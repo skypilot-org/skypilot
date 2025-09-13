@@ -216,7 +216,8 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'if (( $SECONDS - $start_time > {timeout} )); then '
     '  echo "Timeout after {timeout} seconds waiting for job status \'{job_status}\'"; exit 1; '
     'fi; '
-    'current_status=$(sky queue {cluster_name} | '
+    'current_queue=$(sky queue {cluster_name}); '
+    'current_status=$(echo "$current_queue" | '
     'awk "\\$1 == \\"{job_id}\\" '
     r'{{for (i=1; i<=NF; i++) if (\$i ~ /^(' + _ALL_JOB_STATUSES +
     r')$/) print \$i}}"); '
@@ -230,6 +231,7 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'done <<< "$current_status"; '
     'if [ "$found" -eq 1 ]; then break; fi; '  # Break outer loop if match found
     'echo "Waiting for job status to contain {job_status}, current status: $current_status"; '
+    'echo "Current queue: $current_queue"; '
     'sleep 10; '
     'done')
 
@@ -645,7 +647,7 @@ VALIDATE_LAUNCH_OUTPUT = (
     'echo "$s" && echo "==Validating launching==" && '
     'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
     'echo "$s" && echo "==Validating setup output==" && '
-    'echo "$s" | grep -A 1 "Setup detached" | grep "Job submitted" && '
+    'echo "$s" | grep -A 5 "Setup detached" | grep "Job submitted" && '
     'echo "==Validating running output hints==" && echo "$s" | '
     'grep -A 1 "Job submitted, ID:" | '
     'grep "Waiting for task resources on " && '
@@ -779,9 +781,8 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
 
 
 def is_remote_server_test() -> bool:
-    return os.environ.get(
-        'PYTEST_SKYPILOT_REMOTE_SERVER_TEST',
-        None) is not None or api_server_endpoint_configured_in_env_file()
+    return os.environ.get('PYTEST_SKYPILOT_REMOTE_SERVER_TEST',
+                          None) is not None
 
 
 def pytest_controller_cloud() -> Optional[str]:
@@ -798,15 +799,6 @@ def is_grpc_enabled_test() -> bool:
 
 def pytest_config_file_override() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE', None)
-
-
-def api_server_endpoint_configured_in_env_file() -> bool:
-    file_path = pytest_config_file_override()
-    if file_path is not None:
-        with open(file_path, 'r') as f:
-            content = f.read()
-            return 'endpoint' in content
-    return False
 
 
 def services_account_token_configured_in_env_file() -> bool:
@@ -828,12 +820,13 @@ def pytest_override_env_config_file(config: Dict[str, str]):
 def get_api_server_url() -> str:
     """Get the API server URL in the test environment."""
     if is_remote_server_test():
-        if api_server_endpoint_configured_in_env_file():
-            config_file = pytest_config_file_override()
-            config = skypilot_config.parse_and_validate_config_file(config_file)
-            return config.get_nested(('api_server', 'endpoint'), 'UNKNOWN')
-        else:
-            return docker_utils.get_api_server_endpoint_inside_docker()
+        file_path = pytest_config_file_override()
+        if file_path is not None:
+            config = skypilot_config.parse_and_validate_config_file(file_path)
+            endpoint = config.get_nested(('api_server', 'endpoint'), None)
+            if endpoint is not None:
+                return endpoint
+        return docker_utils.get_api_server_endpoint_inside_docker()
     return server_common.get_server_url()
 
 

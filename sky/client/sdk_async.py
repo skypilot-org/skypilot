@@ -456,6 +456,7 @@ async def download_logs(cluster_name: str,
 async def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional['autostop_lib.AutostopWaitFor'] = None,
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -464,7 +465,8 @@ async def start(
     """Async version of start() that restarts a cluster."""
     request_id = await context_utils.to_thread(sdk.start, cluster_name,
                                                idle_minutes_to_autostop,
-                                               retry_until_up, down, force)
+                                               wait_for, retry_until_up, down,
+                                               force)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
@@ -504,13 +506,14 @@ async def stop(
 async def autostop(
     cluster_name: str,
     idle_minutes: int,
+    wait_for: Optional['autostop_lib.AutostopWaitFor'] = None,
     down: bool = False,  # pylint: disable=redefined-outer-name
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
 ) -> None:
     """Async version of autostop() that schedules an autostop/autodown for a
       cluster."""
     request_id = await context_utils.to_thread(sdk.autostop, cluster_name,
-                                               idle_minutes, down)
+                                               idle_minutes, wait_for, down)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:

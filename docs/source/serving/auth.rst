@@ -13,7 +13,7 @@ SkyServe relies on the authorization of the service running on underlying servic
 We define a SkyServe service spec for serving Llama-3 chatbot with vLLM and an API key. In the example YAML below, we define the authorization token as an environment variable, :code:`AUTH_TOKEN`, and pass it to both the service field to enable :code:`readiness_probe` to access the replicas and the vllm entrypoint to start services on replicas with the API key.
 
 .. code-block:: yaml
-  :emphasize-lines: 5,10-11,28
+  :emphasize-lines: 7,12-13,36
 
   # auth.yaml
   envs:

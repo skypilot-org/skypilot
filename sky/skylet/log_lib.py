@@ -354,6 +354,17 @@ def run_bash_command_with_log(bash_command: str,
                             shell=True)
 
 
+def run_bash_command_with_log_and_return_pid(
+        bash_command: str,
+        log_path: str,
+        env_vars: Optional[Dict[str, str]] = None,
+        stream_logs: bool = False,
+        with_ray: bool = False):
+    return_code = run_bash_command_with_log(bash_command, log_path, env_vars,
+                                            stream_logs, with_ray)
+    return {'return_code': return_code, 'pid': os.getpid()}
+
+
 def _follow_job_logs(file,
                      job_id: int,
                      start_streaming: bool,
@@ -395,9 +406,9 @@ def _follow_job_logs(file,
                     wait_last_logs = False
                     continue
                 status_str = status.value if status is not None else 'None'
-                print(ux_utils.finishing_message(
-                    f'Job finished (status: {status_str}).'),
-                      flush=True)
+                finish = ux_utils.finishing_message(
+                    f'Job finished (status: {status_str}).')
+                yield finish + '\n'
                 return
 
             time.sleep(SKY_LOG_TAILING_GAP_SECONDS)
