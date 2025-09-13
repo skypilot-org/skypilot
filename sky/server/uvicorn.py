@@ -213,11 +213,17 @@ class Server(uvicorn.Server):
             # Same as set PYTHONASYNCIODEBUG=1, but with custom threshold.
             event_loop.set_debug(True)
             event_loop.slow_callback_duration = lag_threshold
-        threading.Thread(target=metrics_lib.process_monitor,
-                         args=('server',),
-                         daemon=True).start()
-        with self.capture_signals():
-            asyncio.run(self.serve(*args, **kwargs))
+        stop_monitor = threading.Event()
+        monitor = threading.Thread(target=metrics_lib.process_monitor,
+                                   args=('server', stop_monitor),
+                                   daemon=True)
+        monitor.start()
+        try:
+            with self.capture_signals():
+                asyncio.run(self.serve(*args, **kwargs))
+        finally:
+            stop_monitor.set()
+            monitor.join()
 
 
 def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):

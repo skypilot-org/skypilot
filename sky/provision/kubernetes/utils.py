@@ -3550,9 +3550,20 @@ def process_skypilot_pods(
                     f'requesting GPUs: {pod.metadata.name}')
                 gpu_label = label_formatter.get_label_key()
                 # Get GPU name from pod node selector
-                if pod.spec.node_selector is not None:
-                    gpu_name = label_formatter.get_accelerator_from_label_value(
-                        pod.spec.node_selector.get(gpu_label))
+                node_selector_terms = (
+                    pod.spec.affinity.node_affinity.
+                    required_during_scheduling_ignored_during_execution.
+                    node_selector_terms)
+                if node_selector_terms is not None:
+                    expressions = []
+                    for term in node_selector_terms:
+                        if term.match_expressions:
+                            expressions.extend(term.match_expressions)
+                    for expression in expressions:
+                        if expression.key == gpu_label and expression.operator == 'In':
+                            gpu_name = label_formatter.get_accelerator_from_label_value(
+                                expression.values[0])
+                            break
 
             resources = resources_lib.Resources(
                 cloud=clouds.Kubernetes(),
