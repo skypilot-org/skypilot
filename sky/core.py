@@ -182,9 +182,16 @@ def status(
         cluster_names=cluster_names,
         all_users=all_users,
         include_credentials=include_credentials)
-    return [
-        responses.StatusResponse.model_validate(cluster) for cluster in clusters
-    ]
+
+    status_responses = []
+    for cluster in clusters:
+        try:
+            status_responses.append(
+                responses.StatusResponse.model_validate(cluster))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to validate status responses for cluster '
+                           f'{cluster.get("name")}: {e}')
+    return status_responses
 
 
 def status_kubernetes(
