@@ -1,0 +1,76 @@
+# The template for the sky serve controller
+
+name: {{service_name}}
+
+setup: |
+  {{ sky_activate_python_env }}
+  # Disable the pip version check to avoid the warning message, which makes the
+  # output hard to read.
+  export PIP_DISABLE_PIP_VERSION_CHECK=1
+
+  # Install all cloud dependencies.
+  # This is for multicloud support. To allow controller launch on all clouds,
+  # we need to install all cloud dependencies.
+  {%- for cmd in cloud_dependencies_installation_commands %}
+  {{cmd}}
+  {%- endfor %}
+
+  {% if controller_envs.get('SKYPILOT_DEV') != '0' %}
+  grep -q 'export SKYPILOT_DEV=' ~/.bashrc || echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
+  {% endif %}
+
+  # Install serve dependencies.
+  # TODO(tian): Gather those into serve constants.
+  pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
+  pip list | grep fastapi > /dev/null 2>&1 || pip install fastapi > /dev/null 2>&1
+  pip list | grep httpx > /dev/null 2>&1 || pip install httpx > /dev/null 2>&1
+
+file_mounts:
+  {{remote_task_yaml_path}}: {{local_task_yaml_path}}
+  {%- if local_user_config_path is not none %}
+  {{remote_user_config_path}}: {{local_user_config_path}}
+  {%- endif %}
+  {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
+  {{remote_catalog_path}}: {{local_catalog_path}}
+  {%- endfor %}
+  {%- for controller_file_mount_path, local_file_mount_path in local_to_controller_file_mounts.items() %}
+  {{controller_file_mount_path}}: {{local_file_mount_path}}
+  {%- endfor %}
+{%- if use_tls %}
+  {{remote_tls_keyfile}}: {{local_tls_keyfile}}
+  {{remote_tls_certfile}}: {{local_tls_certfile}}
+{%- endif %}
+
+run: |
+  # Activate the Python environment, so that cloud SDKs can be found in the
+  # PATH.
+  {%- if consolidation_mode_job_id is none %}
+  {{ sky_activate_python_env }}
+  {%- endif %}
+  # Start sky serve service.
+  {%- if consolidation_mode_job_id is not none %}
+  {{sky_python_cmd}} \
+  {%- else %}
+  python \
+  {%- endif %}
+   -u -m sky.serve.service \
+    --service-name {{service_name}} \
+    --task-yaml {{remote_task_yaml_path}} \
+    --entrypoint {{entrypoint}} \
+    {%- if consolidation_mode_job_id is not none %}
+    --job-id {{consolidation_mode_job_id}} \
+    {%- else %}
+    --job-id $SKYPILOT_INTERNAL_JOB_ID \
+    {%- endif %}
+    >> {{controller_log_file}} 2>&1 \
+    {%- if consolidation_mode_job_id is not none %}
+    &
+    {%- endif %}
+    # For consolidation mode, we need to run the service in the background so
+    # that it can immediately return in serve.core.up().
+
+envs:
+{%- for env_name, env_value in controller_envs.items() %}
+  {{env_name}}: {{env_value}}
+{%- endfor %}

@@ -1,0 +1,22 @@
+include sky/backends/monkey_patches/*.py
+exclude sky/clouds/service_catalog/data_fetchers/analyze.py
+include sky/provision/kubernetes/manifests/*
+include sky/provision/azure/*
+include sky/setup_files/*
+include sky/skylet/*.sh
+include sky/skylet/LICENSE
+include sky/skylet/providers/ibm/*
+include sky/skylet/providers/scp/*
+include sky/skylet/providers/*.py
+include sky/skylet/ray_patches/*.patch
+include sky/jobs/dashboard/*
+include sky/jobs/dashboard/templates/*
+include sky/jobs/dashboard/static/*
+include sky/templates/*
+include sky/utils/kubernetes/*
+include sky/server/html/*
+recursive-include sky/dashboard/out *
+include sky/users/*.conf
+include sky/utils/*.sh
+include sky/setup_files/alembic.ini
+recursive-include sky/schemas/db *

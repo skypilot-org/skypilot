@@ -1,0 +1,204 @@
+cluster_name: {{cluster_name_on_cloud}}
+
+# The maximum number of workers nodes to launch in addition to the head node.
+max_workers: {{num_nodes - 1}}
+upscaling_speed: {{num_nodes - 1}}
+idle_timeout_minutes: 60
+
+{%- if docker_image is not none %}
+docker:
+  image: {{docker_image}}
+  container_name: {{docker_container_name}}
+  run_options:
+    - --ulimit nofile=1048576:1048576
+    {%- for run_option in docker_run_options %}
+    - {{run_option}}
+    {%- endfor %}
+  {%- if docker_login_config is not none %}
+  docker_login_config:
+    username: |-
+      {{docker_login_config.username}}
+    password: |-
+      {{docker_login_config.password | indent(6) }}
+    server: |-
+      {{docker_login_config.server}}
+  {%- endif %}
+{%- endif %}
+
+provider:
+  type: external
+  module: sky.provision.aws
+  region: {{region}}
+  availability_zone: {{zones}}
+  # Keep (otherwise cannot reuse when re-provisioning).
+  # teardown(terminate=True) will override this.
+  cache_stopped_nodes: True
+  security_group:
+    # AWS config file must include security group name
+    GroupName: {{security_group}}
+    ManagedBySkyPilot: {{security_group_managed_by_skypilot}}
+{% if vpc_name is not none %}
+  # NOTE: This is a new field added by SkyPilot to force use a specific VPC.
+  vpc_name: {{vpc_name}}
+{% endif %}
+  use_internal_ips: {{use_internal_ips}}
+  # Disable launch config check for worker nodes as it can cause resource
+  # leakage.
+  # Reference: https://github.com/ray-project/ray/blob/cd1ba65e239360c8a7b130f991ed414eccc063ce/python/ray/autoscaler/_private/autoscaler.py#L1115
+  # The upper-level SkyPilot code has make sure there will not be resource
+  # leakage.
+  disable_launch_config_check: true
+
+auth:
+  ssh_user: ubuntu
+  ssh_private_key: {{ssh_private_key}}
+{% if ssh_proxy_command is not none %}
+  ssh_proxy_command: {{ssh_proxy_command}}
+{% endif %}
+
+available_node_types:
+  ray.head.default:
+    resources: {}
+    node_config:
+      {% if remote_identity not in ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'] %}
+      IamInstanceProfile:
+        Name: {{remote_identity}}
+      {% endif %}
+      InstanceType: {{instance_type}}
+      ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
+      # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: {{disk_size}}
+            VolumeType: {{disk_tier}}
+            Encrypted: {{disk_encrypted}}
+            {% if disk_iops %}
+            Iops: {{disk_iops}}
+            {% endif %}
+            {% if disk_throughput %}
+            Throughput: {{disk_throughput}}
+            {% endif %}
+      {% if use_spot %}
+      InstanceMarketOptions:
+          MarketType: spot
+          # Additional options can be found in the boto docs, e.g.
+          #   SpotOptions:
+          #       MaxPrice: MAX_HOURLY_PRICE
+      {% endif %}
+      CapacityReservationSpecification:
+        CapacityReservationPreference: open
+        {% if specific_reservations %}
+        CapacityReservationTarget:
+          CapacityReservationId: {{specific_reservations}}
+        {% endif %}
+      # Use cloud init in UserData to set up the authorized_keys to get
+      # around the number of keys limit and permission issues with
+      # ec2.describe_key_pairs.
+      # The | can ensure the line below are interpreted as a plain text,
+      # without yaml specific syntax to be parsed, such as string that
+      # contains `: `.
+      # Note that sudo and shell need to be specified to ensure setup works.
+      # Reference: https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups
+      # The bootcmd is to disable automatic APT updates, to avoid the lock
+      # when user call `apt install` on the node.
+      # Reference: https://askubuntu.com/questions/1322292/how-do-i-turn-off-automatic-updates-completely-and-for-real
+      UserData: |
+        #cloud-config
+        users:
+          - name: skypilot:ssh_user
+            shell: /bin/bash
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            ssh_authorized_keys:
+              - |-
+                skypilot:ssh_public_key_content
+        write_files:
+          - path: /etc/apt/apt.conf.d/20auto-upgrades
+            content: |
+              APT::Periodic::Update-Package-Lists "0";
+              APT::Periodic::Download-Upgradeable-Packages "0";
+              APT::Periodic::AutocleanInterval "0";
+              APT::Periodic::Unattended-Upgrade "0";
+          - path: /etc/apt/apt.conf.d/10cloudinit-disable
+            content: |
+              APT::Periodic::Enable "0";
+          - path: /etc/apt/apt.conf.d/52unattended-upgrades-local
+            content: |
+              Unattended-Upgrade::DevRelease "false";
+              Unattended-Upgrade::Allowed-Origins {};
+        bootcmd:
+          - systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
+          - systemctl disable apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
+          - systemctl mask apt-daily.service apt-daily-upgrade.service unattended-upgrades.service
+          - systemctl daemon-reload
+        {%- if runcmd %}
+        runcmd:
+        {%- for cmd in runcmd %}
+          - {{cmd}}
+        {%- endfor %}
+        {%- endif %}
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: skypilot-user
+              Value: {{ user }}
+            {%- for label_key, label_value in labels.items() %}
+            - Key: {{ label_key }}
+              Value: {{ label_value|tojson }}
+            {%- endfor %}
+      # Use IDMSv2
+      MetadataOptions:
+        HttpTokens: required
+
+head_node_type: ray.head.default
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+  "~/.ssh/sky-cluster-key": "{{ssh_private_key}}",
+{%- endfor %}
+}
+
+
+# List of shell commands to run to set up nodes.
+# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
+# connection, which is expensive. Try your best to co-locate commands into fewer
+# items!
+#
+# Increment the following for catching performance bugs easier:
+#   current num items (num SSH connections): 1
+setup_commands:
+  # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other
+  # We set auto_activate_base to be false for pre-installed conda.
+  # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
+  # Line "conda config --remove channels": remove the default channel set in the default AWS image as it cannot be accessed.
+  #    UnavailableInvalidChannel: HTTP 404 NOT FOUND for channel  <https://aws-ml-conda-ec2.s3.us-west-2.amazonaws.com>
+  # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
+  # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
+  # Line 'mkdir -p ..': disable host key check
+  # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  # Line 'mkdir -p ~/.ssh ...': adding the key in the ssh config to allow interconnection for nodes in the cluster
+  # Line 'rm ~/.aws/credentials': explicitly remove the credentials file to be safe. This is to guard against the case where the credential files was uploaded once as `remote_identity` was not set in a previous launch.
+  - mkdir -p ~/.ssh; touch ~/.ssh/config;
+    {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
+    {{ conda_installation_commands }}
+    conda config --remove channels "https://aws-ml-conda-ec2.s3.us-west-2.amazonaws.com" || true;
+    {{ ray_skypilot_installation_commands }}
+    sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
+    {%- if docker_image is none %}
+    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    {%- endif %}
+    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;
+    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
+    {%- if remote_identity != 'LOCAL_CREDENTIALS' %}
+    rm ~/.aws/credentials || true;
+    {%- endif %}
+    {{ ssh_max_sessions_config }}
+
+# Command to start ray clusters are now placed in `sky.provision.instance_setup`.
+# We do not need to list it here anymore.

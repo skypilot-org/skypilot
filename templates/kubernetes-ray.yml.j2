@@ -1,0 +1,1263 @@
+cluster_name: {{cluster_name_on_cloud}}
+
+# The maximum number of workers nodes to launch in addition to the head
+# node.
+max_workers: {{num_nodes - 1}}
+upscaling_speed: {{num_nodes - 1}}
+idle_timeout_minutes: 60
+
+
+# Kubernetes resources that need to be configured for the autoscaler to be
+# able to manage the Ray cluster. If any of the provided resources don't
+# exist, the autoscaler will attempt to create them. If this fails, you may
+# not have the required permissions and will have to request them to be
+# created by your cluster administrator.
+provider:
+    type: external
+    module: sky.provision.kubernetes
+
+    region: kubernetes
+
+
+    namespace: {{k8s_namespace}}
+
+    # The kubecontext used to connect to the Kubernetes cluster.
+    {% if k8s_context is not none %}
+    context: {{k8s_context}}
+    {% endif %}
+
+    # This should be one of KubernetesPortMode
+    port_mode: {{k8s_port_mode}}
+
+    # The networking mode used to ssh to pods. One of KubernetesNetworkingMode.
+    networking_mode: {{k8s_networking_mode}}
+
+    # We use internal IPs since we set up a port-forward between the kubernetes
+    # cluster and the local machine, or directly use NodePort to reach the
+    # head node.
+    use_internal_ips: true
+
+    timeout: {{timeout}}
+
+    ssh_jump_image: {{k8s_ssh_jump_image}}
+
+    # Namespace used to host SkyPilot system components, such as fuse device
+    # manager.
+    skypilot_system_namespace: {{k8s_skypilot_system_namespace}}
+
+    # Boolean flag to indicate if the cluster requires FUSE mounting.
+    # Used to set up the necessary permissions and sidecars.
+    fuse_device_required: {{k8s_fuse_device_required}}
+
+    # ServiceAccount created by the autoscaler for the head node pod that it
+    # runs in. If this field isn't provided, the head pod config below must
+    # contain a user-created service account with the proper permissions.
+    autoscaler_service_account:
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+            labels:
+                parent: skypilot
+            name: skypilot-service-account
+
+    # Role created by the autoscaler for the head node pod that it runs in.
+    # If this field isn't provided, the role referenced in
+    # autoscaler_role_binding must exist and have at least these permissions.
+    autoscaler_role:
+        kind: Role
+        apiVersion: rbac.authorization.k8s.io/v1
+        metadata:
+            labels:
+                parent: skypilot
+            name: skypilot-service-account-role
+        # TODO(romilb): This is a very permissive role - gives all access in the
+        #  namespace. We should restrict this. For reference, this is required
+        #  for autodown and creating more SkyPilot clusters from within the pod.
+        rules:
+        - apiGroups: ["*"]
+          resources: ["*"]
+          verbs: ["*"]
+
+    # RoleBinding created by the autoscaler for the head node pod that it runs
+    # in. If this field isn't provided, the head pod config below must contain
+    # a user-created service account with the proper permissions.
+    autoscaler_role_binding:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        metadata:
+            labels:
+                parent: skypilot
+            name: skypilot-service-account-role-binding
+        subjects:
+        - kind: ServiceAccount
+          name: skypilot-service-account
+        roleRef:
+            kind: Role
+            name: skypilot-service-account-role
+            apiGroup: rbac.authorization.k8s.io
+
+    # Role for the skypilot-system namespace to create fusermount-server and
+    # any other system components.
+    autoscaler_skypilot_system_role:
+        kind: Role
+        apiVersion: rbac.authorization.k8s.io/v1
+        metadata:
+            namespace: {{k8s_skypilot_system_namespace}}
+            labels:
+                parent: skypilot
+            name: skypilot-system-service-account-role
+        rules:
+        - apiGroups: ["*"]
+          resources: ["*"]
+          verbs: ["*"]
+
+    # RoleBinding for skypilot-system namespace role
+    autoscaler_skypilot_system_role_binding:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        metadata:
+            namespace: {{k8s_skypilot_system_namespace}}
+            labels:
+                parent: skypilot
+            name: skypilot-system-service-account-role-binding
+        subjects:
+        - kind: ServiceAccount
+          name: skypilot-service-account
+        roleRef:
+            kind: Role
+            name: skypilot-system-service-account-role
+            apiGroup: rbac.authorization.k8s.io
+
+    # Role to access ingress services for fetching IP
+    autoscaler_ingress_role:
+        kind: Role
+        apiVersion: rbac.authorization.k8s.io/v1
+        metadata:
+            namespace: ingress-nginx
+            name: skypilot-service-account-ingress-role
+            labels:
+                parent: skypilot
+        rules:
+            - apiGroups: [ "" ]
+              resources: [ "services" ]
+              verbs: [ "list", "get", "watch" ]
+            - apiGroups: [ "rbac.authorization.k8s.io" ]
+              resources: [ "roles", "rolebindings" ]
+              verbs: [ "get", "list", "watch", "patch" ]
+
+    # RoleBinding to access ingress services for fetching IP
+    autoscaler_ingress_role_binding:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        metadata:
+            namespace: ingress-nginx
+            name: skypilot-service-account-ingress-role-binding
+            labels:
+                parent: skypilot
+        subjects:
+            - kind: ServiceAccount
+              name: skypilot-service-account
+        roleRef:
+            kind: Role
+            name: skypilot-service-account-ingress-role
+            apiGroup: rbac.authorization.k8s.io
+
+    # In addition to a role binding, we also need a cluster role binding to give
+    # the SkyPilot access to the cluster-wide resources such as nodes to get
+    # node resources.
+    autoscaler_cluster_role:
+        kind: ClusterRole
+        apiVersion: rbac.authorization.k8s.io/v1
+        metadata:
+            labels:
+                parent: skypilot
+            name: skypilot-service-account-cluster-role
+        rules:
+        - apiGroups: [ "" ]
+          resources: [ "nodes" ]  # Required for getting node resources.
+          verbs: [ "get", "list", "watch" ]
+        - apiGroups: [ "" ]
+          resources: [ "namespaces" ]  # Required for creating skypilot-system namespace, which hosts fuse device manager.
+          verbs: [ "get", "list", "watch", "create" ]
+        - apiGroups: [ "rbac.authorization.k8s.io" ]
+          resources: [ "clusterroles", "clusterrolebindings" ]  # Required for launching more SkyPilot clusters from within the pod.
+          verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+        - apiGroups: [ "node.k8s.io" ]
+          resources: [ "runtimeclasses" ]   # Required for autodetecting the runtime class of the nodes.
+          verbs: [ "get", "list", "watch" ]
+        - apiGroups: [ "networking.k8s.io" ]   # Required for exposing services.
+          resources: [ "ingressclasses" ]
+          verbs: [ "get", "list", "watch" ]
+
+    # Bind cluster role to the service account
+    autoscaler_cluster_role_binding:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+            labels:
+                parent: skypilot
+            name: skypilot-service-account-cluster-role-binding
+        subjects:
+        - kind: ServiceAccount
+          name: skypilot-service-account
+        roleRef:
+            kind: ClusterRole
+            name: skypilot-service-account-cluster-role
+            apiGroup: rbac.authorization.k8s.io
+
+    services:
+      # Service to expose the head node pod's SSH port.
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          labels:
+            parent: skypilot
+            skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-user: {{ user }}
+          name: {{cluster_name_on_cloud}}-head-ssh
+        spec:
+          selector:
+            component: {{cluster_name_on_cloud}}-head
+          ports:
+            - protocol: TCP
+              port: 22
+              targetPort: 22
+      # Service that maps to the head node of the Ray cluster, so that the
+      # worker nodes can find the head node using
+      # {{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local
+      - apiVersion: v1
+        kind: Service
+        metadata:
+            labels:
+              parent: skypilot
+              skypilot-cluster: {{cluster_name_on_cloud}}
+              skypilot-user: {{ user }}
+            # NOTE: If you're running multiple Ray clusters with services
+            # on one Kubernetes cluster, they must have unique service
+            # names.
+            name: {{cluster_name_on_cloud}}-head
+        spec:
+            # Create a headless service so that the head node can be reached by
+            # the worker nodes with any port number.
+            clusterIP: None
+            # This selector must match the head node pod's selector below.
+            selector:
+                component: {{cluster_name_on_cloud}}-head
+      # Headless service mapping hostnames to rest of the worker nodes
+      {% for worker_id in range(1, num_nodes) %}
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          labels:
+            parent: skypilot
+            skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-user: {{ user }}
+          name: {{cluster_name_on_cloud}}-worker{{ worker_id }}
+        spec:
+          selector:
+              component: {{cluster_name_on_cloud}}-worker{{ worker_id }}
+          clusterIP: None
+      {% endfor %}
+
+
+# Specify the pod type for the ray head node (as configured below).
+head_node_type: ray_head_default
+# Specify the allowed pod types for this ray cluster and the resources they provide.
+available_node_types:
+  ray_head_default:
+    node_config:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        # name will be filled in the provisioner
+        # head node name will be {{cluster_name_on_cloud}}-head, which will match the head node service selector above if a head node
+        # service is required. Worker nodes are named {{cluster_name_on_cloud}}-worker{{ node_id }}
+        labels:
+            parent: skypilot
+            # component will be set for the head node pod to be the same as the head node service selector above if a
+            skypilot-cluster: {{cluster_name_on_cloud}}
+            # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
+            skypilot-ssh-jump: {{k8s_ssh_jump_name}}
+            skypilot-user: {{ user }}
+            # Custom tags for the pods
+            {%- for label_key, label_value in labels.items() %}
+            {{ label_key }}: {{ label_value|tojson }}
+            {%- endfor %}
+            {% if high_availability %}
+            app: {{cluster_name_on_cloud}}
+            {% endif %}
+            {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) %}
+            skypilot-binpack: "gpu"
+            {% endif %}
+            {% if k8s_kueue_local_queue_name %}
+            kueue.x-k8s.io/queue-name: {{k8s_kueue_local_queue_name}}
+            kueue.x-k8s.io/pod-group-name: {{cluster_name_on_cloud}}
+            {% endif %}
+        {% if k8s_kueue_local_queue_name or k8s_enable_gpudirect_tcpx or k8s_enable_gpudirect_tcpxo or k8s_enable_gpudirect_rdma %}
+        annotations:
+          {% if k8s_kueue_local_queue_name %}
+          kueue.x-k8s.io/retriable-in-group: "false"
+          kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes|string }}"
+          {% if k8s_max_run_duration_seconds %}
+          provreq.kueue.x-k8s.io/maxRunDurationSeconds: "{{k8s_max_run_duration_seconds|string}}"
+          {% endif %}
+          {% endif %}
+        # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx 
+        # Values from google cloud guide
+          {% if k8s_enable_gpudirect_tcpx %}
+          devices.gke.io/container.tcpx-daemon: |+
+            - path: /dev/nvidia0
+            - path: /dev/nvidia1
+            - path: /dev/nvidia2
+            - path: /dev/nvidia3
+            - path: /dev/nvidia4
+            - path: /dev/nvidia5
+            - path: /dev/nvidia6
+            - path: /dev/nvidia7
+            - path: /dev/nvidiactl
+            - path: /dev/nvidia-uvm
+          networking.gke.io/default-interface: 'eth0'
+          networking.gke.io/interfaces: |
+            [
+              {"interfaceName":"eth0","network":"default"},
+              {"interfaceName":"eth1","network":"vpc1"},
+              {"interfaceName":"eth2","network":"vpc2"},
+              {"interfaceName":"eth3","network":"vpc3"},
+              {"interfaceName":"eth4","network":"vpc4"}
+            ]
+          {% endif %}
+          {% if k8s_enable_gpudirect_tcpxo %}
+          devices.gke.io/container.tcpxo-daemon: |+
+            - path: /dev/nvidia0
+            - path: /dev/nvidia1
+            - path: /dev/nvidia2
+            - path: /dev/nvidia3
+            - path: /dev/nvidia4
+            - path: /dev/nvidia5
+            - path: /dev/nvidia6
+            - path: /dev/nvidia7
+            - path: /dev/nvidiactl
+            - path: /dev/nvidia-uvm
+            - path: /dev/dmabuf_import_helper
+          networking.gke.io/default-interface: 'eth0'
+          networking.gke.io/interfaces: |
+            [
+              {"interfaceName":"eth0","network":"default"},
+              {"interfaceName":"eth1","network":"vpc1"},
+              {"interfaceName":"eth2","network":"vpc2"},
+              {"interfaceName":"eth3","network":"vpc3"},
+              {"interfaceName":"eth4","network":"vpc4"},
+              {"interfaceName":"eth5","network":"vpc5"},
+              {"interfaceName":"eth6","network":"vpc6"},
+              {"interfaceName":"eth7","network":"vpc7"},
+              {"interfaceName":"eth8","network":"vpc8"}
+            ]
+          {% endif %}
+          {% if k8s_enable_gpudirect_rdma %}
+          networking.gke.io/default-interface: 'eth0'
+          networking.gke.io/interfaces: |
+            [
+              {"interfaceName":"eth0","network":"default"},
+              {"interfaceName":"eth1","network":"gvnic-1"},
+              {"interfaceName":"eth2","network":"rdma-0"},
+              {"interfaceName":"eth3","network":"rdma-1"},
+              {"interfaceName":"eth4","network":"rdma-2"},
+              {"interfaceName":"eth5","network":"rdma-3"},
+              {"interfaceName":"eth6","network":"rdma-4"},
+              {"interfaceName":"eth7","network":"rdma-5"},
+              {"interfaceName":"eth8","network":"rdma-6"},
+              {"interfaceName":"eth9","network":"rdma-7"}
+            ]
+          {% endif %}
+        {% endif %}
+      spec:
+        # serviceAccountName: skypilot-service-account
+        serviceAccountName: {{k8s_service_account_name}}
+        automountServiceAccountToken: {{k8s_automount_sa_token}}
+        restartPolicy: {{ "Always" if high_availability else "Never" }}
+        {% if volume_mounts %}
+        securityContext:
+          fsGroup: 1000
+        {% endif %}
+
+        # Add node selector if GPU/TPUs are requested:
+        {% if (k8s_topology_label_key is not none and k8s_topology_label_value is not none) or (k8s_spot_label_key is not none) or (k8s_enable_flex_start) %}
+        nodeSelector:
+            {% if k8s_topology_label_key is not none and k8s_topology_label_value is not none %}
+            {{k8s_topology_label_key}}: {{k8s_topology_label_value}}
+            {% endif %}
+            {% if k8s_spot_label_key is not none %}
+            {{k8s_spot_label_key}}: {{k8s_spot_label_value|tojson}}
+            {% endif %}
+            {% if k8s_enable_flex_start %}
+            cloud.google.com/gke-flex-start: "true"
+            {% endif %}
+        {% endif %}
+        {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or (avoid_label_keys is not none) %}
+        affinity:
+          nodeAffinity:
+            {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: {{k8s_acc_label_key}}
+                  operator: In
+                  values:
+                  {% for label_value in k8s_acc_label_values %}
+                  - {{label_value}}
+                  {% endfor %}
+            {% endif %}
+            {% if avoid_label_keys is not none %}
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              preference:
+                matchExpressions:
+                {% for avoid_label_key in avoid_label_keys %}
+                - key: {{avoid_label_key}}
+                  operator: DoesNotExist
+                {% endfor %}
+            {% endif %}
+          {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
+          podAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 1
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: "skypilot-binpack"
+                        operator: In
+                        values:
+                          - "gpu"
+                  topologyKey: kubernetes.io/hostname
+          {% endif %}
+        {% endif %}
+        {% if k8s_spot_label_key is not none %}
+        tolerations:
+          - key: {{k8s_spot_label_key}}
+            operator: Equal
+            value: {{k8s_spot_label_value|tojson}}
+            effect: NoSchedule
+        {% endif %}
+
+        # This volume allocates shared memory for Ray to use for its plasma
+        # object store. If you do not provide this, Ray will fall back to
+        # /tmp which cause slowdowns if is not a shared memory volume.
+        volumes:
+        - name: secret-volume
+          secret:
+            secretName: {{k8s_ssh_key_secret_name}}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+        {% if k8s_fuse_device_required %}
+        - name: fusermount-shared-dir
+          hostPath:
+            path: {{k8s_fusermount_shared_dir}}
+            type: DirectoryOrCreate
+        {% endif %}
+        {% if high_availability %}
+        - name: {{k8s_high_availability_deployment_volume_mount_name}}
+          persistentVolumeClaim:
+            claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
+        {% endif %}
+        {% for volume_mount in volume_mounts %}
+        - name: {{volume_mount.name}}
+          persistentVolumeClaim:
+            claimName: {{volume_mount.volume_name_on_cloud}}
+        {% endfor %}
+        {% if k8s_enable_gpudirect_tcpx %}
+        - name: libraries
+          hostPath:
+            path: /home/kubernetes/bin/nvidia/lib64
+        - name: tcpx-socket
+          emptyDir: {}
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: proc-sys
+          hostPath:
+            path: /proc/sys
+        {% endif %}
+        {% if k8s_enable_gpudirect_tcpxo %}
+        - name: libraries
+          hostPath:
+            path: /home/kubernetes/bin/nvidia
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: proc-sys
+          hostPath:
+            path: /proc/sys
+        - name: aperture-devices
+          hostPath:
+            path: /dev/aperture_devices
+        {% endif %}
+        {% if k8s_enable_gpudirect_rdma %}
+        - name: library-dir-host
+          hostPath:
+            path: /home/kubernetes/bin/nvidia
+        - name: gib
+          hostPath:
+            path: /home/kubernetes/bin/gib
+        {% endif %}
+        containers:
+        - name: ray-node
+          imagePullPolicy: Always
+          image: {{image_id}}
+          env:
+            - name: SKYPILOT_POD_NODE_TYPE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['ray-node-type']
+            {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
+            - name: {{ key }}
+              value: {{ value }}
+            {% endfor %}
+            # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx#environment-variables-nccl
+            # Page recommends setting NCCL values for GPUDirect TCPX for best performance.
+            {% if k8s_enable_gpudirect_tcpx %}
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64:/usr/local/tcpx/lib64
+            - name: NCCL_GPUDIRECTTCPX_SOCKET_IFNAME
+              value: eth1,eth2,eth3,eth4
+            - name: NCCL_GPUDIRECTTCPX_CTRL_DEV
+              value: eth0
+            - name: NCCL_GPUDIRECTTCPX_TX_BINDINGS
+              value: "eth1:8-21,112-125;eth2:8-21,112-125;eth3:60-73,164-177;eth4:60-73,164-177"
+            - name: NCCL_GPUDIRECTTCPX_RX_BINDINGS
+              value: "eth1:22-35,126-139;eth2:22-35,126-139;eth3:74-87,178-191;eth4:74-87,178-191"
+            - name: NCCL_GPUDIRECTTCPX_PROGRAM_FLOW_STEERING_WAIT_MICROS
+              value: "500000"
+            - name: NCCL_GPUDIRECTTCPX_UNIX_CLIENT_PREFIX
+              value: "/tmp"
+            - name: NCCL_GPUDIRECTTCPX_FORCE_ACK
+              value: "0"
+            - name: NCCL_SOCKET_IFNAME
+              value: eth0
+            - name: NCCL_CROSS_NIC
+              value: "0"
+            - name: NCCL_ALGO
+              value: Ring
+            - name: NCCL_PROTO
+              value: Simple
+            - name: NCCL_NSOCKS_PERTHREAD
+              value: "4"
+            - name: NCCL_SOCKET_NTHREADS
+              value: "1"
+            - name: NCCL_NET_GDR_LEVEL
+              value: PIX
+            - name: NCCL_DYNAMIC_CHUNK_SIZE
+              value: "524288"
+            - name: NCCL_P2P_PXN_LEVEL
+              value: "0"
+            - name: NCCL_P2P_NET_CHUNKSIZE
+              value: "524288"
+            - name: NCCL_P2P_PCI_CHUNKSIZE
+              value: "524288"
+            - name: NCCL_P2P_NVL_CHUNKSIZE
+              value: "1048576"
+            - name: NCCL_BUFFSIZE
+              value: "4194304"
+            - name: NCCL_MAX_NCHANNELS
+              value: "8"
+            - name: NCCL_MIN_NCHANNELS
+              value: "8"
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0,1,2,3,4,5,6,7"
+            {% endif %}
+            {% if k8s_enable_gpudirect_tcpxo %}
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64
+            - name: NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY
+              value: /dev/aperture_devices
+            - name: NCCL_FASTRAK_CTRL_DEV
+              value: eth0
+            - name: NCCL_FASTRAK_IFNAME
+              value: eth1,eth2,eth3,eth4,eth5,eth6,eth7,eth8
+            - name: NCCL_SOCKET_IFNAME
+              value: eth0
+            - name: NCCL_CROSS_NIC
+              value: "0"
+            - name: NCCL_ALGO
+              value: Ring,Tree
+            - name: NCCL_PROTO
+              value: Simple,LL128
+            - name: NCCL_MIN_NCHANNELS
+              value: "4"
+            - name: NCCL_TUNER_PLUGIN
+              value: libnccl-tuner.so
+            - name: NCCL_TUNER_CONFIG_PATH
+              value: /usr/local/nvidia/lib64/a3plus_tuner_config.textproto
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0,1,2,3,4,5,6,7"
+            {% endif %}
+            {% if k8s_enable_gpudirect_rdma %}
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64
+            - name: NCCL_NET
+              value: gIB
+            - name: NCCL_CROSS_NIC
+              value: "0"
+            - name: NCCL_NET_GDR_LEVEL
+              value: PIX
+            - name: NCCL_P2P_NET_CHUNKSIZE
+              value: "131072"
+            - name: NCCL_NVLS_CHUNKSIZE
+              value: "524288"
+            - name: NCCL_IB_ADAPTIVE_ROUTING
+              value: "1"
+            - name: NCCL_IB_QPS_PER_CONNECTION
+              value: "4"
+            - name: NCCL_IB_TC
+              value: "52"
+            - name: NCCL_IB_FIFO_TC
+              value: "84"
+            {% if k8s_enable_gpudirect_rdma_a4 %}
+            - name: NCCL_TUNER_CONFIG_PATH
+              value: /usr/local/gib/configs/tuner_config_a4.txtpb
+            {% else %}
+            - name: NCCL_TUNER_CONFIG_PATH
+              value: /usr/local/gib/configs/tuner_config_a3u.txtpb
+            {% endif %}
+            {% endif %}
+            {% if k8s_fuse_device_required %}
+            - name: FUSERMOUNT_SHARED_DIR
+              value: {{k8s_fusermount_shared_dir}}
+            {% endif %}
+          # Do not change this command - it keeps the pod alive until it is
+          # explicitly killed.
+          command: ["/bin/bash", "-c", "--"]
+          args:
+            - |
+              # For backwards compatibility, we put a marker file in the pod
+              # to indicate that the pod is running with the changes introduced
+              # in project nimbus: https://github.com/skypilot-org/skypilot/pull/4393
+              # TODO: Remove this marker file and it's usage in setup_commands
+              # after v0.10.0 release.
+              touch /tmp/skypilot_is_nimbus
+
+              # Helper function to conditionally use sudo
+              # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
+              prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
+              [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
+
+              STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
+
+              # STEP 1: Run apt update, install missing packages, and set up ssh.
+              (
+                (
+                # For backwards compatibility, we put a marker file in the pod
+                # to indicate that the apt ssh setup step will write a completion
+                # marker file (/tmp/apt_ssh_setup_complete) to the pod.
+                # TODO: Remove this marker file and its usage in setup_commands
+                # after v0.11.0 release.
+                touch /tmp/apt_ssh_setup_started
+
+                DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
+                echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
+                # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
+                # so that both fusemount and fusermount3 can be masked before enabling SSH access.
+                PACKAGES="rsync curl wget netcat gcc patch pciutils fuse fuse3 openssh-server";
+
+                # Separate packages into two groups: packages that are installed first
+                # so that curl, rsync, ssh and wget are available sooner to unblock the following
+                # conda installation and rsync.
+                # Also, we install fuse first to avoid confliction with fuse3.
+                set -e
+                INSTALL_FIRST="";
+                MISSING_PACKAGES="";
+                for pkg in $PACKAGES; do
+                  if [ "$pkg" == "netcat" ]; then
+                    if ! dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; then
+                      INSTALL_FIRST="$INSTALL_FIRST netcat-openbsd";
+                    fi
+                  elif ! dpkg -l | grep -q "^ii  $pkg "; then
+                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ] || [ "$pkg" == "fuse" ] || [ "$pkg" == "wget" ]; then
+                      INSTALL_FIRST="$INSTALL_FIRST $pkg";
+                    else
+                      MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
+                    fi
+                  fi
+                done;
+                if [ ! -z "$INSTALL_FIRST" ]; then
+                  echo "Installing core packages: $INSTALL_FIRST";
+                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $INSTALL_FIRST;
+                fi;
+                # SSH and other packages are not necessary, so we disable set -e
+                set +e
+
+                if [ ! -z "$MISSING_PACKAGES" ]; then
+                  # Install missing packages individually to avoid failure installation breaks the whole install process,
+                  # e.g. fuse3 is not available on some distributions.
+                  echo "Installing missing packages individually: $MISSING_PACKAGES";
+                  for pkg in $MISSING_PACKAGES; do
+                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $pkg || echo "Optional package $pkg installation failed, skip.";
+                  done
+                fi;
+
+                {% if k8s_fuse_device_required %}
+                set -e
+                # Mask fusermount binary before enabling SSH access
+                FUSERMOUNT_PATH=$(which fusermount)
+                if [ -z "$FUSERMOUNT_PATH" ]; then
+                    echo "Error: fusermount binary not found"
+                    exit 1
+                fi
+                $(prefix_cmd) cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
+                $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
+                FUSERMOUNT3_PATH=$(which fusermount3)
+                if [ -z "$FUSERMOUNT3_PATH" ]; then
+                    FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
+                fi
+                # Also mask fusermount3 for rclone and blobfuse2 (for unmount operation)
+                $(prefix_cmd) ln -sf "$FUSERMOUNT_PATH" "$FUSERMOUNT3_PATH"
+                # Add fusermount-wrapper to handle adapters that use libfuse directly, e.g. blobfuse2
+                $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-wrapper /bin/fusermount-wrapper
+                # Wait for the server to setup the fusermount shim binary in case:
+                # 1. The server daemonset was just deployed and is still starting up.
+                # 2. The node was just started and the server Pod is still starting up.
+                wait_for_fusermount() {
+                    local timeout=60
+                    local start_time=$(date +%s)
+                    while ! command -v fusermount >/dev/null 2>&1; do
+                        current_time=$(date +%s)
+                        elapsed=$((current_time - start_time))
+                        if [ $elapsed -ge $timeout ]; then
+                            echo "Error: fusermount not ready after $timeout seconds"
+                            exit 1
+                        fi
+                        sleep 1
+                    done
+                }
+                wait_for_fusermount
+                # Some distributions may mount hostPath with noexec, copy the binary in this case.
+                if ! fusermount -V; then
+                    echo "fusermount -V failed, copying fusermount-shim directly"
+                    $(prefix_cmd) rm -f "$FUSERMOUNT_PATH"
+                    $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
+                    $(prefix_cmd) rm -f /bin/fusermount-wrapper
+                    $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-wrapper /bin/fusermount-wrapper
+                fi
+                {% endif %}
+
+                $(prefix_cmd) mkdir -p /var/run/sshd;
+                $(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config;
+                $(prefix_cmd) sed "s@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd;
+                cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A;
+                $(prefix_cmd) mkdir -p ~/.ssh;
+                $(prefix_cmd) chown -R $(whoami) ~/.ssh;
+                $(prefix_cmd) chmod 700 ~/.ssh;
+                $(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys;
+                $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
+                $(prefix_cmd) service ssh restart;
+                $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
+
+                touch /tmp/apt_ssh_setup_complete
+                echo "=== SSH setup completed ==="
+                ) > /tmp/${STEPS[0]}.log 2>&1 || {
+                  echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed
+                  cat /tmp/${STEPS[0]}.log
+                  exit 1
+                }
+              ) &
+
+              # STEP 2: Install conda, ray and skypilot (for dependencies); start
+              # ray cluster.
+              (
+                (
+                set -e
+                mkdir -p ~/.sky
+                # Wait for `curl` package to be installed before installing conda
+                # and ray.
+                until dpkg -l | grep -q "^ii  curl "; do
+                  sleep 0.1
+                  echo "Waiting for curl package to be installed..."
+                done
+                {{ conda_installation_commands }}
+                {{ ray_installation_commands }}
+
+                VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                # Wait for `patch` package to be installed before applying ray patches
+                until dpkg -l | grep -q "^ii  patch "; do
+                  sleep 0.1
+                  echo "Waiting for patch package to be installed..."
+                done
+                # Apply Ray patches for progress bar fix
+                ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && { 
+                  VIRTUAL_ENV=~/skypilot-runtime python -c "from sky.skylet.ray_patches import patch; patch()" || exit 1; 
+                }
+                touch /tmp/ray_skypilot_installation_complete
+                echo "=== Ray and skypilot installation completed ==="
+
+                # Disable set -e, as we have some commands that are ok to fail
+                # after the ray start.
+                # TODO(zhwu): this is a hack, we should fix the commands that are
+                # ok to fail.
+                if [ "$SKYPILOT_POD_NODE_TYPE" == "head" ]; then
+                  set +e
+                  {{ ray_head_start_command }}
+                else
+                  # Start ray worker on the worker pod.
+                  # Wait until the head pod is available with an IP address
+                  export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
+                  export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
+                  # Wait until the ray cluster is started on the head pod
+                  until dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; do
+                    sleep 0.1
+                    echo "Waiting for netcat package to be installed..."
+                  done
+                  until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
+                    sleep 0.1
+                  done
+
+                  set +e
+                  {{ ray_worker_start_command }}
+                fi
+                ) > /tmp/${STEPS[1]}.log 2>&1 || {
+                  echo "Error: ${STEPS[1]} failed. Continuing anyway..." > /tmp/${STEPS[1]}.failed
+                  cat /tmp/${STEPS[1]}.log
+                  exit 1
+                }
+              ) &
+
+
+              # STEP 3: Set up environment variables; this should be relatively fast.
+              (
+                (
+                set -e
+                if [ $(id -u) -eq 0 ]; then
+                  echo 'alias sudo=""' >> ~/.bashrc; echo succeed;
+                else
+                  if command -v sudo >/dev/null 2>&1; then
+                    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || { echo 52; exit 52; };
+                  else
+                    { echo 52; exit 52; };
+                  fi;
+                fi;
+                export -p > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
+                ) > /tmp/${STEPS[2]}.log 2>&1 || {
+                  echo "Error: ${STEPS[2]} failed. Continuing anyway..." > /tmp/${STEPS[2]}.failed
+                  cat /tmp/${STEPS[2]}.log
+                  exit 1
+                }
+              ) &
+
+              function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
+
+              # Tails file and checks every 5 sec for
+              # open file handlers with write access
+              # closes if none exist
+              monitor_file() {
+                tail -f $file &
+                TAIL_PID=$!
+                while kill -0 $TAIL_PID 2> /dev/null; do
+                  # only two PIDs should be accessing the file
+                  # the log appender and log tailer
+                  if [ $(mylsof $file | wc -l) -lt 2 ]; then
+                    kill $TAIL_PID
+                    break
+                  fi
+                  # Sleep for 5 seconds before checking again. Do not make this
+                  # too short as it will consume CPU, and too long will cause
+                  # the file to be closed too late keeping the pod alive.
+                  sleep 5
+                done
+              }
+
+              log_tail() {
+                FILE_PATTERN="~/sky_logs/*/tasks/*.log"
+                while ! ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; do
+                  sleep 1
+                done
+
+                # Keep track of already monitored files
+                already_monitored=""
+
+                # Infinite loop to continuously check for new files
+                while true; do
+                  for file in $(eval echo $FILE_PATTERN); do
+                    if echo $already_monitored | grep -q $file; then
+                      # File is already being monitored
+                      continue
+                    fi
+
+                    # Monitor the new file
+                    monitor_file $file &
+                    already_monitored="${already_monitored} ${file}"
+                  done
+                  sleep 0.1
+                done
+              }
+
+              {% if high_availability %}
+              mkdir -p {{k8s_high_availability_deployment_run_script_dir}}
+              if [ -f {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready ]; then
+                SKYPILOT_HA_RECOVERY_LOG="{{ha_recovery_log_path}}"
+                echo "Starting HA recovery at $(date)" >> $SKYPILOT_HA_RECOVERY_LOG
+                start_time=$SECONDS
+                retry_count=0
+
+                # Wait for Ray to be ready, as the following commands is depending on Ray.
+                GET_RAY_STATUS_CMD=$({{sky_python_cmd}} -c 'from sky.provision import instance_setup; print(instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND)')
+                while true; do
+                  retry_count=$((retry_count + 1))
+                  current_duration=$(( SECONDS - start_time ))
+                  echo "Attempt $retry_count to get Ray status after $current_duration seconds..." >> $SKYPILOT_HA_RECOVERY_LOG
+
+                  bash --login -c "$GET_RAY_STATUS_CMD"
+                  if [ $? -eq 0 ]; then
+                    wait_duration=$(( SECONDS - start_time ))
+                    echo "Ray ready after waiting $wait_duration seconds (took $retry_count attempts)" >> $SKYPILOT_HA_RECOVERY_LOG
+                    break
+                  fi
+                  echo "Waiting for Ray to be ready..." >> $SKYPILOT_HA_RECOVERY_LOG
+                  sleep 2
+                done
+
+                # ! Keep this aligned with `CloudVmRayBackend._setup()`
+                # Suppose all `task.setup` are the same for sky serve / managed jobs controller task.
+                # So be careful for compatibility issue once you change it.
+                chmod +x {{k8s_high_availability_deployment_setup_script_path}}
+                /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && {{k8s_high_availability_deployment_setup_script_path}} > /tmp/controller_recovery_setup_commands.log 2>&1"
+                echo "=== Controller setup commands completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
+
+                touch {{k8s_high_availability_restarting_signal_file}}
+                # Get all in-progress jobs from managed jobs controller. We skip any jobs that are already done.
+                # Also, skip the jobs that are waiting to be scheduled as those does not have a controller process running.
+                # For SkyServe, this will be None and every service will be recovered. This is because SkyServe
+                # will delete the service from the database after it is terminated so everything in the database is running.
+                ALL_IN_PROGRESS_JOBS=$({{sky_python_cmd}} -c "from sky.jobs import state; jobs = state.get_managed_jobs(); print(' '.join({str(job['job_id']) for job in jobs if job['schedule_state'] not in [state.ManagedJobScheduleState.DONE, state.ManagedJobScheduleState.WAITING]}) if jobs else None)")
+                if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
+                  read -ra ALL_IN_PROGRESS_JOBS_SEQ <<< "$ALL_IN_PROGRESS_JOBS"
+                fi
+                for file in {{k8s_high_availability_deployment_run_script_dir}}/*; do
+                  # This is the cluster job id on managed jobs controller, but it is guaranteed to be the same as the managed job id,
+                  # so we directly use it here. See `CloudVmRayBackend._exec_code_on_head::_dump_code_to_file` for more details.
+                  JOB_ID=$(basename $file | sed 's/sky_job_//')
+                  # If the list of in-progress jobs is not None (meaning this is a managed job HA controller) and job is not in-progress, skip.
+                  if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
+                    if [[ ! " ${ALL_IN_PROGRESS_JOBS_SEQ[@]} " =~ " ${JOB_ID} " ]]; then
+                      continue
+                    fi
+                  fi
+                  # ! Keep this aligned with `CloudVmRayBackend._execute()`
+                  chmod +x $file
+                  # TODO(tian): This logic may run a lot of things if the jobs controller previously had many jobs.
+                  # We should do more tests and make sure it will scale well.
+                  /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
+                  echo "=== Controller task run for service / job (file: $file) completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
+                done
+                rm {{k8s_high_availability_restarting_signal_file}}
+
+                duration=$(( SECONDS - start_time ))
+                echo "HA recovery completed at $(date)" >> $SKYPILOT_HA_RECOVERY_LOG
+                echo "Total recovery time: $duration seconds" >> $SKYPILOT_HA_RECOVERY_LOG
+              fi
+
+              touch {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready
+              {% endif %}
+
+              trap : TERM INT; log_tail || sleep infinity & wait
+
+          ports:
+          - containerPort: 22  # Used for SSH
+          - containerPort: {{ray_port}}  # Redis port
+          - containerPort: 10001  # Used by Ray Client
+          - containerPort: {{ray_dashboard_port}}  # Used by Ray Dashboard
+
+          # This volume allocates shared memory for Ray to use for its plasma
+          # object store. If you do not provide this, Ray will fall back to
+          # /tmp which cause slowdowns if is not a shared memory volume.
+          volumeMounts:
+          - name: secret-volume
+            readOnly: true
+            mountPath: "/etc/secret-volume"
+          - mountPath: /dev/shm
+            name: dshm
+          {% if k8s_enable_gpudirect_tcpx %}
+          - name: tcpx-socket
+            mountPath: /tmp
+          - name: libraries
+            mountPath: /usr/local/nvidia/lib64
+            readOnly: true
+          {% endif %}
+          {% if k8s_enable_gpudirect_tcpxo %}
+          - name: libraries
+            mountPath: /usr/local/nvidia
+          - name: aperture-devices
+            mountPath: /dev/aperture_devices
+          {% endif %}
+          {% if k8s_enable_gpudirect_rdma %}
+          - name: library-dir-host
+            mountPath: /usr/local/nvidia
+          - name: gib
+            mountPath: /usr/local/gib
+          {% endif %}
+          {% if high_availability %}
+          - name: {{k8s_high_availability_deployment_volume_mount_name}}
+            mountPath: {{k8s_high_availability_deployment_volume_mount_path}}
+          {% endif %}
+          {% if k8s_fuse_device_required %}
+          - name: fusermount-shared-dir
+            mountPath: {{k8s_fusermount_shared_dir}}
+          {% endif %}
+          {% for volume_mount in volume_mounts %}
+          - name: {{volume_mount.name}}
+            mountPath: {{volume_mount.path}}
+          {% endfor %}
+          resources:
+            requests:
+              cpu: {{cpus}}
+              memory: {{memory}}G
+              {% if k8s_resource_key is not none %}
+              # Number of requested google.com/tpu must be equal to the total
+              # number of available TPU chips on the TPU slice node either it
+              # being a node from multi-host TPU slice or single-host TPU
+              # slice. Example reference:
+              # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work
+              {{k8s_resource_key}}: {{accelerator_count}}
+              {% endif %}
+              {% if k8s_network_type == 'coreweave' %}
+              rdma/ib: 1
+              {% endif %}
+            {% if k8s_resource_key is not none %}
+            limits:
+              # Limits need to be defined for GPU/TPU requests
+              {% if k8s_resource_key is not none %}
+              {{k8s_resource_key}}: {{accelerator_count}}
+              {% endif %}
+              {% if k8s_network_type == 'coreweave' %}
+              rdma/ib: 1
+              {% endif %}
+            {% endif %}
+          {% if k8s_ipc_lock_capability %}
+          securityContext:
+            capabilities:
+              add:
+                - IPC_LOCK
+          {% endif %}
+        {% if k8s_enable_gpudirect_tcpx %}
+        # GPUDirect TCPX daemon sidecar container
+        - name: tcpx-daemon
+          image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/tcpgpudmarxd-dev:v2.0.11
+          imagePullPolicy: Always
+          command:
+            - /tcpgpudmarxd/build/app/tcpgpudmarxd
+            - --gpu_nic_preset
+            - a3vm
+            - --gpu_shmem_type
+            - fd
+            - --uds_path
+            - /run/tcpx
+            - --setup_param
+            - --verbose
+            - "128"
+            - "2"
+            - "0"
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          volumeMounts:
+            - name: libraries
+              mountPath: /usr/local/nvidia/lib64
+              readOnly: true
+            - name: tcpx-socket
+              mountPath: /run/tcpx
+            - name: sys
+              mountPath: /hostsysfs
+            - name: proc-sys
+              mountPath: /hostprocsysfs
+          env:
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64
+        {% endif %}
+        {% if k8s_enable_gpudirect_tcpxo %}
+        - name: tcpxo-daemon
+          image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.17
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -ex
+              chmod 755 /fts/entrypoint_rxdm_container.sh
+              /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics=8 --uid= --alsologtostderr
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_BIND_SERVICE
+          volumeMounts:
+            - name: libraries
+              mountPath: /usr/local/nvidia
+            - name: sys
+              mountPath: /hostsysfs
+            - name: proc-sys
+              mountPath: /hostprocsysfs
+          env:
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64
+        {% endif %}
+
+      {% if high_availability %}
+      pvc_spec:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
+          namespace: {{k8s_namespace}}
+        spec:
+          accessModes:
+            - ReadWriteOnce # Our controller pod is singleton
+          {% if k8s_high_availability_storage_class_name is not none %}
+          storageClassName: {{k8s_high_availability_storage_class_name}}
+          {% endif %}
+          resources:
+            requests:
+              storage: {{disk_size}}Gi
+
+      deployment_spec:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: {{cluster_name_on_cloud}}-deployment
+          namespace: {{k8s_namespace}}
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: {{cluster_name_on_cloud}}
+          template:
+            # The only difference between the pod spec and this section is the initContainers
+            metadata:
+              # should be replaced by pod metadata
+            spec:
+              securityContext:
+                fsGroup: 1000
+              # To prevent the home dir provided by the docker image from being overridden by pvc mounting,
+              # we use initContainers to copy it first to /mnt/home, which will later be mounted to home dir.
+              initContainers:
+                - name: init-copy-home
+                  image: {{image_id}}
+                  command: ["/bin/sh", "-c"]
+                  args:
+                    - |
+                      # Define path for the marker file created by the main container upon successful startup.
+                      # This file persists in the PVC across Pod restarts.
+                      MARKER_FILE="/mnt/home/k8s_container_ready"
+                      SOURCE_PATH="{{k8s_high_availability_deployment_volume_mount_path}}"
+                      DEST_PATH="/mnt/home"
+
+                      # We only need to copy the initial home directory contents from the image
+                      # the *first* time a Pod uses a *new* PVC.
+                      # On subsequent Pod starts (e.g., after a crash or update), the PVC
+                      # already contains the necessary data (and potentially user modifications).
+                      # The presence of MARKER_FILE (created by the main container in a previous
+                      # successful run) indicates the PVC is already initialized. Checking for
+                      # it prevents unnecessary and time-consuming rsync operations on every restart.
+                      if [ ! -f "$MARKER_FILE" ]; then
+                        echo "Marker '$MARKER_FILE' not found. PVC likely needs initialization."
+                        echo "Copying initial home directory from image ($SOURCE_PATH/) to PVC ($DEST_PATH)..."
+
+                        # Use rsync with -rl (recursive, links) instead of -a (archive).
+                        # This avoids preserving times (-t) and permissions (-p) implied by -a,
+                        # which caused 'Operation not permitted' errors on the PVC root directory (/mnt/home).
+                        # Owner/group preservation (-o, -g) is also skipped (default for -rl), ensuring
+                        # files are owned by the container's user/group.
+                        rsync -rl "$SOURCE_PATH/" "$DEST_PATH"
+
+                        # Check if rsync failed
+                        if [ $? -ne 0 ]; then
+                           echo "ERROR: rsync failed during home directory initialization." >&2
+                           exit 1 # Exit initContainer with error if copy fails
+                        fi
+                        echo "Home directory initialization copy complete."
+                      else
+                        # If marker exists, skip the copy
+                        echo "Marker '$MARKER_FILE' found. Skipping initial home directory copy."
+                      fi
+                      echo "Current contents of $DEST_PATH:"
+                      ls -la "$DEST_PATH"
+                  volumeMounts:
+                    # Mount the persistent volume claim into the initContainer
+                    - name: {{k8s_high_availability_deployment_volume_mount_name}}
+                      mountPath: /mnt/home # Temporary mount point for initialization
+              # should be replaced by pod spec
+      {% endif %}
+
+setup_commands:
+  # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
+  # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other
+  # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
+  # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
+  # Line 'mkdir -p ..': disable host key check
+  # Line '[-f /etc/fuse.conf] ..': enable `-o allow_other` option for `goofys`
+  # Line 'for step in ..': check if any failure indicator exists for the setup done in pod args and print the error message. This is only a best effort, as the
+  # commands in pod args are asynchronous and we cannot guarantee the failure indicators are created before the setup commands finish.
+  - |
+    mkdir -p ~/.ssh; touch ~/.ssh/config;
+    {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
+    STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
+    start_epoch=$(date +%s);
+    
+    # Wait for SSH setup to complete before proceeding
+    if [ -f /tmp/apt_ssh_setup_started ]; then
+      echo "=== Logs for asynchronous SSH setup ===";
+      [ -f /tmp/apt_ssh_setup_complete ] && cat /tmp/${STEPS[0]}.log ||
+      { tail -f -n +1 /tmp/${STEPS[0]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/apt_ssh_setup_complete ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+      [ -f /tmp/${STEPS[0]}.failed ] && { echo "Error: ${STEPS[0]} failed. Exiting."; exit 1; } || true;
+    fi
+    
+    echo "=== Logs for asynchronous ray and skypilot installation ===";
+    if [ -f /tmp/skypilot_is_nimbus ]; then
+      echo "=== Logs for asynchronous ray and skypilot installation ===";
+      [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log ||
+      { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+      [ -f /tmp/${STEPS[1]}.failed ] && { echo "Error: ${STEPS[1]} failed. Exiting."; exit 1; } || true;
+    fi
+    end_epoch=$(date +%s);
+    echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
+    start_epoch=$(date +%s);
+    {{ skypilot_wheel_installation_commands }}
+    end_epoch=$(date +%s);
+    echo "=== Skypilot wheel installation completed in $(($end_epoch - $start_epoch)) secs ===";
+    start_epoch=$(date +%s);
+    sudo touch ~/.sudo_as_admin_successful;
+    sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
+    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf');
+    ulimit -n 1048576;
+    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;
+    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
+    end_epoch=$(date +%s);
+    echo "=== Setup system configs and fuse completed in $(($end_epoch - $start_epoch)) secs ===";
+    for step in $STEPS; do [ -f "/tmp/${step}.failed" ] && { echo "Error: /tmp/${step}.failed found:"; cat /tmp/${step}.log; exit 1; } || true; done;
+    {% if tpu_requested %}
+    # The /tmp/tpu_logs directory is where TPU-related logs, such as logs from
+    # the TPU runtime, are written. These capture runtime information about the
+    # TPU execution, including any warnings, errors, or general activity of
+    # the TPU driver. By default, the /tmp/tpu_logs directory is created with
+    # 755 permissions, and the user of the provisioned pod is not necessarily
+    # a root. Hence, we need to update the write permission so the logs can be
+    # properly written.
+    # TODO(Doyoung): Investigate to see why TPU workload fails to run without
+    # execution permission, such as granting 766 to log file. Check if it's a
+    # must and see if there's a workaround to grant minimum permission.
+    sudo chmod 777 /tmp/tpu_logs;
+    {% endif %}
+    {{ ssh_max_sessions_config }}
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+  "~/.ssh/sky-cluster-key": "{{ssh_private_key}}",
+{%- endfor %}
+}
+
+auth:
+  ssh_user: sky
+  ssh_private_key: {{ssh_private_key}}

@@ -1,0 +1,94 @@
+pod_spec:
+    apiVersion: v1
+    kind: Pod
+    metadata:
+        name: {{ name }}
+        labels:
+            component: {{ name }}
+            parent: skypilot
+    spec:
+        serviceAccountName: sky-ssh-jump-sa
+        volumes:
+          - name: secret-volume
+            secret:
+                secretName: {{ secret }}
+        containers:
+          - name: {{ name }}
+            imagePullPolicy: Always
+            image: {{ image }}
+            command: ["python3", "-u", "/skypilot/sky/utils/kubernetes/ssh_jump_lifecycle_manager.py"]
+            ports:
+              - containerPort: 22
+            volumeMounts:
+              - name: secret-volume
+                readOnly: true
+                mountPath: /etc/secret-volume
+            lifecycle:
+                postStart:
+                    exec:
+                        command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys && sudo service ssh restart"]
+            env:
+              - name: MY_POD_NAME
+                valueFrom:
+                    fieldRef:
+                        fieldPath: metadata.name
+              - name: MY_POD_NAMESPACE
+                valueFrom:
+                    fieldRef:
+                        fieldPath: metadata.namespace
+              - name: ALERT_THRESHOLD
+                # seconds
+                value: "600"
+              - name: RETRY_INTERVAL
+                # seconds
+                value: "60"
+        terminationGracePeriodSeconds: 0
+service_spec:
+    apiVersion: v1
+    kind: Service
+    metadata:
+        name: {{ name }}
+        labels:
+            parent: skypilot
+    spec:
+        type: {{ service_type }}
+        selector:
+            component: {{ name }}
+        ports:
+          - protocol: TCP
+            port: 22
+            targetPort: 22
+# The following ServiceAccount/Role/RoleBinding sets up an RBAC for life cycle
+# management of the jump pod/service
+service_account:
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+        name: sky-ssh-jump-sa
+        labels:
+          parent: skypilot
+role:
+    kind: Role
+    apiVersion: rbac.authorization.k8s.io/v1
+    metadata:
+        name: sky-ssh-jump-role
+        labels:
+          parent: skypilot
+    rules:
+      - apiGroups: [""]
+        resources: ["pods", "pods/status", "pods/exec", "services"]
+        verbs: ["get", "list", "create", "delete"]
+role_binding:
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+        name: sky-ssh-jump-rb
+        labels:
+          parent: skypilot
+    subjects:
+    - kind: ServiceAccount
+      name: sky-ssh-jump-sa
+    roleRef:
+        kind: Role
+        name: sky-ssh-jump-role
+        apiGroup: rbac.authorization.k8s.io

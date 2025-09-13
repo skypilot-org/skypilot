@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sky-gpu-labeler  # We append the node name in the script
+  namespace: kube-system
+spec:
+  template:
+    metadata:
+      labels:
+        parent: skypilot
+        job: sky-gpu-labeler
+    spec:
+      serviceAccountName: gpu-labeler-sa
+      containers:
+      - name: gpu-labeler
+        image: us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu:latest # Using this image also serves as a way to "pre-pull" the image onto nodes
+        command: ["/bin/bash", "-i", "-c"]
+        args:
+          - |
+            python /label_gpus.py
+        env:
+        - name: MY_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        volumeMounts:
+        - name: label-script
+          mountPath: /label_gpus.py
+          subPath: label_gpus.py
+        resources:
+          requests:
+            cpu: "0.1"
+            memory: "100Mi"
+            nvidia.com/gpu: "1"
+          limits:
+            nvidia.com/gpu: "1"
+      volumes:
+      - name: label-script
+        configMap:
+          name: gpu-labeler-script
+          defaultMode: 0744
+      restartPolicy: Never
+      nodeSelector: {}  # We set the node name in the script

@@ -1,0 +1,17 @@
+0a1,5
+> # From https://github.com/ray-project/ray/blob/ray-2.9.3/python/ray/autoscaler/_private/resource_demand_scheduler.py
+> # Sky patch changes:
+> #  - no new nodes are allowed to be launched launched when the upscaling_speed is 0
+> #  - comment out "assert not unfulfilled": this seems a buggy assert
+> 
+451c456,459
+<             if upper_bound > 0:
+---
+>             # NOTE(sky): do not autoscale when upsclaing speed is 0.
+>             if self.upscaling_speed == 0:
+>                 upper_bound = 0
+>             if upper_bound >= 0:
+595c603
+<             assert not unfulfilled
+---
+>             # assert not unfulfilled  # NOTE(sky): buggy assert.

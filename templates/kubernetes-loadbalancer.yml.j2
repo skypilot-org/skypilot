@@ -1,0 +1,27 @@
+service_spec:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: {{ service_name }}
+    labels:
+      parent: skypilot
+      {%- for label_key, label_value in labels.items() %}
+      {{ label_key }}: {{ label_value|tojson }}
+      {%- endfor %}
+    annotations:
+      {%- for key, value in annotations.items() %}
+      {{ key }}: {{ value|tojson }}
+      {%- endfor %}
+      {# Note: It's ok to add cloud-specific annotations here since they will be ignored by other clouds #}
+      service.beta.kubernetes.io/coreweave-load-balancer-type: public
+  spec:
+    type: LoadBalancer
+    selector:
+      {{ selector_key }}: {{ selector_value }}
+    ports:
+{%- for port in ports %}
+    - port: {{ port | int }}
+      targetPort: {{ port | int }}
+      protocol: TCP
+      name: port{{ port }}
+{%- endfor %}

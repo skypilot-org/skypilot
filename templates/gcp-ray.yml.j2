@@ -1,0 +1,290 @@
+cluster_name: {{cluster_name_on_cloud}}
+
+# The maximum number of workers nodes to launch in addition to the head node.
+max_workers: {{num_nodes - 1}}
+upscaling_speed: {{num_nodes - 1}}
+idle_timeout_minutes: 60
+
+# The docker password could be a GCP service account key, which is a JSON string
+# that may contain newlines. We need indent(6) to make sure the lines
+# after the first line are properly indented.
+{%- if docker_image is not none %}
+docker:
+  image: {{docker_image}}
+  container_name: {{docker_container_name}}
+  run_options:
+    - --ulimit nofile=1048576:1048576
+    {%- for run_option in docker_run_options %}
+    - {{run_option}}
+    {%- endfor %}
+{%- if docker_login_config is not none %}
+  docker_login_config:
+    username: |-
+      {{docker_login_config.username}}
+    password: |-
+      {{docker_login_config.password | indent(6) }}
+    server: |-
+      {{docker_login_config.server}}
+{%- endif %}
+{%- endif %}
+
+provider:
+  # We use a custom node provider for GCP to create, stop and reuse instances.
+  type: external  # type: gcp
+  module: sky.provision.gcp
+  region: {{region}}
+  availability_zone: {{zones}}
+  # Keep (otherwise cannot reuse when re-provisioning).
+  # teardown(terminate=True) will override this.
+  cache_stopped_nodes: True
+  # The GCP project ID.
+  project_id: {{gcp_project_id}}
+{% if vpc_name is not none %}
+  # NOTE: This is a new field added by SkyPilot to force use a specific VPC.
+  vpc_name: {{vpc_name}}
+{% endif %}
+  # The firewall rule name for customized firewall rules. Only enabled
+  # if we have ports requirement.
+{% if firewall_rule is not none %}
+  firewall_rule: {{firewall_rule}}
+{% endif %}
+  use_internal_ips: {{use_internal_ips}}
+  force_enable_external_ips: {{force_enable_external_ips}}
+{%- if tpu_vm %}
+  _has_tpus: True
+{%- endif %}
+{%- if tpu_node_name %}
+  tpu_node:
+    name: {{tpu_node_name}}
+    acceleratorType: {{tpu_type}}
+    runtimeVersion: {{runtime_version}}
+{%- endif %}
+  # Disable launch config check for worker nodes as it can cause resource
+  # leakage.
+  # Reference: https://github.com/ray-project/ray/blob/cd1ba65e239360c8a7b130f991ed414eccc063ce/python/ray/autoscaler/_private/autoscaler.py#L1115
+  # The upper-level SkyPilot code has make sure there will not be resource
+  # leakage.
+  disable_launch_config_check: true
+  use_managed_instance_group: {{ gcp_use_managed_instance_group }}
+{%- if enable_gvnic %}
+  enable_gvnic: {{ enable_gvnic }}
+{%- endif %}
+{%- if enable_gpu_direct %}
+  enable_gpu_direct: {{ enable_gpu_direct }}
+{%- endif %}
+{%- if placement_policy %}
+  placement_policy: {{ placement_policy }}
+{%- endif %}
+{%- if network_tier %}
+  network_tier: {{ network_tier }}
+{%- endif %}
+
+auth:
+  ssh_user: gcpuser
+  ssh_private_key: {{ssh_private_key}}
+{% if ssh_proxy_command is not none %}
+  ssh_proxy_command: {{ssh_proxy_command}}
+{% endif %}
+
+available_node_types:
+  ray_head_default:
+    resources: {}
+    node_config:
+      labels:
+        skypilot-user: {{ user }}
+      {%- for label_key, label_value in labels.items() %}
+        {{ label_key }}: {{ label_value|tojson }}
+      {%- endfor %}
+        use-managed-instance-group: {{ gcp_use_managed_instance_group_value|tojson }}
+      {%- if gcp_use_managed_instance_group %}
+      managed-instance-group:
+        run_duration: {{ run_duration }}
+        {%- if provision_timeout is defined and provision_timeout is not none %}
+        provision_timeout: {{ provision_timeout }}
+        {%- endif %}
+      {%- endif %}
+      {%- if specific_reservations %}
+      reservationAffinity:
+        consumeReservationType: SPECIFIC_RESERVATION
+        key: compute.googleapis.com/reservation-name
+        values: {{ specific_reservations }}
+      {%- endif %}
+{%- if tpu_vm %}
+      acceleratorType: {{tpu_type}}
+      runtimeVersion: {{runtime_version}}
+    {%- if volumes %}
+      dataDisks:
+      {%- for volume in volumes %}
+        {%- if volume.source %}
+        - sourceDisk: {{volume.source}}
+        {%- endif %}
+        {%- if volume.attach_mode %}
+          mode: {{volume.attach_mode}}
+        {%- endif %}
+      {%- endfor %}
+    {%- endif %}
+      metadata:
+        # TPU VM's metadata has different format than normal VMs.
+        # After replacing the variables, this will become username:ssh_public_key_content.
+        # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
+        ssh-keys: |-
+              skypilot:ssh_user:skypilot:ssh_public_key_content
+      {%- if user_data is not none %}
+        startup-script: |-
+          {{ user_data | indent(10) }}
+      {%- endif %}
+  {%- if use_spot %}
+      schedulingConfig:
+        preemptible: true
+  {%- endif %}
+{%- else %}
+      machineType: {{instance_type}}
+    {%- if machine_image is not none %}
+      sourceMachineImage: {{machine_image}}
+    {%- endif %}
+      disks:
+        - boot: true
+          autoDelete: true
+          type: PERSISTENT
+          initializeParams:
+            diskSizeGb: {{disk_size}}
+            # See https://cloud.google.com/deep-learning-vm/docs/images
+          {%- if machine_image is none %}
+            sourceImage: {{image_id}}
+          {%- endif %}
+            diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
+          {%- if disk_iops %}
+            provisionedIops: {{disk_iops}}
+          {%- endif %}
+      {%- for volume in volumes %}
+        - boot: false
+          autoDelete: {{volume.auto_delete}}
+          type: {{volume.storage_type}}
+          deviceName: {{volume.device_name}}
+        {%- if volume.source %}
+          source: {{volume.source}}
+        {%- endif %}
+        {%- if volume.attach_mode %}
+          mode: {{volume.attach_mode}}
+        {%- endif %}
+        {%- if volume.interface_type %}
+          interface: {{volume.interface_type}}
+        {%- endif %}
+        {%- if volume.disk_tier %}
+          initializeParams:
+            diskType: zones/{{zones}}/diskTypes/{{volume.disk_tier}}
+        {%- endif %}
+          {%- if volume.disk_name %}
+            diskName: {{volume.disk_name}}
+          {%- endif %}
+          {%- if volume.disk_size %}
+            diskSizeGb: {{volume.disk_size}}
+          {%- endif %}
+          {%- if volume.iops %}
+            provisionedIops: {{volume.iops}}
+          {%- endif %}
+      {%- endfor %}
+  {%- if gpu is not none %}
+      guestAccelerators:
+        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
+          acceleratorCount: {{gpu_count}}
+  {%- endif %}
+      metadata:
+        items:
+          - key: ssh-keys
+            # After replacing the variables, this will become username:ssh_public_key_content.
+            # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
+            value: |-
+              skypilot:ssh_user:skypilot:ssh_public_key_content
+  {%- if gpu is not none %}
+          - key: install-nvidia-driver
+            value: "True"
+  {%- endif %}
+  {%- if user_data is not none %}
+          - key: user-data
+            value: |-
+              {{ user_data | indent(14) }}
+  {%- endif %}
+  {%- if use_spot or gpu is not none %}
+      scheduling:
+  {%- if use_spot %}
+        automaticRestart: false
+        instanceTerminationAction: DELETE
+        onHostMaintenance: TERMINATE
+        provisioningModel: SPOT
+        preemptible: true
+  {%- endif %}
+  {%- if gpu is not none %}
+        onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+  {%- endif %}
+  {%- endif %}
+{%- endif %}
+
+head_node_type: ray_head_default
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+  "~/.ssh/sky-cluster-key": "{{ssh_private_key}}",
+{%- endfor %}
+}
+
+# List of shell commands to run to set up nodes.
+# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
+# connection, which is expensive. Try your best to co-locate commands into fewer
+# items!
+#
+# Increment the following for catching performance bugs easier:
+#   current num items (num SSH connections): 1  (+1 if tpu_vm)
+setup_commands:
+  # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other
+  # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
+  # Line 'which conda ..': some images (TPU VM) do not install conda by
+  # default. 'source ~/.bashrc' is needed so conda takes effect for the next
+  # commands.
+  # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
+  # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
+  # Line 'sudo systemctl stop jupyter ..': stop jupyter service to avoid port conflict on 8080
+  # Line 'mkdir -p ..': disable host key check
+  # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
+    {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
+    {%- if docker_image is none %}
+    sudo systemctl stop unattended-upgrades || true;
+    sudo systemctl disable unattended-upgrades || true;
+    sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
+    {%- endif %}
+    p=$(mylsof "/var/lib/dpkg/lock-frontend"); echo "$p";
+    sudo kill -9 `echo "$p" | tail -n 1` || true;
+    sudo rm /var/lib/dpkg/lock-frontend;
+    sudo pkill -9 dpkg;
+    sudo pkill -9 apt-get;
+    sudo dpkg --configure --force-overwrite -a;
+    mkdir -p ~/.ssh; touch ~/.ssh/config;
+    {{ conda_installation_commands }}
+    source ~/.bashrc;
+  {%- if tpu_vm %}
+    test -f ~/miniconda3/etc/profile.d/conda.sh && source ~/miniconda3/etc/profile.d/conda.sh && conda activate base || true;
+    {{ sky_pip_cmd }} install --upgrade google-api-python-client;
+  {%- endif %}
+  {%- if tpu_node_name %}
+    grep "export TPU_NAME=" ~/.bashrc && echo "TPU_NAME already set" || echo "export TPU_NAME={{tpu_node_name}}" >> ~/.bashrc;
+  {%- endif %}
+    {{ ray_skypilot_installation_commands }}
+    sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
+    {%- if docker_image is none %}
+    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    sudo systemctl stop jupyter > /dev/null 2>&1 || true;
+    sudo systemctl disable jupyter > /dev/null 2>&1 || true;
+    {%- endif %}
+    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;
+    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
+    {{ ssh_max_sessions_config }}
+
+# Command to start ray clusters are now placed in `sky.provision.instance_setup`.
+# We do not need to list it here anymore.

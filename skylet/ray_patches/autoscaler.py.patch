@@ -1,0 +1,8 @@
+0a1,3
+> # From https://github.com/ray-project/ray/blob/ray-2.9.3/python/ray/autoscaler/_private/autoscaler.py
+> # Sky patch changes:
+> #  - enable upscaling_speed to be 0.0
+1074c1077
+<             if upscaling_speed:
+---
+>             if upscaling_speed is not None: # NOTE(sky): enable 0.0

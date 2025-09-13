@@ -1,0 +1,7 @@
+0a1,2
+> # From https://github.com/ray-project/ray/blob/ray-2.9.3/python/ray/autoscaler/_private/command_runner.py
+> 
+140c142
+<                     "ControlPersist": "10s",
+---
+>                     "ControlPersist": "300s",

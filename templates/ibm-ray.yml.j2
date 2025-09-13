@@ -1,0 +1,141 @@
+cluster_name: {{cluster_name_on_cloud}}
+
+# The maximum number of workers nodes to launch in addition to the head node.
+max_workers: {{num_nodes - 1}}
+upscaling_speed: {{num_nodes - 1}}
+idle_timeout_minutes: 60
+
+
+provider:
+  type: external
+  module: sky.skylet.providers.ibm.IBMVPCNodeProvider
+  region: {{region}}
+  availability_zone: {{zones}}
+  # Keep (otherwise cannot reuse when re-provisioning).
+  # teardown(terminate=True) will override this.
+  cache_stopped_nodes: True
+  iam_api_key: {{iam_api_key}}
+  resource_group_id: {{resource_group_id}}
+  # Disable launch config check for worker nodes as it can cause resource
+  # leakage.
+  # Reference: https://github.com/ray-project/ray/blob/cd1ba65e239360c8a7b130f991ed414eccc063ce/python/ray/autoscaler/_private/autoscaler.py#L1115
+  # The upper-level SkyPilot code has make sure there will not be resource
+  # leakage.
+  disable_launch_config_check: true
+
+auth:
+  ssh_user: ubuntu
+  ssh_private_key: {{ssh_private_key}}
+
+
+available_node_types:
+  ray_head_default:
+    resources: {{instance_resources}}
+    node_config:
+      image_id: {{image_id}}
+      boot_volume_capacity: {{disk_capacity}}
+      volume_tier_name: general-purpose
+      instance_profile_name: {{instance_type}}
+
+      {% if use_spot %}
+      InstanceMarketOptions:
+          MarketType: spot
+
+      {% endif %}
+{% if num_nodes > 1 %}
+  ray_worker_default:
+    min_workers: {{num_nodes - 1}}
+    max_workers: {{num_nodes - 1}}
+    resources: {{worker_instance_resources}}
+    node_config:
+      image_id: {{image_id}}
+      boot_volume_capacity: {{disk_capacity}}
+      volume_tier_name: general-purpose
+      instance_profile_name: {{worker_instance_type}}
+
+      {% if use_spot %}
+      InstanceMarketOptions:
+          MarketType: spot
+
+      {% endif %}
+{%- endif %}
+
+head_node_type: ray_head_default
+
+
+{# Format: `REMOTE_PATH : LOCAL_PATH` #}
+file_mounts: {
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+  "~/.ssh/sky-cluster-key": "{{ssh_private_key}}",
+{%- endfor %}
+}
+
+rsync_exclude: []
+
+initialization_commands: []
+
+# List of shell commands to run to set up nodes.
+# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
+# connection, which is expensive. Try your best to co-locate commands into fewer
+# items!
+#
+# Increment the following for catching performance bugs easier:
+#   current num items (num SSH connections): 1
+setup_commands:
+  # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other
+  # We set auto_activate_base to be false for pre-installed conda.
+  # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
+  # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
+  # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
+  # Line 'mkdir -p ..': disable host key check
+  # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  - sudo systemctl stop unattended-upgrades || true;
+    sudo systemctl disable unattended-upgrades || true;
+    sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
+    sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
+    sudo pkill -9 apt-get;
+    sudo pkill -9 dpkg;
+    sudo dpkg --configure -a;
+    mkdir -p ~/.ssh; touch ~/.ssh/config;
+    {{ conda_installation_commands }}
+    {{ ray_skypilot_installation_commands }}
+    sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
+    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;
+    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
+    {{ ssh_max_sessions_config }}
+
+# Command to start ray on the head node. You don't need to change this.
+# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
+# connection, which is expensive. Try your best to co-locate commands into fewer
+# items! The same comment applies for worker_start_ray_commands.
+#
+# Increment the following for catching performance bugs easier:
+#   current num items (num SSH connections): 1
+head_start_ray_commands:
+  # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
+  # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
+  # all the sessions to be reloaded. This is a workaround.
+  - {{ sky_activate_python_env }}; {{ sky_ray_cmd }} stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 {{ sky_ray_cmd }} start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
+    {{dump_port_command}}; {{ray_head_wait_initialized_command}}
+
+{%- if num_nodes > 1 %}
+worker_start_ray_commands:
+  - {{ sky_activate_python_env }}; {{ sky_ray_cmd }} stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 {{ sky_ray_cmd }} start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
+{%- else %}
+worker_start_ray_commands: []
+{%- endif %}
+
+head_node: {}
+worker_nodes: {}
+
+# These fields are required for external cloud providers.
+head_setup_commands: []
+worker_setup_commands: []
+cluster_synced_files: []
+file_mounts_sync_continuously: False
