@@ -88,6 +88,8 @@ if typing.TYPE_CHECKING:
     from sky import dag
     from sky.schemas.generated import autostopv1_pb2
     from sky.schemas.generated import autostopv1_pb2_grpc
+    from sky.schemas.generated import jobsv1_pb2
+    from sky.schemas.generated import jobsv1_pb2_grpc
 else:
     # To avoid requiring grpcio to be installed on the client side.
     grpc = adaptors_common.LazyImport(
@@ -99,6 +101,9 @@ else:
         'sky.schemas.generated.autostopv1_pb2')
     autostopv1_pb2_grpc = adaptors_common.LazyImport(
         'sky.schemas.generated.autostopv1_pb2_grpc')
+    jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
+    jobsv1_pb2_grpc = adaptors_common.LazyImport(
+        'sky.schemas.generated.jobsv1_pb2_grpc')
 
 Path = str
 
@@ -3039,20 +3044,92 @@ class SkyletClient:
 
     def __init__(self, channel: 'grpc.Channel'):
         self._autostop_stub = autostopv1_pb2_grpc.AutostopServiceStub(channel)
+        self._jobs_stub = jobsv1_pb2_grpc.JobsServiceStub(channel)
 
     def set_autostop(
         self,
         request: 'autostopv1_pb2.SetAutostopRequest',
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'autostopv1_pb2.SetAutostopResponse':
         return self._autostop_stub.SetAutostop(request, timeout=timeout)
 
     def is_autostopping(
         self,
         request: 'autostopv1_pb2.IsAutostoppingRequest',
-        timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'autostopv1_pb2.IsAutostoppingResponse':
         return self._autostop_stub.IsAutostopping(request, timeout=timeout)
+
+    def add_job(
+        self,
+        request: 'jobsv1_pb2.AddJobRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.AddJobResponse':
+        return self._jobs_stub.AddJob(request, timeout=timeout)
+
+    def queue_job(
+        self,
+        request: 'jobsv1_pb2.QueueJobRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.QueueJobResponse':
+        return self._jobs_stub.QueueJob(request, timeout=timeout)
+
+    def update_status(
+        self,
+        request: 'jobsv1_pb2.UpdateStatusRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.UpdateStatusResponse':
+        return self._jobs_stub.UpdateStatus(request, timeout=timeout)
+
+    def get_job_queue(
+        self,
+        request: 'jobsv1_pb2.GetJobQueueRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.GetJobQueueResponse':
+        return self._jobs_stub.GetJobQueue(request, timeout=timeout)
+
+    def cancel_jobs(
+        self,
+        request: 'jobsv1_pb2.CancelJobsRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.CancelJobsResponse':
+        return self._jobs_stub.CancelJobs(request, timeout=timeout)
+
+    def fail_all_in_progress_jobs(
+        self,
+        request: 'jobsv1_pb2.FailAllInProgressJobsRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.FailAllInProgressJobsResponse':
+        return self._jobs_stub.FailAllInProgressJobs(request, timeout=timeout)
+
+    def get_job_status(
+        self,
+        request: 'jobsv1_pb2.GetJobStatusRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.GetJobStatusResponse':
+        return self._jobs_stub.GetJobStatus(request, timeout=timeout)
+
+    def get_job_submitted_timestamp(
+        self,
+        request: 'jobsv1_pb2.GetJobSubmittedTimestampRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.GetJobSubmittedTimestampResponse':
+        return self._jobs_stub.GetJobSubmittedTimestamp(request,
+                                                        timeout=timeout)
+
+    def get_job_ended_timestamp(
+        self,
+        request: 'jobsv1_pb2.GetJobEndedTimestampRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.GetJobEndedTimestampResponse':
+        return self._jobs_stub.GetJobEndedTimestamp(request, timeout=timeout)
+
+    def get_log_dirs_for_jobs(
+        self,
+        request: 'jobsv1_pb2.GetLogDirsForJobsRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.GetLogDirsForJobsResponse':
+        return self._jobs_stub.GetLogDirsForJobs(request, timeout=timeout)
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
@@ -3560,16 +3637,26 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # update_status will query the ray job status for all INIT /
             # PENDING / RUNNING jobs for the real status, since we do not
             # know the actual previous status of the cluster.
-            cmd = job_lib.JobLibCodeGen.update_status()
             logger.debug('Update job queue on remote cluster.')
             with rich_utils.safe_status(
                     ux_utils.spinner_message('Preparing SkyPilot runtime')):
-                returncode, _, stderr = self.run_on_head(handle,
-                                                         cmd,
-                                                         require_outputs=True)
-            subprocess_utils.handle_returncode(returncode, cmd,
-                                               'Failed to update job status.',
-                                               stderr)
+                use_legacy = not handle.is_grpc_enabled_with_flag
+
+                if handle.is_grpc_enabled_with_flag:
+                    try:
+                        request = jobsv1_pb2.UpdateStatusRequest()
+                        backend_utils.invoke_skylet_with_retries(
+                            lambda: SkyletClient(handle.get_grpc_channel()
+                                                ).update_status(request))
+                    except exceptions.SkyletMethodNotImplementedError:
+                        use_legacy = True
+
+                if use_legacy:
+                    cmd = job_lib.JobLibCodeGen.update_status()
+                    returncode, _, stderr = self.run_on_head(
+                        handle, cmd, require_outputs=True)
+                    subprocess_utils.handle_returncode(
+                        returncode, cmd, 'Failed to update job status.', stderr)
         if prev_cluster_status == status_lib.ClusterStatus.STOPPED:
             # Safely set all the previous jobs to FAILED since the cluster
             # is restarted
@@ -3577,14 +3664,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # 1. A job finishes RUNNING, but right before it update itself
             # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
             # 2. On next `sky start`, it gets reset to FAILED.
-            cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
-            returncode, stdout, stderr = self.run_on_head(handle,
-                                                          cmd,
-                                                          require_outputs=True)
-            subprocess_utils.handle_returncode(
-                returncode, cmd,
-                'Failed to set previously in-progress jobs to FAILED',
-                stdout + stderr)
+            use_legacy = not handle.is_grpc_enabled_with_flag
+
+            if handle.is_grpc_enabled_with_flag:
+                try:
+                    fail_request = jobsv1_pb2.FailAllInProgressJobsRequest()
+                    backend_utils.invoke_skylet_with_retries(
+                        lambda: SkyletClient(handle.get_grpc_channel(
+                        )).fail_all_in_progress_jobs(fail_request))
+                except exceptions.SkyletMethodNotImplementedError:
+                    use_legacy = True
+
+            if use_legacy:
+                cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
+                returncode, stdout, stderr = self.run_on_head(
+                    handle, cmd, require_outputs=True)
+                subprocess_utils.handle_returncode(
+                    returncode, cmd,
+                    'Failed to set previously in-progress jobs to FAILED',
+                    stdout + stderr)
 
         prev_ports = None
         if prev_handle is not None:
@@ -3943,28 +4041,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         remote_log_dir: Optional[str] = None,
     ) -> None:
         """Executes generated code on the head node."""
-        script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
+        use_legacy = not handle.is_grpc_enabled_with_flag
+        file_name = f'sky_job_{job_id}'
+        script_path = os.path.join(SKY_REMOTE_APP_DIR, file_name)
         if remote_log_dir is None:
             remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
-
-        cd = f'cd {SKY_REMOTE_WORKDIR}'
-
-        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
-                      f'touch {remote_log_path}')
-        encoded_script = shlex.quote(codegen)
-        create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
-        job_submit_cmd = (
-            # JOB_CMD_IDENTIFIER is used for identifying the process retrieved
-            # with pid is the same driver process.
-            f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
-            f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
-            # Do not use &>, which is not POSIX and may not work.
-            # Note that the order of ">filename 2>&1" matters.
-            f'> {remote_log_path} 2>&1')
-
-        code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-        job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
         def _dump_code_to_file(codegen: str,
                                target_dir: str = SKY_REMOTE_APP_DIR) -> None:
@@ -3973,14 +4055,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
                 fp.flush()
-                script_path = os.path.join(target_dir, f'sky_job_{job_id}')
-                # We choose to sync code + exec, because the alternative of 'ray
-                # submit' may not work as it may use system python (python2) to
-                # execute the script. Happens for AWS.
+                script_path = os.path.join(target_dir, file_name)
+                # We choose to sync code + exec, because the alternative of
+                # 'ray submit' may not work as it may use system python
+                # (python2) to execute the script. Happens for AWS.
                 head_runner.rsync(source=fp.name,
                                   target=script_path,
                                   up=True,
                                   stream_logs=False)
+
+        cd = f'cd {SKY_REMOTE_WORKDIR}'
+        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
+                      f'touch {remote_log_path}')
+        encoded_script = shlex.quote(codegen)
+        create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
+        job_submit_cmd = (
+            # JOB_CMD_IDENTIFIER is used for identifying the process
+            # retrieved with pid is the same driver process.
+            f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
+            f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
+            # Do not use &>, which is not POSIX and may not work.
+            # Note that the order of ">filename 2>&1" matters.
+            f'> {remote_log_path} 2>&1')
+        code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+        job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
         # Should also be ealier than _is_command_length_over_limit
         # Same reason as in _setup
@@ -3988,64 +4086,116 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             _dump_code_to_file(job_submit_cmd,
                                constants.PERSISTENT_RUN_SCRIPT_DIR)
 
-        if _is_command_length_over_limit(job_submit_cmd):
-            _dump_code_to_file(codegen)
-            job_submit_cmd = f'{mkdir_code} && {code}'
+        if handle.is_grpc_enabled_with_flag:
+            try:
+                managed_job_info: Optional[jobsv1_pb2.ManagedJobInfo] = None
+                if managed_job_dag is not None:
+                    workspace = skypilot_config.get_active_workspace(
+                        force_user_workspace=True)
+                    entrypoint = common_utils.get_current_command()
 
-        def _maybe_add_managed_job_code(job_submit_cmd: str) -> str:
-            if managed_job_dag is not None:
-                # Add the managed job to job queue database.
-                managed_job_codegen = managed_jobs.ManagedJobCodeGen()
-                managed_job_code = managed_job_codegen.set_pending(
-                    job_id,
-                    managed_job_dag,
-                    skypilot_config.get_active_workspace(
-                        force_user_workspace=True),
-                    entrypoint=common_utils.get_current_command())
-                # Set the managed job to PENDING state to make sure that this
-                # managed job appears in the `sky jobs queue`, even if it needs
-                # to wait to be submitted.
-                # We cannot set the managed job to PENDING state in the job
-                # template (jobs-controller.yaml.j2), as it may need to wait for
-                # the run commands to be scheduled on the job controller in
-                # high-load cases.
-                job_submit_cmd += ' && ' + managed_job_code
-            return job_submit_cmd
+                    managed_job_tasks: List[jobsv1_pb2.ManagedJobTask] = []
+                    for task_id, task in enumerate(managed_job_dag.tasks):
+                        resources_str = backend_utils.get_task_resources_str(
+                            task, is_managed_job=True)
+                        managed_job_tasks.append(
+                            jobsv1_pb2.ManagedJobTask(
+                                task_id=task_id,
+                                name=task.name,
+                                resources_str=resources_str,
+                                metadata_json=task.metadata_json))
 
-        job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
+                    managed_job_info = jobsv1_pb2.ManagedJobInfo(
+                        name=managed_job_dag.name,
+                        pool=managed_job_dag.pool,
+                        workspace=workspace,
+                        entrypoint=entrypoint,
+                        tasks=managed_job_tasks)
 
-        returncode, stdout, stderr = self.run_on_head(handle,
-                                                      job_submit_cmd,
-                                                      stream_logs=False,
-                                                      require_outputs=True)
-        # Happens when someone calls `sky exec` but remote is outdated for
-        # running a job. Necessitating calling `sky launch`.
-        backend_utils.check_stale_runtime_on_remote(returncode, stderr,
-                                                    handle.cluster_name)
-        output = stdout + stderr
-        if ((returncode == 255 and 'too long' in output.lower()) or
-            (returncode == 1 and 'request-uri too large' in output.lower())):
-            # If the generated script is too long, we retry it with dumping
-            # the script to a file and running it with SSH. We use a general
-            # length limit check before but it could be inaccurate on some
-            # systems.
-            # When there is a cloudflare proxy in front of the remote, it could
-            # cause `414 Request-URI Too Large` error.
-            logger.debug('Failed to submit job due to command length limit. '
-                         'Dumping job to file and running it with SSH. '
-                         f'Output: {output}')
-            _dump_code_to_file(codegen)
-            job_submit_cmd = f'{mkdir_code} && {code}'
+                if _is_command_length_over_limit(codegen):
+                    _dump_code_to_file(codegen)
+                    queue_job_request = jobsv1_pb2.QueueJobRequest(
+                        job_id=job_id,
+                        # codegen not set - server assumes script uploaded
+                        remote_log_dir=remote_log_dir,
+                        managed_job=managed_job_info,
+                        script_path=script_path)
+                else:
+                    queue_job_request = jobsv1_pb2.QueueJobRequest(
+                        job_id=job_id,
+                        codegen=codegen,
+                        remote_log_dir=remote_log_dir,
+                        managed_job=managed_job_info,
+                        script_path=script_path)
+
+                backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
+                    handle.get_grpc_channel()).queue_job(queue_job_request))
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            if _is_command_length_over_limit(job_submit_cmd):
+                _dump_code_to_file(codegen)
+                job_submit_cmd = f'{mkdir_code} && {code}'
+
+            def _maybe_add_managed_job_code(job_submit_cmd: str) -> str:
+                if managed_job_dag is not None:
+                    # Add the managed job to job queue database.
+                    managed_job_codegen = managed_jobs.ManagedJobCodeGen()
+                    managed_job_code = managed_job_codegen.set_pending(
+                        job_id,
+                        managed_job_dag,
+                        skypilot_config.get_active_workspace(
+                            force_user_workspace=True),
+                        entrypoint=common_utils.get_current_command())
+                    # Set the managed job to PENDING state to make sure that
+                    # this managed job appears in the `sky jobs queue`, even
+                    # if it needs to wait to be submitted.
+                    # We cannot set the managed job to PENDING state in the
+                    # job template (jobs-controller.yaml.j2), as it may need
+                    # to wait for the run commands to be scheduled on the job
+                    # controller in high-load cases.
+                    job_submit_cmd += ' && ' + managed_job_code
+                return job_submit_cmd
+
             job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
+
             returncode, stdout, stderr = self.run_on_head(handle,
                                                           job_submit_cmd,
                                                           stream_logs=False,
                                                           require_outputs=True)
+            # Happens when someone calls `sky exec` but remote is outdated for
+            # running a job. Necessitating calling `sky launch`.
+            backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                        handle.cluster_name)
+            output = stdout + stderr
+            if ((returncode == 255 and 'too long' in output.lower()) or
+                (returncode == 1 and
+                 'request-uri too large' in output.lower())):
+                # If the generated script is too long, we retry it with dumping
+                # the script to a file and running it with SSH. We use a general
+                # length limit check before but it could be inaccurate on some
+                # systems.
+                # When there is a cloudflare proxy in front of the remote, it
+                # could cause `414 Request-URI Too Large` error.
+                logger.debug(
+                    'Failed to submit job due to command length limit. '
+                    'Dumping job to file and running it with SSH. '
+                    f'Output: {output}')
+                _dump_code_to_file(codegen)
+                job_submit_cmd = f'{mkdir_code} && {code}'
+                job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
+                returncode, stdout, stderr = self.run_on_head(
+                    handle,
+                    job_submit_cmd,
+                    stream_logs=False,
+                    require_outputs=True)
 
-        subprocess_utils.handle_returncode(returncode,
-                                           job_submit_cmd,
-                                           f'Failed to submit job {job_id}.',
-                                           stderr=stdout + stderr)
+            subprocess_utils.handle_returncode(
+                returncode,
+                job_submit_cmd,
+                f'Failed to submit job {job_id}.',
+                stderr=stdout + stderr)
 
         controller = controller_utils.Controllers.from_name(handle.cluster_name)
         if controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER:
@@ -4066,42 +4216,64 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str,
                  metadata: str) -> Tuple[int, str]:
-        code = job_lib.JobLibCodeGen.add_job(
-            job_name=job_name,
-            username=common_utils.get_user_hash(),
-            run_timestamp=self.run_timestamp,
-            resources_str=resources_str,
-            metadata=metadata)
-        returncode, result_str, stderr = self.run_on_head(handle,
-                                                          code,
-                                                          stream_logs=False,
-                                                          require_outputs=True,
-                                                          separate_stderr=True)
-        # Happens when someone calls `sky exec` but remote is outdated for
-        # adding a job. Necessitating calling `sky launch`.
-        backend_utils.check_stale_runtime_on_remote(returncode, stderr,
-                                                    handle.cluster_name)
-        # TODO(zhwu): this sometimes will unexpectedly fail, we can add
-        # retry for this, after we figure out the reason.
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to fetch job id.', stderr)
-        try:
-            job_id_match = _JOB_ID_PATTERN.search(result_str)
-            if job_id_match is not None:
-                job_id = int(job_id_match.group(1))
-            else:
-                # For backward compatibility.
-                job_id = int(result_str)
-            log_dir_match = _LOG_DIR_PATTERN.search(result_str)
-            if log_dir_match is not None:
-                log_dir = log_dir_match.group(1).strip()
-            else:
-                # For backward compatibility, use the same log dir as local.
-                log_dir = self.log_dir
-        except ValueError as e:
-            logger.error(stderr)
-            raise ValueError(f'Failed to parse job id: {result_str}; '
-                             f'Returncode: {returncode}') from e
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        if handle.is_grpc_enabled_with_flag:
+            try:
+                request = jobsv1_pb2.AddJobRequest(
+                    job_name=job_name,
+                    username=common_utils.get_user_hash(),
+                    run_timestamp=self.run_timestamp,
+                    resources_str=resources_str,
+                    metadata=metadata)
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: SkyletClient(handle.get_grpc_channel()).add_job(
+                        request))
+                job_id = response.job_id
+                log_dir = response.log_dir
+                return job_id, log_dir
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            code = job_lib.JobLibCodeGen.add_job(
+                job_name=job_name,
+                username=common_utils.get_user_hash(),
+                run_timestamp=self.run_timestamp,
+                resources_str=resources_str,
+                metadata=metadata)
+            returncode, result_str, stderr = self.run_on_head(
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+            # Happens when someone calls `sky exec` but remote is outdated for
+            # adding a job. Necessitating calling `sky launch`.
+            backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                        handle.cluster_name)
+            # TODO(zhwu): this sometimes will unexpectedly fail, we can add
+            # retry for this, after we figure out the reason.
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to fetch job id.',
+                                               stderr)
+            try:
+                job_id_match = _JOB_ID_PATTERN.search(result_str)
+                if job_id_match is not None:
+                    job_id = int(job_id_match.group(1))
+                else:
+                    # For backward compatibility.
+                    job_id = int(result_str)
+                log_dir_match = _LOG_DIR_PATTERN.search(result_str)
+                if log_dir_match is not None:
+                    log_dir = log_dir_match.group(1).strip()
+                else:
+                    # For backward compatibility, use the same log dir as local.
+                    log_dir = self.log_dir
+            except ValueError as e:
+                logger.error(stderr)
+                raise ValueError(f'Failed to parse job id: {result_str}; '
+                                 f'Returncode: {returncode}') from e
         return job_id, log_dir
 
     def _execute(
@@ -4280,6 +4452,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_ids: Optional[List[int]] = None,
         stream_logs: bool = True
     ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
+        if handle.is_grpc_enabled_with_flag:
+            try:
+                request = jobsv1_pb2.GetJobStatusRequest(job_ids=job_ids)
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: SkyletClient(handle.get_grpc_channel()
+                                        ).get_job_status(request))
+                statuses: Dict[Optional[int], Optional[job_lib.JobStatus]] = {
+                    job_id: job_lib.JobStatus.from_protobuf(proto_status)
+                    for job_id, proto_status in response.job_statuses.items()
+                }
+                return statuses
+            except exceptions.SkyletMethodNotImplementedError:
+                pass
+
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       code,
@@ -4300,16 +4486,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         See `skylet.job_lib.cancel_jobs_encoded_results` for more details.
         """
-        code = job_lib.JobLibCodeGen.cancel_jobs(jobs, cancel_all, user_hash)
-        returncode, stdout, _ = self.run_on_head(handle,
-                                                 code,
-                                                 stream_logs=False,
-                                                 require_outputs=True)
-        subprocess_utils.handle_returncode(
-            returncode, code,
-            f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
+        use_legacy = not handle.is_grpc_enabled_with_flag
 
-        cancelled_ids = message_utils.decode_payload(stdout)
+        if handle.is_grpc_enabled_with_flag:
+            try:
+                request = jobsv1_pb2.CancelJobsRequest(job_ids=jobs,
+                                                       cancel_all=cancel_all,
+                                                       user_hash=user_hash)
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: SkyletClient(handle.get_grpc_channel()).cancel_jobs(
+                        request))
+                cancelled_ids = response.cancelled_job_ids
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            code = job_lib.JobLibCodeGen.cancel_jobs(jobs, cancel_all,
+                                                     user_hash)
+            returncode, stdout, _ = self.run_on_head(handle,
+                                                     code,
+                                                     stream_logs=False,
+                                                     require_outputs=True)
+            subprocess_utils.handle_returncode(
+                returncode, code,
+                f'Failed to cancel jobs on cluster {handle.cluster_name}.',
+                stdout)
+            cancelled_ids = message_utils.decode_payload(stdout)
         if cancelled_ids:
             logger.info(
                 f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}')
@@ -4326,20 +4528,48 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             A dictionary mapping job_id to log path.
         """
-        code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(job_ids)
-        returncode, job_to_dir, stderr = self.run_on_head(handle,
+        job_to_dir: Dict[str, str] = {}
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        if handle.is_grpc_enabled_with_flag:
+            try:
+                int_job_ids = []
+                if job_ids:
+                    for str_job_id in job_ids:
+                        if str_job_id.isdigit():
+                            int_job_ids.append(int(str_job_id))
+                request = jobsv1_pb2.GetLogDirsForJobsRequest(
+                    job_ids=int_job_ids)
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: SkyletClient(handle.get_grpc_channel()
+                                        ).get_log_dirs_for_jobs(request))
+                job_log_dirs = response.job_log_dirs
+                if not job_log_dirs:
+                    logger.info(f'{colorama.Fore.YELLOW}'
+                                'No matching log directories found'
+                                f'{colorama.Style.RESET_ALL}')
+                    return {}
+                for job_id, log_dir in job_log_dirs.items():
+                    # Convert to string for backwards compatibility
+                    job_to_dir[str(job_id)] = log_dir
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(job_ids)
+            returncode, stdout, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
                                                           require_outputs=True,
                                                           separate_stderr=True)
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to sync logs.', stderr)
-        job_to_dir: Dict[str, str] = message_utils.decode_payload(job_to_dir)
-        if not job_to_dir:
-            logger.info(f'{colorama.Fore.YELLOW}'
-                        'No matching log directories found'
-                        f'{colorama.Style.RESET_ALL}')
-            return {}
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to sync logs.', stderr)
+            job_to_dir = message_utils.decode_payload(stdout)
+            if not job_to_dir:
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            'No matching log directories found'
+                            f'{colorama.Style.RESET_ALL}')
+                return {}
 
         job_ids = list(job_to_dir.keys())
         dirs = list(job_to_dir.values())
@@ -4616,11 +4846,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         exist_ok=True)
             log_file = os.path.join(local_log_dir, 'run.log')
 
-            code = managed_jobs.ManagedJobCodeGen.stream_logs(job_name=None,
-                                                              job_id=job_id,
-                                                              follow=False,
-                                                              controller=False)
-
+            code = managed_jobs.ManagedJobCodeGen.stream_logs(
+                job_name=None,
+                job_id=int(job_id),
+                follow=False,
+                controller=False)
             # With the stdin=subprocess.DEVNULL, the ctrl-c will not
             # kill the process, so we need to handle it manually here.
             if threading.current_thread() is threading.main_thread():

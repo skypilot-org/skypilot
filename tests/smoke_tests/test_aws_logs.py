@@ -17,6 +17,11 @@ from sky import skypilot_config
 @pytest.mark.no_nebius  # Requires AWS to be enabled
 @pytest.mark.no_seeweb  # Requires AWS to be enabled
 def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping test in shared remote api server environment as '
+            'helm api server deployment set credential_file instead of env vars'
+        )
     name = smoke_tests_utils.get_cluster_name()
     # Calculate timestamp 1 hour ago in ISO format
     one_hour_ago = (datetime.now(timezone.utc) -
