@@ -2019,13 +2019,12 @@ def test_long_setup_run_script(generic_cloud: str):
 
 
 # ---------- Test min-gpt on Kubernetes ----------
-@pytest.mark.kubernetes
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('train_file', [
     'examples/distributed-pytorch/train.yaml',
     'examples/distributed-pytorch/train-rdzv.yaml'
 ])
-def test_min_gpt_kubernetes(train_file):
+def test_min_gpt(generic_cloud: str, train_file: str):
     accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     name = smoke_tests_utils.get_cluster_name()
 
@@ -2052,7 +2051,7 @@ def test_min_gpt_kubernetes(train_file):
     test = smoke_tests_utils.Test(
         'min_gpt_kubernetes',
         [
-            f'sky launch -y -c {name} --infra kubernetes {dist_train_file}',
+            f'sky launch -y -c {name} --infra {generic_cloud} {dist_train_file}',
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',
