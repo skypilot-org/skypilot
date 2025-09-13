@@ -261,6 +261,17 @@ def write_ray_up_script_with_patched_launch_hash_fn(
     return f.name
 
 
+def _get_num_gpus(ray_resources_dict: Dict[str, float]) -> int:
+    dict_copy = copy.copy(ray_resources_dict)
+    try:
+        dict_copy.pop('CPU')
+    except KeyError:
+        pass
+    if len(dict_copy) == 0:
+        return 0
+    return math.ceil(list(dict_copy.values())[0])
+
+
 class RayCodeGen:
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -3889,6 +3900,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_envs.update(self._skypilot_predefined_env_vars(handle))
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
+            setup_envs[constants.SKYPILOT_SETUP_NUM_GPUS_PER_NODE] = (str(
+                _get_num_gpus(backend_utils.get_task_demands_dict(task))))
+
             runner = runners[node_id]
             setup_script = log_lib.make_task_bash_script(setup,
                                                          env_vars=setup_envs)
