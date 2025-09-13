@@ -1733,6 +1733,9 @@ def test_aws_custom_image():
         # Test python>=3.12 where SkyPilot should automatically create a separate
         # conda env for runtime with python 3.10.
         'docker:continuumio/miniconda3:latest',
+        # Test image with custom MOTD that can potentially interfere with
+        # SSH user/rsync path detection.
+        'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
