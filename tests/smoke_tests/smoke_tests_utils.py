@@ -647,7 +647,7 @@ VALIDATE_LAUNCH_OUTPUT = (
     'echo "$s" && echo "==Validating launching==" && '
     'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
     'echo "$s" && echo "==Validating setup output==" && '
-    'echo "$s" | grep -A 1 "Setup detached" | grep "Job submitted" && '
+    'echo "$s" | grep -A 5 "Setup detached" | grep "Job submitted" && '
     'echo "==Validating running output hints==" && echo "$s" | '
     'grep -A 1 "Job submitted, ID:" | '
     'grep "Waiting for task resources on " && '

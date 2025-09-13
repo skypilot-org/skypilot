@@ -64,6 +64,7 @@ BLACK_INCLUDES=(
 
 PYLINT_FLAGS=(
     '--load-plugins'  'pylint_quotes'
+    '--ignore-paths' 'sky/schemas/generated'
 )
 
 # Format specified files
