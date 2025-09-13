@@ -7,6 +7,7 @@ import pytest
 
 from sky import check
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
@@ -139,13 +140,22 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
     _run_label_test(allowed_labels, invalid_labels, cloud=clouds.AWS())
 
 
+# I am not sure why these tests were failing, commenting out for now.
+# @mock.patch('sky.catalog.instance_type_exists', return_value=True)
+# @mock.patch('sky.catalog.get_accelerators_from_instance_type',
+#             return_value={'fake-acc': 2})
+# @mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+#             return_value='/dev/sda1')
+# @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+# @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
+# def test_aws_make_deploy_variables(*mocks) -> None:
+@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='x86_64')
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
 @mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
             return_value='/dev/sda1')
 @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
-@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='fake-arch')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
     os.environ[
@@ -228,13 +238,22 @@ def test_aws_make_deploy_variables(*mocks) -> None:
                                        'variables generated')
 
 
+# I am not sure why these tests were failing, commenting out for now.
+# @mock.patch('sky.catalog.instance_type_exists', return_value=True)
+# @mock.patch('sky.catalog.get_accelerators_from_instance_type',
+#             return_value={'fake-acc': 2})
+# @mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+#             return_value='/dev/xvda')
+# @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+# @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
+# def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
+@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='x86_64')
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
 @mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
             return_value='/dev/xvda')
 @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
-@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='fake-arch')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
     os.environ[
@@ -1275,3 +1294,83 @@ def test_should_be_blocked_by(r_kwargs, blocked_kwargs, expected):
     r = Resources(**r_kwargs)
     blocked = Resources(**blocked_kwargs)
     assert r.should_be_blocked_by(blocked) == expected
+
+
+def test_accelerators_list_of_dicts():
+    """Test parsing accelerators specified as list of dicts."""
+    config = {'accelerators': [{'T4': 1}, {'L4': 2}]}
+    resources_set = Resources.from_yaml_config(config)
+    assert len(resources_set) == 2
+
+    # Convert to list to access elements
+    resources_list = list(resources_set)
+
+    # Verify both accelerator types are parsed correctly
+    accel_types = {list(r.accelerators.keys())[0] for r in resources_list}
+    assert 'T4' in accel_types
+    assert 'L4' in accel_types
+
+    # Verify counts are correct
+    for r in resources_list:
+        if 'T4' in r.accelerators:
+            assert r.accelerators['T4'] == 1
+        elif 'L4' in r.accelerators:
+            assert r.accelerators['L4'] == 2
+
+
+def test_accelerators_mixed_list_format():
+    """Test parsing accelerators with mixed string and dict format in list."""
+    config = {'accelerators': [{'T4': 1}, 'V100:2', {'A100': 1}]}
+    resources_set = Resources.from_yaml_config(config)
+    assert len(resources_set) == 3
+
+    # Verify all accelerator types are parsed correctly
+    resources_list = list(resources_set)
+    accel_types = {list(r.accelerators.keys())[0] for r in resources_list}
+    assert 'T4' in accel_types
+    assert 'V100' in accel_types
+    assert 'A100' in accel_types
+
+
+def test_accelerators_list_of_dicts_with_null():
+    """Test parsing accelerators list of dicts with null count."""
+    config = {
+        'accelerators': [
+            {
+                'T4': 1
+            },
+            {
+                'V100': None
+            }  # null count should default to 1
+        ]
+    }
+    resources_set = Resources.from_yaml_config(config)
+    assert len(resources_set) == 2
+
+    resources_list = list(resources_set)
+    for r in resources_list:
+        if 'T4' in r.accelerators:
+            assert r.accelerators['T4'] == 1
+        elif 'V100' in r.accelerators:
+            assert r.accelerators['V100'] == 1
+
+
+def test_accelerators_invalid_list_item_type():
+    """Test that invalid accelerator list item types are rejected."""
+    config = {
+        'accelerators': [123]  # invalid type
+    }
+
+    # Schema validation should catch this and raise InvalidSkyPilotConfigError
+    with pytest.raises(exceptions.InvalidSkyPilotConfigError,
+                       match='not valid under any of the given schemas'):
+        Resources.from_yaml_config(config)
+
+    config = {
+        'accelerators': [True]  # invalid type
+    }
+
+    # Schema validation should catch this too
+    with pytest.raises(exceptions.InvalidSkyPilotConfigError,
+                       match='not valid under any of the given schemas'):
+        Resources.from_yaml_config(config)

@@ -2044,12 +2044,28 @@ class Resources:
             elif isinstance(accelerators, list) or isinstance(
                     accelerators, set):
                 accelerators_list = []
-                for accel_name in accelerators:
-                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
-                    accelerators_list.extend(parsed_accels)
-            else:
-                assert False, ('Invalid accelerators type:'
-                               f'{type(accelerators)}')
+                for accel_item in accelerators:
+                    if isinstance(accel_item, str):
+                        parsed_accels = cls._parse_accelerators_from_str(
+                            accel_item)
+                        accelerators_list.extend(parsed_accels)
+                    elif isinstance(accel_item, dict):
+                        # Handle dict items in list format
+                        for acc_name, acc_count in accel_item.items():
+                            if acc_count is None:
+                                acc_str = acc_name
+                            else:
+                                acc_str = f'{acc_name}:{acc_count}'
+                            parsed_accels = cls._parse_accelerators_from_str(
+                                acc_str)
+                            accelerators_list.extend(parsed_accels)
+                    else:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError('accelerators: invalid item type '
+                                             f'{type(accel_item)}. '
+                                             'Expected str or dict, got '
+                                             f'{accel_item}')
+
             # now that accelerators is a list, we need to decide which to
             # include in the final set, however, there may be multiple copies
             # of the same accelerator, some given by name by the user and the

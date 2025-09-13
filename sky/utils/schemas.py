@@ -409,7 +409,19 @@ def get_resources_schema():
                 }, {
                     'type': 'array',
                     'items': {
-                        'type': 'string',
+                        'anyOf': [{
+                            'type': 'string',
+                        }, {
+                            'type': 'object',
+                            'required': [],
+                            'additionalProperties': {
+                                'anyOf': [{
+                                    'type': 'null',
+                                }, {
+                                    'type': 'number',
+                                }]
+                            }
+                        }]
                     }
                 }]
             },
