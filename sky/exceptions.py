@@ -675,6 +675,11 @@ class SkyletInternalError(Exception):
     pass
 
 
+class SkyletMethodNotImplementedError(Exception):
+    """Raised when a Skylet gRPC method is not implemented on the server."""
+    pass
+
+
 class ClientError(Exception):
     """Raised when a there is a client error occurs.
 
