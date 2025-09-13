@@ -1366,7 +1366,7 @@ def _fill_in_launchable_resources(
                 cloud: clouds.Cloud, resources: resources_lib.Resources,
                 num_nodes: int) -> resources_utils.FeasibleResources:
             resources = resources.copy()
-            resources._set_cloud(cloud)
+            resources.set_cloud(cloud)
             resources.validate()
             return cloud.get_feasible_launchable_resources(resources, num_nodes)
 
