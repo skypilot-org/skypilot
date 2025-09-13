@@ -613,7 +613,7 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
     """
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        count = await session.execute(
+        result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
@@ -625,6 +625,7 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
                     spot_table.c.end_at.is_(None),
                 )).values({spot_table.c.status: ManagedJobStatus.PENDING.value})
         )
+        count = result.rowcount
         await session.commit()
         if count != 1:
             raise exceptions.ManagedJobStatusError(
