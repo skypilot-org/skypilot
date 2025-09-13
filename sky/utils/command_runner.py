@@ -3,6 +3,7 @@ import enum
 import hashlib
 import os
 import pathlib
+import re
 import shlex
 import sys
 import time
@@ -21,6 +22,9 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
+
+# Pattern to extract home directory from command output, handling MOTD contamination
+_HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 
 # Rsync options
 # TODO(zhwu): This will print a per-file progress bar (with -P),
@@ -183,19 +187,25 @@ class CommandRunner:
         return '-'.join(str(x) for x in self.node)
 
     def _get_remote_home_dir(self) -> str:
-        # Use `echo ~` to get the remote home directory, instead of pwd or
-        # echo $HOME, because pwd can be `/` when the remote user is root
-        # and $HOME is not always set.
-        # Use use_login=False to prevent MOTD output contamination.
-        rc, remote_home_dir, stderr = self.run('echo ~',
-                                               require_outputs=True,
-                                               separate_stderr=True,
-                                               stream_logs=False,
-                                               use_login=False)
+        # Use pattern matching to extract home directory, handling MOTD contamination.
+        # Some container images print MOTD when login shells start, which can
+        # contaminate command output. We use a unique pattern to extract the
+        # actual home directory reliably.
+        rc, output, stderr = self.run('echo "SKYPILOT_HOME_DIR: $(echo ~)"',
+                                      require_outputs=True,
+                                      separate_stderr=True,
+                                      stream_logs=False)
         if rc != 0:
             raise ValueError('Failed to get remote home directory: '
-                             f'{remote_home_dir + stderr}')
-        remote_home_dir = remote_home_dir.strip()
+                             f'{output + stderr}')
+        
+        # Extract home directory using pattern matching
+        home_dir_match = _HOME_DIR_PATTERN.search(output)
+        if home_dir_match:
+            remote_home_dir = home_dir_match.group(1)
+        else:
+            raise ValueError('Failed to find remote home directory identifier: '
+                             f'{output + stderr}')
         return remote_home_dir
 
     def _get_command_to_run(
@@ -397,7 +407,6 @@ class CommandRunner:
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
-            use_login: bool = True,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -416,8 +425,6 @@ class CommandRunner:
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
-            use_login: Whether to use login shell. If False, avoids login shell
-                MOTD output that can contaminate command output.
 
         Returns:
             returncode
@@ -759,7 +766,6 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
-            use_login: bool = True,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -804,8 +810,7 @@ class SSHCommandRunner(CommandRunner):
                                                process_stream,
                                                separate_stderr,
                                                skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc,
-                                               use_login=use_login)
+                                               source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
@@ -972,7 +977,6 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
-            use_login: bool = True,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod or deployment by its
         name and namespace.
@@ -997,8 +1001,6 @@ class KubernetesCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
-            use_login: Whether to use login shell. If False, avoids login shell
-                MOTD output that can contaminate command output.
 
         Returns:
             returncode
@@ -1039,8 +1041,7 @@ class KubernetesCommandRunner(CommandRunner):
                                                process_stream,
                                                separate_stderr,
                                                skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc,
-                                               use_login=use_login)
+                                               source_bashrc=source_bashrc)
         command = kubectl_base_command + [
             # It is important to use /bin/bash -c here to make sure we quote the
             # command to be run properly. Otherwise, directly appending commands
@@ -1154,7 +1155,6 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
-            use_login: bool = True,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Use subprocess to run the command."""
         del port_forward, ssh_mode, connect_timeout  # Unused.
@@ -1163,8 +1163,7 @@ class LocalProcessCommandRunner(CommandRunner):
                                                process_stream,
                                                separate_stderr,
                                                skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc,
-                                               use_login=use_login)
+                                               source_bashrc=source_bashrc)
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
