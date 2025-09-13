@@ -2044,7 +2044,7 @@ def test_min_gpt(generic_cloud: str, train_file: str):
         # Create a temporary YAML file with the modified content
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
                                          delete=False) as f:
-            f.write(read_and_modify(file_path))
+            f.write(modified_content)
             f.flush()
             train_file_path = f.name
         return train_file_path
