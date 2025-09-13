@@ -32,6 +32,17 @@ DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
 
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
+# Server url format: <your-user-id>.dkr.ecr.<region>.amazonaws.com
+REGION_INDEX_IN_SERVER_URL = 3
+
+INSTALL_AWS_CLI_CMD = (
+    'which aws || ((command -v unzip >/dev/null 2>&1 || '
+    '(sudo apt-get update && sudo apt-get install -y unzip)) && '
+    'curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" '
+    '-o "/tmp/awscliv2.zip" && '
+    'unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install '
+    '&& rm -rf /tmp/awscliv2.zip /tmp/aws)',)
+
 
 @dataclasses.dataclass
 class DockerLoginConfig:
@@ -54,21 +65,6 @@ class DockerLoginConfig:
             password=d[constants.DOCKER_PASSWORD_ENV_VAR],
             server=d[constants.DOCKER_SERVER_ENV_VAR],
         )
-
-    def process_credential(self) -> None:
-        """Process a Docker credential for login.
-
-        Handles escaped command substitution syntax and returns the properly
-        quoted string for shell execution. If the string starts with '\\$(' and
-        ends with ')', it will remove the escape character, allowing the literal
-        '$(' to be used.
-        """
-        # Handle escaped command substitution by removing the escape character
-        if self.username.startswith('\\$(') and self.username.endswith(')'):
-            self.username = self.username[1:]  # Remove escape character
-
-        if self.password.startswith('\\$(') and self.password.endswith(')'):
-            self.password = self.password[1:]  # Remove escape character
 
 
 # Copied from ray.autoscaler._private.ray_constants
@@ -254,8 +250,6 @@ class DockerInitializer:
             docker_login_config = DockerLoginConfig(
                 **self.docker_config['docker_login_config'])
 
-            docker_login_config.process_credential()
-
             if docker_login_config.password:
                 # Password is allowed to be empty, in that case, we will not run
                 # the login command, and assume that the image pulling is
@@ -264,6 +258,20 @@ class DockerInitializer:
                     f'{self.docker_cmd} login --username '
                     f'{shlex.quote(docker_login_config.username)} '
                     f'--password {shlex.quote(docker_login_config.password)} '
+                    f'{shlex.quote(docker_login_config.server)}',
+                    wait_for_docker_daemon=True)
+            elif docker_login_config.server.endswith('.amazonaws.com'):
+                # AWS ECR: Use aws ecr get-login-password for authentication
+                # This command uses the IAM credentials from the EC2 instance
+                region = docker_login_config.server.split(
+                    '.')[REGION_INDEX_IN_SERVER_URL]
+
+                self._run(INSTALL_AWS_CLI_CMD, wait_for_docker_daemon=False)
+
+                self._run(
+                    f'aws ecr get-login-password --region {region} | '
+                    f'{self.docker_cmd} login --username AWS '
+                    f'--password-stdin '
                     f'{shlex.quote(docker_login_config.server)}',
                     wait_for_docker_daemon=True)
             elif docker_login_config.server.endswith('-docker.pkg.dev'):
