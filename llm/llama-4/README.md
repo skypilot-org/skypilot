@@ -19,7 +19,7 @@
 ## Run Llama 4
 
 ```bash
-sky launch llama4.yaml -c llama4 --env HF_TOKEN
+HF_TOKEN=xxx sky launch llama4.yaml -c llama4 --secret HF_TOKEN
 ```
 
 https://github.com/user-attachments/assets/48cdc44a-31a5-45f0-93be-7a8b6c6a0ded
@@ -29,7 +29,9 @@ The `llama4.yaml` file is as follows:
 ```yaml
 envs:
   MODEL_NAME: meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+
+secrets:
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --secret to pass.
 
 resources:
   accelerators: { H100:8, H200:8, B100:8, B200:8, GB200:8 }
@@ -53,7 +55,7 @@ run: |
 
 You can use other models by setting different `MODEL_NAME`.
 ```bash
-sky launch llama4.yaml -c llama4 --env HF_TOKEN --env MODEL_NAME=meta-llama/Llama-4-Scout-17B-16E-Instruct
+HF_TOKEN=xxx sky launch llama4.yaml -c llama4 --secret HF_TOKEN --env MODEL_NAME=meta-llama/Llama-4-Scout-17B-16E-Instruct
 ```
 
 
@@ -97,7 +99,7 @@ sky down llama4
 
 With no change to the YAML, launch a fully managed service on your infra:
 ```console
-HF_TOKEN=xxx sky serve up llama4.yaml -n llama4 --env HF_TOKEN
+HF_TOKEN=xxx sky serve up llama4.yaml -n llama4 --secret HF_TOKEN
 ```
 
 Wait until the service is ready:
@@ -154,3 +156,6 @@ sky serve down llama4
 
 See more details in [SkyServe docs](https://docs.skypilot.co/en/latest/serving/sky-serve.html).
 
+## Community tutorial: Llama 4 on SGLang, served via SkyServe
+
+For a community tutorial on how to serve Llama 4 on SGLang (both single-node and multi-node), see [Serving Llama 4 models on Nebius AI Cloud with SkyPilot and SGLang](https://nebius.com/blog/posts/serving-llama-4-skypilot-sglang).

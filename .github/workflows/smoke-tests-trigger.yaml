@@ -20,7 +20,7 @@ jobs:
         with:
           buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
           pipeline: "skypilot-1/smoke-tests"
-          branch: "master"
+          branch: ${{ github.ref_name }}
           commit: "HEAD"
           message: "Manual Smoke Tests: ${{ github.event.inputs.param }}"
           ignore_pipeline_branch_filter: true

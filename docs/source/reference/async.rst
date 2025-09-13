@@ -38,10 +38,10 @@ For example, when a user runs ``sky launch -c my-cluster``, the following output
     $ sky launch -c my-cluster --cpus 2
     Considered resources (1 node):
     ---------------------------------------------------------------------------------------------
-    CLOUD        INSTANCE    vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN
+    INFRA                   INSTANCE      vCPUs   Mem(GB)   GPUS      COST ($)   CHOSEN
     ---------------------------------------------------------------------------------------------
-    Kubernetes   2CPU--2GB   2       2         -              in-cluster    0.00          ✔
-    AWS          m6i.large   2       8         -              us-east-1     0.10
+    Kubernetes (my-cluster) 2CPU--2GB     2       2         -         0.00       ✔
+    AWS (us-east-1)         m6i.large     2       8         -         0.098     
     ---------------------------------------------------------------------------------------------
     Launching a new cluster 'my-cluster'. Proceed? [Y/n]:
     ⚙︎ Launching on Kubernetes.
@@ -105,6 +105,37 @@ Similar to the CLIs, the SkyPilot SDK calls send asynchronous requests to the Sk
   # Tail the logs of the job. This is a synchronous call.
   sky.tail_logs(job_id)
 
+
+Async Python SDK
+~~~~~~~~~~~~~~~~~
+
+SkyPilot also provides an async SDK that automatically streams logs by default, providing a more interactive experience:
+
+.. code-block:: python
+
+  import asyncio
+  from sky.client import sdk_async as sdk
+  import sky
+
+  async def main():
+    task = sky.Task(
+        run="echo hello SkyPilot")
+    # Async functions stream logs by default and return results directly
+    job_id, handle = await sdk.launch(task, cluster_name="my-cluster")
+
+    # Get cluster status with live streaming
+    status = await sdk.status()
+
+    # Or disable streaming for simple result retrieval
+    status = await sdk.status(stream_logs=None)
+
+  asyncio.run(main())
+
+
+All async SDK functions support a ``stream_logs`` parameter:
+
+- ``stream_logs=True`` (default): Live log streaming with interactive progress
+- ``stream_logs=False``: Simple result retrieval without streaming
 
 Note that the following log functions are synchronous:
 

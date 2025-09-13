@@ -22,6 +22,6 @@ run_command = 'docker run -v ~/mnist/:/mnist/ --runtime=nvidia --rm cemizm/tf-be
 
 with sky.Dag() as dag:
     t = sky.Task(run=run_command, setup=setup_cmd)
-    t.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
+    t.set_resources(sky.Resources(infra='aws', accelerators='V100'))
 
 sky.launch(dag)

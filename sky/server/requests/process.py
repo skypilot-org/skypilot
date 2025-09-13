@@ -6,6 +6,7 @@ import threading
 import time
 from typing import Callable, Dict, Optional, Tuple
 
+from sky import exceptions
 from sky.utils import atomic
 from sky.utils import subprocess_utils
 
@@ -67,14 +68,24 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
 
 
 # Define the worker function outside of the class to avoid pickling self
-def _disposable_worker(fn, initializer: Optional[Callable], initargs: Tuple,
-                       args, kwargs):
+def _disposable_worker(fn, initializer, initargs, result_queue, args, kwargs):
+    """The worker function that is used to run the task.
+
+    Args:
+        fn: The function to run.
+        initializer: The initializer function to run before running the task.
+        initargs: The arguments to pass to the initializer function.
+        result_queue: The queue to put the result and exception into.
+        args: The arguments to pass to the function.
+        kwargs: The keyword arguments to pass to the function.
+    """
     try:
         if initializer is not None:
             initializer(*initargs)
-        fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
+        result_queue.put(result)
     except BaseException as e:  # pylint: disable=broad-except
-        return e
+        result_queue.put(e)
 
 
 class DisposableExecutor:
@@ -98,28 +109,52 @@ class DisposableExecutor:
         self._initializer: Optional[Callable] = initializer
         self._initargs: Tuple = initargs
 
-    def _monitor_worker(self, process: multiprocessing.Process) -> None:
+    def _monitor_worker(self, process: multiprocessing.Process,
+                        future: concurrent.futures.Future,
+                        result_queue: multiprocessing.Queue) -> None:
         """Monitor the worker process and cleanup when it's done."""
-        process.join()
-        if process.pid:
-            with self._lock:
-                if process.pid in self.workers:
-                    del self.workers[process.pid]
+        try:
+            process.join()
+            if not future.cancelled():
+                try:
+                    # Get result from the queue if process completed
+                    if not result_queue.empty():
+                        result = result_queue.get(block=False)
+                        if isinstance(result, BaseException):
+                            future.set_exception(result)
+                        else:
+                            future.set_result(result)
+                    else:
+                        # Process ended but no result
+                        future.set_result(None)
+                except (multiprocessing.TimeoutError, BrokenPipeError,
+                        EOFError) as e:
+                    future.set_exception(e)
+        finally:
+            if process.pid:
+                with self._lock:
+                    if process.pid in self.workers:
+                        del self.workers[process.pid]
 
-    # Submit is not compatible with ProcessPoolExecutor because we does not
-    # bother to return a Future. Can be improved if needed.
-    def submit(self, fn, *args, **kwargs) -> bool:
-        """Submit a task for execution."""
+    def submit(self, fn, *args, **kwargs) -> concurrent.futures.Future:
+        """Submit a task for execution and return a Future."""
+        future: concurrent.futures.Future = concurrent.futures.Future()
+
         if self._shutdown:
-            return False
+            raise RuntimeError('Cannot submit task after executor is shutdown')
+
         with self._lock:
             if (self.max_workers is not None and
                     len(self.workers) >= self.max_workers):
-                return False
+                raise exceptions.ExecutionPoolFullError(
+                    'Maximum workers reached')
 
+        result_queue: multiprocessing.Queue = multiprocessing.Queue()
         process = multiprocessing.Process(target=_disposable_worker,
                                           args=(fn, self._initializer,
-                                                self._initargs, args, kwargs))
+                                                self._initargs, result_queue,
+                                                args, kwargs))
+        process.daemon = True
         process.start()
 
         with self._lock:
@@ -128,13 +163,13 @@ class DisposableExecutor:
                 raise RuntimeError('Failed to start process')
             self.workers[pid] = process
 
-        # Start monitor thread to cleanup the worker process when it's done.
+        # Start monitor thread to cleanup the worker process when it's done
         monitor_thread = threading.Thread(target=self._monitor_worker,
-                                          args=(process,),
+                                          args=(process, future, result_queue),
                                           daemon=True)
         monitor_thread.start()
 
-        return True
+        return future
 
     def has_idle_workers(self) -> bool:
         """Check if there are any idle workers."""
@@ -167,18 +202,23 @@ class BurstableExecutor:
                  burst_workers: int = 0,
                  **kwargs):
         if garanteed_workers > 0:
+            self._guaranteed_workers = garanteed_workers
+            self._guaranteed_pool_kwargs = kwargs
+            self._guaranteed_pool_lock = threading.Lock()
             self._executor = PoolExecutor(max_workers=garanteed_workers,
                                           **kwargs)
         if burst_workers > 0:
             self._burst_executor = DisposableExecutor(max_workers=burst_workers,
                                                       **kwargs)
 
-    def submit_until_success(self, fn, *args, **kwargs):
+    def submit_until_success(self, fn, *args,
+                             **kwargs) -> concurrent.futures.Future:
         """Submit a task for execution until success.
 
         Prioritizes submitting to the guaranteed pool. If no idle workers
         are available in the guaranteed pool, it will submit to the burst
-        pool.
+        pool. If the burst pool is full, it will retry the whole process until
+        the task is submitted successfully.
         TODO(aylei): this is coupled with executor.RequestWorker since we
         know the worker is dedicated to request scheduling and it either
         blocks on request polling or request submitting. So it is no harm
@@ -188,20 +228,63 @@ class BurstableExecutor:
 
         while True:
             if self._executor is not None and self._executor.has_idle_workers():
-                self._executor.submit(fn, *args, **kwargs)
-                break
+                return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
             if (self._burst_executor is not None and
                     self._burst_executor.has_idle_workers()):
-                self._burst_executor.submit(fn, *args, **kwargs)
-                break
+                try:
+                    fut = self._burst_executor.submit(fn, *args, **kwargs)
+                    return fut
+                except exceptions.ExecutionPoolFullError:
+                    # The burst pool is full, try the next candidate.
+                    pass
             if self._executor is not None:
                 # No idle workers in either pool, still queue the request
                 # to the guaranteed pool to keep behavior consistent.
-                self._executor.submit(fn, *args, **kwargs)
-                break
+                return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
             logger.debug('No guaranteed pool set and the burst pool is full, '
                          'retry later.')
             time.sleep(0.1)
+
+    def _submit_to_guaranteed_pool(self, fn, *args,
+                                   **kwargs) -> concurrent.futures.Future:
+        """Submit to the guaranteed pool with retry.
+
+        The concurrent.futures.ProcessPoolExecutor will terminate all child
+        processes and reject new tasks if any of the child process died, e.g.
+        OOM killed. So when the pool is broken, we have to rebuild a new pool
+        to execute tasks.
+
+        Alternatives considered:
+        - multiprocessing.Pool: individual process failure does not affect the
+            pool, but it lacks of lazy-init support and does not handle process
+            failure gracefully.
+        - inherit from concurrent.futures.ProcessPoolExecutor: If a child
+            process dies when executing a task, we have to set an exception
+            in the Future object of the task. But there is a race condition
+            that the child process may dies exactly after get the task from
+            queue so there is no (obviously) safe way to record process PID
+            to task mapping in the current architecture of
+            ProcessPoolExecutor. It is more feasible to implement a custom
+            ProcessPoolExecutor with an new architecture.
+        - a custom ProcessPoolExecutor: non-trivial to implement, keep for
+            future improvement as BrokenProcessPool is not expected to be
+            a common case, i.e. it usually indicates there a bug elsewhere
+            when this happens.
+        """
+        with self._guaranteed_pool_lock:
+            assert self._executor is not None
+            try:
+                return self._executor.submit(fn, *args, **kwargs)
+            except concurrent.futures.process.BrokenProcessPool as e:
+                logger.warning('The guaranteed pool is broken, '
+                               f'replacing the pool and retrying. Error: {e}')
+                broken_pool = self._executor
+                threading.Thread(target=broken_pool.shutdown,
+                                 daemon=True).start()
+                self._executor = PoolExecutor(
+                    max_workers=self._guaranteed_workers,
+                    **self._guaranteed_pool_kwargs)
+        return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
 
     def shutdown(self) -> None:
         """Shutdown the executor."""

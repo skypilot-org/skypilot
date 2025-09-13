@@ -26,24 +26,24 @@ You can query the accelerators available in your Kubernetes clusters with:
 
 .. code-block:: console
 
-   $ sky show-gpus --cloud k8s
+   $ sky show-gpus --infra k8s
 
 
 .. code-block:: text
 
     Kubernetes GPUs
-    GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-    L4    1, 2, 4                   12          12
-    H100  1, 2, 4, 8                16          16
+    GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
+    L4    1, 2, 4                   12 of 12
+    H100  1, 2, 4, 8                16 of 16
 
     Kubernetes per node GPU availability
-    NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
-    my-cluster-0               L4        4           4
-    my-cluster-1               L4        4           4
-    my-cluster-2               L4        2           2
-    my-cluster-3               L4        2           2
-    my-cluster-4               H100      8           8
-    my-cluster-5               H100      8           8
+    NODE                       GPU       UTILIZATION
+    my-cluster-0               L4        4 of 4
+    my-cluster-1               L4        4 of 4
+    my-cluster-2               L4        2 of 2
+    my-cluster-3               L4        2 of 2
+    my-cluster-4               H100      8 of 8
+    my-cluster-5               H100      8 of 8
 
 Querying accelerator details
 ----------------------------
@@ -86,13 +86,18 @@ You can use ``accelerator:count`` in various places that accept accelerator spec
 See :ref:`auto-failover` for more examples.
 
 Google TPUs
------------------
+-----------
 
 See :ref:`tpu`.
+
+AMG GPUs
+--------
+
+See :ref:`kubernetes-amd-gpu`.
 
 .. toctree::
    :maxdepth: 1
    :hidden:
 
    Using Google TPUs <../../reference/tpu>
-
+   Using AMD GPUs <../../reference/kubernetes/amd-gpu>

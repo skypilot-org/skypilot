@@ -1,11 +1,28 @@
 """Payloads for the Sky API requests.
 
-TODO(zhwu): We can consider a better way to handle the default values of the
-kwargs for the payloads, otherwise, we have to keep the default values the sync
-with the backend functions. The benefit of having the default values in the
-payloads is that a user can find the default values in the Restful API docs.
+All the payloads that will be used between the client and server communication
+must be defined here to make sure it get covered by our API compatbility tests.
+
+Compatibility note:
+- Adding a new body for new API is compatible as long as the SDK method using
+  the new API is properly decorated with `versions.minimal_api_version`.
+- Adding a new field with default value to an existing body is compatible at
+  API level, but the business logic must handle the case where the field is
+  not proccessed by an old version of remote client/server. This can usually
+  be done by checking `versions.get_remote_api_version()`.
+- Other changes are not compatible at API level, so must be handled specially.
+  A common pattern is to keep both the old and new version of the body and
+  checking `versions.get_remote_api_version()` to decide which body to use. For
+  example, say we refactor the `LaunchBody`, the original `LaunchBody` must be
+  kept in the codebase and the new body should be added via `LaunchBodyV2`.
+  Then if the remote runs in an old version, the local code should still send
+  `LaunchBody` to keep the backward compatibility. `LaunchBody` can be removed
+  later when constants.MIN_COMPATIBLE_API_VERSION is updated to a version that
+  supports `LaunchBodyV2`
+
+Also refer to sky.server.constants.MIN_COMPATIBLE_API_VERSION and the
+sky.server.versions module for more details.
 """
-import getpass
 import os
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -16,6 +33,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.server import common
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.usage import usage_lib
@@ -38,10 +56,14 @@ logger = sky_logging.init_logger(__name__)
 EXTERNAL_LOCAL_ENV_VARS = [
     # Allow overriding the AWS authentication.
     'AWS_PROFILE',
+    'AWS_DEFAULT_PROFILE',
     'AWS_ACCESS_KEY_ID',
     'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
     # Allow overriding the GCP authentication.
     'GOOGLE_APPLICATION_CREDENTIALS',
+    # Allow overriding the kubeconfig.
+    'KUBECONFIG',
 ]
 
 
@@ -49,13 +71,14 @@ EXTERNAL_LOCAL_ENV_VARS = [
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
-        if env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
+        if (env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX) and
+                not env_var.startswith(
+                    constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)):
             env_vars[env_var] = os.environ[env_var]
         if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
-    env_vars[constants.USER_ENV_VAR] = os.getenv(constants.USER_ENV_VAR,
-                                                 getpass.getuser())
+    env_vars[constants.USER_ENV_VAR] = common_utils.get_current_user_name()
     env_vars[
         usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
     # Remove the path to config file, as the config content is included in the
@@ -63,26 +86,59 @@ def request_body_env_vars() -> dict:
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
+    # Remove the config related env vars, as the client config override
+    # should be passed in the request body.
+    # Any new environment variables that are server-specific should
+    # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
+    env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
     return env_vars
 
 
 def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     """Returns the override configs from the client."""
+    if annotations.is_on_api_server:
+        return {}
     config = skypilot_config.to_dict()
     # Remove the API server config, as we should not specify the SkyPilot
     # server endpoint on the server side. This avoids the warning at
     # server-side.
     config.pop_nested(('api_server',), default_value=None)
+    # Remove the admin policy, as the policy has been applied on the client
+    # side.
+    config.pop_nested(('admin_policy',), default_value=None)
     return config
 
 
-class RequestBody(pydantic.BaseModel):
+def get_override_skypilot_config_path_from_client() -> Optional[str]:
+    """Returns the override config path from the client."""
+    if annotations.is_on_api_server:
+        return None
+    # Currently, we don't need to check if the client-side config
+    # has been overridden because we only deal with cases where
+    # client has a project-level config/changed config and the
+    # api server has a different config.
+    return skypilot_config.loaded_config_path_serialized()
+
+
+class BasePayload(pydantic.BaseModel):
+    """The base payload for the SkyPilot API."""
+    # Ignore extra fields in the request body, which is useful for backward
+    # compatibility. The difference with `allow` is that `ignore` will not
+    # include the unknown fields when dump the model, i.e., we can add new
+    # fields to the request body without breaking the existing old API server
+    # where the handler function does not accept the new field in function
+    # signature.
+    model_config = pydantic.ConfigDict(extra='ignore')
+
+
+class RequestBody(BasePayload):
     """The request body for the SkyPilot API."""
     env_vars: Dict[str, str] = {}
     entrypoint: str = ''
     entrypoint_command: str = ''
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
+    override_skypilot_config_path: Optional[str] = None
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -97,6 +153,9 @@ class RequestBody(pydantic.BaseModel):
         data['override_skypilot_config'] = data.get(
             'override_skypilot_config',
             get_override_skypilot_config_from_client())
+        data['override_skypilot_config_path'] = data.get(
+            'override_skypilot_config_path',
+            get_override_skypilot_config_path_from_client())
         super().__init__(**data)
 
     def to_kwargs(self) -> Dict[str, Any]:
@@ -111,6 +170,7 @@ class RequestBody(pydantic.BaseModel):
         kwargs.pop('entrypoint_command')
         kwargs.pop('using_remote_api_server')
         kwargs.pop('override_skypilot_config')
+        kwargs.pop('override_skypilot_config_path')
         return kwargs
 
     @property
@@ -122,6 +182,13 @@ class CheckBody(RequestBody):
     """The request body for the check endpoint."""
     clouds: Optional[Tuple[str, ...]] = None
     verbose: bool = False
+    workspace: Optional[str] = None
+
+
+class EnabledCloudsBody(RequestBody):
+    """The request body for the enabled clouds endpoint."""
+    workspace: Optional[str] = None
+    expand: bool = False
 
 
 class DagRequestBody(RequestBody):
@@ -144,17 +211,33 @@ class DagRequestBody(RequestBody):
         return kwargs
 
 
-class ValidateBody(DagRequestBody):
-    """The request body for the validate endpoint."""
-    dag: str
+class DagRequestBodyWithRequestOptions(DagRequestBody):
+    """Request body base class for endpoints with a dag and request options."""
     request_options: Optional[admin_policy.RequestOptions]
 
+    def get_request_options(self) -> Optional[admin_policy.RequestOptions]:
+        """Get the request options."""
+        if self.request_options is None:
+            return None
+        if isinstance(self.request_options, dict):
+            return admin_policy.RequestOptions(**self.request_options)
+        return self.request_options
 
-class OptimizeBody(DagRequestBody):
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        kwargs['request_options'] = self.get_request_options()
+        return kwargs
+
+
+class ValidateBody(DagRequestBodyWithRequestOptions):
+    """The request body for the validate endpoint."""
+    dag: str
+
+
+class OptimizeBody(DagRequestBodyWithRequestOptions):
     """The request body for the optimize endpoint."""
     dag: str
     minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
-    request_options: Optional[admin_policy.RequestOptions]
 
 
 class LaunchBody(RequestBody):
@@ -162,8 +245,10 @@ class LaunchBody(RequestBody):
     task: str
     cluster_name: str
     retry_until_up: bool = False
+    # TODO(aylei): remove this field in v0.12.0
     idle_minutes_to_autostop: Optional[int] = None
     dryrun: bool = False
+    # TODO(aylei): remove this field in v0.12.0
     down: bool = False
     backend: Optional[str] = None
     optimize_target: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
@@ -229,12 +314,15 @@ class StatusBody(RequestBody):
     cluster_names: Optional[List[str]] = None
     refresh: common_lib.StatusRefreshMode = common_lib.StatusRefreshMode.NONE
     all_users: bool = True
+    # TODO (kyuds): default to False post 0.10.5
+    include_credentials: bool = True
 
 
 class StartBody(RequestBody):
     """The request body for the start endpoint."""
     cluster_name: str
     idle_minutes_to_autostop: Optional[int] = None
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     retry_until_up: bool = False
     down: bool = False
     force: bool = False
@@ -244,6 +332,7 @@ class AutostopBody(RequestBody):
     """The request body for the autostop endpoint."""
     cluster_name: str
     idle_minutes: int
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
 
 
@@ -297,6 +386,63 @@ class ClusterJobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
+class UserCreateBody(RequestBody):
+    """The request body for the user create endpoint."""
+    username: str
+    password: str
+    role: Optional[str] = None
+
+
+class UserDeleteBody(RequestBody):
+    """The request body for the user delete endpoint."""
+    user_id: str
+
+
+class UserUpdateBody(RequestBody):
+    """The request body for the user update endpoint."""
+    user_id: str
+    role: Optional[str] = None
+    password: Optional[str] = None
+
+
+class UserImportBody(RequestBody):
+    """The request body for the user import endpoint."""
+    csv_content: str
+
+
+class ServiceAccountTokenCreateBody(RequestBody):
+    """The request body for creating a service account token."""
+    token_name: str
+    expires_in_days: Optional[int] = None
+
+
+class ServiceAccountTokenDeleteBody(RequestBody):
+    """The request body for deleting a service account token."""
+    token_id: str
+
+
+class UpdateRoleBody(RequestBody):
+    """The request body for updating a user role."""
+    role: str
+
+
+class ServiceAccountTokenRoleBody(RequestBody):
+    """The request body for getting a service account token role."""
+    token_id: str
+
+
+class ServiceAccountTokenUpdateRoleBody(RequestBody):
+    """The request body for updating a service account token role."""
+    token_id: str
+    role: str
+
+
+class ServiceAccountTokenRotateBody(RequestBody):
+    """The request body for rotating a service account token."""
+    token_id: str
+    expires_in_days: Optional[int] = None
+
+
 class DownloadBody(RequestBody):
     """The request body for the download endpoint."""
     folder_paths: List[str]
@@ -305,6 +451,28 @@ class DownloadBody(RequestBody):
 class StorageBody(RequestBody):
     """The request body for the storage endpoint."""
     name: str
+
+
+class VolumeApplyBody(RequestBody):
+    """The request body for the volume apply endpoint."""
+    name: str
+    volume_type: str
+    cloud: str
+    region: Optional[str] = None
+    zone: Optional[str] = None
+    size: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    labels: Optional[Dict[str, str]] = None
+
+
+class VolumeDeleteBody(RequestBody):
+    """The request body for the volume delete endpoint."""
+    names: List[str]
+
+
+class VolumeListBody(RequestBody):
+    """The request body for the volume list endpoint."""
+    pass
 
 
 class EndpointsBody(RequestBody):
@@ -328,6 +496,8 @@ class JobsLaunchBody(RequestBody):
     """The request body for the jobs launch endpoint."""
     task: str
     name: Optional[str]
+    pool: Optional[str] = None
+    num_jobs: Optional[int] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -341,6 +511,22 @@ class JobsQueueBody(RequestBody):
     refresh: bool = False
     skip_finished: bool = False
     all_users: bool = False
+    job_ids: Optional[List[int]] = None
+
+
+class JobsQueueV2Body(RequestBody):
+    """The request body for the jobs queue endpoint."""
+    refresh: bool = False
+    skip_finished: bool = False
+    all_users: bool = False
+    job_ids: Optional[List[int]] = None
+    user_match: Optional[str] = None
+    workspace_match: Optional[str] = None
+    name_match: Optional[str] = None
+    pool_match: Optional[str] = None
+    page: Optional[int] = None
+    limit: Optional[int] = None
+    statuses: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):
@@ -349,6 +535,7 @@ class JobsCancelBody(RequestBody):
     job_ids: Optional[List[int]] = None
     all: bool = False
     all_users: bool = False
+    pool: Optional[str] = None
 
 
 class JobsLogsBody(RequestBody):
@@ -358,6 +545,7 @@ class JobsLogsBody(RequestBody):
     follow: bool = True
     controller: bool = False
     refresh: bool = False
+    tail: Optional[int] = None
 
 
 class RequestCancelBody(RequestBody):
@@ -421,6 +609,7 @@ class ServeLogsBody(RequestBody):
     target: Union[str, serve.ServiceComponent]
     replica_id: Optional[int] = None
     follow: bool = True
+    tail: Optional[int] = None
 
 
 class ServeDownloadLogsBody(RequestBody):
@@ -430,6 +619,7 @@ class ServeDownloadLogsBody(RequestBody):
     targets: Optional[Union[str, serve.ServiceComponent,
                             List[Union[str, serve.ServiceComponent]]]]
     replica_ids: Optional[List[int]] = None
+    tail: Optional[int] = None
 
 
 class ServeStatusBody(RequestBody):
@@ -439,9 +629,10 @@ class ServeStatusBody(RequestBody):
 
 class RealtimeGpuAvailabilityRequestBody(RequestBody):
     """The request body for the realtime GPU availability endpoint."""
-    context: Optional[str]
-    name_filter: Optional[str]
-    quantity_filter: Optional[int]
+    context: Optional[str] = None
+    name_filter: Optional[str] = None
+    quantity_filter: Optional[int] = None
+    is_ssh: Optional[bool] = None
 
 
 class KubernetesNodeInfoRequestBody(RequestBody):
@@ -481,6 +672,12 @@ class LocalUpBody(RequestBody):
     password: Optional[str] = None
 
 
+class SSHUpBody(RequestBody):
+    """The request body for the SSH up/down endpoints."""
+    infra: Optional[str] = None
+    cleanup: bool = False
+
+
 class ServeTerminateReplicaBody(RequestBody):
     """The request body for the serve terminate replica endpoint."""
     service_name: str
@@ -510,7 +707,110 @@ class JobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
+class JobsPoolApplyBody(RequestBody):
+    """The request body for the jobs pool apply endpoint."""
+    task: str
+    pool_name: str
+    mode: serve.UpdateMode
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        dag = common.process_mounts_in_task_on_api_server(self.task,
+                                                          self.env_vars,
+                                                          workdir_only=False)
+        assert len(
+            dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                              'a pool.', dag)
+        kwargs['task'] = dag.tasks[0]
+        return kwargs
+
+
+class JobsPoolDownBody(RequestBody):
+    """The request body for the jobs pool down endpoint."""
+    pool_names: Optional[Union[str, List[str]]]
+    all: bool = False
+    purge: bool = False
+
+
+class JobsPoolStatusBody(RequestBody):
+    """The request body for the jobs pool status endpoint."""
+    pool_names: Optional[Union[str, List[str]]]
+
+
+class JobsPoolLogsBody(RequestBody):
+    """The request body for the jobs pool logs endpoint."""
+    pool_name: str
+    target: Union[str, serve.ServiceComponent]
+    worker_id: Optional[int] = None
+    follow: bool = True
+    tail: Optional[int] = None
+
+
+class JobsPoolDownloadLogsBody(RequestBody):
+    """The request body for the jobs pool download logs endpoint."""
+    pool_name: str
+    local_dir: str
+    targets: Optional[Union[str, serve.ServiceComponent,
+                            List[Union[str, serve.ServiceComponent]]]]
+    worker_ids: Optional[List[int]] = None
+    tail: Optional[int] = None
+
+
 class UploadZipFileResponse(pydantic.BaseModel):
     """The response body for the upload zip file endpoint."""
     status: str
     missing_chunks: Optional[List[str]] = None
+
+
+class UpdateWorkspaceBody(RequestBody):
+    """The request body for updating a specific workspace configuration."""
+    workspace_name: str = ''  # Will be set from path parameter
+    config: Dict[str, Any]
+
+
+class CreateWorkspaceBody(RequestBody):
+    """The request body for creating a new workspace."""
+    workspace_name: str = ''  # Will be set from path parameter
+    config: Dict[str, Any]
+
+
+class DeleteWorkspaceBody(RequestBody):
+    """The request body for deleting a workspace."""
+    workspace_name: str
+
+
+class UpdateConfigBody(RequestBody):
+    """The request body for updating the entire SkyPilot configuration."""
+    config: Dict[str, Any]
+
+
+class GetConfigBody(RequestBody):
+    """The request body for getting the entire SkyPilot configuration."""
+    pass
+
+
+class CostReportBody(RequestBody):
+    """The request body for the cost report endpoint."""
+    days: Optional[int] = 30
+
+
+class RequestPayload(BasePayload):
+    """The payload for the requests."""
+
+    request_id: str
+    name: str
+    entrypoint: str
+    request_body: str
+    status: str
+    created_at: float
+    user_id: str
+    return_value: str
+    error: str
+    pid: Optional[int]
+    schedule_type: str
+    user_name: Optional[str] = None
+    # Resources the request operates on.
+    cluster_name: Optional[str] = None
+    status_msg: Optional[str] = None
+    should_retry: bool = False
+    finished_at: Optional[float] = None

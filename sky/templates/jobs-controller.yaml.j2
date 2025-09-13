@@ -3,6 +3,7 @@
 name: {{dag_name}}
 
 file_mounts:
+  {{remote_original_user_yaml_path}}: {{original_user_dag_path}}
   {{remote_user_yaml_path}}: {{user_yaml_path}}
   {%- if local_user_config_path is not none %}
   {{remote_user_config_path}}: {{local_user_config_path}}
@@ -14,6 +15,12 @@ file_mounts:
   {{controller_file_mount_path}}: {{local_file_mount_path}}
   {%- endfor %}
 
+# NOTE(dev): This needs to be a subset of sky/templates/sky-serve-controller.yaml.j2.
+# It is because we use the --fast flag to submit jobs and no --fast flag to launch pools.
+# So when we launch a new pool, it will install the required dependencies.
+# TODO(tian): Add --fast to launch pools as well, and figure out the dependency installation.
+# Maybe in the --fast implementation, we can store the hash of setup commands that used to be
+# run and don't skip setup phase if the hash is different.
 setup: |
   {{ sky_activate_python_env }}
   # Disable the pip version check to avoid the warning message, which makes the
@@ -29,31 +36,10 @@ setup: |
   grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
   {% endif %}
 
-  # Create systemd service file
-  mkdir -p ~/.config/systemd/user/
-
-  # Create systemd user service file
-  cat << EOF > ~/.config/systemd/user/skypilot-dashboard.service
-  [Unit]
-  Description=SkyPilot Jobs Dashboard
-  After=network.target
-
-  [Service]
-  Environment="SKYPILOT_USER_ID={{ dashboard_user_id }}"
-  Restart=always
-  StandardOutput=append:/home/$USER/.sky/job-dashboard.log
-  StandardError=append:/home/$USER/.sky/job-dashboard.log
-  ExecStart={{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard
-
-  [Install]
-  WantedBy=default.target
-  EOF
-
-  export SKYPILOT_USER_ID="{{ dashboard_user_id }}"
-  {{ dashboard_setup_cmd }}
-
 run: |
+  {%- if consolidation_mode_job_id is none %}
   {{ sky_activate_python_env }}
+  {%- endif %}
 
   # Write env vars to a file
   {%- for env_name, env_value in controller_envs.items() %}
@@ -64,9 +50,23 @@ run: |
   # Note: The job is already in the `spot` table, marked as PENDING.
   # CloudVmRayBackend._exec_code_on_head() calls
   # managed_job_codegen.set_pending() before we get here.
-  python -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
+  {%- if consolidation_mode_job_id is not none %}
+  {{sky_python_cmd}} \
+  {%- else %}
+  python \
+  {%- endif %}
+    -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
+    --user-yaml-path {{remote_original_user_yaml_path}} \
+    {%- if consolidation_mode_job_id is not none %}
+    --job-id {{consolidation_mode_job_id}} \
+    {%- else %}
     --job-id $SKYPILOT_INTERNAL_JOB_ID \
-    --env-file {{remote_env_file_path}}
+    {%- endif %}
+    --env-file {{remote_env_file_path}} \
+    {%- if pool is not none %}
+    --pool {{pool}} \
+    {%- endif %}
+    --priority {{priority}}
 
 
 envs:

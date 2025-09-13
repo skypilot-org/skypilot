@@ -1,4 +1,5 @@
 """Constants used for Managed Jobs."""
+import os
 from typing import Any, Dict, Union
 
 from sky.skylet import constants as skylet_constants
@@ -9,6 +10,8 @@ JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
 
 JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 
+CONSOLIDATED_SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
+SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # Resources as a dict for the jobs controller.
 # Use smaller CPU instance type for jobs controller, but with more memory, i.e.
 # r6i.xlarge (4vCPUs, 32 GB) for AWS, Standard_E4s_v5 (4vCPUs, 32 GB) for Azure,
@@ -47,7 +50,7 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # The version of the lib files that jobs/utils use. Whenever there is an API
 # change for the jobs/utils, we need to bump this version and update
 # job.utils.ManagedJobCodeGen to handle the version update.
-MANAGED_JOBS_VERSION = 3
+MANAGED_JOBS_VERSION = 10
 
 # The command for setting up the jobs dashboard on the controller. It firstly
 # checks if the systemd services are available, and if not (e.g., Kubernetes

@@ -26,11 +26,13 @@ import collections
 import os
 import re
 import subprocess
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import click
 from conftest import cloud_to_pytest_keyword
 from conftest import default_clouds_to_run
+import requests
 import yaml
 
 DEFAULT_CLOUDS_TO_RUN = default_clouds_to_run
@@ -51,12 +53,13 @@ QUEUE_GENERIC_CLOUD_REMOTE_SERVER = 'generic_cloud_remote_server'
 # resource_heavy. It can be either EKS or GKE.
 QUEUE_KUBE_BACKEND = os.getenv('KUBE_BACKEND', QUEUE_EKS).lower()
 assert QUEUE_KUBE_BACKEND in [QUEUE_EKS, QUEUE_GKE]
-# Only aws, gcp, azure, and kubernetes are supported for now.
+# Only aws, gcp, azure, nebius, and kubernetes are supported for now.
 # Other clouds do not have credentials.
 CLOUD_QUEUE_MAP = {
     'aws': QUEUE_GENERIC_CLOUD,
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
+    'nebius': QUEUE_GENERIC_CLOUD,
     'kubernetes': QUEUE_KUBERNETES
 }
 
@@ -66,7 +69,7 @@ GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
 
 
 def _get_buildkite_queue(cloud: str, remote_server: bool,
-                         run_on_cloud_kube_backend: bool) -> str:
+                         run_on_cloud_kube_backend: bool, args: str) -> str:
     """Get the Buildkite queue for a given cloud.
 
     We use a separate queue for generic cloud tests on remote servers because:
@@ -77,6 +80,16 @@ def _get_buildkite_queue(cloud: str, remote_server: bool,
     Kubernetes has low concurrency on a single VM originally,
     so remote-server won't drain VM resources, we can reuse the same queue.
     """
+    env_queue = os.environ.get('BUILDKITE_QUEUE', None)
+    if env_queue:
+        return env_queue
+
+    if '--env-file' in args:
+        # TODO(zeping): Remove this when test requirements become more varied.
+        # Currently, tests specifying --env-file and a custom API server endpoint are assigned to
+        # the generic_cloud queue to optimize resource usage. If tests require customization
+        # beyond the API server, update this logic to ensure they run on the correct resources.
+        return QUEUE_GENERIC_CLOUD
     if run_on_cloud_kube_backend:
         return QUEUE_KUBE_BACKEND
 
@@ -109,12 +122,15 @@ def _parse_args(args: Optional[str] = None):
 
     # -k argument for a test selection pattern
     parser.add_argument("-k")
-
     parser.add_argument("--remote-server", action="store_true")
-
     parser.add_argument('--base-branch')
-
     parser.add_argument('--controller-cloud')
+    parser.add_argument('--postgres', action="store_true")
+    parser.add_argument('--helm-version')
+    parser.add_argument('--helm-package')
+    parser.add_argument('--jobs-consolidation', action="store_true")
+    parser.add_argument('--grpc', action="store_true")
+    parser.add_argument('--env-file')
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
@@ -146,6 +162,18 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--base-branch {parsed_args.base_branch}')
     if parsed_args.controller_cloud:
         extra_args.append(f'--controller-cloud {parsed_args.controller_cloud}')
+    if parsed_args.postgres:
+        extra_args.append('--postgres')
+    if parsed_args.helm_version:
+        extra_args.append(f'--helm-version {parsed_args.helm_version}')
+    if parsed_args.helm_package:
+        extra_args.append(f'--helm-package {parsed_args.helm_package}')
+    if parsed_args.jobs_consolidation:
+        extra_args.append('--jobs-consolidation')
+    if parsed_args.grpc:
+        extra_args.append('--grpc')
+    if parsed_args.env_file:
+        extra_args.append(f'--env-file {parsed_args.env_file}')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
@@ -248,7 +276,7 @@ def _extract_marked_tests(
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
             _get_buildkite_queue(cloud, remote_server,
-                                 run_on_cloud_kube_backend)
+                                 run_on_cloud_kube_backend, args)
             for cloud in final_clouds_to_include
         ], param_list, [
             extra_args for _ in range(len(final_clouds_to_include))
@@ -349,17 +377,75 @@ def _convert_release(test_files: List[str], args: str, trigger_command: str):
                            trigger_command)
 
 
-def _convert_quick_tests_core(test_files: List[str], args: List[str],
+def _rest_request(url: str,
+                  method: str,
+                  json: Optional[Dict[str, Any]] = None) -> Any:
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            resp = requests.request(method, url, json=json, timeout=10)
+        except Exception as e:  # pylint: disable=broad-except
+            # Retry on transient network errors
+            if attempt >= 3:
+                raise RuntimeError(f'network error: {e}') from e
+            time.sleep(1)
+            continue
+
+        # Retry on 5xx and 429
+        if resp.status_code >= 500 or resp.status_code == 429:
+            if attempt >= 3:
+                raise RuntimeError(f'error {resp.status_code}: {resp.text}')
+            time.sleep(1)
+            continue
+
+        if resp.status_code >= 400:
+            # Non-retryable client error
+            raise RuntimeError(f'error {resp.status_code}: {resp.text}')
+
+        if resp.text:
+            try:
+                return resp.json()
+            except Exception:  # pylint: disable=broad-except
+                return resp.text
+        return None
+
+
+def _get_latest_pypi_version():
+    resp = _rest_request('https://pypi.org/pypi/skypilot/json', 'GET')
+    if isinstance(resp, dict):
+        return resp.get('info', {}).get('version')
+    raise RuntimeError(f'Failed to get latest pypi version: {resp}')
+
+
+def _convert_quick_tests_core(test_files: List[str], args: str,
                               trigger_command: str):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_quick_tests_core.yaml'
+    base_branch = '--base-branch' in args
+    base_branches = []
+    if not base_branch:
+        latest_pypi_version = _get_latest_pypi_version()
+        print(f'latest_pypi_version: {latest_pypi_version}')
+        base_branches = ['master', f'v{latest_pypi_version}']
+    print(f'base_branches: {base_branches}')
     output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
         # We want enable all clouds by default for each test function
         # for pre-merge. And let the author controls which clouds
         # to run by parameter.
-        pipeline = _generate_pipeline(test_file, args)
-        output_file_pipelines.append(pipeline)
+        if base_branches:
+            for branch in base_branches:
+                if ('test_quick_tests_core.py' in test_file and
+                        branch != 'master'):
+                    continue
+                pipeline = _generate_pipeline(test_file,
+                                              args + f'--base-branch {branch}',
+                                              auto_retry=True)
+                output_file_pipelines.append(pipeline)
+        else:
+            pipeline = _generate_pipeline(test_file, args, auto_retry=True)
+            output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(yaml_file_path,
                            output_file_pipelines,
@@ -371,12 +457,34 @@ def _convert_quick_tests_core(test_files: List[str], args: List[str],
 @click.option('--args',
               type=str,
               help='Args to pass to pytest, e.g., --managed-jobs --aws')
-def main(args):
+@click.option('--file_pattern',
+              type=str,
+              help='File pattern to run, e.g., test_cluster_job.py')
+def main(args: str, file_pattern: str):
+    # parse arguments from command line and environment variables
+    args = args or os.getenv('ARGS', '')
+    print(f'args: {args}')
+    file_pattern = file_pattern or os.getenv('FILE_PATTERN', '')
+    print(f'file_pattern: {file_pattern}')
+    file_pattern_list = [
+        file_pattern_str.strip() for file_pattern_str in file_pattern.split(',')
+    ] if file_pattern else []
+    # If trigger via buildkite, TRIGGER_COMMAND should be set.
+    # Otherwise, use the args passed in for local testing.
+    trigger_command = (os.getenv('TRIGGER_COMMAND', '') or args or
+                       '/smoke-test')
+
     test_files = []
     for root, _, files in os.walk('tests/smoke_tests'):
         for file in files:
-            if file.endswith('.py') and file.startswith('test_'):
+            if (file.endswith('.py') and file.startswith('test_')):
+                excluded_by_file_pattern = (file_pattern_list and all(
+                    file_pattern_str not in file
+                    for file_pattern_str in file_pattern_list))
+                if excluded_by_file_pattern:
+                    continue
                 test_files.append(os.path.join(root, file))
+
     release_files = []
     quick_tests_core_files = []
     for test_file in test_files:
@@ -385,13 +493,7 @@ def main(args):
         else:
             release_files.append(test_file)
 
-    args = args or os.getenv('ARGS', '')
-    print(f'args: {args}')
-    # If trigger via buildkite, TRIGGER_COMMAND should be set.
-    # Otherwise, use the args passed in for local testing.
-    trigger_command = os.getenv('TRIGGER_COMMAND', '') or args or '/smoke-test'
     print(f'trigger_command: {trigger_command}')
-
     _convert_release(release_files, args, trigger_command)
     _convert_quick_tests_core(quick_tests_core_files, args, trigger_command)
 

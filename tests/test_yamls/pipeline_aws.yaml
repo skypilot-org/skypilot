@@ -4,8 +4,7 @@ name: pipeline
 name: a
 
 resources:
-  cloud: aws
-  region: us-east-2
+  infra: aws/us-east-2
   cpus: 2+
   memory: 4+
 
@@ -21,7 +20,7 @@ run: |
 name: b
 
 resources:
-  cloud: aws
+  infra: aws
   cpus: 2+
   memory: 4+
 
@@ -39,7 +38,7 @@ run: |
 name: eval1
 
 resources:
-  cloud: aws
+  infra: aws
   cpus: 2+
   memory: 4+
 
@@ -57,7 +56,7 @@ run: |
 name: eval2
 
 resources:
-  cloud: aws
+  infra: aws
   cpus: 2+
   memory: 4+
 

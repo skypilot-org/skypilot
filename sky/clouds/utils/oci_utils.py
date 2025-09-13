@@ -105,22 +105,34 @@ class OCIConfig:
     @classmethod
     def get_compartment(cls, region):
         # Allow task(cluster)-specific compartment/VCN parameters.
-        default_compartment_ocid = skypilot_config.get_nested(
-            ('oci', 'default', 'compartment_ocid'), None)
-        compartment = skypilot_config.get_nested(
-            ('oci', region, 'compartment_ocid'), default_compartment_ocid)
+        default_compartment_ocid = skypilot_config.get_effective_region_config(
+            cloud='oci',
+            region='default',
+            keys=('compartment_ocid',),
+            default_value=None)
+        compartment = skypilot_config.get_effective_region_config(
+            cloud='oci',
+            region=region,
+            keys=('compartment_ocid',),
+            default_value=default_compartment_ocid)
         return compartment
 
     @classmethod
     def get_vcn_ocid(cls, region):
         # Will reuse the regional VCN if specified.
-        vcn = skypilot_config.get_nested(('oci', region, 'vcn_ocid'), None)
+        vcn = skypilot_config.get_effective_region_config(cloud='oci',
+                                                          region=region,
+                                                          keys=('vcn_ocid',),
+                                                          default_value=None)
         return vcn
 
     @classmethod
     def get_vcn_subnet(cls, region):
         # Will reuse the subnet if specified.
-        vcn = skypilot_config.get_nested(('oci', region, 'vcn_subnet'), None)
+        vcn = skypilot_config.get_effective_region_config(cloud='oci',
+                                                          region=region,
+                                                          keys=('vcn_subnet',),
+                                                          default_value=None)
         return vcn
 
     @classmethod
@@ -129,16 +141,22 @@ class OCIConfig:
         # we give a choice to set the default image tag (for gpu instances) in
         # the sky's user-config file (if not specified, use the hardcode one at
         # last)
-        return skypilot_config.get_nested(('oci', 'default', 'image_tag_gpu'),
-                                          'skypilot:gpu-ubuntu-2204')
+        return skypilot_config.get_effective_region_config(
+            cloud='oci',
+            region='default',
+            keys=('image_tag_gpu',),
+            default_value='skypilot:gpu-ubuntu-2204')
 
     @classmethod
     def get_default_image_tag(cls) -> str:
         # Get the default image tag. Instead of hardcoding, we give a choice to
         # set the default image tag in the sky's user-config file. (if not
         # specified, use the hardcode one at last)
-        return skypilot_config.get_nested(
-            ('oci', 'default', 'image_tag_general'), 'skypilot:cpu-ubuntu-2204')
+        return skypilot_config.get_effective_region_config(
+            cloud='oci',
+            region='default',
+            keys=('image_tag_general',),
+            default_value='skypilot:cpu-ubuntu-2204')
 
     @classmethod
     def get_sky_user_config_file(cls) -> str:
@@ -152,16 +170,22 @@ class OCIConfig:
 
     @classmethod
     def get_profile(cls) -> str:
-        return skypilot_config.get_nested(
-            ('oci', 'default', 'oci_config_profile'), 'DEFAULT')
+        return skypilot_config.get_effective_region_config(
+            cloud='oci',
+            region='default',
+            keys=('oci_config_profile',),
+            default_value='DEFAULT')
 
     @classmethod
     def get_default_image_os(cls) -> str:
         # Get the default image OS. Instead of hardcoding, we give a choice to
         # set the default image OS type in the sky's user-config file. (if not
         # specified, use the hardcode one at last)
-        return skypilot_config.get_nested(('oci', 'default', 'image_os_type'),
-                                          'ubuntu')
+        return skypilot_config.get_effective_region_config(
+            cloud='oci',
+            region='default',
+            keys=('image_os_type',),
+            default_value='ubuntu')
 
 
 oci_config = OCIConfig()

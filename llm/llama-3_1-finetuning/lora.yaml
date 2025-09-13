@@ -2,19 +2,19 @@
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch lora.yaml -c llama31 --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch lora.yaml -c llama31 --secret HF_TOKEN
 #
 # To finetune a 70B model:  
 #
-#  HF_TOKEN=xxx sky launch lora.yaml -c llama31-70 --env HF_TOKEN --env MODEL_SIZE=70B
+#  HF_TOKEN=xxx sky launch lora.yaml -c llama31-70 --secret HF_TOKEN --env MODEL_SIZE=70B
 
 envs:
   MODEL_SIZE: 8B
-  HF_TOKEN:
   DATASET: "yahma/alpaca-cleaned"
   # Change this to your own checkpoint bucket
   CHECKPOINT_BUCKET_NAME: sky-llama-31-checkpoints
-
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 resources:
   accelerators: A100:8
@@ -31,7 +31,7 @@ file_mounts:
     # store: r2
 
 setup: |
-  pip install torch torchvision
+  pip install torch==2.4.0 torchvision
 
   # Install torch tune from source for the latest Llama-3.1 model
   pip install git+https://github.com/pytorch/torchtune.git@58255001bd0b1e3a81a6302201024e472af05379

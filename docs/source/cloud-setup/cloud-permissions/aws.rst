@@ -18,7 +18,7 @@ Using AWS SSO
     If you use AWS SSO and multiple clouds, check the :ref:`SSO multi-cloud compatibility notes <sso-feature-compat>`.
 
 
-To use SSO, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. To use your newly installed AWS v2 CLI, use the aboslute path to the CLI (by default, ``/usr/local/aws-cli/aws``) or create an alias ``alias awsv2=/usr/local/aws-cli/aws``.
+To use SSO, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. To use your newly installed AWS v2 CLI, use the absolute path to the CLI (by default, ``/usr/local/aws-cli/aws``) or create an alias ``alias awsv2=/usr/local/aws-cli/aws``.
 
 You can use the following to check version:
 
@@ -50,6 +50,51 @@ Log in and approve the request in your web browser. Then back in the CLI, comple
 - **Profile name**: set to ``default`` if you want to use this profile by default with SkyPilot, otherwise see :ref:`several-aws-profiles`.
 
 If everything is set up correctly, :code:`sky check aws` should succeed!
+
+
+.. _aws-ssm:
+
+Using AWS Systems Manager (SSM)
+--------------------------------
+
+`AWS Systems Manager Session Manager <https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html>`_ provides secure shell access to EC2 instances without requiring direct network access through SSH ports or bastion hosts.
+
+SkyPilot can be configured to use SSM for SSH connections by setting ``use_ssm`` to true in your :ref:`config.yaml <config-yaml>` file under the ``aws`` section.
+
+Prerequisites
+~~~~~~~~~~~~~
+
+Before using SSM with SkyPilot, ensure the following:
+
+1. **AWS CLI v2** and **Session Manager plugin** are installed. Follow the `installation guide <https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html>`_ for your operating system.
+
+   .. note::
+      If using a :ref:`remote API server <sky-api-server>`, install the Session Manager plugin on the API server instead of your local machine.
+
+2. **IAM permissions** are configured to allow SSM access:
+
+   - Your user/role needs ``ssm:StartSession`` permission
+   - The ``skypilot-v1`` IAM role (used by EC2 instances) needs the ``AmazonSSMManagedInstanceCore`` managed policy attached
+
+   To attach the SSM policy to the SkyPilot role:
+
+   a. Open the `IAM console <https://console.aws.amazon.com/iam/>`_ and go to **Roles**
+   b. Search for and select the ``skypilot-v1`` role
+   c. Click **Add permissions** → **Attach policies**
+   d. Search for ``AmazonSSMManagedInstanceCore`` and select it
+   e. Click **Add permissions**
+
+Configuration
+~~~~~~~~~~~~~
+
+Add the following to your ``~/.sky/config.yaml`` file:
+
+.. code-block:: yaml
+
+    aws:
+        use_ssm: true
+
+Once configured, SkyPilot will automatically use SSM for all SSH connections to your AWS instances in the specified regions.
 
 
 .. _sso-feature-compat:
@@ -90,10 +135,10 @@ Example of mixing the default profile and another profile:
 .. code-block:: console
 
     $ # A cluster launched under the default AWS identity.
-    $ sky launch --cloud aws -c default
+    $ sky launch --infra aws -c default
 
     $ # A cluster launched under a different profile.
-    $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c other-profile-cluster
+    $ AWS_PROFILE=AdministratorAccess-12345 sky launch --infra aws -c other-profile-cluster
 
 If you are using a :ref:`remote API server <sky-api-server>`, the AWS credentials are configured on the remote server. Overriding ``AWS_PROFILE`` on the client side won't work.
 

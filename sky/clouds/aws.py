@@ -10,14 +10,15 @@ import time
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
-from sky.clouds import service_catalog
-from sky.clouds.service_catalog import common as catalog_common
+from sky.adaptors import common
+from sky.catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import annotations
@@ -32,14 +33,17 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
     from sky.utils import status_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
 # Image ID tags
 _DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu'
+_DEFAULT_CPU_ARM64_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-arm64'
 # For GPU-related package version,
-# see sky/clouds/service_catalog/images/provisioners/cuda.sh
+# see sky/catalog/images/provisioners/cuda.sh
 _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu'
+_DEFAULT_GPU_ARM64_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-arm64'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _DEFAULT_NEURON_IMAGE_ID = 'skypilot:neuron-ubuntu-2204'
 
@@ -64,6 +68,8 @@ _CREDENTIAL_FILES = [
 ]
 
 DEFAULT_AMI_GB = 45
+DEFAULT_SSH_USER = 'ubuntu'
+DEFAULT_ROOT_DEVICE_NAME = '/dev/sda1'
 
 # Temporary measure, as deleting per-cluster SGs is too slow.
 # See https://github.com/skypilot-org/skypilot/pull/742.
@@ -73,6 +79,105 @@ DEFAULT_AMI_GB = 45
 DEFAULT_SECURITY_GROUP_NAME = f'sky-sg-{common_utils.user_and_hostname_hash()}'
 # Security group to use when user specified ports in their resources.
 USER_PORTS_SECURITY_GROUP_NAME = 'sky-sg-{}'
+
+# GPU instance types that support EFA
+# TODO(hailong): Some CPU instance types also support EFA, may need to support
+# all of them later.
+# TODO(hailong): Add the EFA info in catalog.
+_EFA_INSTANCE_TYPE_PREFIXES = [
+    'g4dn.',
+    'g5.',
+    'g6.',
+    'gr6.',
+    'g6e.',
+    'p4d.',
+    'p4de.',
+    'p5.',
+    'p5e.',
+    'p5en.',
+    'p6-b200.',
+]
+
+# Docker run options for EFA.
+# Refer to https://github.com/ofiwg/libfabric/issues/6437 for updating
+# memlock ulimit
+_EFA_DOCKER_RUN_OPTIONS = [
+    '--cap-add=IPC_LOCK',
+    '--device=/dev/infiniband',
+    '--ulimit memlock=-1:-1',
+]
+
+# AWS EFA image name.
+# Refer to https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-base-gpu-ami-ubuntu-22-04.html for latest version. # pylint: disable=line-too-long
+# TODO(hailong): may need to update the version later.
+_EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
+' (Ubuntu 22.04) 20250808'
+
+
+def _is_efa_instance_type(instance_type: str) -> bool:
+    """Check if the instance type is in EFA supported instance family."""
+    return any(
+        instance_type.startswith(prefix)
+        for prefix in _EFA_INSTANCE_TYPE_PREFIXES)
+
+
+@annotations.lru_cache(scope='global', maxsize=128)
+def _get_efa_image_id(region_name: str) -> Optional[str]:
+    """Get the EFA image id for the given region."""
+    try:
+        client = aws.client('ec2', region_name=region_name)
+        response = client.describe_images(Filters=[{
+            'Name': 'name',
+            'Values': [_EFA_IMAGE_NAME]
+        }])
+        if 'Images' not in response:
+            return None
+        if len(response['Images']) == 0:
+            return None
+        available_images = [
+            img for img in response['Images'] if img['State'] == 'available'
+        ]
+        if len(available_images) == 0:
+            return None
+        sorted_images = sorted(available_images,
+                               key=lambda x: x['CreationDate'],
+                               reverse=True)
+        return sorted_images[0]['ImageId']
+    except (aws.botocore_exceptions().NoCredentialsError,
+            aws.botocore_exceptions().ProfileNotFound,
+            aws.botocore_exceptions().ClientError) as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to get EFA image id: {e}') from None
+
+
+@annotations.lru_cache(scope='global', maxsize=128)
+def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
+    """Get the maximum number of EFA interfaces for the given instance type."""
+    if not _is_efa_instance_type(instance_type):
+        return 0
+    try:
+        client = aws.client('ec2', region_name=region_name)
+        response = client.describe_instance_types(
+            # TODO(cooperc): fix the types for mypy 1.16
+            # Boto3 type stubs expect Literal instance types; using str list here.
+            InstanceTypes=[instance_type],  # type: ignore
+            Filters=[{
+                'Name': 'network-info.efa-supported',
+                'Values': ['true']
+            }])
+        if 'InstanceTypes' in response and len(response['InstanceTypes']) > 0:
+            network_info = response['InstanceTypes'][0]['NetworkInfo']
+            if ('EfaInfo' in network_info and
+                    'MaximumEfaInterfaces' in network_info['EfaInfo']):
+                return network_info['EfaInfo']['MaximumEfaInterfaces']
+        return 0
+    except (aws.botocore_exceptions().NoCredentialsError,
+            aws.botocore_exceptions().ProfileNotFound,
+            aws.botocore_exceptions().ClientError) as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Failed to get max EFA interfaces for {instance_type}: {e}'
+            ) from None
 
 
 class AWSIdentityType(enum.Enum):
@@ -173,6 +278,11 @@ class AWS(clouds.Cloud):
                 f'High availability controllers are not supported on {cls._REPR}.'
             )
 
+        unsupported_features[
+            clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK] = (
+                f'Customized multiple network interfaces are not supported on {cls._REPR}.'
+            )
+
         return unsupported_features
 
     @classmethod
@@ -201,7 +311,7 @@ class AWS(clouds.Cloud):
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'aws')
 
         if region is not None:
@@ -256,19 +366,29 @@ class AWS(clouds.Cloud):
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
-        image_id = service_catalog.get_image_id_from_tag(_DEFAULT_CPU_IMAGE_ID,
+        arch = cls.get_arch_from_instance_type(instance_type)
+        if arch == constants.ARM64_ARCH:
+            image_id = catalog.get_image_id_from_tag(
+                _DEFAULT_CPU_ARM64_IMAGE_ID, region_name, clouds='aws')
+        else:
+            image_id = catalog.get_image_id_from_tag(_DEFAULT_CPU_IMAGE_ID,
+                                                     region_name,
+                                                     clouds='aws')
+        if acc is not None:
+            if arch == constants.ARM64_ARCH:
+                image_id = catalog.get_image_id_from_tag(
+                    _DEFAULT_GPU_ARM64_IMAGE_ID, region_name, clouds='aws')
+            else:
+                image_id = catalog.get_image_id_from_tag(_DEFAULT_GPU_IMAGE_ID,
                                                          region_name,
                                                          clouds='aws')
-        if acc is not None:
-            image_id = service_catalog.get_image_id_from_tag(
-                _DEFAULT_GPU_IMAGE_ID, region_name, clouds='aws')
             assert len(acc) == 1, acc
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
-                image_id = service_catalog.get_image_id_from_tag(
+                image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_GPU_K80_IMAGE_ID, region_name, clouds='aws')
             if acc_name in ['Trainium', 'Inferentia']:
-                image_id = service_catalog.get_image_id_from_tag(
+                image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_NEURON_IMAGE_ID, region_name, clouds='aws')
         if image_id is not None:
             return image_id
@@ -286,8 +406,13 @@ class AWS(clouds.Cloud):
         image_id: Optional[Dict[Optional[str], str]],
         region_name: str,
         instance_type: str,
+        enable_efa: bool,
     ) -> str:
         if image_id is None:
+            if enable_efa:
+                efa_image_id = _get_efa_image_id(region_name)
+                if efa_image_id:
+                    return efa_image_id
             return cls._get_default_ami(region_name, instance_type)
         if None in image_id:
             image_id_str = image_id[None]
@@ -295,9 +420,9 @@ class AWS(clouds.Cloud):
             assert region_name in image_id, image_id
             image_id_str = image_id[region_name]
         if image_id_str.startswith('skypilot:'):
-            image_id_str = service_catalog.get_image_id_from_tag(image_id_str,
-                                                                 region_name,
-                                                                 clouds='aws')
+            image_id_str = catalog.get_image_id_from_tag(image_id_str,
+                                                         region_name,
+                                                         clouds='aws')
             if image_id_str is None:
                 # Raise ResourcesUnavailableError to make sure the failover
                 # in CloudVMRayBackend will be correctly triggered.
@@ -337,6 +462,44 @@ class AWS(clouds.Cloud):
         return image_size
 
     @classmethod
+    @annotations.lru_cache(scope='request', maxsize=1)
+    def get_image_root_device_name(cls, image_id: str,
+                                   region: Optional[str]) -> str:
+        if image_id.startswith('skypilot:'):
+            return DEFAULT_ROOT_DEVICE_NAME
+        assert region is not None, (image_id, region)
+        image_not_found_message = (
+            f'Image {image_id!r} not found in AWS region {region}.\n'
+            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+            'Example: ami-0729d913a335efca7')
+        try:
+            client = aws.client('ec2', region_name=region)
+            image_info = client.describe_images(ImageIds=[image_id]).get(
+                'Images', [])
+            if not image_info:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(image_not_found_message)
+            image = image_info[0]
+            if 'RootDeviceName' not in image:
+                logger.warning(f'Image {image_id!r} does not have a root '
+                               f'device name. '
+                               f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+                return DEFAULT_ROOT_DEVICE_NAME
+            return image['RootDeviceName']
+        except (aws.botocore_exceptions().NoCredentialsError,
+                aws.botocore_exceptions().ProfileNotFound):
+            # Fallback to default root device name if no credentials are
+            # available.
+            # The credentials issue will be caught when actually provisioning
+            # the instance and appropriate errors will be raised there.
+            logger.warning(f'No credentials available for region {region}. '
+                           f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+            return DEFAULT_ROOT_DEVICE_NAME
+        except aws.botocore_exceptions().ClientError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(image_not_found_message) from None
+
+    @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         # The command for getting the current zone is from:
         # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
@@ -356,11 +519,11 @@ class AWS(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='aws')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='aws')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -397,16 +560,19 @@ class AWS(clouds.Cloud):
         return cost
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='aws')
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
+                                                 clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -415,48 +581,86 @@ class AWS(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='aws')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='aws')
+
+    @classmethod
+    def get_arch_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        return catalog.get_arch_from_instance_type(instance_type, clouds='aws')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='aws')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='aws')
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Any]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
         del dryrun  # unused
         assert zones is not None, (region, zones)
 
         region_name = region.name
         zone_names = [zone.name for zone in zones]
 
-        r = resources
-        # r.accelerators is cleared but .instance_type encodes the info.
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        # resources.accelerators is cleared but .instance_type encodes the info.
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        if r.extract_docker_image() is not None:
-            image_id_to_use = None
+        network_tier = (resources.network_tier if resources.network_tier
+                        is not None else resources_utils.NetworkTier.STANDARD)
+        if network_tier == resources_utils.NetworkTier.BEST:
+            max_efa_interfaces = _get_max_efa_interfaces(
+                resources.instance_type, region_name)
+            enable_efa = max_efa_interfaces > 0
         else:
-            image_id_to_use = r.image_id
-        image_id = self._get_image_id(image_id_to_use, region_name,
-                                      r.instance_type)
+            max_efa_interfaces = 0
+            enable_efa = False
 
-        disk_encrypted = skypilot_config.get_nested(('aws', 'disk_encrypted'),
-                                                    False)
-        user_security_group_config = skypilot_config.get_nested(
-            ('aws', 'security_group_name'), None)
+        docker_run_options = []
+        if resources.extract_docker_image() is not None:
+            image_id_to_use = None
+            if enable_efa:
+                docker_run_options = _EFA_DOCKER_RUN_OPTIONS
+        else:
+            image_id_to_use = resources.image_id
+        image_id = self._get_image_id(image_id_to_use, region_name,
+                                      resources.instance_type, enable_efa)
+
+        root_device_name = self.get_image_root_device_name(
+            image_id, region_name)
+
+        ssh_user = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('ssh_user',),
+            default_value=DEFAULT_SSH_USER)
+
+        disk_encrypted = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('disk_encrypted',),
+            default_value=False)
+        user_security_group_config = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('security_group_name',),
+            default_value=None)
         user_security_group = None
         if isinstance(user_security_group_config, str):
             user_security_group = user_security_group_config
@@ -483,17 +687,21 @@ class AWS(clouds.Cloud):
                     'in `~/.sky/config.yaml`.')
 
         return {
-            'instance_type': r.instance_type,
+            'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'disk_encrypted': disk_encrypted,
-            'use_spot': r.use_spot,
+            'use_spot': resources.use_spot,
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
+            'root_device_name': root_device_name,
+            'ssh_user': ssh_user,
             'security_group': security_group,
             'security_group_managed_by_skypilot':
                 str(security_group != user_security_group).lower(),
-            **AWS._get_disk_specs(r.disk_tier)
+            'max_efa_interfaces': max_efa_interfaces,
+            'docker_run_options': docker_run_options,
+            **AWS._get_disk_specs(resources.disk_tier)
         }
 
     def _get_feasible_launchable_resources(
@@ -538,7 +746,9 @@ class AWS(clouds.Cloud):
             default_instance_type = AWS.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:
@@ -547,16 +757,16 @@ class AWS(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            use_spot=resources.use_spot,
-            cpus=resources.cpus,
-            memory=resources.memory,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='aws')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             memory=resources.memory,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='aws')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -564,12 +774,14 @@ class AWS(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's compute service."""
         return cls._check_credentials()
 
     @classmethod
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's storage service."""
         # TODO(seungjin): Implement separate check for
         # if the user has access to S3.
@@ -596,12 +808,9 @@ class AWS(clouds.Cloud):
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
             return False, dependency_installation_hints
-        try:
-            # Checks if aws boto is installed properly
-            # pylint: disable=import-outside-toplevel, unused-import
-            import boto3
-            import botocore
-        except ImportError:
+
+        # Checks if aws boto is installed properly
+        if not common.can_import_modules(['boto3', 'botocore']):
             return False, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.
@@ -668,7 +877,7 @@ class AWS(clouds.Cloud):
 
         # Fetch the AWS catalogs
         # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import aws_catalog
+        from sky.catalog import aws_catalog
 
         # Trigger the fetch of the availability zones mapping.
         try:
@@ -721,7 +930,7 @@ class AWS(clouds.Cloud):
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
+                              stderr=subprocess.DEVNULL)
         if proc.returncode != 0:
             return None
         return proc.stdout
@@ -859,7 +1068,7 @@ class AWS(clouds.Cloud):
         # `aws configure list` as cache key. Different `aws configure list` output
         # can have same aws identity, our assumption is the output would be stable
         # in real world, so the number of cache files would be limited.
-        # TODO(aylei): consider using a more stable cache key and evalute eviction.
+        # TODO(aylei): consider using a more stable cache key and evaluate eviction.
         cache_path = catalog_common.get_catalog_path(
             f'aws/.cache/user-identity-{config_hash}.txt')
         if os.path.exists(cache_path):
@@ -921,7 +1130,7 @@ class AWS(clouds.Cloud):
                 identity_type.can_credential_expire())
 
     def instance_type_exists(self, instance_type):
-        return service_catalog.instance_type_exists(instance_type, clouds='aws')
+        return catalog.instance_type_exists(instance_type, clouds='aws')
 
     @classmethod
     def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:
@@ -971,12 +1180,13 @@ class AWS(clouds.Cloud):
             botocore.exceptions.ClientError: error in Boto3 client request.
         """
 
+        resources = resources.assert_launchable()
         instance_type = resources.instance_type
         region = resources.region
         use_spot = resources.use_spot
 
         # pylint: disable=import-outside-toplevel,unused-import
-        from sky.clouds.service_catalog import aws_catalog
+        from sky.catalog import aws_catalog
 
         quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
 
@@ -1056,7 +1266,7 @@ class AWS(clouds.Cloud):
 
         image_name = f'skypilot-{cluster_name.display_name}-{int(time.time())}'
 
-        status = provision_lib.query_instances('AWS',
+        status = provision_lib.query_instances('AWS', cluster_name.display_name,
                                                cluster_name.name_on_cloud,
                                                {'region': region})
         instance_ids = list(status.keys())

@@ -70,7 +70,7 @@ We use two simple counter jobs in this example:
 
   # high-priority-job.yaml
   resources:
-    cloud: kubernetes
+    infra: k8s
     cpus: 4
 
   run: |
@@ -91,7 +91,7 @@ We use two simple counter jobs in this example:
 
   # low-priority-job.yaml
   resources:
-    cloud: kubernetes
+    infra: k8s
     cpus: 4
 
   run: |

@@ -1,7 +1,9 @@
-name: nccl-test-efa
+# This example is used to test the NCCL performance
+# with EFA on HyperPod/EKS.
+name: nccl-efa-eks
 
 resources:
-  cloud: kubernetes
+  infra: k8s
   accelerators: A100:8
   cpus: 90+
   image_id: docker:public.ecr.aws/hpc-cloud/nccl-tests:latest

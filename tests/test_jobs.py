@@ -1,11 +1,12 @@
 import pytest
+from sqlalchemy import create_engine
 
 import sky
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
-from sky.utils import db_utils
 from sky.utils import resources_utils
+from sky.utils.db import db_utils
 
 
 @pytest.fixture
@@ -13,11 +14,12 @@ def _mock_db_conn(tmp_path, monkeypatch):
     # Create a temporary database file
     db_path = tmp_path / 'state_testing.db'
 
-    # Create a new SQLiteConn instance
-    db_conn = db_utils.SQLiteConn(str(db_path), global_user_state.create_table)
+    sqlalchemy_engine = create_engine(f'sqlite:///{db_path}')
 
-    # Monkeypatch the global database connection
-    monkeypatch.setattr(global_user_state, '_DB', db_conn)
+    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
+                        sqlalchemy_engine)
+
+    global_user_state.create_table(sqlalchemy_engine)
 
 
 @pytest.fixture
@@ -31,17 +33,15 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
     - test-disk-tier1: AWS, 1x m6i.2xlarge, with best disk tier
     - test-disk-tier2: GCP, 1x n2-standard-8, with medium disk tier
     """
-    assert 'state.db' not in global_user_state._DB.db_path
+    assert 'state.db' not in global_user_state._SQLALCHEMY_ENGINE.url
 
     handle = backends.CloudVmRayResourceHandle(
         cluster_name='test-cluster1',
         cluster_name_on_cloud='test-cluster1',
         cluster_yaml='/tmp/cluster1.yaml',
         launched_nodes=2,
-        launched_resources=sky.Resources(sky.AWS(),
-                                         instance_type='p4d.24xlarge',
-                                         region='us-east-1',
-                                         zone='us-east-1a'),
+        launched_resources=sky.Resources(infra='aws/us-east-1/us-east-1a',
+                                         instance_type='p4d.24xlarge'),
     )
     global_user_state.add_or_update_cluster(
         'test-cluster1',
@@ -53,11 +53,9 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_name_on_cloud='test-cluster2',
         cluster_yaml='/tmp/cluster2.yaml',
         launched_nodes=1,
-        launched_resources=sky.Resources(sky.GCP(),
+        launched_resources=sky.Resources(infra='gcp/us-west1/us-west1-a',
                                          instance_type='n1-highmem-64',
-                                         accelerators='V100:4',
-                                         region='us-west1',
-                                         zone='us-west1-a'),
+                                         accelerators='V100:4'),
     )
     global_user_state.add_or_update_cluster(
         'test-cluster2',
@@ -69,9 +67,8 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_name_on_cloud='test-cluster3',
         cluster_yaml='/tmp/cluster3.yaml',
         launched_nodes=1,
-        launched_resources=sky.Resources(sky.Azure(),
-                                         instance_type='Standard_D4s_v3',
-                                         region='eastus'),
+        launched_resources=sky.Resources(infra='azure/eastus',
+                                         instance_type='Standard_D4s_v3'),
     )
     global_user_state.add_or_update_cluster(
         'test-cluster3',
@@ -84,10 +81,8 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_yaml='/tmp/disk-tier1.yaml',
         launched_nodes=1,
         launched_resources=sky.Resources(
-            sky.AWS(),
+            infra='aws/us-east-1/us-east-1a',
             instance_type='m6i.2xlarge',
-            region='us-east-1',
-            zone='us-east-1a',
             disk_tier=resources_utils.DiskTier.BEST))
     global_user_state.add_or_update_cluster(
         'test-disk-tier1',
@@ -100,10 +95,8 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_yaml='/tmp/disk-tier2.yaml',
         launched_nodes=1,
         launched_resources=sky.Resources(
-            sky.GCP(),
+            infra='gcp/us-west1/us-west1-a',
             instance_type='n2-standard-8',
-            region='us-west1',
-            zone='us-west1-a',
             disk_tier=resources_utils.DiskTier.MEDIUM))
     global_user_state.add_or_update_cluster(
         'test-disk-tier2',
@@ -150,9 +143,8 @@ class TestExecutionOnExistingClusters:
             sky.exec(task, cluster_name='test-cluster1', dryrun=True))
         task.set_resources(
             sky.Resources(
-                sky.AWS(),
+                infra='aws/us-east-1',
                 accelerators='A100:1',
-                region='us-east-1',
             ))
         sky.stream_and_get(
             sky.launch(task, cluster_name='test-cluster1', dryrun=True))
@@ -166,7 +158,7 @@ class TestExecutionOnExistingClusters:
         sky.stream_and_get(
             sky.exec(task, cluster_name='test-cluster2', dryrun=True))
         task.set_resources(
-            sky.Resources(sky.GCP(), accelerators='V100:3', region='us-west1'))
+            sky.Resources(infra='gcp/us-west1', accelerators='V100:3'))
         sky.stream_and_get(
             sky.launch(task, cluster_name='test-cluster2', dryrun=True))
         sky.stream_and_get(
@@ -217,10 +209,10 @@ class TestExecutionOnExistingClusters:
         self._run_launch_exec_with_error(task, 'test-cluster3')
 
         # Cloud mismatch
-        task.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
+        task.set_resources(sky.Resources(infra='aws', accelerators='V100'))
         self._run_launch_exec_with_error(task, 'test-cluster2')
 
-        task.set_resources(sky.Resources(sky.GCP()))
+        task.set_resources(sky.Resources(infra='gcp'))
         self._run_launch_exec_with_error(task, 'test-cluster1')
 
         # Disk tier mismatch

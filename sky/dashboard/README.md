@@ -8,6 +8,14 @@ If you install SkyPilot from the official package, after starting the API server
 
 If you install SkyPilot from source, before starting the API server, run the following commands to generate the dashboard production build:
 
+1. Install node js and npm:
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+nvm install 18
+nvm use 18
+```
+
 ```bash
 # You may need to clear your cache if you have permission issues
 # npm cache clean --force

@@ -5,6 +5,9 @@ max_workers: {{num_nodes - 1}}
 upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
+# The docker password could be a GCP service account key, which is a JSON string
+# that may contain newlines. We need indent(6) to make sure the lines
+# after the first line are properly indented.
 {%- if docker_image is not none %}
 docker:
   image: {{docker_image}}
@@ -19,7 +22,7 @@ docker:
     username: |-
       {{docker_login_config.username}}
     password: |-
-      {{docker_login_config.password}}
+      {{docker_login_config.password | indent(6) }}
     server: |-
       {{docker_login_config.server}}
 {%- endif %}
@@ -66,6 +69,15 @@ provider:
 {%- if enable_gvnic %}
   enable_gvnic: {{ enable_gvnic }}
 {%- endif %}
+{%- if enable_gpu_direct %}
+  enable_gpu_direct: {{ enable_gpu_direct }}
+{%- endif %}
+{%- if placement_policy %}
+  placement_policy: {{ placement_policy }}
+{%- endif %}
+{%- if network_tier %}
+  network_tier: {{ network_tier }}
+{%- endif %}
 
 auth:
   ssh_user: gcpuser
@@ -100,12 +112,27 @@ available_node_types:
 {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
+    {%- if volumes %}
+      dataDisks:
+      {%- for volume in volumes %}
+        {%- if volume.source %}
+        - sourceDisk: {{volume.source}}
+        {%- endif %}
+        {%- if volume.attach_mode %}
+          mode: {{volume.attach_mode}}
+        {%- endif %}
+      {%- endfor %}
+    {%- endif %}
       metadata:
         # TPU VM's metadata has different format than normal VMs.
         # After replacing the variables, this will become username:ssh_public_key_content.
         # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
         ssh-keys: |-
               skypilot:ssh_user:skypilot:ssh_public_key_content
+      {%- if user_data is not none %}
+        startup-script: |-
+          {{ user_data | indent(10) }}
+      {%- endif %}
   {%- if use_spot %}
       schedulingConfig:
         preemptible: true
@@ -129,6 +156,34 @@ available_node_types:
           {%- if disk_iops %}
             provisionedIops: {{disk_iops}}
           {%- endif %}
+      {%- for volume in volumes %}
+        - boot: false
+          autoDelete: {{volume.auto_delete}}
+          type: {{volume.storage_type}}
+          deviceName: {{volume.device_name}}
+        {%- if volume.source %}
+          source: {{volume.source}}
+        {%- endif %}
+        {%- if volume.attach_mode %}
+          mode: {{volume.attach_mode}}
+        {%- endif %}
+        {%- if volume.interface_type %}
+          interface: {{volume.interface_type}}
+        {%- endif %}
+        {%- if volume.disk_tier %}
+          initializeParams:
+            diskType: zones/{{zones}}/diskTypes/{{volume.disk_tier}}
+        {%- endif %}
+          {%- if volume.disk_name %}
+            diskName: {{volume.disk_name}}
+          {%- endif %}
+          {%- if volume.disk_size %}
+            diskSizeGb: {{volume.disk_size}}
+          {%- endif %}
+          {%- if volume.iops %}
+            provisionedIops: {{volume.iops}}
+          {%- endif %}
+      {%- endfor %}
   {%- if gpu is not none %}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
@@ -144,6 +199,11 @@ available_node_types:
   {%- if gpu is not none %}
           - key: install-nvidia-driver
             value: "True"
+  {%- endif %}
+  {%- if user_data is not none %}
+          - key: user-data
+            value: |-
+              {{ user_data | indent(14) }}
   {%- endif %}
   {%- if use_spot or gpu is not none %}
       scheduling:

@@ -2,16 +2,16 @@ name: multi-resources
 
 resources:
   ordered:
-    - cloud: AWS
+    - infra: aws
       accelerators: A10g
-    - cloud: GCP
+    - infra: gcp
       accelerators: L4
 
 # resources:
 #   any_of:
-    # - cloud: AWS
+    # - infra: aws
     #   accelerators: A10g
-    # - cloud: GCP
+    # - infra: gcp
     #   accelerators: L4
 
 run: |

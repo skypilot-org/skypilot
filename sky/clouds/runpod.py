@@ -1,19 +1,20 @@
 """ RunPod Cloud. """
 
+from importlib import util as import_lib_util
+import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
+from sky import catalog
 from sky import clouds
-from sky.clouds import service_catalog
 from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+    from sky.utils import volume as volume_lib
 
-_CREDENTIAL_FILES = [
-    'config.toml',
-]
+_CREDENTIAL_FILE = 'config.toml'
 
 
 @registry.CLOUD_REGISTRY.register
@@ -30,14 +31,20 @@ class RunPod(clouds.Cloud):
              'are non-trivial on RunPod.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on RunPod.'),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is not supported yet on RunPod.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             ('Mounting object stores is not supported on RunPod. To read data '
              'from object stores on RunPod, use `mode: COPY` to copy the data '
              'to local disk.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on RunPod.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported on '
+             'RunPod.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
+    _MAX_VOLUME_NAME_LEN_LIMIT = 30
     _regions: List[clouds.Region] = []
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -70,7 +77,7 @@ class RunPod(clouds.Cloud):
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'runpod')
 
         if region is not None:
@@ -88,8 +95,8 @@ class RunPod(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='runpod')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='runpod')
 
     @classmethod
     def zones_provision_loop(
@@ -116,11 +123,11 @@ class RunPod(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='runpod')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='runpod')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -135,56 +142,65 @@ class RunPod(clouds.Cloud):
         return 0.0
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for RunPod."""
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='runpod')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
+                                                 clouds='runpod')
 
     @classmethod
     def get_accelerators_from_instance_type(
             cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='runpod')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='runpod')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Optional[Union[str, bool]]]:
         del dryrun, cluster_name  # unused
         assert zones is not None, (region, zones)
 
+        if volume_mounts and len(volume_mounts) > 1:
+            raise ValueError(f'RunPod only supports one network volume mount, '
+                             f'but {len(volume_mounts)} are specified.')
+
         zone_names = [zone.name for zone in zones]
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        if r.image_id is None:
-            image_id = 'runpod/base:0.0.2'
-        elif r.extract_docker_image() is not None:
-            image_id = r.extract_docker_image()
+        if resources.image_id is None:
+            image_id: Optional[str] = 'runpod/base:0.0.2'
+        elif resources.extract_docker_image() is not None:
+            image_id = resources.extract_docker_image()
         else:
-            image_id = r.image_id[r.region]
+            image_id = resources.image_id[resources.region]
 
         instance_type = resources.instance_type
         use_spot = resources.use_spot
-
         hourly_cost = self.instance_type_to_hourly_cost(
             instance_type=instance_type, use_spot=use_spot)
 
@@ -232,7 +248,9 @@ class RunPod(clouds.Cloud):
             default_instance_type = RunPod.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
@@ -243,15 +261,15 @@ class RunPod(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            use_spot=resources.use_spot,
-            cpus=resources.cpus,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='runpod')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='runpod')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -259,37 +277,79 @@ class RunPod(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         RunPod's compute service."""
         return cls._check_credentials()
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """ Verify that the user has valid credentials for RunPod. """
+        """Verify that the user has valid credentials for RunPod. """
+        dependency_error_msg = ('Failed to import runpod. '
+                                'To install, run: pip install skypilot[runpod]')
         try:
-            import runpod  # pylint: disable=import-outside-toplevel
-            valid, error = runpod.check_credentials()
+            runpod_spec = import_lib_util.find_spec('runpod')
+            if runpod_spec is None:
+                return False, dependency_error_msg
+            toml_spec = import_lib_util.find_spec('toml')
+            if toml_spec is None:
+                return False, dependency_error_msg
+        except ValueError:
+            # docstring of importlib_util.find_spec:
+            # First, sys.modules is checked to see if the module was alread
+            # imported.
+            # If so, then sys.modules[name].__spec__ is returned.
+            # If that happens to be set to None, then ValueError is raised.
+            return False, dependency_error_msg
 
-            if not valid:
+        valid, error = cls._check_runpod_credentials()
+        if not valid:
+            return False, (
+                f'{error} \n'  # First line is indented by 4 spaces
+                '    Credentials can be set up by running: \n'
+                f'        $ pip install runpod \n'
+                f'        $ runpod config\n'
+                '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
+            )
+
+        return True, None
+
+    @classmethod
+    def _check_runpod_credentials(cls, profile: str = 'default'):
+        """Checks if the credentials file exists and is valid."""
+        credential_file = os.path.expanduser(f'~/.runpod/{_CREDENTIAL_FILE}')
+        if not os.path.exists(credential_file):
+            return False, '~/.runpod/config.toml does not exist.'
+
+        # we don't need to import toml here if config.toml does not exist,
+        # wait until we know the cred file exists.
+        import tomli as toml  # pylint: disable=import-outside-toplevel
+
+        # Check for default api_key
+        try:
+            with open(credential_file, 'rb') as cred_file:
+                config = toml.load(cred_file)
+
+            if profile not in config:
                 return False, (
-                    f'{error} \n'  # First line is indented by 4 spaces
-                    '    Credentials can be set up by running: \n'
-                    f'        $ pip install runpod \n'
-                    f'        $ runpod config\n'
-                    '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
+                    f'~/.runpod/config.toml is missing {profile} profile.')
+
+            if 'api_key' not in config[profile]:
+                return (
+                    False,
+                    '~/.runpod/config.toml is missing '
+                    f'api_key for {profile} profile.',
                 )
 
-            return True, None
+        except (TypeError, ValueError):
+            return False, '~/.runpod/config.toml is not a valid TOML file.'
 
-        except ImportError:
-            return False, ('Failed to import runpod. '
-                           'To install, run: pip install skypilot[runpod]')
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
-            f'~/.runpod/{filename}': f'~/.runpod/{filename}'
-            for filename in _CREDENTIAL_FILES
+            f'~/.runpod/{_CREDENTIAL_FILE}': f'~/.runpod/{_CREDENTIAL_FILE}'
         }
 
     @classmethod
@@ -299,15 +359,25 @@ class RunPod(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, 'runpod')
+        return catalog.instance_type_exists(instance_type, 'runpod')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='runpod')
+        return catalog.validate_region_zone(region, zone, clouds='runpod')
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         # TODO: use 0.0 for now to allow all images. We should change this to
         # return the docker image size.
         return 0.0
+
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the volume name is valid for this cloud.
+
+        - must be <= 30 characters
+        """
+        if len(volume_name) > cls._MAX_VOLUME_NAME_LEN_LIMIT:
+            return (False, f'Volume name exceeds the maximum length of '
+                    f'{cls._MAX_VOLUME_NAME_LEN_LIMIT} characters.')
+        return True, None

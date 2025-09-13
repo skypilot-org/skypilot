@@ -11,6 +11,7 @@ from typing_extensions import Literal
 from sky import sky_logging as sky_logging
 from sky.skylet import constants as constants
 from sky.skylet import job_lib as job_lib
+from sky.utils import context
 from sky.utils import log_utils as log_utils
 
 SKY_LOG_WAITING_GAP_SECONDS: int = ...
@@ -39,6 +40,10 @@ class _ProcessingArgs:
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...) -> None:
         ...
+
+
+def _get_context() -> Optional[context.Context]:
+    ...
 
 
 def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
@@ -121,6 +126,15 @@ def run_bash_command_with_log(bash_command: str,
                               env_vars: Optional[Dict[str, str]] = ...,
                               stream_logs: bool = ...,
                               with_ray: bool = ...):
+    ...
+
+
+def run_bash_command_with_log_and_return_pid(
+        bash_command: str,
+        log_path: str,
+        env_vars: Optional[Dict[str, str]] = ...,
+        stream_logs: bool = ...,
+        with_ray: bool = ...):
     ...
 
 

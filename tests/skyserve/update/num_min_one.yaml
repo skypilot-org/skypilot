@@ -7,7 +7,7 @@ service:
 
 resources:
   ports: 8080
-  cloud: gcp
+  infra: gcp
 
 workdir: examples/serve/http_server
 

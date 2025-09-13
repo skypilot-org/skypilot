@@ -6,6 +6,7 @@ import random
 import resource
 import shlex
 import subprocess
+import sys
 import threading
 import time
 import typing
@@ -16,7 +17,6 @@ import colorama
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import timeline
@@ -208,8 +208,11 @@ def kill_children_processes(parent_pids: Optional[Union[
             kill_process_with_grace_period(child, force=force)
 
 
-def kill_process_with_grace_period(proc: Union[multiprocessing.Process,
-                                               psutil.Process],
+GenericProcess = Union[multiprocessing.Process, psutil.Process,
+                       subprocess.Popen]
+
+
+def kill_process_with_grace_period(proc: GenericProcess,
                                    force: bool = False,
                                    grace_period: int = 10) -> None:
     """Kill a process with SIGTERM and wait for it to exit.
@@ -222,6 +225,9 @@ def kill_process_with_grace_period(proc: Union[multiprocessing.Process,
     """
     if isinstance(proc, psutil.Process):
         alive = proc.is_running
+        wait = proc.wait
+    elif isinstance(proc, subprocess.Popen):
+        alive = lambda: proc.poll() is None
         wait = proc.wait
     else:
         alive = proc.is_alive
@@ -240,11 +246,10 @@ def kill_process_with_grace_period(proc: Union[multiprocessing.Process,
         # The child process may have already been terminated.
         return
     except psutil.TimeoutExpired:
-        # Pass to finally to force kill the process.
-        pass
-    finally:
         logger.debug(f'Process {proc.pid} did not terminate after '
                      f'{grace_period} seconds')
+        # Continue to finally to force kill the process.
+    finally:
         # Attempt to force kill if the normal termination fails
         if not force:
             logger.debug(f'Force killing process {proc.pid}')
@@ -317,12 +322,8 @@ def kill_process_daemon(process_pid: int) -> None:
     daemon_script = os.path.join(
         os.path.dirname(os.path.abspath(log_lib.__file__)),
         'subprocess_daemon.py')
-    python_path = subprocess.check_output(constants.SKY_GET_PYTHON_PATH_CMD,
-                                          shell=True,
-                                          stderr=subprocess.DEVNULL,
-                                          encoding='utf-8').strip()
     daemon_cmd = [
-        python_path,
+        sys.executable,
         daemon_script,
         '--parent-pid',
         str(parent_pid),
@@ -436,3 +437,12 @@ def slow_start_processes(processes: List[Startable],
             break
         batch_size = min(batch_size * 2, max_batch_size)
         time.sleep(delay)
+
+
+def is_process_alive(pid: int) -> bool:
+    """Check if a process is alive."""
+    try:
+        process = psutil.Process(pid)
+        return process.is_running()
+    except psutil.NoSuchProcess:
+        return False

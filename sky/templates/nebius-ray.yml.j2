@@ -9,6 +9,8 @@ provider:
   type: external
   module: sky.provision.nebius
   region: "{{region}}"
+  use_internal_ips: {{use_internal_ips}}
+  use_static_ip_address: {{ use_static_ip_address }}
 
 {%- if docker_image is not none %}
 docker:
@@ -24,7 +26,7 @@ docker:
     username: |-
       {{docker_login_config.username}}
     password: |-
-      {{docker_login_config.password}}
+      {{docker_login_config.password | indent(6) }}
     server: |-
       {{docker_login_config.server}}
   {%- endif %}
@@ -34,6 +36,9 @@ docker:
 auth:
   ssh_user: ubuntu
   ssh_private_key: {{ssh_private_key}}
+{% if ssh_proxy_command is not none %}
+  ssh_proxy_command: {{ssh_proxy_command}}
+{% endif %}
 
 available_node_types:
   ray_head_default:
@@ -42,18 +47,21 @@ available_node_types:
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}
       DiskSize: {{disk_size}}
+      use_spot: {{ use_spot }}
+      network_tier: {{network_tier}}
+      filesystems:
+        {%- for fs in filesystems %}
+        - filesystem_id: {{ fs.filesystem_id }}
+          filesystem_mount_tag: {{ fs.filesystem_mount_tag }}
+          filesystem_attach_mode: {{ fs.filesystem_attach_mode }}
+          filesystem_mount_path: {{ fs.filesystem_mount_path }}
+        {%- endfor %}
       UserData: |
-        {%- if docker_image is not none %}
-        runcmd:
-          - sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
-          - systemctl restart sshd
-        {%- endif %}
-
         {# Two available OS images:
-               1. ubuntu22.04-driverless - requires Docker installation
-               2. ubuntu22.04-cuda12 - comes with Docker pre-installed
-            To optimize deployment speed, Docker is only installed when using ubuntu22.04-driverless #}
-        {%- if docker_image is not none and image_id == 'ubuntu22.04-driverless' %}
+               1. ubuntu24.04-driverless - requires Docker installation
+               2. ubuntu24.04-cuda12 - comes with Docker pre-installed
+            To optimize deployment speed, Docker is only installed when using ubuntu24.04-driverless #}
+        {%- if docker_image is not none and image_id.endswith('-driverless') %}
         apt:
           sources:
             docker.list:
@@ -101,6 +109,7 @@ file_mounts: {
   "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
 {%- for remote_path, local_path in credentials.items() %}
   "{{remote_path}}": "{{local_path}}",
+  "~/.ssh/sky-cluster-key": "{{ssh_private_key}}",
 {%- endfor %}
 }
 
@@ -116,6 +125,7 @@ initialization_commands: []
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1
 setup_commands:
+  # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Create ~/.ssh/config file in case the file does not exist in the image.
   # Line 'rm ..': there is another installation of pip.
@@ -125,6 +135,11 @@ setup_commands:
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
+    {%- endfor %}
+    {%- for fs in filesystems %}
+    sudo mkdir {{ fs.filesystem_mount_path }};
+    sudo mount -t virtiofs {{ fs.filesystem_mount_tag }} {{ fs.filesystem_mount_path }};
+    sudo chmod a+w {{ fs.filesystem_mount_path }};
     {%- endfor %}
     sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
@@ -136,8 +151,13 @@ setup_commands:
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
+  {%- if env_vars is defined %}
+    {%- for env_var, env_value in env_vars.items() %}
+    echo '{{env_var}}={{env_value}}' | sudo tee -a /etc/environment;
+    {%- endfor %}
+  {%- endif %}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
-    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
+    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
     {{ ssh_max_sessions_config }}

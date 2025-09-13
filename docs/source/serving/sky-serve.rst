@@ -37,11 +37,6 @@ How it works:
 .. features a simple YAML spec to describe your services (referred to as a *service
 .. YAML* in the following) and a centralized controller to manage the deployments.
 
-
-.. tip::
-
-  To get started with SkyServe, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
-
 Quick tour: LLM serving
 -----------------------
 
@@ -488,6 +483,13 @@ Thus, **no user action is needed** to manage its lifecycle.
 
 You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
 
+High availability controller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyServe also supports a High Availability Controller mode when running controller on Kubernetes. This ensures your services remain available even if the controller pod experiences unexpected failures. The controller state is preserved using persistent volumes, allowing seamless recovery with minimal disruption to your running services.
+
+For more details on setting up and configuring high availability, see :ref:`High availability controller <sky-serve-high-availability-controller>`.
+
 .. _customizing-sky-serve-controller-resources:
 
 Customizing SkyServe controller resources
@@ -527,8 +529,7 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
       resources:
         # All configs below are optional.
         # Specify the location of the SkyServe controller.
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         # Specify the maximum number of services that can be run concurrently.
         cpus: 2+  # number of vCPUs, max concurrent services = min(4 * cpus, memory in GiB)
         # Specify the disk_size in GB of the SkyServe controller.

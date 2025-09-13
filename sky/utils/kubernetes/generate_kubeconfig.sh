@@ -156,6 +156,9 @@ rules:
   - apiGroups: [""]                 # Required for sky show-gpus command
     resources: ["pods"]
     verbs: ["get", "list"]
+  - apiGroups: ["rbac.authorization.k8s.io"]   # Required for SkyPilot to inspect its own permissions
+    resources: ["clusterroles", "clusterrolebindings", "roles", "rolebindings"]
+    verbs: ["get", "list", "watch"]
 ---
 # ClusterRoleBinding for the service account
 apiVersion: rbac.authorization.k8s.io/v1
@@ -316,7 +319,7 @@ EOF
 echo "---
 Done!
 
-Kubeconfig using service acccount '${SKYPILOT_SA}' in namespace '${NAMESPACE}' written at $(pwd)/kubeconfig
+Kubeconfig using service account '${SKYPILOT_SA}' in namespace '${NAMESPACE}' written at $(pwd)/kubeconfig
 
 Copy the generated kubeconfig file to your ~/.kube/ directory to use it with
 kubectl and skypilot:

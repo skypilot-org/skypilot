@@ -143,21 +143,21 @@ Deploying on Google Cloud GKE
 
      $ sky check
 
-5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud k8s`
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --infra k8s`
 
    .. code-block:: console
 
-       $ sky show-gpus --cloud k8s
-       GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-       L4    1, 2, 4                   8           6
-       A100  1, 2                      4           2
+       $ sky show-gpus --infra k8s
+       GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
+       L4    1, 2, 4                   6 of 8 free
+       A100  1, 2                      2 of 4 free
 
        Kubernetes per node GPU availability
-       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
-       my-cluster-0               L4        4           4
-       my-cluster-1               L4        4           2
-       my-cluster-2               A100      2           2
-       my-cluster-3               A100      2           0
+       NODE                       GPU       UTILIZATION
+       my-cluster-0               L4        4 of 4 free
+       my-cluster-1               L4        2 of 4 free
+       my-cluster-2               A100      2 of 2 free
+       my-cluster-3               A100      0 of 2 free
 
 .. note::
     GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
@@ -198,17 +198,17 @@ Deploying on Amazon EKS
 
      $ sky check
 
-5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud k8s`
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --infra k8s`
 
    .. code-block:: console
 
-       $ sky show-gpus --cloud k8s
-       GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-       A100  1, 2                      4           2
+       $ sky show-gpus --infra k8s
+       GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
+       A100  1, 2                      2 of 2 free
 
        Kubernetes per node GPU availability
-       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
-       my-cluster-0               A100      2           2
+       NODE                       GPU       UTILIZATION
+       my-cluster-0               A100      2 of 2 free
 
 .. _kubernetes-setup-onprem:
 

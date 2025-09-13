@@ -42,7 +42,8 @@
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3-70B-Instruct
   # MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 service:
   replicas: 2
@@ -117,7 +118,7 @@ You can also get the full YAML file [here](https://github.com/skypilot-org/skypi
 
 Launch a single spot instance to serve Llama-3 on your infra:
 ```console
-HF_TOKEN=xxx sky launch llama3.yaml -c llama3 --env HF_TOKEN
+HF_TOKEN=xxx sky launch llama3.yaml -c llama3 --secret HF_TOKEN
 ```
 
 <details>
@@ -158,7 +159,7 @@ To run on Kubernetes or use an on-demand instance, pass `--no-use-spot` to the a
 <summary>Example outputs with Kubernetes / on-demand instances:</summary>
 
 ```console
-$ HF_TOKEN=xxx sky launch llama3.yaml -c llama3 --env HF_TOKEN --no-use-spot
+$ HF_TOKEN=xxx sky launch llama3.yaml -c llama3 --secret HF_TOKEN --no-use-spot
 ...
 I 04-18 16:34:13 optimizer.py:693] == Optimizer ==
 I 04-18 16:34:13 optimizer.py:704] Target: minimizing cost
@@ -271,7 +272,7 @@ After playing with the model, you can deploy the model with autoscaling and load
 
 With no change to the YAML, launch a fully managed service on your infra:
 ```console
-HF_TOKEN=xxx sky serve up llama3.yaml -n llama3 --env HF_TOKEN
+HF_TOKEN=xxx sky serve up llama3.yaml -n llama3 --secret HF_TOKEN
 ```
 
 Wait until the service is ready:

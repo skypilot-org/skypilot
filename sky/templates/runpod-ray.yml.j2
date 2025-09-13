@@ -20,7 +20,7 @@ provider:
     username: |-
       {{docker_login_config.username}}
     password: |-
-      {{docker_login_config.password}}
+      {{docker_login_config.password | indent(6) }}
     server: |-
       {{docker_login_config.server}}
   {%- endif %}
@@ -40,6 +40,14 @@ available_node_types:
         skypilot:ssh_public_key_content
       Preemptible: {{use_spot}}
       BidPerGPU: {{bid_per_gpu}}
+      {%- if volume_mounts and volume_mounts|length > 0 %}
+      VolumeMounts:
+      {%- for vm in volume_mounts %}
+        - VolumeNameOnCloud: {{ vm.volume_name_on_cloud }}
+          VolumeIdOnCloud: {{ vm.volume_id_on_cloud }}
+          MountPath: {{ vm.path }}
+      {%- endfor %}
+      {%- endif %}
 
 head_node_type: ray_head_default
 

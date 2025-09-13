@@ -1,0 +1,572 @@
+{
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": {
+            "type": "grafana",
+            "uid": "-- Grafana --"
+          },
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "links": [],
+    "panels": [
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisBorderShow": false,
+              "axisCenteredZero": false,
+              "axisColorMode": "text",
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "barWidthFactor": 0.6,
+              "drawStyle": "line",
+              "fillOpacity": 18,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "insertNulls": false,
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 1,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "max": 100,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green"
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "unit": "percent"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        },
+        "id": 1,
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "lastNotNull",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "right",
+            "showLegend": true
+          },
+          "tooltip": {
+            "hideZeros": false,
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "pluginVersion": "12.0.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "DCGM_FI_DEV_GPU_UTIL{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
+            "range": true,
+            "refId": "A"
+          },
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "amd_gpu_gfx_activity{hostname=~\"$node\", gpu_id=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+            "range": true,
+            "refId": "B"
+          }
+        ],
+        "title": "GPU Utilization",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisBorderShow": false,
+              "axisCenteredZero": false,
+              "axisColorMode": "text",
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "barWidthFactor": 0.6,
+              "drawStyle": "line",
+              "fillOpacity": 18,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "insertNulls": false,
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 1,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green"
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "unit": "decmbytes"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        },
+        "id": 2,
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "lastNotNull",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "right",
+            "showLegend": true
+          },
+          "tooltip": {
+            "hideZeros": false,
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "pluginVersion": "12.0.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "DCGM_FI_DEV_FB_USED{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
+            "range": true,
+            "refId": "A"
+          },
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "amd_gpu_used_vram{hostname=~\"$node\", gpu_id=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+            "range": true,
+            "refId": "B"
+          }
+        ],
+        "title": "GPU Memory Utilization",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisBorderShow": false,
+              "axisCenteredZero": false,
+              "axisColorMode": "text",
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "barWidthFactor": 0.6,
+              "drawStyle": "line",
+              "fillOpacity": 18,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "insertNulls": false,
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 1,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green"
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "unit": "celsius"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        },
+        "id": 3,
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "lastNotNull",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "right",
+            "showLegend": true
+          },
+          "tooltip": {
+            "hideZeros": false,
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "pluginVersion": "12.0.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "DCGM_FI_DEV_GPU_TEMP{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
+            "range": true,
+            "refId": "A"
+          },
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "amd_gpu_junction_temperature{hostname=~\"$node\", gpu_id=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+            "range": true,
+            "refId": "B"
+          }
+        ],
+        "title": "GPU Temperature",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisBorderShow": false,
+              "axisCenteredZero": false,
+              "axisColorMode": "text",
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "barWidthFactor": 0.6,
+              "drawStyle": "line",
+              "fillOpacity": 18,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "insertNulls": false,
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 1,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green"
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "unit": "watt"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        },
+        "id": 4,
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "lastNotNull",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "right",
+            "showLegend": true
+          },
+          "tooltip": {
+            "hideZeros": false,
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "pluginVersion": "12.0.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "DCGM_FI_DEV_POWER_USAGE{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
+            "range": true,
+            "refId": "A"
+          },
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "amd_gpu_average_package_power{hostname=~\"$node\", gpu_id=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "hide": false,
+            "instant": false,
+            "legendFormat": "{{hostname}} - {{card_series}} GPU {{gpu_id}}",
+            "range": true,
+            "refId": "B"
+          }
+        ],
+        "title": "GPU Power Usage",
+        "type": "timeseries"
+      }
+    ],
+    "preload": false,
+    "schemaVersion": 41,
+    "tags": [
+      "dcgm",
+      "gpu",
+      "skypilot"
+    ],
+    "templating": {
+      "list": [
+        {
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "definition": "label_values(kube_pod_labels, label_skypilot_cluster)",
+          "includeAll": true,
+          "multi": false,
+          "name": "cluster",
+          "options": [],
+          "query": "label_values(kube_pod_labels, label_skypilot_cluster)",
+          "refresh": 1,
+          "regex": "",
+          "sort": 1,
+          "type": "query"
+        },
+        {
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"node\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"node\", \"$1\", \"hostname\", \"(.*)\"))",
+          "includeAll": true,
+          "multi": true,
+          "name": "node",
+          "options": [],
+          "query": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"node\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"node\", \"$1\", \"hostname\", \"(.*)\"))",
+          "refresh": 1,
+          "regex": "/node=\"([^\"]+)\"/",
+          "type": "query"
+        },
+        {
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}, \"gpu\", \"$1\", \"gpu\", \"(.*)\") or label_replace(amd_gpu_gfx_activity{hostname=~\"$node\"}, \"gpu\", \"$1\", \"gpu_id\", \"(.*)\"))",
+          "includeAll": true,
+          "multi": true,
+          "name": "gpu",
+          "options": [],
+          "query": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}, \"gpu\", \"$1\", \"gpu\", \"(.*)\") or label_replace(amd_gpu_gfx_activity{hostname=~\"$node\"}, \"gpu\", \"$1\", \"gpu_id\", \"(.*)\"))",
+          "refresh": 1,
+          "regex": "/gpu=\"([^\"]+)/",
+          "sort": 1,
+          "type": "query"
+        }
+      ]
+    },
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "browser",
+    "title": "SkyPilot DCGM GPU Metrics",
+    "uid": "skypilot-dcgm-gpu",
+    "version": 1
+  }

@@ -79,9 +79,7 @@ if __name__ == '__main__':
         task = sky.Task(setup=setup, run=run)
         task.set_file_mounts(file_mounts)
         task.set_resources(
-            sky.Resources(clouds.Kubernetes(),
-                          cpus=args.cpus,
-                          memory=args.memory))
+            sky.Resources(infra='k8s', cpus=args.cpus, memory=args.memory))
         # Use launch instead of jobs launch for predictable client parallelism
         resps.append(sky.launch(task, f'benchmark-{i}'))
     try:

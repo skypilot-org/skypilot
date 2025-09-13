@@ -16,13 +16,26 @@ from typing import Dict
 from urllib.request import Request
 
 import websockets
+from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect
+
+BUFFER_SIZE = 2**16  # 64KB
+
+# Environment variable for a file path to the API cookie file.
+# Keep in sync with server/constants.py
+API_COOKIE_FILE_ENV_VAR = 'SKYPILOT_API_COOKIE_FILE'
+# Default file if unset.
+# Keep in sync with server/constants.py
+API_COOKIE_FILE_DEFAULT_LOCATION = '~/.sky/cookies.txt'
 
 
 def _get_cookie_header(url: str) -> Dict[str, str]:
     """Extract Cookie header value from a cookie jar for a specific URL"""
-    cookie_path = os.environ.get('SKYPILOT_API_COOKIE_FILE')
+    cookie_path = os.environ.get(API_COOKIE_FILE_ENV_VAR)
     if cookie_path is None:
+        cookie_path = API_COOKIE_FILE_DEFAULT_LOCATION
+    cookie_path = os.path.expanduser(cookie_path)
+    if not os.path.exists(cookie_path):
         return {}
 
     request = Request(url)
@@ -51,19 +64,36 @@ async def main(url: str) -> None:
             old_settings = None
 
         try:
-            await asyncio.gather(stdin_to_websocket(websocket),
-                                 websocket_to_stdout(websocket))
+            loop = asyncio.get_running_loop()
+            # Use asyncio.Stream primitives to wrap stdin and stdout, this is to
+            # avoid creating a new thread for each read/write operation
+            # excessively.
+            stdin_reader = asyncio.StreamReader()
+            protocol = asyncio.StreamReaderProtocol(stdin_reader)
+            await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+            transport, protocol = await loop.connect_write_pipe(
+                asyncio.streams.FlowControlMixin, sys.stdout)  # type: ignore
+            stdout_writer = asyncio.StreamWriter(transport, protocol, None,
+                                                 loop)
+
+            await asyncio.gather(stdin_to_websocket(stdin_reader, websocket),
+                                 websocket_to_stdout(websocket, stdout_writer))
         finally:
             if old_settings:
                 termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
                                   old_settings)
 
 
-async def stdin_to_websocket(websocket):
+async def stdin_to_websocket(reader: asyncio.StreamReader,
+                             websocket: ClientConnection):
     try:
         while True:
-            data = await asyncio.get_event_loop().run_in_executor(
-                None, sys.stdin.buffer.read, 1)
+            # Read at most BUFFER_SIZE bytes, this not affect
+            # responsiveness since it will return as soon as
+            # there is at least one byte.
+            # The BUFFER_SIZE is chosen to be large enough to improve
+            # throughput.
+            data = await reader.read(BUFFER_SIZE)
             if not data:
                 break
             await websocket.send(data)
@@ -73,13 +103,13 @@ async def stdin_to_websocket(websocket):
         await websocket.close()
 
 
-async def websocket_to_stdout(websocket):
+async def websocket_to_stdout(websocket: ClientConnection,
+                              writer: asyncio.StreamWriter):
     try:
         while True:
             message = await websocket.recv()
-            sys.stdout.buffer.write(message)
-            await asyncio.get_event_loop().run_in_executor(
-                None, sys.stdout.buffer.flush)
+            writer.write(message)
+            await writer.drain()
     except websockets.exceptions.ConnectionClosed:
         print('WebSocket connection closed', file=sys.stderr)
     except Exception as e:  # pylint: disable=broad-except

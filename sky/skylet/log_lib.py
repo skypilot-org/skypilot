@@ -4,6 +4,7 @@ This is a remote utility module that provides logging functionality.
 """
 import collections
 import copy
+import functools
 import io
 import multiprocessing.pool
 import os
@@ -21,6 +22,8 @@ import colorama
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -59,6 +62,16 @@ class _ProcessingArgs:
         self.streaming_prefix = streaming_prefix
 
 
+def _get_context():
+    # TODO(aylei): remove this after we drop the backward-compatibility for
+    # 0.9.x in 0.12.0
+    # Keep backward-compatibility for the old version of SkyPilot runtimes.
+    if 'context' in globals():
+        return context.get()
+    else:
+        return None
+
+
 def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     """Process the stream of a process."""
     out_io = io.TextIOWrapper(io_stream,
@@ -77,6 +90,9 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     with open(args.log_path, 'a', encoding='utf-8') as fout:
         with line_processor:
             while True:
+                ctx = _get_context()
+                if ctx is not None and ctx.is_canceled():
+                    return
                 line = out_io.readline()
                 if not line:
                     break
@@ -111,26 +127,24 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     return ''.join(out)
 
 
-def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
-    """Redirect the process's filtered stdout/stderr to both stream and file"""
+def process_subprocess_stream(proc, stdout_stream_handler,
+                              stderr_stream_handler) -> Tuple[str, str]:
+    """Process the stream of a process in threads, blocking."""
     if proc.stderr is not None:
         # Asyncio does not work as the output processing can be executed in a
         # different thread.
         # selectors is possible to handle the multiplexing of stdout/stderr,
         # but it introduces buffering making the output not streaming.
         with multiprocessing.pool.ThreadPool(processes=1) as pool:
-            err_args = copy.copy(args)
-            err_args.line_processor = None
-            stderr_fut = pool.apply_async(_handle_io_stream,
-                                          args=(proc.stderr, sys.stderr,
-                                                err_args))
+            stderr_fut = pool.apply_async(stderr_stream_handler,
+                                          args=(proc.stderr, sys.stderr))
             # Do not launch a thread for stdout as the rich.status does not
             # work in a thread, which is used in
             # log_utils.RayUpLineProcessor.
-            stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
+            stdout = stdout_stream_handler(proc.stdout, sys.stdout)
             stderr = stderr_fut.get()
     else:
-        stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
+        stdout = stdout_stream_handler(proc.stdout, sys.stdout)
         stderr = ''
     return stdout, stderr
 
@@ -176,7 +190,12 @@ def run_with_log(
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout_arg = stderr_arg = None
-    if process_stream:
+    ctx = _get_context()
+    if process_stream or ctx is not None:
+        # Capture stdout/stderr of the subprocess if:
+        # 1. Post-processing is needed (process_stream=True)
+        # 2. Potential contextual handling is needed (ctx is not None)
+        # TODO(aylei): can we always capture the stdout/stderr?
         stdout_arg = subprocess.PIPE
         stderr_arg = subprocess.PIPE if not with_ray else subprocess.STDOUT
     # Use stdin=subprocess.DEVNULL by default, as allowing inputs will mess up
@@ -197,6 +216,8 @@ def run_with_log(
             subprocess_utils.kill_process_daemon(proc.pid)
             stdout = ''
             stderr = ''
+            stdout_stream_handler = None
+            stderr_stream_handler = None
 
             if process_stream:
                 if skip_lines is None:
@@ -223,7 +244,35 @@ def run_with_log(
                     replace_crlf=with_ray,
                     streaming_prefix=streaming_prefix,
                 )
-                stdout, stderr = process_subprocess_stream(proc, args)
+                stdout_stream_handler = functools.partial(
+                    _handle_io_stream,
+                    args=args,
+                )
+                if proc.stderr is not None:
+                    err_args = copy.copy(args)
+                    err_args.line_processor = None
+                    stderr_stream_handler = functools.partial(
+                        _handle_io_stream,
+                        args=err_args,
+                    )
+            if ctx is not None:
+                # When runs in a coroutine, always process the subprocess
+                # stream to:
+                # 1. handle context cancellation
+                # 2. redirect subprocess stdout/stderr to the contextual
+                #    stdout/stderr of current coroutine.
+                stdout, stderr = context_utils.pipe_and_wait_process(
+                    ctx,
+                    proc,
+                    cancel_callback=subprocess_utils.kill_children_processes,
+                    stdout_stream_handler=stdout_stream_handler,
+                    stderr_stream_handler=stderr_stream_handler)
+            elif process_stream:
+                # When runs in a process, only process subprocess stream if
+                # necessary to avoid unnecessary stream handling overhead.
+                stdout, stderr = process_subprocess_stream(
+                    proc, stdout_stream_handler, stderr_stream_handler)
+            # Ensure returncode is set.
             proc.wait()
             if require_outputs:
                 return proc.returncode, stdout, stderr
@@ -305,6 +354,17 @@ def run_bash_command_with_log(bash_command: str,
                             shell=True)
 
 
+def run_bash_command_with_log_and_return_pid(
+        bash_command: str,
+        log_path: str,
+        env_vars: Optional[Dict[str, str]] = None,
+        stream_logs: bool = False,
+        with_ray: bool = False):
+    return_code = run_bash_command_with_log(bash_command, log_path, env_vars,
+                                            stream_logs, with_ray)
+    return {'return_code': return_code, 'pid': os.getpid()}
+
+
 def _follow_job_logs(file,
                      job_id: int,
                      start_streaming: bool,
@@ -346,9 +406,9 @@ def _follow_job_logs(file,
                     wait_last_logs = False
                     continue
                 status_str = status.value if status is not None else 'None'
-                print(ux_utils.finishing_message(
-                    f'Job finished (status: {status_str}).'),
-                      flush=True)
+                finish = ux_utils.finishing_message(
+                    f'Job finished (status: {status_str}).')
+                yield finish + '\n'
                 return
 
             time.sleep(SKY_LOG_TAILING_GAP_SECONDS)
@@ -495,9 +555,11 @@ def tail_logs(job_id: Optional[int],
                     if start_streaming:
                         print(line, end='', flush=True)
                 status_str = status.value if status is not None else 'None'
-                print(ux_utils.finishing_message(
-                    f'Job finished (status: {status_str}).'),
-                      flush=True)
+                # Only show "Job finished" for actually terminal states
+                if status is not None and status.is_terminal():
+                    print(ux_utils.finishing_message(
+                        f'Job finished (status: {status_str}).'),
+                          flush=True)
         except FileNotFoundError:
             print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                   f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')

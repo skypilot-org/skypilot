@@ -64,12 +64,12 @@ The easiest way to grant permissions to a user access your GCP project without t
   roles/compute.admin
   roles/iam.serviceAccountAdmin
   roles/iam.serviceAccountUser
-  roles/serviceusage.serviceUsageConsumer
+  roles/serviceusage.serviceUsageAdmin
   roles/storage.admin
   roles/iam.securityAdmin
 
 .. note::
-    If the ``roles/iam.securityAdmin`` role is undesirable, you can do the following. First, include the role and have any user (e.g., the admin) run ``sky launch --cloud gcp`` successfully once. This is to create the necessary service account. Then, replace the role ``roles/iam.securityAdmin`` with ``roles/iam.roleViewer`` in the list above.
+    If the ``roles/iam.securityAdmin`` role is undesirable, you can do the following. First, include the role and have any user (e.g., the admin) run ``sky launch --infra gcp`` successfully once. This is to create the necessary service account. Then, replace the role ``roles/iam.securityAdmin`` with ``roles/iam.roleViewer`` in the list above.
 
 
 Optionally, to use TPUs, add the following role:
@@ -339,6 +339,163 @@ To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to sp
 
 The ``gcp.ssh_proxy_command`` field is optional. If SkyPilot is run on a machine that can directly access the internal IPs of the instances, it can be omitted. Otherwise, it should be set to a command that can be used to proxy SSH connections to the internal IPs of the instances.
 
+Here are two ways to enable SkyPilot's access those private hosts:
+
+* **Option 1** – :ref:`SSH proxy / bastion host <gcp-proxy-host>`
+* **Option 2** – :ref:`IAP tunneling (Identity‑Aware Proxy) <gcp-iap-tunnel>`
+  This is often simpler because you do **not** need to run or secure your own
+  bastion; Google handles the tunnel at the edge.
+
+Choose whichever fits your environment.
+
+.. _gcp-proxy-host:
+
+Option 1: Simple single‑proxy example
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+If you have a "jump host" that's directly accessible from the machine running SkyPilot, tell SkyPilot how to pipe SSH through it:
+
+.. code-block:: yaml
+
+    gcp:
+      use_internal_ips: true
+      vpc_name: my-vpc-name
+      ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no myself@my.proxy
+
+When **multiple regions** are involved you can map each region to its own proxy
+(just as before):
+
+.. code-block:: yaml
+
+    gcp:
+      use_internal_ips: true
+      vpc_name: my-vpc-name
+      ssh_proxy_command:
+        us-west1: ssh -W %h:%p -o StrictHostKeyChecking=no myself@west.proxy
+        us-east1: ssh -W %h:%p -o StrictHostKeyChecking=no myself@east.proxy
+
+
+.. _gcp-iap-tunnel:
+
+Option 2: IAP tunneling
+~~~~~~~~~~~~~~~~~~~~~~~
+`IAP TCP forwarding <https://cloud.google.com/iap/docs/using-tcp-forwarding>`__
+creates an authenticated tunnel from your workstation to any private IP inside
+a GCP VPC—no public IP, VPN, or self-managed bastion required. SkyPilot
+implements the `IP-based (destination-group) mode <https://cloud.google.com/iap/docs/tcp-by-host>`__; the per-instance mode is not supported yet.
+
+Setup
+^^^^^
+* Enable the API once per project:
+
+  .. code-block:: console
+
+     $ gcloud services enable iap.googleapis.com
+
+* This method requires **IAP tunnel permissions**.
+  Adding the built-in role ``roles/iap.tunnelResourceAccessor`` on the destination
+  group (or project-wide) is the simplest approach, in addition to the :ref:`other permissions required by SkyPilot <cloud-permissions-gcp>`.
+* A **Cloud NAT** gateway must exist in every region where you launch
+  internal-only VMs so they can reach the internet for package installs.
+  See :ref:`gcp-cloud-nat`.
+
+The following script can be used to set up IAP tunneling in a specific VPC region:
+
+.. dropdown:: Automated setup script (per region)
+
+    .. code-block:: bash
+
+        #!/usr/bin/env bash
+        # Set your region and VPC.
+        REGION=us-east1        # e.g. us-west1, europe-west4, ...
+        VPC=default            # change if using a custom VPC
+
+        #######################################################################
+        # 1. Cloud NAT (if none exists)                                       #
+        #######################################################################
+        nat_exists=false
+        for r in $(gcloud compute routers list --regions="$REGION" \
+                     --format='value(name)'); do
+          if gcloud compute routers nats list --router="$r" --region="$REGION" \
+                 --format='value(name)' | grep -q .; then
+            nat_exists=true
+          fi
+        done
+        if [ "$nat_exists" = false ]; then
+          gcloud compute routers create nat-router --network="$VPC" --region="$REGION"
+          gcloud compute routers nats create nat-config \
+            --router=nat-router --router-region="$REGION" \
+            --nat-all-subnet-ip-ranges --auto-allocate-nat-external-ips
+        fi
+
+        #######################################################################
+        # 2. IAP destination group covering the subnet CIDR                   #
+        #######################################################################
+        CIDR=$(gcloud compute networks subnets list --network="$VPC" \
+                 --regions="$REGION" --format='value(ipCidrRange)')
+        gcloud iap tcp dest-groups create "internal-vpc-$VPC" \
+            --region="$REGION" --ip-range-list="$CIDR"
+
+        #######################################################################
+        # 3. Show the SkyPilot config snippet                                 #
+        #######################################################################
+        echo "Update your config.yaml to add the new gcp.ssh_proxy_command.$REGION value:"
+        echo
+        cat <<EOF
+        gcp:
+          use_internal_ips: true
+          ssh_proxy_command:
+            $REGION: gcloud compute start-iap-tunnel %h %p --listen-on-stdin --region=$REGION --network=$VPC --dest-group=internal-vpc-$VPC
+        EOF
+
+        # Automatically do it
+        read -p 'Automatically update ~/.sky/config.yaml? [y/N] ' choice
+        if echo "$choice" | grep -xqE '[yY]'; then
+          yq -Yi ".gcp.use_internal_ips=true | .gcp.ssh_proxy_command[\"$REGION\"]=\"gcloud compute start-iap-tunnel %h %p --listen-on-stdin --region=$REGION --network=$VPC --dest-group=internal-vpc-$VPC\"" ~/.sky/config.yaml
+        else
+          echo 'Aborting.'
+        fi
+
+    Paste the printed snippet into your ``~/.sky/config.yaml`` (or let the script
+    modify it automatically).
+
+Once the destination group is created, make sure to set the ``ssh_proxy_command`` :ref:`in the SkyPilot config <config-yaml-gcp-ssh-proxy-command>`. For instance, if you have
+
+- destination group: ``internal-vpc-default``
+- region: ``us-east1``
+- VPC: ``default``
+
+you could use this configuration:
+
+.. code-block:: yaml
+
+    gcp:
+      use_internal_ips: true
+      ssh_proxy_command:
+        us-east1: gcloud compute start-iap-tunnel %h %p --listen-on-stdin --region=us-east1 --network=default --dest-group=internal-vpc-default
+
+
+How it works
+^^^^^^^^^^^^
+1. ``sky launch`` creates VMs **without external IPs**.
+2. When connecting to the instance, ``ssh`` uses the **IAP proxy command** shown above.
+   ``gcloud compute start-iap-tunnel`` transparently
+   forwards the connection through Google’s edge to the VM’s private address.
+3. SSH packets travel over the authenticated IAP
+   tunnel—no public ingress is ever exposed.
+
+Troubleshooting
+^^^^^^^^^^^^^^^
+* *Permission denied / 403* when opening the tunnel → the caller is missing
+  ``roles/iap.tunnelResourceAccessor`` (or an equivalent custom role) on the
+  destination group.
+* VM cannot reach the Internet → ensure the Cloud NAT gateway is in **the same
+  region** as the subnet and that ``--nat-all-subnet-ip-ranges`` is enabled.
+* Multiple subnets or VPCs → create one destination group per
+  *region × CIDR* and map each region to the correct group in
+  ``ssh_proxy_command``.
+
+
+.. _gcp-cloud-nat:
 
 Cloud NAT setup
 ~~~~~~~~~~~~~~~~
