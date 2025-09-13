@@ -1163,7 +1163,8 @@ class LocalProcessCommandRunner(CommandRunner):
                                                process_stream,
                                                separate_stderr,
                                                skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc)
+                                               source_bashrc=source_bashrc,
+                                               use_login=False)
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
