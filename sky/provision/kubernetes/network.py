@@ -22,8 +22,9 @@ def open_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, 'provider_config is required'
+    context = kubernetes_utils.get_context_from_config(provider_config)
     port_mode = network_utils.get_port_mode(
-        provider_config.get('port_mode', None))
+        provider_config.get('port_mode', None), context)
     ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _open_ports_using_loadbalancer(
@@ -46,8 +47,10 @@ def _open_ports_using_loadbalancer(
 ) -> None:
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
+    context = kubernetes_utils.get_context_from_config(provider_config)
     content = network_utils.fill_loadbalancer_template(
         namespace=provider_config.get('namespace', 'default'),
+        context=context,
         service_name=service_name,
         ports=ports,
         selector_key='skypilot-cluster',
@@ -59,7 +62,7 @@ def _open_ports_using_loadbalancer(
 
     network_utils.create_or_replace_namespaced_service(
         namespace=kubernetes_utils.get_namespace_from_config(provider_config),
-        context=kubernetes_utils.get_context_from_config(provider_config),
+        context=context,
         service_name=service_name,
         service_spec=content['service_spec'])
 
@@ -70,6 +73,7 @@ def _open_ports_using_ingress(
     provider_config: Dict[str, Any],
 ) -> None:
     context = kubernetes_utils.get_context_from_config(provider_config)
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     # Check if an ingress controller exists
     if not network_utils.ingress_controller_exists(context):
         raise Exception(
@@ -78,7 +82,7 @@ def _open_ports_using_ingress(
             'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long
         )
 
-    # Prepare service names, ports,  for template rendering
+    # Prepare service names, ports, for template rendering
     service_details = [
         (f'{cluster_name_on_cloud}--skypilot-svc--{port}', port,
          _PATH_PREFIX.format(
@@ -100,6 +104,7 @@ def _open_ports_using_ingress(
     # multiple rules.
     content = network_utils.fill_ingress_template(
         namespace=provider_config.get('namespace', 'default'),
+        context=context,
         service_details=service_details,
         ingress_name=f'{cluster_name_on_cloud}-skypilot-ingress',
         selector_key='skypilot-cluster',
@@ -111,9 +116,8 @@ def _open_ports_using_ingress(
         # Update metadata from config
         kubernetes_utils.merge_custom_metadata(service_spec['metadata'])
         network_utils.create_or_replace_namespaced_service(
-            namespace=kubernetes_utils.get_namespace_from_config(
-                provider_config),
-            context=kubernetes_utils.get_context_from_config(provider_config),
+            namespace=namespace,
+            context=context,
             service_name=service_name,
             service_spec=service_spec,
         )
@@ -121,8 +125,8 @@ def _open_ports_using_ingress(
     kubernetes_utils.merge_custom_metadata(content['ingress_spec']['metadata'])
     # Create or update the single ingress for all services
     network_utils.create_or_replace_namespaced_ingress(
-        namespace=kubernetes_utils.get_namespace_from_config(provider_config),
-        context=kubernetes_utils.get_context_from_config(provider_config),
+        namespace=namespace,
+        context=context,
         ingress_name=f'{cluster_name_on_cloud}-skypilot-ingress',
         ingress_spec=content['ingress_spec'],
     )
@@ -135,8 +139,9 @@ def cleanup_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, 'provider_config is required'
+    context = kubernetes_utils.get_context_from_config(provider_config)
     port_mode = network_utils.get_port_mode(
-        provider_config.get('port_mode', None))
+        provider_config.get('port_mode', None), context)
     ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _cleanup_ports_for_loadbalancer(
@@ -202,8 +207,9 @@ def query_ports(
     """See sky/provision/__init__.py"""
     del head_ip  # unused
     assert provider_config is not None, 'provider_config is required'
+    context = kubernetes_utils.get_context_from_config(provider_config)
     port_mode = network_utils.get_port_mode(
-        provider_config.get('port_mode', None))
+        provider_config.get('port_mode', None), context)
     ports = list(port_ranges_to_set(ports))
 
     try:

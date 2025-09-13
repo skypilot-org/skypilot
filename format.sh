@@ -49,11 +49,13 @@ YAPF_FLAGS=(
 YAPF_EXCLUDES=(
     '--exclude' 'build/**'
     '--exclude' 'sky/skylet/providers/ibm/**'
+    '--exclude' 'sky/schemas/generated/**'
 )
 
 ISORT_YAPF_EXCLUDES=(
     '--sg' 'build/**'
     '--sg' 'sky/skylet/providers/ibm/**'
+    '--sg' 'sky/schemas/generated/**'
 )
 
 BLACK_INCLUDES=(
@@ -62,6 +64,7 @@ BLACK_INCLUDES=(
 
 PYLINT_FLAGS=(
     '--load-plugins'  'pylint_quotes'
+    '--ignore-paths' 'sky/schemas/generated'
 )
 
 # Format specified files
@@ -125,19 +128,33 @@ mypy $(cat tests/mypy_files.txt)
 # Run Pylint
 echo 'Sky Pylint:'
 if [[ "$1" == '--files' ]]; then
-    # If --files is passed, filter to files within sky/ and pass to pylint.
+    # If --files is passed, filter to files within sky/ and examples/ and pass to pylint.
     pylint "${PYLINT_FLAGS[@]}" "${@:2}"
 elif [[ "$1" == '--all' ]]; then
-    # Pylint entire sky directory.
-    pylint "${PYLINT_FLAGS[@]}" sky
+    # Pylint entire sky and examples directories.
+    pylint "${PYLINT_FLAGS[@]}" sky examples
 else
-    # Pylint only files in sky/ that have changed in last commit.
-    changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- 'sky/*.py' 'sky/*.pyi')
+    # Pylint only files in sky/ and examples/ that have changed in last commit.
+    changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- 'sky/*.py' 'sky/*.pyi' 'examples/*.py' 'examples/*.pyi')
     if [[ -n "$changed_files" ]]; then
         echo "$changed_files" | tr '\n' '\0' | xargs -0 pylint "${PYLINT_FLAGS[@]}"
     else
         echo 'Pylint skipped: no files changed in sky/.'
     fi
+fi
+
+# Lint and format the dashboard
+echo "SkyPilot Dashboard linting and formatting:"
+if ! npm -v || ! node -v; then
+    echo "npm or node is not installed, please install them first"
+    # Don't fail the script if npm or node is not installed
+    # because it's not required for all users
+else
+    npm --prefix sky/dashboard install
+    npm --prefix sky/dashboard run lint
+    npm --prefix sky/dashboard run format
+    echo "SkyPilot Dashboard linting and formatting: Done"
+    echo
 fi
 
 if ! git diff --quiet &>/dev/null; then

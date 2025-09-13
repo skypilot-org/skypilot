@@ -13,8 +13,9 @@ service:
 # Fields below are the same with `serve-openai-api.yaml`.
 envs:
   MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
-  AUTH_TOKEN: # TODO: Fill with your own auth token (a random string), or use --env to pass.
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
+  AUTH_TOKEN: null # Pass with `--secret AUTH_TOKEN` in CLI
 
 resources:
   accelerators: {L4:1, A10G:1, A10:1, A100:1, A100-80GB:1}

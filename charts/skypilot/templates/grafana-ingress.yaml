@@ -1,0 +1,37 @@
+{{- if and .Values.grafana.enabled .Values.grafana.ingress.enableAuthedIngress }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-grafana-authed
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    {{- if or .Values.auth.oauth.enabled (and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled")) }}
+    # OAuth2 Proxy authentication for browser-based access
+    {{- $oauth2 := .Values.auth.oauth -}}
+    {{- if not .Values.auth.oauth.enabled -}}
+    {{- $oauth2 = index .Values.ingress "oauth2-proxy" -}}
+    {{- end }}
+    nginx.ingress.kubernetes.io/auth-signin: {{ if index $oauth2 "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/start?rd=$escaped_request_uri
+    nginx.ingress.kubernetes.io/auth-url: {{ if index $oauth2 "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/auth
+    nginx.ingress.kubernetes.io/auth-response-headers: {{ index .Values.grafana "grafana.ini" "auth.proxy" "header_name" }}
+    {{- else }}
+    # Basic authentication
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-realm: "SkyPilot API Server"
+    nginx.ingress.kubernetes.io/auth-secret: {{ .Values.ingress.authSecret | default (printf "%s-basic-auth" .Release.Name) }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header X-WEBAUTH-USER admin;
+spec:
+  ingressClassName: {{ .Values.grafana.ingress.ingressClassName }}
+  rules:
+  - http:
+      paths:
+      - backend:
+          service:
+            name: {{ .Release.Name }}-grafana
+            port:
+              number: 80
+        path: {{ .Values.grafana.ingress.path }}
+        pathType: Prefix
+{{- end}}

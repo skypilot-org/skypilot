@@ -1,0 +1,86 @@
+# This example is used to test the NCCL performance with
+# GPUDirect TCPX on GKE.#
+#
+# Usage:
+# sky launch -c nccl examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke_h100.yaml
+name: nccl-gpudirect-tcpx
+
+resources:
+  infra: k8s
+  accelerators: H100:8
+  image_id: docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/nccl-plugin-gpudirecttcpx
+  network_tier: best
+
+num_nodes: 2
+
+envs:
+  USE_GPU_DIRECT: "true"
+
+run: |
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    echo "Head node"
+
+    # Total number of processes, NP should be the total number of GPUs in the cluster
+    NP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
+
+    # Append :${SKYPILOT_NUM_GPUS_PER_NODE} to each IP as slots
+    nodes=""
+    for ip in $SKYPILOT_NODE_IPS; do
+      nodes="${nodes}${ip}:${SKYPILOT_NUM_GPUS_PER_NODE},"
+    done
+    nodes=${nodes::-1}
+    echo "All nodes: ${nodes}"
+
+    if [ "${USE_GPU_DIRECT}" == "true" ]; then
+      export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/tcpx/lib64
+    else
+      # Use the default NCCL library
+      export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64
+    fi
+    
+    mpirun \
+      --allow-run-as-root \
+      --tag-output \
+      -H $nodes \
+      -np $NP \
+      -N $SKYPILOT_NUM_GPUS_PER_NODE \
+      -x PATH \
+      -x LD_LIBRARY_PATH \
+      -x NCCL_SOCKET_IFNAME \
+      -x NCCL_CROSS_NIC \
+      -x NCCL_ALGO \
+      -x NCCL_PROTO \
+      -x NCCL_NSOCKS_PERTHREAD \
+      -x NCCL_SOCKET_NTHREADS \
+      -x NCCL_MAX_NCHANNELS \
+      -x NCCL_MIN_NCHANNELS \
+      -x NCCL_DYNAMIC_CHUNK_SIZE \
+      -x NCCL_P2P_NET_CHUNKSIZE \
+      -x NCCL_P2P_PCI_CHUNKSIZE \
+      -x NCCL_P2P_NVL_CHUNKSIZE \
+      -x NCCL_BUFFSIZE \
+      -x CUDA_VISIBLE_DEVICES \
+      -x NCCL_GPUDIRECTTCPX_SOCKET_IFNAME \
+      -x NCCL_GPUDIRECTTCPX_CTRL_DEV \
+      -x NCCL_GPUDIRECTTCPX_TX_BINDINGS \
+      -x NCCL_GPUDIRECTTCPX_RX_BINDINGS \
+      -x NCCL_GPUDIRECTTCPX_PROGRAM_FLOW_STEERING_WAIT_MICROS \
+      -x NCCL_GPUDIRECTTCPX_UNIX_CLIENT_PREFIX \
+      -x NCCL_GPUDIRECTTCPX_FORCE_ACK \
+      -x NCCL_NET_GDR_LEVEL \
+      -x NCCL_P2P_PXN_LEVEL \
+      -x NCCL_DEBUG=INFO -x NCCL_DEBUG_SUBSYS=ENV \
+      --mca btl tcp,self \
+      --mca btl_tcp_if_include eth0 \
+      --mca plm_rsh_args "-p 222" \
+      /third_party/nccl-tests-mpi/build/all_reduce_perf \
+      -b 8 \
+      -e 2G \
+      -f 2 \
+      -g 1 \
+      -c 1 \
+      -w 5 \
+      -n 20
+  else
+    echo "Worker nodes"
+  fi

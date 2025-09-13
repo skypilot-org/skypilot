@@ -7,18 +7,26 @@ from typing import Any, Dict, List, Optional, Tuple
 from sky import sky_logging
 from sky.adaptors import runpod
 from sky.provision import docker_utils
-import sky.provision.runpod.api.commands as runpod_commands
+from sky.provision.runpod.api import commands as runpod_commands
 from sky.skylet import constants
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
 GPU_NAME_MAP = {
+    # AMD
+    'MI300X': 'AMD Instinct MI300X OAM',
+
+    # NVIDIA A-series
     'A100-80GB': 'NVIDIA A100 80GB PCIe',
-    'A100-40GB': 'NVIDIA A100-PCIE-40GB',
     'A100-80GB-SXM': 'NVIDIA A100-SXM4-80GB',
     'A30': 'NVIDIA A30',
     'A40': 'NVIDIA A40',
+
+    # NVIDIA B-series
+    'B200': 'NVIDIA B200',
+
+    # GeForce
     'RTX3070': 'NVIDIA GeForce RTX 3070',
     'RTX3080': 'NVIDIA GeForce RTX 3080',
     'RTX3080Ti': 'NVIDIA GeForce RTX 3080 Ti',
@@ -26,25 +34,43 @@ GPU_NAME_MAP = {
     'RTX3090Ti': 'NVIDIA GeForce RTX 3090 Ti',
     'RTX4070Ti': 'NVIDIA GeForce RTX 4070 Ti',
     'RTX4080': 'NVIDIA GeForce RTX 4080',
+    'RTX4080SUPER': 'NVIDIA GeForce RTX 4080 SUPER',
     'RTX4090': 'NVIDIA GeForce RTX 4090',
+    'RTX5080': 'NVIDIA GeForce RTX 5080',
+    'RTX5090': 'NVIDIA GeForce RTX 5090',
+
+    # NVIDIA H100/H200
     # Following instance is displayed as SXM at the console
     # but the ID from the API appears as HBM
     'H100-SXM': 'NVIDIA H100 80GB HBM3',
+    'H100-NVL': 'NVIDIA H100 NVL',
     'H100': 'NVIDIA H100 PCIe',
+    'H200-SXM': 'NVIDIA H200',
+
+    # NVIDIA L-series
     'L4': 'NVIDIA L4',
     'L40': 'NVIDIA L40',
-    'RTX4000-Ada-SFF': 'NVIDIA RTX 4000 SFF Ada Generation',
+    'L40S': 'NVIDIA L40S',
+
+    # Ada generation (GeForce & RTX A)
+    'RTX2000-Ada': 'NVIDIA RTX 2000 Ada Generation',
     'RTX4000-Ada': 'NVIDIA RTX 4000 Ada Generation',
+    'RTX4000-Ada-SFF': 'NVIDIA RTX 4000 SFF Ada Generation',
+    'RTX5000-Ada': 'NVIDIA RTX 5000 Ada Generation',
     'RTX6000-Ada': 'NVIDIA RTX 6000 Ada Generation',
+
+    # NVIDIA RTX A-series
+    'RTXA2000': 'NVIDIA RTX A2000',
     'RTXA4000': 'NVIDIA RTX A4000',
     'RTXA4500': 'NVIDIA RTX A4500',
     'RTXA5000': 'NVIDIA RTX A5000',
     'RTXA6000': 'NVIDIA RTX A6000',
-    'RTX5000': 'Quadro RTX 5000',
+
+    # Tesla V100 variants
     'V100-16GB-FHHL': 'Tesla V100-FHHL-16GB',
-    'V100-16GB-SXM2': 'V100-SXM2-16GB',
-    'RTXA2000': 'NVIDIA RTX A2000',
-    'V100-16GB-PCIe': 'Tesla V100-PCIE-16GB'
+    'V100-16GB-SXM2': 'Tesla V100-SXM2-16GB',
+    'V100-32GB-SXM2': 'Tesla V100-SXM2-32GB',
+    'V100-16GB-PCIe': 'Tesla V100-PCIE-16GB',
 }
 
 
@@ -237,24 +263,36 @@ def _create_template_for_docker_login(
     return login_config.format_image(image_name), create_template_resp['id']
 
 
-def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
-           disk_size: int, image_name: str, ports: Optional[List[int]],
-           public_key: str, preemptible: Optional[bool], bid_per_gpu: float,
-           docker_login_config: Optional[Dict[str, str]]) -> str:
+def launch(
+    cluster_name: str,
+    node_type: str,
+    instance_type: str,
+    region: str,
+    zone: str,
+    disk_size: int,
+    image_name: str,
+    ports: Optional[List[int]],
+    public_key: str,
+    preemptible: Optional[bool],
+    bid_per_gpu: float,
+    docker_login_config: Optional[Dict[str, str]],
+    *,
+    network_volume_id: Optional[str] = None,
+    volume_mount_path: Optional[str] = None,
+) -> str:
     """Launches an instance with the given parameters.
 
-    Converts the instance_type to the RunPod GPU name, finds the specs for the
-    GPU, and launches the instance.
+    For CPU instances, we directly use the instance_type for launching the
+    instance.
+
+    For GPU instances, we convert the instance_type to the RunPod GPU name,
+    and finds the specs for the GPU, before launching the instance.
 
     Returns:
         instance_id: The instance ID.
     """
     name = f'{cluster_name}-{node_type}'
-    gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
-    gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
-    cloud_type = instance_type.split('_')[2]
 
-    gpu_specs = runpod.runpod.get_gpu(gpu_type)
     # TODO(zhwu): keep this align with setups in
     # `provision.kuberunetes.instance.py`
     setup_cmd = (
@@ -277,6 +315,9 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
         f'$(prefix_cmd) echo "{public_key}" >> ~/.ssh/authorized_keys; '
         '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
         '$(prefix_cmd) service ssh restart; '
+        '$(prefix_cmd) export -p > ~/container_env_var.sh && '
+        '$(prefix_cmd) '
+        'mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh; '
         '[ $(id -u) -eq 0 ] && echo alias sudo="" >> ~/.bashrc;sleep infinity')
     # Use base64 to deal with the tricky quoting issues caused by runpod API.
     encoded = base64.b64encode(setup_cmd.encode('utf-8')).decode('utf-8')
@@ -299,25 +340,48 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
     params = {
         'name': name,
         'image_name': image_name_formatted,
-        'gpu_type_id': gpu_type,
-        'cloud_type': cloud_type,
         'container_disk_in_gb': disk_size,
-        'min_vcpu_count': 4 * gpu_quantity,
-        'min_memory_in_gb': gpu_specs['memoryInGb'] * gpu_quantity,
-        'gpu_count': gpu_quantity,
         'country_code': region,
+        'data_center_id': zone,
         'ports': ports_str,
         'support_public_ip': True,
         'docker_args': docker_args,
         'template_id': template_id,
     }
 
+    # Optional network volume mount.
+    if volume_mount_path is not None:
+        params['volume_mount_path'] = volume_mount_path
+    if network_volume_id is not None:
+        params['network_volume_id'] = network_volume_id
+
+    # GPU instance types start with f'{gpu_count}x',
+    # CPU instance types start with 'cpu'.
+    is_cpu_instance = instance_type.startswith('cpu')
+    if is_cpu_instance:
+        # RunPod CPU instances can be uniquely identified by the instance_id.
+        params.update({
+            'instance_id': instance_type,
+        })
+    else:
+        gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
+        gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
+        cloud_type = instance_type.split('_')[2]
+        gpu_specs = runpod.runpod.get_gpu(gpu_type)
+        params.update({
+            'gpu_type_id': gpu_type,
+            'cloud_type': cloud_type,
+            'min_vcpu_count': 4 * gpu_quantity,
+            'min_memory_in_gb': gpu_specs['memoryInGb'] * gpu_quantity,
+            'gpu_count': gpu_quantity,
+        })
+
     if preemptible is None or not preemptible:
         new_instance = runpod.runpod.create_pod(**params)
     else:
         new_instance = runpod_commands.create_spot_pod(
             bid_per_gpu=bid_per_gpu,
-            **params,
+            **params,  # type: ignore[arg-type]
         )
 
     return new_instance['id']

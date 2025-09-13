@@ -95,7 +95,8 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     logger.info(f'{colorama.Fore.GREEN}Transfer job scheduled: '
                 f'{colorama.Style.RESET_ALL}'
                 f's3://{s3_bucket_name} -> gs://{gs_bucket_name} ')
-    logger.debug(json.dumps(operation, indent=4))
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(json.dumps(operation, indent=4))
     logger.info('Waiting for the transfer to finish')
     start = time.time()
     with rich_utils.safe_status('Transferring'):

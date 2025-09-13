@@ -1,0 +1,304 @@
+name: Release Build
+
+on:
+  schedule:
+    - cron: '0 0 1,15 * *'  # Runs at 00:00 on the 1st and 15th of each month (UTC)
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release version (e.g., 0.9.0)'
+        required: false
+        type: string
+      skip_version_checks:
+        description: 'Skip version verification steps'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  release-build:
+    runs-on: ubuntu-latest
+    outputs:
+      test_branch: ${{ steps.create_test_branch.outputs.test_branch }}
+      release_branch: ${{ steps.create_release_branch.outputs.release_branch }}
+      release_version: ${{ steps.determine_version.outputs.release_version }}
+      new_commit_sha: ${{ steps.create_test_branch.outputs.new_commit_sha }}
+      previous_release_branch: ${{ steps.find_previous_release_branch.outputs.previous_release_branch }}
+      previous_minor_release_branch: ${{ steps.find_previous_release_branch.outputs.previous_minor_release_branch }}
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          python-version: '3.10'
+
+      - name: Find latest release from PyPI
+        id: find_previous_release_branch
+        run: |
+          # Get the latest version from PyPI using JSON API
+          LATEST_PYPI_VERSION=$(curl -s https://pypi.org/pypi/skypilot/json | jq -r .info.version)
+          echo "Latest PyPI version: ${LATEST_PYPI_VERSION}"
+
+          # Determine the base branch for PyPI version
+          PREVIOUS_RELEASE_BRANCH="releases/${LATEST_PYPI_VERSION}"
+          echo "previous_release_branch=${PREVIOUS_RELEASE_BRANCH}" >> $GITHUB_OUTPUT
+          echo "Determined previous release branch: ${PREVIOUS_RELEASE_BRANCH}"
+
+          # Output the latest PyPI version for subsequent steps
+          echo "latest_pypi_version=${LATEST_PYPI_VERSION}" >> $GITHUB_OUTPUT
+
+          # Find the latest version of the previous minor version
+          MAJOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f1)
+          MINOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f2)
+          PREVIOUS_MINOR=$((MINOR - 1))
+          PREVIOUS_MINOR_LATEST_VERSION=$(curl -s https://pypi.org/pypi/skypilot/json | jq -r ".releases | keys[]" | grep "^${MAJOR}\.${PREVIOUS_MINOR}\." | sort -V | tail -n 1)
+          if [ -n "${PREVIOUS_MINOR_LATEST_VERSION}" ]; then
+            PREVIOUS_MINOR_RELEASE_BRANCH="releases/${PREVIOUS_MINOR_LATEST_VERSION}"
+            echo "previous_minor_release_branch=${PREVIOUS_MINOR_RELEASE_BRANCH}" >> $GITHUB_OUTPUT
+            echo "Determined previous minor release branch: ${PREVIOUS_MINOR_RELEASE_BRANCH}"
+          else
+            echo "Could not determine previous minor release branch."
+            echo "previous_minor_release_branch=" >> $GITHUB_OUTPUT
+          fi
+
+      # Determine release version based on trigger type
+      - name: Determine release version
+        id: determine_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_version }}" ]; then
+            # Manual trigger with input version provided
+            RELEASE_VERSION="${{ github.event.inputs.release_version }}"
+            echo "Using manually specified version: ${RELEASE_VERSION}"
+          else
+            # Scheduled trigger or manual trigger without version - extract version from latest release and increment patch
+            LATEST_VERSION="${{ steps.find_previous_release_branch.outputs.latest_pypi_version }}"
+            # Split version into parts
+            MAJOR=$(echo $LATEST_VERSION | cut -d. -f1)
+            MINOR=$(echo $LATEST_VERSION | cut -d. -f2)
+            PATCH=$(echo $LATEST_VERSION | cut -d. -f3)
+            # Always increment patch version
+            NEW_PATCH=$((PATCH + 1))
+            RELEASE_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+            echo "Incrementing from ${LATEST_VERSION} to ${RELEASE_VERSION}"
+          fi
+          echo "release_version=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Verify release version > latest PyPI version
+        id: verify_version
+        if: ${{ !github.event.inputs.skip_version_checks }}
+        run: |
+          RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
+          echo "Validated release version: ${RELEASE_VERSION}"
+
+          # Get the latest version from PyPI using JSON API
+          LATEST_PYPI_VERSION="${{ steps.find_previous_release_branch.outputs.latest_pypi_version }}"
+          echo "Latest PyPI version: ${LATEST_PYPI_VERSION}"
+
+          # Parse latest PyPI version
+          PYPI_MAJOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f1)
+          PYPI_MINOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f2)
+          PYPI_PATCH=$(echo $LATEST_PYPI_VERSION | cut -d. -f3)
+
+          # Calculate expected next patch version
+          NEXT_PATCH_VERSION="${PYPI_MAJOR}.${PYPI_MINOR}.$((PYPI_PATCH + 1))"
+
+          echo "Expected next patch version: ${NEXT_PATCH_VERSION}"
+
+          # Check if the determined release version is the expected next patch version
+          if [ "${RELEASE_VERSION}" = "${NEXT_PATCH_VERSION}" ]; then
+            echo "Success: Version check passed. Determined version ${RELEASE_VERSION} is the expected next patch version."
+          else
+            echo "Error: Determined release version ${RELEASE_VERSION} must be the next patch version (${NEXT_PATCH_VERSION}) compared to the latest PyPI version ${LATEST_PYPI_VERSION}."
+            exit 1
+          fi
+
+      - name: Create release branch
+        id: create_release_branch
+        run: |
+          RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
+          BRANCH_NAME="releases/${RELEASE_VERSION}"
+
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Check if branch already exists
+          if git ls-remote --exit-code --heads origin ${BRANCH_NAME} > /dev/null 2>&1; then
+            echo "Error: Release branch ${BRANCH_NAME} already exists. Please manually delete the branch first and then rerun the workflow."
+            exit 1
+          fi
+
+          # Create release branch
+          git checkout -b ${BRANCH_NAME}
+          echo "Created release branch: ${BRANCH_NAME}"
+          echo "release_branch=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+
+          git push -f origin ${BRANCH_NAME}
+          echo "Pushed release branch: ${BRANCH_NAME}"
+
+      - name: Set release version and create test branch
+        id: create_test_branch
+        run: |
+          RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
+          BRANCH_NAME="releases/${RELEASE_VERSION}"
+
+          # Checkout the base release branch
+          echo "Checking out the release branch ${BRANCH_NAME}..."
+          git checkout ${BRANCH_NAME}
+
+          # Make version changes
+          echo "Updating __version__ in sky/__init__.py to ${RELEASE_VERSION}..."
+          sed -i "s/__version__ = '.*'/__version__ = '${RELEASE_VERSION}'/g" sky/__init__.py
+          sed -i "s/image: berkeleyskypilot\/skypilot:.*/image: berkeleyskypilot\/skypilot:${RELEASE_VERSION}/g" charts/skypilot/values.yaml
+
+          # Create the test branch from the *current* state (base branch with version bump)
+          TEST_BRANCH="test_releases/${RELEASE_VERSION}"
+          echo "Creating test branch ${TEST_BRANCH}..."
+          git checkout -b ${TEST_BRANCH}
+
+          # Commit the version change on the new test branch
+          git add sky/__init__.py
+          git add charts/skypilot/values.yaml
+          git commit -m "Release ${RELEASE_VERSION}"
+
+          # Get the new commit SHA from the test branch
+          NEW_COMMIT_SHA=$(git rev-parse HEAD)
+          echo "new_commit_sha=${NEW_COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "New commit SHA on ${TEST_BRANCH}: ${NEW_COMMIT_SHA}"
+
+          # Push the new test branch
+          echo "Pushing ${TEST_BRANCH}..."
+          git push -f origin ${TEST_BRANCH}
+          echo "test_branch=${TEST_BRANCH}" >> $GITHUB_OUTPUT
+
+  smoke-tests:
+    needs: release-build
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ needs.release-build.outputs.new_commit_sha }}
+      branch: ${{ needs.release-build.outputs.test_branch }}
+      message: "Release ${{ needs.release-build.outputs.release_version }}"
+      pipeline: "full-smoke-tests-run"
+      timeout_minutes: 240
+      wait: true
+      fail_on_buildkite_failure: true
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  quicktest-core:
+    needs: release-build
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ needs.release-build.outputs.new_commit_sha }}
+      branch: ${{ needs.release-build.outputs.test_branch }}
+      message: "Release ${{ needs.release-build.outputs.release_version }}"
+      pipeline: "quicktest-core"
+      build_env_vars: '{"ARGS": "--base-branch ${{ needs.release-build.outputs.previous_release_branch }}"}'
+      timeout_minutes: 180
+      wait: true
+      fail_on_buildkite_failure: true
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  quicktest-core-previous-minor:
+    needs: release-build
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ needs.release-build.outputs.new_commit_sha }}
+      branch: ${{ needs.release-build.outputs.test_branch }}
+      message: "Release ${{ needs.release-build.outputs.release_version }} (vs previous minor)"
+      pipeline: "quicktest-core"
+      build_env_vars: '{"ARGS": "--base-branch ${{ needs.release-build.outputs.previous_minor_release_branch }}"}'
+      timeout_minutes: 180
+      wait: true
+      fail_on_buildkite_failure: true
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  smoke-tests-remote-server-kubernetes:
+    needs: release-build
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ needs.release-build.outputs.new_commit_sha }}
+      branch: ${{ needs.release-build.outputs.test_branch }}
+      message: "Release ${{ needs.release-build.outputs.release_version }} --remote-server --kubernetes"
+      pipeline: "smoke-tests"
+      build_env_vars: '{"ARGS": "--remote-server --kubernetes"}'
+      timeout_minutes: 60
+      wait: true
+      fail_on_buildkite_failure: true
+      sleep_seconds: 1800  # 30-minute delay to reduce buildkite resource usage
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  release-tests:
+    needs: release-build
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ needs.release-build.outputs.new_commit_sha }}
+      branch: ${{ needs.release-build.outputs.test_branch }}
+      message: "Release ${{ needs.release-build.outputs.release_version }}"
+      pipeline: "release"
+      wait: false
+      fail_on_buildkite_failure: false
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  create-pr:
+    needs: [release-build, smoke-tests, quicktest-core, quicktest-core-previous-minor, smoke-tests-remote-server-kubernetes, release-tests]
+    if: always() && needs.release-build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Create release branch and PR
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
+          TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
+          RELEASE_BRANCH: ${{ needs.release-build.outputs.release_branch }}
+          RELEASE_VERSION: ${{ needs.release-build.outputs.release_version }}
+          SMOKE_TEST_BUILD: ${{ needs.smoke-tests.outputs.build_number }}
+          QUICKTEST_BUILD: ${{ needs.quicktest-core.outputs.build_number }}
+          QUICKTEST_PREV_MINOR_BUILD: ${{ needs.quicktest-core-previous-minor.outputs.build_number }}
+          REMOTE_SERVER_K8S_BUILD: ${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}
+          RELEASE_TEST_BUILD: ${{ needs.release-tests.outputs.build_number }}
+        run: |
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Create PR with buildkite links
+          PR_BODY="Release ${RELEASE_VERSION}
+
+          Buildkite Test Links:
+          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/skypilot-1/smoke-tests/builds/${REMOTE_SERVER_K8S_BUILD}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")"
+          if [ "${{ needs.quicktest-core-previous-minor.result }}" == "success" ] || [ "${{ needs.quicktest-core-previous-minor.result }}" == "failure" ]; then
+            PR_BODY="${PR_BODY}
+          - [Quicktest Core (vs Previous Minor)](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_PREV_MINOR_BUILD}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")"
+          fi
+          PR_BODY="${PR_BODY}
+          - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${RELEASE_TEST_BUILD}) - ⏳ (not waiting for completion)
+
+          *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*"
+
+          echo "Creating PR from ${TEST_BRANCH} to ${RELEASE_BRANCH}"
+
+          gh pr create --base ${RELEASE_BRANCH} --head ${TEST_BRANCH} \
+            --title "Release ${RELEASE_VERSION}" \
+            --body "${PR_BODY}"

@@ -2,9 +2,19 @@ name: Build and Publish Helm Charts
 description: Build and publish docker image and Helm charts for SkyPilot.
 
 on:
-  schedule:
-    # Set the time to be 20 mins after the pypi nightly build
-    - cron: '55 10 * * *' # 10:55am UTC, 2:55am PST, 5:55am EST
+  workflow_call:
+    inputs:
+      package_name:
+        description: 'SkyPilot PyPI package name'
+        required: true
+        type: string
+    secrets:
+      DOCKER_USERNAME:
+        required: true
+      DOCKER_PASSWORD:
+        required: true
+      HELM_DEPLOY_KEY:
+        required: true
   workflow_dispatch:
     inputs:
       package_name:
@@ -20,9 +30,16 @@ jobs:
   set-package:
     runs-on: ubuntu-latest
     outputs:
-      package_name: ${{ github.event_name == 'workflow_dispatch' && inputs.package_name || 'skypilot-nightly' }}
+      package_name: ${{ inputs.package_name }}
     steps:
-      - run: echo "Using package ${{ github.event_name == 'workflow_dispatch' && inputs.package_name || 'skypilot-nightly' }}"
+      - name: Validate package name
+        run: |
+          if [[ "${{ inputs.package_name }}" != "skypilot-nightly" && "${{ inputs.package_name }}" != "skypilot" ]]; then
+            echo "Error: package_name must be either 'skypilot-nightly' or 'skypilot'"
+            exit 1
+          fi
+      - name: Echo package name
+        run: echo "Using package ${{ inputs.package_name }}"
 
   docker-build:
     needs: set-package
@@ -43,3 +60,16 @@ jobs:
     secrets:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       HELM_DEPLOY_KEY: ${{ secrets.HELM_DEPLOY_KEY }}
+
+  smoke-tests:
+    needs: [set-package, docker-build, publish-helm]
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ github.sha }}
+      branch: ${{ github.ref_name }}
+      message: "helm-docker-release deploy tests ${{ needs.set-package.outputs.package_name }} ${{ needs.docker-build.outputs.version }}"
+      pipeline: "smoke-tests"
+      build_env_vars: '{"ARGS": "--gcp --helm-package ${{ needs.set-package.outputs.package_name }} --helm-version ${{ needs.docker-build.outputs.version }} -k test_helm_deploy_gke"}'
+      timeout_minutes: 30
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}

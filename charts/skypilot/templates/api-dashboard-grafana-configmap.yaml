@@ -1,0 +1,13 @@
+{{- if and .Values.grafana.enabled .Values.grafana.sidecar.dashboards.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-api-server-overview-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}-api
+    grafana_dashboard: "true"
+data:
+  api-server-overview.json: |
+{{ .Files.Get "manifests/api-server-overview.json" | indent 4 }}
+{{- end }}

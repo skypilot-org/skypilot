@@ -9,7 +9,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
 RUN rm -rf /etc/apt/sources.list.d/cuda* && \
     apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat-openbsd curl -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat-openbsd curl jq -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup SSH and generate hostkeys

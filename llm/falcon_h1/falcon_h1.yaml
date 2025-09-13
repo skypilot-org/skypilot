@@ -1,0 +1,50 @@
+# Falcon H1 Series Deployment with vLLM on SkyPilot
+# Supports: Falcon-H1-0.5B, 1.5B, 3B, 34B models
+
+resources:
+  accelerators: A100:8  # Use A100-80GB:8 for 34B model
+  ports: 8000
+  disk_tier: best
+  use_spot: true
+
+envs: 
+  MODEL_NAME: tiiuae/Falcon-H1-34B-Instruct
+  MAX_MODEL_LEN: 4096
+
+setup: |
+  uv pip install vllm
+  # Install transformers from source (Falcon H1 not in stable release yet)
+  uv pip install git+https://github.com/huggingface/transformers.git
+
+run: |
+  # Falcon H1 models use Mamba n_groups=2
+  # This requires tensor_parallel_size to be 1 or 2
+  
+  TP_SIZE=2
+  DP_SIZE=$((SKYPILOT_NUM_GPUS_PER_NODE / TP_SIZE))
+  
+  echo "=== Falcon H1 Configuration ==="
+  echo "Model: $MODEL_NAME"
+  echo "GPUs: $SKYPILOT_NUM_GPUS_PER_NODE (TP=$TP_SIZE, DP=$DP_SIZE)"
+  echo "=============================="
+  
+  python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --tensor-parallel-size $TP_SIZE \
+    --data-parallel-size $DP_SIZE \
+    --model $MODEL_NAME \
+    --max-model-len $MAX_MODEL_LEN
+
+service:
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 2
+    target_qps_per_replica: 5
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1

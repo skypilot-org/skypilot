@@ -3,35 +3,22 @@ import argparse
 import hashlib
 import os
 import subprocess
-from typing import Tuple
+from typing import Dict, Optional, Tuple
 
-from kubernetes import client
-from kubernetes import config
+import colorama
 import yaml
 
-import sky
+from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import directory_utils
 from sky.utils import rich_utils
 
 
-def prerequisite_check() -> Tuple[bool, str]:
-    """Checks if kubectl is installed and kubeconfig is set up"""
-    reason = ''
-    prereq_ok = False
-    try:
-        subprocess.run(['kubectl', 'get', 'pods'],
-                       check=True,
-                       capture_output=True)
-        prereq_ok = True
-    except FileNotFoundError:
-        reason = 'kubectl not found. Please install kubectl and try again.'
-    except subprocess.CalledProcessError as e:
-        output = e.output.decode('utf-8')
-        reason = 'Error running kubectl: ' + output
-    return prereq_ok, reason
+def _format_string(str_to_format: str, colorama_format: str) -> str:
+    return f'{colorama_format}{str_to_format}{colorama.Style.RESET_ALL}'
 
 
-def cleanup() -> Tuple[bool, str]:
+def cleanup(context: Optional[str] = None) -> Tuple[bool, str]:
     """Deletes all Kubernetes resources created by this script
 
     Used to provide idempotency when the script is run multiple times. Also
@@ -42,11 +29,12 @@ def cleanup() -> Tuple[bool, str]:
                    'replicasets,configmaps,secrets,pv,pvc,clusterrole,'
                    'serviceaccount,clusterrolebinding -n kube-system '
                    '-l job=sky-gpu-labeler')
-
+    if context:
+        del_command += f' --context {context}'
     success = False
     reason = ''
-    with rich_utils.safe_status('Cleaning up existing GPU labeling '
-                                'resources'):
+    with rich_utils.client_status('Cleaning up existing GPU labeling '
+                                  'resources'):
         try:
             subprocess.run(del_command.split(), check=True, capture_output=True)
             success = True
@@ -62,32 +50,47 @@ def get_node_hash(node_name: str):
     return md5_hash[:32]
 
 
-def label():
-    deletion_success, reason = cleanup()
+def label(context: Optional[str] = None, wait_for_completion: bool = True):
+    deletion_success, reason = cleanup(context=context)
     if not deletion_success:
         print(reason)
         return
 
-    sky_dir = os.path.dirname(sky.__file__)
-    manifest_dir = os.path.join(sky_dir, 'utils/kubernetes')
+    unlabeled_gpu_nodes = kubernetes_utils.get_unlabeled_accelerator_nodes(
+        context=context)
+
+    if not unlabeled_gpu_nodes:
+        print('No unlabeled GPU nodes found in the cluster. If you have '
+              'unlabeled GPU nodes, please ensure that they have the resource '
+              f'`{kubernetes_utils.get_gpu_resource_key(context)}: '
+              '<number of GPUs>` in their capacity.')
+        return
+
+    print(
+        _format_string(
+            f'Found {len(unlabeled_gpu_nodes)} '
+            'unlabeled GPU nodes in the cluster', colorama.Fore.YELLOW))
+
+    manifest_dir = os.path.join(directory_utils.get_sky_dir(),
+                                'utils/kubernetes')
 
     # Apply the RBAC manifest using kubectl since it contains multiple resources
-    with rich_utils.safe_status('Setting up GPU labeling'):
+    with rich_utils.client_status('Setting up GPU labeling'):
         rbac_manifest_path = os.path.join(manifest_dir,
                                           'k8s_gpu_labeler_setup.yaml')
         try:
-            subprocess.check_output(
-                ['kubectl', 'apply', '-f', rbac_manifest_path])
+            apply_command = ['kubectl', 'apply', '-f', rbac_manifest_path]
+            if context:
+                apply_command += ['--context', context]
+            subprocess.check_output(apply_command)
         except subprocess.CalledProcessError as e:
             output = e.output.decode('utf-8')
             print('Error setting up GPU labeling: ' + output)
             return
 
-    with rich_utils.safe_status('Creating GPU labeler jobs'):
-        config.load_kube_config()
-
-        v1 = client.CoreV1Api()
-        batch_v1 = client.BatchV1Api()
+    jobs_to_node_names: Dict[str, str] = {}
+    with rich_utils.client_status('Creating GPU labeler jobs'):
+        batch_v1 = kubernetes.batch_api(context=context)
         # Load the job manifest
         job_manifest_path = os.path.join(manifest_dir,
                                          'k8s_gpu_labeler_job.yaml')
@@ -95,20 +98,10 @@ def label():
         with open(job_manifest_path, 'r', encoding='utf-8') as file:
             job_manifest = yaml.safe_load(file)
 
-        # Iterate over nodes
-        nodes = v1.list_node().items
-
-        # Get the list of nodes with GPUs
-        gpu_nodes = []
-        for node in nodes:
-            if kubernetes_utils.get_gpu_resource_key() in node.status.capacity:
-                gpu_nodes.append(node)
-
-        print(f'Found {len(gpu_nodes)} GPU nodes in the cluster')
-
         # Check if the 'nvidia' RuntimeClass exists
         try:
-            nvidia_exists = kubernetes_utils.check_nvidia_runtime_class()
+            nvidia_exists = kubernetes_utils.check_nvidia_runtime_class(
+                context=context)
         except Exception as e:  # pylint: disable=broad-except
             print('Error occurred while checking for nvidia RuntimeClass: '
                   f'{str(e)}')
@@ -125,12 +118,15 @@ def label():
         else:
             print('Using default RuntimeClass for GPU labeling.')
 
-        for node in gpu_nodes:
+        for node in unlabeled_gpu_nodes:
             node_name = node.metadata.name
 
             # Modify the job manifest for the current node
-            job_manifest['metadata']['name'] = ('sky-gpu-labeler-'
-                                                f'{get_node_hash(node_name)}')
+            job_name = ('sky-gpu-labeler-'
+                        f'{get_node_hash(node_name)}')
+            jobs_to_node_names[job_name] = node_name
+            job_manifest['metadata']['name'] = job_name
+
             job_manifest['spec']['template']['spec']['nodeSelector'] = {
                 'kubernetes.io/hostname': node_name
             }
@@ -138,18 +134,85 @@ def label():
 
             # Create the job for this node`
             batch_v1.create_namespaced_job(namespace, job_manifest)
-            print(f'Created GPU labeler job for node {node_name}')
-    if not gpu_nodes:
-        print('No GPU nodes found in the cluster. If you have GPU nodes, '
-              'please ensure that they have the label '
-              f'`{kubernetes_utils.get_gpu_resource_key()}: <number of GPUs>`')
+            print(
+                _format_string(f'Created GPU labeler job for node {node_name}',
+                               colorama.Style.DIM))
+
+    context_str = f' --context {context}' if context else ''
+
+    if wait_for_completion:
+        # Wait for the job to complete
+        with rich_utils.client_status(
+                'Waiting for GPU labeler jobs to complete'):
+            success = wait_for_jobs_completion(jobs_to_node_names,
+                                               'kube-system',
+                                               context=context)
+        if success:
+            print(
+                _format_string('✅ GPU labeling completed successfully',
+                               colorama.Fore.GREEN))
+        else:
+            print(_format_string('❌ GPU labeling failed', colorama.Fore.RED))
+        cleanup(context=context)
     else:
-        print('GPU labeling started - this may take 10 min or more to complete.'
-              '\nTo check the status of GPU labeling jobs, run '
-              '`kubectl get jobs -n kube-system -l job=sky-gpu-labeler`'
-              '\nYou can check if nodes have been labeled by running '
-              '`kubectl describe nodes` and looking for labels of the format '
-              '`skypilot.co/accelerator: <gpu_name>`. ')
+        print(
+            f'GPU labeling started - this may take 10 min or more to complete.'
+            '\nTo check the status of GPU labeling jobs, run '
+            f'`kubectl get jobs -n kube-system '
+            f'-l job=sky-gpu-labeler{context_str}`'
+            '\nYou can check if nodes have been labeled by running '
+            f'`kubectl describe nodes{context_str}` '
+            'and looking for labels of the format '
+            '`skypilot.co/accelerator: <gpu_name>`. ')
+
+
+def wait_for_jobs_completion(jobs_to_node_names: Dict[str, str],
+                             namespace: str,
+                             context: Optional[str] = None,
+                             timeout: int = 60 * 20):
+    """Waits for a Kubernetes Job to complete or fail.
+
+    Args:
+        jobs_to_node_names: A dictionary mapping job names to node names.
+        namespace: The namespace the Job is in (default: "default").
+        timeout: Timeout in seconds (default: 1200 seconds = 20 minutes).
+
+    Returns:
+        True if the Job completed successfully, False if it failed or timed out.
+    """
+    batch_v1 = kubernetes.batch_api(context=context)
+    w = kubernetes.watch()
+    completed_jobs = []
+    for event in w.stream(func=batch_v1.list_namespaced_job,
+                          namespace=namespace,
+                          timeout_seconds=timeout):
+        job = event['object']
+        job_name = job.metadata.name
+        if job_name in jobs_to_node_names:
+            node_name = jobs_to_node_names[job_name]
+            if job.status and job.status.completion_time:
+                print(
+                    _format_string(
+                        f'GPU labeler job for node {node_name} '
+                        'completed successfully', colorama.Style.DIM))
+                completed_jobs.append(job_name)
+                num_remaining_jobs = len(jobs_to_node_names) - len(
+                    completed_jobs)
+                if num_remaining_jobs == 0:
+                    w.stop()
+                    return True
+            elif job.status and job.status.failed:
+                print(
+                    _format_string(
+                        f'GPU labeler job for node {node_name} failed',
+                        colorama.Style.DIM))
+                w.stop()
+                return False
+    print(
+        _format_string(
+            f'Timed out after waiting {timeout} seconds '
+            'for job to complete', colorama.Style.DIM))
+    return False  #Timed out
 
 
 def main():
@@ -165,18 +228,28 @@ def main():
                         action='store_true',
                         help='delete all GPU labeler resources in the '
                         'Kubernetes cluster.')
+    parser.add_argument('--context',
+                        type=str,
+                        help='the context to use for the Kubernetes cluster.')
+    parser.add_argument('--async',
+                        dest='async_completion',
+                        action='store_true',
+                        help='do not wait for the GPU labeling to complete.')
     args = parser.parse_args()
+    context = None
+    if args.context:
+        context = args.context
 
     # Check if kubectl is installed and kubeconfig is set up
-    prereq_ok, reason = prerequisite_check()
+    prereq_ok, reason = kubernetes_utils.check_credentials(context=context)
     if not prereq_ok:
         print(reason)
         return
 
     if args.cleanup:
-        cleanup()
+        cleanup(context=context)
     else:
-        label()
+        label(context=context, wait_for_completion=not args.async_completion)
 
 
 if __name__ == '__main__':

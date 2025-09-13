@@ -4,16 +4,38 @@ Autostop and Autodown
 ============================
 
 The **autostop** (or **autodown**) feature automatically stops (or tears down) a
-cluster after it becomes idle.
+cluster after it becomes :ref:`idle <auto-stop-setting-idleness-behavior>`.
 
 With autostop, users can simply submit jobs and leave their laptops, while
-**ensuring no unnecessary spending occurs**: after jobs have finished, the
-cluster(s) used will be automatically stopped (which can be restarted later).
+ensuring no unnecessary spending occurs. After jobs have finished, the
+clusters used will be automatically stopped, which can be restarted later.
 
-With autodown, the cluster(s) used will be automatically torn down (i.e.,
-terminated) instead.
+With autodown, the clusters used will be automatically torn down, i.e.,
+terminated.
 
-To schedule autostop for a cluster, use :code:`sky autostop` or ``sky launch -i <idle minutes>``:
+.. note::
+
+  The autostop/autodown logic is executed by the remote cluster.  Your local
+  machine does *not* need to stay up for them to take effect.
+
+Setting autostop
+~~~~~~~~~~~~~~~~
+
+To schedule autostop for a cluster, set autostop in the SkyPilot YAML:
+
+.. code-block:: yaml
+
+   resources:
+     autostop: true  # Stop after default idle minutes (5).
+
+     # Or:
+     autostop: 10m  # Stop after this many idle minutes.
+
+     # Or:
+     autostop:
+       idle_minutes: 10
+
+Alternatively, use :code:`sky autostop` or ``sky launch -i <idle minutes>``:
 
 .. code-block:: bash
 
@@ -29,7 +51,20 @@ To schedule autostop for a cluster, use :code:`sky autostop` or ``sky launch -i 
    # (Equivalent to the above) Use the -i flag:
    sky launch -d -c mycluster cluster.yaml -i 10
 
-To schedule autodown for a cluster, pass the ``--down`` flag to either :code:`sky autostop` or ``sky launch``:
+
+Setting autodown
+~~~~~~~~~~~~~~~~
+
+To schedule autodown for a cluster, set autodown in the SkyPilot YAML:
+
+.. code-block:: yaml
+
+   resources:
+     autostop:
+       idle_minutes: 10
+       down: true  # Use autodown.
+
+Alternatively, pass the ``--down`` flag to either :code:`sky autostop` or ``sky launch``:
 
 .. code-block:: bash
 
@@ -41,11 +76,9 @@ To schedule autodown for a cluster, pass the ``--down`` flag to either :code:`sk
    # Or:
    sky autostop mycluster2 -i 10 --down
 
-.. note::
 
-  The autostop/autodown logic will be automatically executed by the remote
-  cluster.  Your local machine does *not* need to stay up for them to take
-  effect.
+Canceling autostop/autodown
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To cancel any scheduled autostop/autodown on the cluster:
 
@@ -53,20 +86,56 @@ To cancel any scheduled autostop/autodown on the cluster:
 
    sky autostop mycluster --cancel
 
-To view the status of the cluster, use ``sky status [--refresh]``:
+Viewing autostop status
+~~~~~~~~~~~~~~~~~~~~~~~
+
+To view the status of the cluster, use ``sky dashboard`` or ``sky status``:
 
 .. code-block:: bash
 
    $ sky status
-   NAME         LAUNCHED    RESOURCES            STATUS   AUTOSTOP       COMMAND
-   mycluster    1 min ago   2x AWS(m4.2xlarge)   UP       10 min         sky launch -d -c ...
-   mycluster2   1 min ago   2x AWS(m4.2xlarge)   UP       10 min(down)   sky launch -d -c ...
+   NAME         INFRA           RESOURCES                     STATUS   AUTOSTOP       LAUNCHED
+   mycluster    AWS (us-east-1) 2x(cpus=8, m4.2xlarge, ...)   UP       10 min         1 min ago
+   mycluster2   AWS (us-east-1) 2x(cpus=8, m4.2xlarge, ...)   UP       10 min(down)   1 min ago
 
-   # Refresh the statuses by querying the cloud providers
-   $ sky status --refresh
-   I 06-27 13:36:11 backend_utils.py:2273] Autodowned cluster: mycluster2
-   NAME         LAUNCHED    RESOURCES            STATUS   AUTOSTOP  COMMAND
-   mycluster    11 min ago  2x AWS(m4.2xlarge)   STOPPED  10 min    sky launch -d -c ...
+Clusters that are autostopped/autodowned are automatically removed from the status table.
 
-Note that :code:`sky status` shows the cached statuses, which can be outdated for clusters with autostop/autodown scheduled.
-To query the latest statuses of those clusters, use :code:`sky status --refresh`.
+.. _auto-stop-setting-idleness-behavior:
+
+Setting idleness behavior
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A cluster is considered idle if there are no in‑progress jobs (pending or running)
+and no active SSH sessions. You can change the idleness criteria in SkyPilot YAML with
+:ref:`resources.autostop.wait_for <yaml-spec-resources-autostop>`.
+
+``wait_for`` can be set as one of the followings:
+
+- ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish.
+- ``jobs``: Only wait for in‑progress jobs — useful for ignoring long‑running SSH or IDE connections.
+- ``none``: Wait for nothing; autostop right after ``idle_minutes`` — useful for ignoring long‑running jobs (e.g., Jupyter notebooks) and enforcing a hard time limit.
+
+Examples:
+
+.. code-block:: yaml
+
+   resources:
+     autostop:
+       idle_minutes: 10
+       wait_for: jobs_and_ssh
+
+Alternatively, pass the ``--wait-for`` flag to either ``sky autostop`` or ``sky launch``:
+
+.. code-block:: bash
+
+   # Default: Running jobs and active SSH sessions reset the idleness timer.
+   sky launch -d -c mycluster cluster.yaml -i 10 --wait-for jobs_and_ssh
+
+   # Or:
+   sky autostop mycluster -i 10 --wait-for jobs_and_ssh
+
+   # Only running jobs reset the idleness timer.
+   sky autostop mycluster -i 10 --wait-for jobs
+
+   # Hard time limit: Stop after 10 minutes, regardless of running jobs or SSH sessions.
+   sky autostop mycluster -i 10 --wait-for none

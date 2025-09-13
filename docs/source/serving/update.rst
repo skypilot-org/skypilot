@@ -57,9 +57,9 @@ We can use :code:`sky serve status http-server` to check the status of the servi
     http-server  1        1m 41s  READY   2/2       44.206.240.249:30002
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  IP              LAUNCHED    RESOURCES       STATUS  REGION
-    http-server   1   1        54.173.203.169  2 mins ago  1x AWS(vCPU=2)  READY   us-east-1
-    http-server   2   1        52.87.241.103   2 mins ago  1x AWS(vCPU=2)  READY   us-east-1
+    SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED    INFRA                RESOURCES                                 STATUS  
+    http-server   1   1        http://54.173.203.169:8081  2 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY   
+    http-server   2   1        http://52.87.241.103:8081   2 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY   
 
 Service ``http-server`` has an initial version of 1.
 
@@ -102,12 +102,12 @@ SkyServe will trigger launching three new replicas.
     http-server  2        6m 15s  READY   2/5       44.206.240.249:30002
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  IP              LAUNCHED     RESOURCES       STATUS        REGION
-    http-server   1   1        54.173.203.169  6 mins ago   1x AWS(vCPU=2)  READY         us-east-1
-    http-server   2   1        52.87.241.103   6 mins ago   1x AWS(vCPU=2)  READY         us-east-1
-    http-server   3   2        -               21 secs ago  1x AWS(vCPU=2)  PROVISIONING  us-east-1
-    http-server   4   2        -               21 secs ago  1x AWS(vCPU=2)  PROVISIONING  us-east-1
-    http-server   5   2        -               21 secs ago  1x AWS(vCPU=2)  PROVISIONING  us-east-1
+    SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     INFRA                RESOURCES                                 STATUS       
+    http-server   1   1        http://54.173.203.169:8081  6 mins ago   AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY         
+    http-server   2   1        http://52.87.241.103:8081   6 mins ago   AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY         
+    http-server   3   2        -                           21 secs ago  AWS (us-east-1b)     1x(cpus=2, mem=8, m5.large, ...)          PROVISIONING  
+    http-server   4   2        -                           21 secs ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          PROVISIONING  
+    http-server   5   2        -                           21 secs ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          PROVISIONING  
 
 
 Whenever a new replica is ready, the traffic will be redirected to both old and new replicas.
@@ -121,12 +121,12 @@ Whenever a new replica is ready, the traffic will be redirected to both old and 
     http-server  1,2        10m 4s  READY   3/5       44.206.240.249:30002
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  IP              LAUNCHED     RESOURCES       STATUS         REGION
-    http-server   1   1        54.173.203.169  10 mins ago  1x AWS(vCPU=2)  READY          us-east-1
-    http-server   2   1        52.87.241.103   10 mins ago  1x AWS(vCPU=2)  READY          us-east-1
-    http-server   3   2        3.93.241.163    1 min ago    1x AWS(vCPU=2)  READY          us-east-1
-    http-server   4   2        -               1 min ago    1x AWS(vCPU=2)  PROVISIONING   us-east-1
-    http-server   5   2        -               1 min ago    1x AWS(vCPU=2)  PROVISIONING   us-east-1
+    SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     INFRA                RESOURCES                                 STATUS        
+    http-server   1   1        http://54.173.203.169:8081  10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY          
+    http-server   2   1        http://52.87.241.103:8081   10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY          
+    http-server   3   2        http://3.93.241.163:8081    1 min ago    AWS (us-east-1b)     1x(cpus=2, mem=8, m5.large, ...)          READY          
+    http-server   4   2        -                           1 min ago    AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          PROVISIONING   
+    http-server   5   2        -                           1 min ago    AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          PROVISIONING   
 
 
 Once the total number of both old and new replicas exceeds the requested number, old replicas will be scaled down.
@@ -140,12 +140,13 @@ Once the total number of both old and new replicas exceeds the requested number,
     http-server  1,2        10m 4s  READY   3/5       44.206.240.249:30002
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  IP              LAUNCHED     RESOURCES       STATUS         REGION
-    http-server   1   1        54.173.203.169  10 mins ago  1x AWS(vCPU=2)  SHUTTING_DOWN  us-east-1
-    http-server   2   1        52.87.241.103   10 mins ago  1x AWS(vCPU=2)  READY          us-east-1
-    http-server   3   2        3.93.241.163    1 min ago    1x AWS(vCPU=2)  READY          us-east-1
-    http-server   4   2        18.206.226.82   1 min ago    1x AWS(vCPU=2)  READY          us-east-1
-    http-server   5   2        -               1 min ago    1x AWS(vCPU=2)  PROVISIONING   us-east-1
+    SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     INFRA                RESOURCES                                 STATUS         
+    http-server   1   1        http://54.173.203.169:8081  10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY          
+    http-server   2   1        http://52.87.241.103:8081   10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY          
+    http-server   3   2        http://3.93.241.163:8081    1 min ago    AWS (us-east-1b)     1x(cpus=2, mem=8, m5.large, ...)          READY          
+    http-server   4   2        -                           1 min ago    AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          PROVISIONING   
+    http-server   5   2        -                           1 min ago    AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          PROVISIONING   
+
 
 Eventually, we will only have new replicas ready to serve user requests.
 
@@ -158,10 +159,10 @@ Eventually, we will only have new replicas ready to serve user requests.
     http-server  2        11m 42s  READY   3/3       44.206.240.249:30002
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  IP             LAUNCHED    RESOURCES       STATUS  REGION
-    http-server   3   2        3.93.241.163   3 mins ago  1x AWS(vCPU=2)  READY   us-east-1
-    http-server   4   2        18.206.226.82  3 mins ago  1x AWS(vCPU=2)  READY   us-east-1
-    http-server   5   2        3.26.232.31    1 min ago   1x AWS(vCPU=2)  READY   us-east-1
+    SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED    INFRA                RESOURCES                                 STATUS  
+    http-server   3   2        http://3.93.241.163:8081    3 mins ago  AWS (us-east-1b)     1x(cpus=2, mem=8, m5.large, ...)          READY   
+    http-server   4   2        http://18.206.226.82:8081   3 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY   
+    http-server   5   2        http://3.26.232.31:8081     1 min ago   AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY
 
 
 
@@ -210,12 +211,12 @@ SkyServe will trigger launching three new replicas.
     http-server  2        6m 15s  READY   2/5       44.206.240.249:30002
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  IP              LAUNCHED     RESOURCES       STATUS        REGION
-    http-server   1   1        54.173.203.169  6 mins ago   1x AWS(vCPU=2)  READY         us-east-1
-    http-server   2   1        52.87.241.103   6 mins ago   1x AWS(vCPU=2)  READY         us-east-1
-    http-server   3   2        -               21 secs ago  1x AWS(vCPU=2)  PROVISIONING  us-east-1
-    http-server   4   2        -               21 secs ago  1x AWS(vCPU=2)  PROVISIONING  us-east-1
-    http-server   5   2        -               21 secs ago  1x AWS(vCPU=2)  PROVISIONING  us-east-1
+    SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     INFRA                RESOURCES                                 STATUS       
+    http-server   1   1        http://54.173.203.169:8081  6 mins ago   AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY         
+    http-server   2   1        http://52.87.241.103:8081   6 mins ago   AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          READY         
+    http-server   3   2        -                           21 secs ago  AWS (us-east-1b)     1x(cpus=2, mem=8, m5.large, ...)          PROVISIONING  
+    http-server   4   2        -                           21 secs ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          PROVISIONING  
+    http-server   5   2        -                           21 secs ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          PROVISIONING  
 
 
 When a new replica is ready, the traffic will still be redirected to old replicas.
@@ -229,12 +230,12 @@ When a new replica is ready, the traffic will still be redirected to old replica
     http-server  1        10m 4s  READY   3/5       44.206.240.249:30002
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  IP              LAUNCHED     RESOURCES       STATUS         REGION
-    http-server   1   1        54.173.203.169  10 mins ago  1x AWS(vCPU=2)  READY          us-east-1
-    http-server   2   1        52.87.241.103   10 mins ago  1x AWS(vCPU=2)  READY          us-east-1
-    http-server   3   2        3.93.241.163    1 min ago    1x AWS(vCPU=4)  READY          us-east-1
-    http-server   4   2        -               1 min ago    1x AWS(vCPU=4)  PROVISIONING   us-east-1
-    http-server   5   2        -               1 min ago    1x AWS(vCPU=4)  PROVISIONING   us-east-1
+    SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     INFRA                RESOURCES                                   STATUS        
+    http-server   1   1        http://54.173.203.169:8081  10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)           SHUTTING_DOWN  
+    http-server   2   1        http://52.87.241.103:8081   10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)           READY          
+    http-server   3   2        http://3.93.241.163:8081    1 min ago    AWS (us-east-1b)     1x(cpus=4, mem=16, m5.xlarge, ...)        READY          
+    http-server   4   2        http://18.206.226.82:8081   1 min ago    AWS (us-east-1a)     1x(cpus=4, mem=16, m5.xlarge, ...)        READY          
+    http-server   5   2        -                           1 min ago    AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)           PROVISIONING   
 
 
 Once the total number of new replicas satisfies the requirements, traffics will be redirected to new replicas and old replicas will be scaled down.
@@ -248,12 +249,12 @@ Once the total number of new replicas satisfies the requirements, traffics will 
     http-server  2        10m 4s  READY   3/5       44.206.240.249:30002
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  IP              LAUNCHED     RESOURCES       STATUS         REGION
-    http-server   1   1        54.173.203.169  10 mins ago  1x AWS(vCPU=2)  SHUTTING_DOWN  us-east-1
-    http-server   2   1        52.87.241.103   10 mins ago  1x AWS(vCPU=2)  SHUTTING_DOWN  us-east-1
-    http-server   3   2        3.93.241.163    1 min ago    1x AWS(vCPU=4)  READY          us-east-1
-    http-server   4   2        18.206.226.82   1 min ago    1x AWS(vCPU=4)  READY          us-east-1
-    http-server   5   2        3.26.232.31     1 min ago    1x AWS(vCPU=4)  READY          us-east-1
+    SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     INFRA                RESOURCES                                 STATUS         
+    http-server   1   1        http://54.173.203.169:8081  10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          SHUTTING_DOWN  
+    http-server   2   1        http://52.87.241.103:8081   10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, m5.large, ...)          SHUTTING_DOWN  
+    http-server   3   2        http://3.93.241.163:8081    1 min ago    AWS (us-east-1b)     1x(cpus=4, mem=16, m5.xlarge, ...)        READY          
+    http-server   4   2        http://18.206.226.82:8081   1 min ago    AWS (us-east-1a)     1x(cpus=4, mem=16, m5.xlarge, ...)        READY          
+    http-server   5   2        http://3.26.232.31:8081     1 min ago    AWS (us-east-1a)     1x(cpus=4, mem=16, m5.xlarge, ...)        READY
 
 Eventually, same as the rolling update, we will only have new replicas ready to serve user requests.
 
@@ -266,7 +267,7 @@ Eventually, same as the rolling update, we will only have new replicas ready to 
     http-server  2        11m 42s  READY   3/3       44.206.240.249:30002
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  IP             LAUNCHED    RESOURCES       STATUS  REGION
-    http-server   3   2        3.93.241.163   3 mins ago  1x AWS(vCPU=4)  READY   us-east-1
-    http-server   4   2        18.206.226.82  3 mins ago  1x AWS(vCPU=4)  READY   us-east-1
-    http-server   5   2        3.26.232.31    1 min ago   1x AWS(vCPU=4)  READY   us-east-1
+    SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     INFRA                RESOURCES                                 STATUS         
+    http-server   3   2        http://3.93.241.163:8081    3 mins ago   AWS (us-east-1b)     1x(cpus=4, mem=16, m5.xlarge, ...)        READY          
+    http-server   4   2        http://18.206.226.82:8081   3 mins ago   AWS (us-east-1a)     1x(cpus=4, mem=16, m5.xlarge, ...)        READY          
+    http-server   5   2        http://3.26.232.31:8081     1 min ago    AWS (us-east-1a)     1x(cpus=4, mem=16, m5.xlarge, ...)        READY

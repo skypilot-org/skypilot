@@ -11,13 +11,13 @@ resources:
   any_of:
     # Avoid using docker image for lambda due to the docker is not supported on
     # Lambda yet, but the base image works.
-    - cloud: lambda
+    - infra: lambda
       image_id: null
-    - cloud: aws
-    - cloud: gcp
-    - cloud: azure
-    - cloud: fluidstack
-    - cloud: kubernetes
+    - infra: aws
+    - infra: gcp
+    - infra: azure
+    - infra: fluidstack
+    - infra: kubernetes
   
 file_mounts:
   ~/.cache/huggingface:

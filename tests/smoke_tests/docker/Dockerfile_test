@@ -1,0 +1,154 @@
+# Stage 1: Install Google Cloud SDK using APT
+FROM python:3.10-slim AS gcloud-apt-install
+
+RUN apt-get update && \
+    apt-get install -y curl gnupg lsb-release && \
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" > /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
+    apt-get update && \
+    apt-get install --no-install-recommends -y \
+        google-cloud-cli \
+        google-cloud-cli-gke-gcloud-auth-plugin && \
+    apt-get clean && rm -rf /usr/lib/google-cloud-sdk/platform/bundledpythonunix \
+    /var/lib/apt/lists/*
+
+# Stage 2: Main image
+FROM python:3.10-slim
+
+# Copy Google Cloud SDK from Stage 1
+COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
+
+# Set environment variable
+ENV PATH="/opt/google-cloud-sdk/bin:$PATH"
+
+# Usage:
+# Command on Mac:
+# Note: The --build-arg ALL_PROXY and proxy environment variables can be removed if you don't need to use a proxy
+# docker build -t sky-remote-test-image --build-arg USERNAME=$(whoami) --build-arg ALL_PROXY=socks5://host.docker.internal:7890 -f tests/smoke_tests/docker/Dockerfile_test .
+#
+# Full command with all mounts, credential copying, and proxy settings:
+# docker run -it --name sky-test \
+#   -v "$(pwd)":/skypilot:rw \
+#   -v "$HOME/.kube/config":"/home/$(whoami)/.kube/config" \
+#   -v "$HOME/.aws":"/home/$(whoami)/.aws" \
+#   -v "$HOME/.azure":"/home/$(whoami)/.azure" \
+#   -v "$HOME/.config/gcloud":"/home/$(whoami)/.config/gcloud" \
+#   -e https_proxy=http://host.docker.internal:7890 \
+#   -e http_proxy=http://host.docker.internal:7890 \
+#   -e all_proxy=socks5://host.docker.internal:7890 \
+#   -e no_proxy=localhost,127.0.0.1,0.0.0.0 \
+#   --add-host=host.docker.internal:host-gateway \
+#   -p 46581:46580 \
+#   sky-remote-test-image
+
+# Add build arguments
+ARG USERNAME
+RUN if [ -z "$USERNAME" ]; then echo "ERROR: USERNAME build argument is required. Use --build-arg USERNAME=${USER}"; exit 1; fi
+RUN echo "Building for user: $USERNAME"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies
+RUN apt update -y && \
+    apt install -y \
+    wget \
+    sudo \
+    curl \
+    unzip \
+    htop \
+    vim \
+    git \
+    dnsutils \
+    expect \
+    netcat-traditional \
+    socat \
+    uuid-runtime \
+    docker.io \
+    rsync \
+    jq \
+    apache2-utils
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(case "$(uname -m)" in \
+        "x86_64") echo "amd64" ;; \
+        "aarch64") echo "arm64" ;; \
+        *) echo "$(uname -m)" ;; \
+    esac)/kubectl" && \
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    rm kubectl
+
+# Add a custom user with sudo privileges
+RUN useradd -m ${USERNAME} && \
+    echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Switch to the new user
+USER ${USERNAME}
+
+# Set bash as the default shell
+SHELL ["/bin/bash", "-c"]
+
+# Set environment variables persistently
+ENV PATH="/home/${USERNAME}/miniconda3/bin:${PATH}"
+
+RUN mkdir -p ~/sky_workdir ~/log ~/tmp-workdir && \
+    touch ~/tmp-workdir/tmp\ file
+
+WORKDIR /home/${USERNAME}/sky_workdir
+
+# Install Miniconda
+RUN MINICONDA_ARCH=$(case "$(uname -m)" in \
+        "x86_64") echo "x86_64" ;; \
+        "aarch64") echo "aarch64" ;; \
+        *) echo "$(uname -m)" ;; \
+    esac) && \
+    echo "Installing Miniconda for architecture: $MINICONDA_ARCH" && \
+    curl -fsSL "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-${MINICONDA_ARCH}.sh" -o miniconda.sh && \
+    chmod +x miniconda.sh && \
+    ./miniconda.sh -b -p ~/miniconda3 && \
+    rm miniconda.sh
+
+# Initialize conda & install Python
+RUN source ~/miniconda3/etc/profile.d/conda.sh && \
+    conda init bash && \
+    conda config --set auto_activate_base true
+
+# Add conda initialization to .bashrc (for interactive shells)
+RUN echo "source /home/${USERNAME}/miniconda3/etc/profile.d/conda.sh" >> ~/.bashrc
+
+RUN mkdir -p ~/sky_workdir/skypilot
+COPY . /home/${USERNAME}/sky_workdir/skypilot/
+
+WORKDIR /home/${USERNAME}/sky_workdir/skypilot
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+
+# Install packages using conda environment
+RUN source ~/miniconda3/etc/profile.d/conda.sh && \
+    conda activate base && \
+    export PATH="$PATH:$HOME/.local/bin" && \
+    uv pip uninstall skypilot && \
+    uv pip install --prerelease=allow "azure-cli>=2.65.0" && \
+    uv pip install -r requirements-dev.txt && \
+    uv pip install -e ".[all]" && \
+    # Install httpx with SOCKS support for proxy environments - necessary when system has proxy enabled
+    uv pip install httpx[socks]
+
+# Install Helm
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Copy the entrypoint script
+COPY tests/smoke_tests/docker/entrypoint.sh /home/${USERNAME}/entrypoint.sh
+COPY tests/smoke_tests/docker/stop_sky_resource.sh /home/${USERNAME}/stop_sky_resource.sh
+
+# Debug and set permissions
+RUN sudo chown ${USERNAME}:${USERNAME} ~/entrypoint.sh && \
+    sudo chown ${USERNAME}:${USERNAME} ~/stop_sky_resource.sh && \
+    ls -la ~/entrypoint.sh && \
+    ls -la ~/stop_sky_resource.sh && \
+    chmod +x ~/entrypoint.sh && \
+    chmod +x ~/stop_sky_resource.sh
+
+# Set the entrypoint
+ENTRYPOINT /bin/bash ~/entrypoint.sh

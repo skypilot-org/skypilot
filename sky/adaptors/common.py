@@ -1,20 +1,26 @@
 """Lazy import for modules to avoid import error when not used."""
+from importlib import util as importlib_util
 import functools
 import importlib
 import threading
-from typing import Any, Callable, Optional, Tuple
+import types
+from typing import Any, Callable, List, Optional, Tuple
 
 
-class LazyImport:
-    """Lazy importer for heavy modules or cloud modules only when enabled.
+class LazyImport(types.ModuleType):
+    """Lazy importer for modules.
 
-    We use this for pandas and networkx, as they can be time-consuming to import
-    (0.1-0.2 seconds). With this class, we can avoid the unnecessary import time
-    when the module is not used (e.g., `networkx` should not be imported for
-    `sky status and `pandas` should not be imported for `sky exec`).
+    This is mainly used in two cases:
+    1. Heavy 3rd party modules: They can be time-consuming to import
+    and not necessary for all `sky` imports, e.g., numpy(700+ms),
+    pendulum(500+ms), cryptography(500+ms), pandas(200+ms), and
+    networkx(100+ms), etc. With this class, we can avoid the
+    unnecessary import time when the module is not used (e.g.,
+    `networkx` should not be imported for `sky status` and `pandas`
+    should not be imported for `sky exec`).
 
-    We also use this for cloud adaptors, because we do not want to import the
-    cloud dependencies when it is not enabled.
+    2. Cloud modules in cloud adaptors: cloud dependencies are only required
+    when a cloud is enabled, so we only import them when actually needed.
     """
 
     def __init__(self,
@@ -73,3 +79,25 @@ def load_lazy_modules(modules: Tuple[LazyImport, ...]):
         return wrapper
 
     return decorator
+
+
+def can_import_modules(module_names: List[str]) -> bool:
+    """ module availability without actually importing it to
+    save memory footprint.
+
+    Args:
+        module_names: List[str], the names of the modules to check.
+
+    Returns:
+        True if all modules are available, False otherwise.
+        If a module exists in sys.modules, but is set to None,
+        then it is considered as not available.
+    """
+    try:
+        for module_name in module_names:
+            module_spec = importlib_util.find_spec(module_name)
+            if module_spec is None:
+                return False
+        return True
+    except ValueError:
+        return False

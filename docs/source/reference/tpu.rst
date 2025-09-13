@@ -75,8 +75,8 @@ Here is a complete task YAML that trains a `Llama 3 model <https://ai.meta.com/b
    resources:
       accelerators: tpu-v6e-8 # Fill in the accelerator type you want to use
 
-   envs:
-      HF_TOKEN: # fill in your huggingface token
+   secrets:
+      HF_TOKEN: null # fill in your huggingface token
 
    workdir: .
 
@@ -132,7 +132,7 @@ Launch it with:
 
 .. code-block:: console
 
-   $ HF_TOKEN=<your-huggingface-token> sky launch train-llama3-8b.yaml -c llama-3-train --env HF_TOKEN
+   $ HF_TOKEN=<your-huggingface-token> sky launch train-llama3-8b.yaml -c llama-3-train --secret HF_TOKEN
 
 You should see the following outputs when the job finishes.
 
@@ -190,7 +190,7 @@ We can run the same Llama 3 training job in on a TPU Pod with the following comm
 
 .. code-block:: console
 
-   $ HF_TOKEN=<your-huggingface-token> sky launch -c tpu-pod --gpus tpu-v6e-32 train-llama3-8b.yaml --env HF_TOKEN
+   $ HF_TOKEN=<your-huggingface-token> sky launch -c tpu-pod --gpus tpu-v6e-32 train-llama3-8b.yaml --secret HF_TOKEN
 
 You should see the following output.
 
@@ -237,7 +237,7 @@ To submit more jobs to  the same TPU Pod, use :code:`sky exec`:
 
 .. code-block:: console
 
-   $ HF_TOKEN=<your-huggingface-token> sky exec tpu-pod train-llama3-8b.yaml --env HF_TOKEN
+   $ HF_TOKEN=<your-huggingface-token> sky exec tpu-pod train-llama3-8b.yaml --secret HF_TOKEN
 
 
 **You can find more useful examples for Serving LLMs on TPUs in** `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu/v6e>`__.

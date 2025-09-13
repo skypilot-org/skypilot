@@ -1,5 +1,6 @@
 from typing import List
 
+import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
@@ -15,7 +16,15 @@ def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
 
 
 # ---------- Test multi-tenant ----------
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
+@pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
 def test_multi_tenant(generic_cloud: str):
+    if smoke_tests_utils.services_account_token_configured_in_env_file():
+        pytest.skip(
+            'Skipping multi-tenant test because a service account token is '
+            'configured. The service account token represents a unique user, '
+            'so USER_ENV_VAR cannot be used to simulate multiple users.')
+
     name = smoke_tests_utils.get_cluster_name()
     user_1 = 'abcdef12'
     user_1_name = 'user1'
@@ -97,12 +106,48 @@ def test_multi_tenant(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
+@pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
 def test_multi_tenant_managed_jobs(generic_cloud: str):
+    if smoke_tests_utils.services_account_token_configured_in_env_file():
+        pytest.skip(
+            'Skipping multi-tenant test because a service account token is '
+            'configured. The service account token represents a unique user, '
+            'so USER_ENV_VAR cannot be used to simulate multiple users.')
+
     name = smoke_tests_utils.get_cluster_name()
     user_1 = 'abcdef12'
     user_1_name = 'user1'
     user_2 = 'abcdef13'
     user_2_name = 'user2'
+
+    controller_related_test_cmds = []
+    # Only enable controller related tests for non-consolidation mode.
+    # For consolidation mode, the controller is the same with API server,
+    # hence no `sky status` output is available nor controller down is supported.
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        controller_related_test_cmds = [
+            'echo "==== Test jobs controller cluster user ===="',
+            f's=$(sky status -u) && echo "$s" && echo "$s" | grep sky-jobs-controller- | grep -v {user_1_name} | grep -v {user_2_name}',
+            'echo "==== Test controller down blocked by other users ===="',
+            *set_user(user_1, user_1_name, [
+                f'sky jobs launch -n {name}-3 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d sleep 1000',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f'{name}-3',
+                    job_status=[
+                        sky.ManagedJobStatus.PENDING,
+                        sky.ManagedJobStatus.DEPRECATED_SUBMITTED,
+                        sky.ManagedJobStatus.STARTING,
+                        sky.ManagedJobStatus.RUNNING
+                    ],
+                    timeout=60),
+            ]),
+            *set_user(user_2, user_2_name, [
+                f'controller=$(sky status -u | grep sky-jobs-controller- | awk \'{{print $1}}\') && echo "$controller" && echo delete | sky down "$controller" && exit 1 || true',
+                f'sky jobs cancel -y -n {name}-3',
+            ]),
+        ]
 
     test = smoke_tests_utils.Test(
         'test_multi_tenant_managed_jobs',
@@ -120,28 +165,51 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                 f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-2 | grep SUCCEEDED',
                 f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep {name}-2 | grep SUCCEEDED',
             ]),
-            'echo "==== Test jobs controller cluster user ===="',
-            f's=$(sky status -u) && echo "$s" && echo "$s" | grep sky-jobs-controller- | grep -v {user_1_name} | grep -v {user_2_name}',
-            'echo "==== Test controller down blocked by other users ===="',
-            *set_user(user_1, user_1_name, [
-                f'sky jobs launch -n {name}-3 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d sleep 1000',
-                smoke_tests_utils.
-                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f'{name}-3',
-                    job_status=[
-                        sky.ManagedJobStatus.PENDING,
-                        sky.ManagedJobStatus.SUBMITTED,
-                        sky.ManagedJobStatus.STARTING,
-                        sky.ManagedJobStatus.RUNNING
-                    ],
-                    timeout=60),
-            ]),
-            *set_user(user_2, user_2_name, [
-                f'controller=$(sky status -u | grep sky-jobs-controller- | awk \'{{print $1}}\') && echo "$controller" && echo delete | sky down "$controller" && exit 1 || true',
-                f'sky jobs cancel -y -n {name}-3',
-            ]),
+            *controller_related_test_cmds,
         ],
         f'sky jobs cancel -y -n {name}-1; sky jobs cancel -y -n {name}-2; sky jobs cancel -y -n {name}-3',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# Test request scheduling in different API server deployment modes, currently
+# we rely on --remote-server flag to test the two different scenarios:
+# 1. with --remote-server: API server is deployed remotely with `--deploy` flag
+# 2. without --remote-server: API server is launched before smoke test using
+#    `sky api start`, same as the server being automatically launched for the
+#    first time user running sky command.
+# TODO(aylei): test different modes without relying on global smoke test setup
+# when we can launch isolated API server instance in each case.
+def test_requests_scheduling(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    user = "abcdef21"
+    username = f"dispatch-{smoke_tests_utils.test_id}"
+    test = smoke_tests_utils.Test(
+        'test_requests_scheduling',
+        [
+            'echo "==== Test queue dispatch ===="',
+            'sky api info',
+            *set_user(
+                user,
+                username,
+                [
+                    f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -n dispatch tests/test_yamls/minimal.yaml',
+                    f'for i in {{1..10}}; do sky exec {name} -n job-${{i}} "sleep 60" --async; done',
+                    # Wait for all reqeusts get scheduled and executed, do not check the status here to make this case focus.
+                    (f's=$(sky api status -a | grep {username});'
+                     'timeout=60; start=$SECONDS; '
+                     'until ! echo "$s" | grep "" | grep "PENDING|RUNNING"; do '
+                     '  if [ $((SECONDS - start)) -gt $timeout ]; then '
+                     '    echo "Timeout waiting for jobs to be scheduled"; exit 1; '
+                     '  fi; '
+                     f'  sleep 5; s=$(sky api status -a | grep {username});'
+                     '  echo "Waiting for request get scheduled"; echo "$s"; '
+                     'done'),
+                ],
+            ),
+        ],
+        f'sky down -y {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)

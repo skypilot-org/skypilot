@@ -1,0 +1,26 @@
+name: Dashboard Testing and Formatting
+
+on:
+  # Trigger the workflow on push or pull request,
+  # but only for the main branch
+  push:
+    branches:
+      - master
+      - 'releases/**'
+  pull_request:
+    branches:
+      - master
+      - 'releases/**'
+  merge_group:
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies and check
+      run: |
+        npm --prefix sky/dashboard install
+        npm --prefix sky/dashboard run lint
+        npm --prefix sky/dashboard run format:check
+        npm --prefix sky/dashboard run build

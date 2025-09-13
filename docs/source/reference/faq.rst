@@ -213,6 +213,24 @@ You will need to install a PyTorch version that is compatible with your NVIDIA d
 Miscellaneous
 -------------
 
+Why can't I use ``ray.init(address="auto")`` directly in my SkyPilot job?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyPilot uses Ray internally on port 6380 for cluster management. When you use ``ray.init(address="auto")``, Ray connects to SkyPilot's internal cluster, causing resource bundling conflicts where user workloads interfere with SkyPilot's resource management.
+
+**Always start your own Ray cluster** on a different port (e.g., 6379). See the :ref:`distributed Ray example <dist-jobs>` for the correct pattern:
+
+.. code-block:: yaml
+
+  run: |
+    head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+    if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+      ray start --head
+      python your_script.py
+    else
+      ray start --address $head_ip:6379
+    fi
+
 How can I launch a VS Code tunnel using a SkyPilot task definition?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -245,12 +263,12 @@ need to manually stop the old API server to have the new version take effect.
   sky api stop
 
 
-.. _migration-0.8.0:
+.. _migration-0.8.1:
 
-Migration from ``SkyPilot<=0.8.0``
+Migration from ``SkyPilot<=0.8.1``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-After ``SkyPilot v0.8.0``, SkyPilot has moved to a new client-server architecture, which is more flexible and powerful.
+After ``SkyPilot v0.8.1``, SkyPilot has moved to a new client-server architecture, which is more flexible and powerful.
 It also introduces the :ref:`asynchronous execution model <async>`, which may cause compatibility issues with user programs using  previous SkyPilot SDKs.
 
 
@@ -260,7 +278,7 @@ All SkyPilot SDKs (except log related functions: ``sky.tail_logs``, ``sky.jobs.t
 
 **Action needed**: Wrapping all SkyPilot SDK function calls with ``sky.stream_and_get()`` will make your program behave mostly the same as before:
 
-``SkyPilot<=0.8.0``:
+``SkyPilot<=0.8.1``:
 
 .. code-block:: python
 
@@ -268,7 +286,7 @@ All SkyPilot SDKs (except log related functions: ``sky.tail_logs``, ``sky.jobs.t
   job_id, handle = sky.launch(task)
   sky.tail_logs(job_id)
 
-``SkyPilot>0.8.0``:
+``SkyPilot>0.8.1``:
 
 .. code-block:: python
   :emphasize-lines: 2
@@ -281,6 +299,6 @@ Removed arguments: :code:`detach_setup`/:code:`detach_run`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 :code:`detach_setup`/:code:`detach_run` in :code:`sky.launch` were removed after
-:code:`0.8.0`, because setup and run are now detached by default with Python SDK.
+:code:`0.8.1`, because setup and run are now detached by default with Python SDK.
 If you would like to view the logs for the jobs submitted to a cluster, you can
 explicitly call ``sky.tail_logs(job_id)`` as shown above.

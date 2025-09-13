@@ -10,6 +10,7 @@ import threading
 import colorama
 
 from sky.skylet import constants
+from sky.utils import context
 from sky.utils import env_options
 from sky.utils import rich_utils
 
@@ -17,6 +18,15 @@ from sky.utils import rich_utils
 _FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 _DATE_FORMAT = '%m-%d %H:%M:%S'
 _SENSITIVE_LOGGER = ['sky.provisioner', 'sky.optimizer']
+
+_DEBUG_LOG_DIR = os.path.expanduser(
+    os.path.join(constants.SKY_LOGS_DIRECTORY, 'request_debug'))
+
+DEBUG = logging.DEBUG
+INFO = logging.INFO
+WARNING = logging.WARNING
+ERROR = logging.ERROR
+CRITICAL = logging.CRITICAL
 
 
 def _show_logging_prefix():
@@ -41,6 +51,43 @@ class NewLineFormatter(logging.Formatter):
         return msg
 
 
+class EnvAwareHandler(rich_utils.RichSafeStreamHandler):
+    """A handler that awares environment variables.
+
+    This handler dynamically reflects the log level from environment variables.
+    """
+
+    def __init__(self, stream=None, level=logging.NOTSET, sensitive=False):
+        super().__init__(stream)
+        self.level = level
+        self._sensitive = sensitive
+
+    @property
+    def level(self):
+        # Only refresh log level if we are in a context, since the log level
+        # has already been reloaded eagerly in multi-processing. Refresh again
+        # is a no-op and can be avoided.
+        # TODO(aylei): unify the mechanism for coroutine context and
+        # multi-processing.
+        if context.get() is not None:
+            if self._sensitive:
+                # For sensitive logger, suppress debug log despite the
+                # SKYPILOT_DEBUG env var if SUPPRESS_SENSITIVE_LOG is set
+                if env_options.Options.SUPPRESS_SENSITIVE_LOG.get():
+                    return logging.INFO
+            if env_options.Options.SHOW_DEBUG_INFO.get():
+                return logging.DEBUG
+            else:
+                return self._level
+        else:
+            return self._level
+
+    @level.setter
+    def level(self, level):
+        # pylint: disable=protected-access
+        self._level = logging._checkLevel(level)
+
+
 _root_logger = logging.getLogger('sky')
 _default_handler = None
 _logging_config = threading.local()
@@ -61,7 +108,7 @@ def _setup_logger():
     _root_logger.setLevel(logging.DEBUG)
     global _default_handler
     if _default_handler is None:
-        _default_handler = rich_utils.RichSafeStreamHandler(sys.stdout)
+        _default_handler = EnvAwareHandler(sys.stdout)
         _default_handler.flush = sys.stdout.flush  # type: ignore
         if env_options.Options.SHOW_DEBUG_INFO.get():
             _default_handler.setLevel(logging.DEBUG)
@@ -81,7 +128,7 @@ def _setup_logger():
         # for certain loggers.
         for logger_name in _SENSITIVE_LOGGER:
             logger = logging.getLogger(logger_name)
-            handler_to_logger = rich_utils.RichSafeStreamHandler(sys.stdout)
+            handler_to_logger = EnvAwareHandler(sys.stdout, sensitive=True)
             handler_to_logger.flush = sys.stdout.flush  # type: ignore
             logger.addHandler(handler_to_logger)
             logger.setLevel(logging.INFO)
@@ -97,8 +144,8 @@ def _setup_logger():
 def reload_logger():
     """Reload the logger.
 
-    This is useful when the logging configuration is changed.
-    e.g., the logging level is changed or stdout/stderr is reset.
+    This ensures that the logger takes the new environment variables,
+    such as SKYPILOT_DEBUG.
     """
     global _default_handler
     _root_logger.removeHandler(_default_handler)
@@ -125,6 +172,43 @@ def set_logging_level(logger: str, level: int):
         yield
     finally:
         logger.setLevel(original_level)
+
+
+@contextlib.contextmanager
+def set_sky_logging_levels(level: int):
+    """Set the logging level for all loggers."""
+    # Turn off logger
+    previous_levels = {}
+    for logger_name in logging.Logger.manager.loggerDict:
+        if logger_name.startswith('sky'):
+            logger = logging.getLogger(logger_name)
+            previous_levels[logger_name] = logger.level
+            logger.setLevel(level)
+    if level == logging.DEBUG:
+        previous_show_debug_info = env_options.Options.SHOW_DEBUG_INFO.get()
+        os.environ[env_options.Options.SHOW_DEBUG_INFO.env_key] = '1'
+    try:
+        yield
+    finally:
+        # Restore logger
+        for logger_name in logging.Logger.manager.loggerDict:
+            if logger_name.startswith('sky'):
+                logger = logging.getLogger(logger_name)
+                try:
+                    logger.setLevel(previous_levels[logger_name])
+                except KeyError:
+                    # New loggers maybe initialized after the context manager,
+                    # no need to restore the level.
+                    pass
+        if level == logging.DEBUG and not previous_show_debug_info:
+            os.environ.pop(env_options.Options.SHOW_DEBUG_INFO.env_key)
+
+
+def logging_enabled(logger: logging.Logger, level: int) -> bool:
+    # Note(cooperc): This may return true in a lot of cases where we won't
+    # actually log anything, since the log level is set on the handler in
+    # _setup_logger.
+    return logger.getEffectiveLevel() <= level
 
 
 @contextlib.contextmanager
@@ -173,3 +257,28 @@ def generate_tmp_logging_file_path(file_name: str) -> str:
     log_path = os.path.expanduser(os.path.join(log_dir, file_name))
 
     return log_path
+
+
+@contextlib.contextmanager
+def add_debug_log_handler(request_id: str):
+    if os.getenv(constants.ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING) != 'true':
+        yield
+        return
+
+    os.makedirs(_DEBUG_LOG_DIR, exist_ok=True)
+    log_path = os.path.join(_DEBUG_LOG_DIR, f'{request_id}.log')
+    try:
+        debug_log_handler = logging.FileHandler(log_path)
+        debug_log_handler.setFormatter(FORMATTER)
+        debug_log_handler.setLevel(logging.DEBUG)
+        _root_logger.addHandler(debug_log_handler)
+        # sky.provision sets up its own logger/handler with propogate=False,
+        # so add it there too.
+        provision_logger = logging.getLogger('sky.provision')
+        provision_logger.addHandler(debug_log_handler)
+        provision_logger.setLevel(logging.DEBUG)
+        yield
+    finally:
+        _root_logger.removeHandler(debug_log_handler)
+        provision_logger.removeHandler(debug_log_handler)
+        debug_log_handler.close()

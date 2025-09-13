@@ -1,0 +1,57 @@
+service:
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
+    initial_delay_seconds: 1800
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 3
+    target_qps_per_replica: 10
+    num_overprovision: 1
+    dynamic_ondemand_fallback: true
+    spot_placer: dynamic_fallback
+
+envs:
+  MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
+
+resources:
+  infra: aws
+  any_of:
+    # Enable all region in AWS.
+    - infra: aws
+    # Enable one in GCP.
+    - infra: gcp/*/asia-northeast3-a
+  use_spot: true
+  accelerators: L4
+  ports: 9000  # Expose to internet traffic.
+
+setup: |
+  conda activate vllm
+  if [ $? -ne 0 ]; then
+    conda create -n vllm python=3.10 -y
+    conda activate vllm
+  fi
+
+  pip install fschat==0.2.36 accelerate==0.28.0 vllm==0.3.3 outlines==0.0.39
+  python -c "import huggingface_hub; huggingface_hub.login('$HF_TOKEN')"
+
+run: |
+  conda activate vllm
+  echo 'Starting vllm api server...'
+
+  # https://github.com/vllm-project/vllm/issues/3098
+  export PATH=$PATH:/sbin
+
+  python -u -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 --port 9000 \
+    --model $MODEL_NAME \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-num-seqs 64 \
+    2>&1 | tee api_server.log

@@ -11,7 +11,7 @@ SkyPilot supports priority-based scheduling, preemption, and re-queuing of jobs 
 To set job priorities:
 
 1. Create :ref:`priority classes <priorities-example-priority-classes>` in your Kubernetes cluster.
-2. :ref:`Set the priority classes in your SkyPilot jobs<priorities-example-sky-pilot-jobs>` by setting ``experimental.config_overrides.kubernetes.pod_config.spec.priorityClassName``.
+2. :ref:`Set the priority classes in your SkyPilot jobs<priorities-example-sky-pilot-jobs>` by setting ``config.kubernetes.pod_config.spec.priorityClassName``.
 3. Use :ref:`sky jobs launch <managed-jobs>` to launch your jobs.
 
 With this setup, you can run high priority jobs that preempt low priority jobs when resources are constrained.
@@ -62,7 +62,7 @@ Apply these priority classes to your cluster:
 Step 2: Setting priorities in SkyPilot jobs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To assign priorities to your SkyPilot jobs, use the ``experimental.config_overrides.kubernetes.pod_config`` field in your SkyPilot YAML.
+To assign priorities to your SkyPilot jobs, use the ``config.kubernetes.pod_config`` field in your SkyPilot YAML.
 
 We use two simple counter jobs in this example:
 
@@ -70,7 +70,7 @@ We use two simple counter jobs in this example:
 
   # high-priority-job.yaml
   resources:
-    cloud: kubernetes
+    infra: k8s
     cpus: 4
 
   run: |
@@ -81,18 +81,17 @@ We use two simple counter jobs in this example:
         time.sleep(1)
     '
 
-  experimental:
-    config_overrides:
-      kubernetes:
-        pod_config:
-          spec:
-            priorityClassName: high-priority
+  config:
+    kubernetes:
+      pod_config:
+        spec:
+          priorityClassName: high-priority
 
 .. code-block:: yaml
 
   # low-priority-job.yaml
   resources:
-    cloud: kubernetes
+    infra: k8s
     cpus: 4
 
   run: |
@@ -103,16 +102,15 @@ We use two simple counter jobs in this example:
         time.sleep(1)
     '
 
-  experimental:
-    config_overrides:
-      kubernetes:
-        pod_config:
+  config:
+    kubernetes:
+      pod_config:
           spec:
             priorityClassName: low-priority
 
 .. tip::
   To see the preemption behavior, be sure to set the ``resources.cpu`` field such that once one job is running, there are no CPUs left for the other job in the cluster.
-   
+
   You can inspect the total number of CPUs in the cluster using ``kubectl get nodes``.
 
 Step 3: Launch your jobs
@@ -154,7 +152,7 @@ Once the high priority job finishes, the low priority job will start running aga
   No in-progress managed jobs.
   ID  NAME             RESOURCES  SUBMITTED    TOT. DURATION  #RECOVERIES  STATUS
   2   sky-0232-romilb  1x[CPU:4]  23 mins ago  17m 22s        0            SUCCEEDED
-  1   sky-0d6f-romilb  1x[CPU:4]  25 mins ago  23m 47s        1            RUNNING 
+  1   sky-0d6f-romilb  1x[CPU:4]  25 mins ago  23m 47s        1            RUNNING
 
 
 

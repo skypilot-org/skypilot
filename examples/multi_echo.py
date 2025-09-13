@@ -9,8 +9,9 @@ import sky
 
 
 def run(cluster: Optional[str] = None,
-        cloud: Optional[str] = None,
-        use_spot: bool = True):
+        infra: Optional[str] = None,
+        use_spot: bool = True,
+        accelerator: str = 'T4'):
     if cluster is None:
         # (username, last 4 chars of hash of hostname): for uniquefying users on
         # shared-account cloud providers.
@@ -19,18 +20,17 @@ def run(cluster: Optional[str] = None,
         _user_and_host = f'{getpass.getuser()}-{hostname_hash}'
         cluster = f'test-multi-echo-{_user_and_host}'
 
-    if cloud is None:
-        cloud = 'gcp'
-    cloud = sky.CLOUD_REGISTRY.from_str(cloud)
+    if infra is None:
+        infra = 'gcp'
 
     # Create the cluster.
     with sky.Dag() as dag:
         cluster_resources = sky.Resources(
-            cloud,
+            infra=infra,
             # We need to set CPUs to 5+ so that the total number of RUNNING jobs
             # is not limited by the number of CPU cores (5 x 2 x 2 = 20).
             cpus='5+',
-            accelerators={'T4': 1},
+            accelerators={accelerator: 1},
             use_spot=use_spot)
         task = sky.Task(num_nodes=2).set_resources(cluster_resources)
     request_id = sky.launch(dag, cluster_name=cluster)
@@ -43,7 +43,7 @@ def run(cluster: Optional[str] = None,
         # expected.
         task = sky.Task(run=f'echo {i}; sleep 70')
         # Set to 0.1 so that there can be 20 RUNNING jobs in parallel.
-        resources = sky.Resources(accelerators={'T4': 0.1})
+        resources = sky.Resources(accelerators={accelerator: 0.1})
         task.set_resources(resources)
         request_id = sky.exec(task, cluster_name=cluster)
         print(f'Submitting task {i}...request_id={request_id}')
@@ -56,13 +56,15 @@ def run(cluster: Optional[str] = None,
 
 if __name__ == '__main__':
     cluster = None
-    cloud = None
+    infra = None
     use_spot = True
     if len(sys.argv) > 1:
         # For smoke test passing in a cluster name.
         cluster = sys.argv[1]
     if len(sys.argv) > 2:
-        cloud = sys.argv[2]
+        infra = sys.argv[2]
     if len(sys.argv) > 3:
         use_spot = sys.argv[3] == '1'
-    run(cluster, cloud, use_spot)
+    if len(sys.argv) > 4:
+        accelerator = sys.argv[4]
+    run(cluster, infra, use_spot, accelerator)

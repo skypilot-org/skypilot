@@ -4,7 +4,7 @@
 name: symlink-playground
 
 resources:
-  cloud: aws
+  infra: aws
   instance_type: m5.2xlarge
 
 # Symlink: ln -s [data_path] ~/Downloads/temp1

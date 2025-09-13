@@ -7,6 +7,7 @@ from sphinx.util.logging import getLogger
 ALLOWED_TERMS = {
     # Technical terms
     'Kubernetes',
+    'Python',
     'SkyPilot',
     'SkyServe',
     'Gemma',
@@ -15,10 +16,14 @@ ALLOWED_TERMS = {
     'OpenAI',
     'API',
     'GPU',
+    'GPT-OSS',
     'VM',
     'GUI',
     'AWS',
     'GCP',
+    'Nebius',
+    'Bonus',
+    'Infiniband',
     'Azure',
     'HF_TOKEN',
     'Ingress',
@@ -41,6 +46,9 @@ ALLOWED_TERMS = {
     'Samsung',
     'Google',
     'Amazon',
+    'Okta',
+    'Prometheus',
+    'Grafana',
     # Framework names
     'vLLM',
     'TGI',
@@ -54,10 +62,24 @@ ALLOWED_TERMS = {
 
 # Add multi-word terms that should be treated as a single entity
 MULTI_WORD_TERMS = {
-    'Lambda Cloud', 'Weights & Biases', 'Rancher Kubernetes Engine',
-    'Google Cloud', 'LoadBalancer Service', 'Dynamic Workload Scheduler',
-    'Sky Computing', 'VS Code', 'GCP Service Account', 'Cudo Compute',
-    'Samsung Cloud Platform'
+    'Lambda Cloud',
+    'Weights & Biases',
+    'Rancher Kubernetes Engine',
+    'Google Cloud',
+    'LoadBalancer Service',
+    'Dynamic Workload Scheduler',
+    'Sky Computing',
+    'VS Code',
+    'Cudo Compute',
+    'Samsung Cloud Platform',
+    'Node Pool',
+    'Node Pools',
+    'OAuth2 Proxy',
+    'Google Workspace',
+    'Google Auth Platform',
+    'Google Cloud Logging',
+    'AWS Systems Manager',
+    'Microsoft Entra ID',
 }
 
 
@@ -110,7 +132,8 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
         while i < len(words):
             # Check for multi-word terms
             matched_phrase = False
-            for phrase in MULTI_WORD_TERMS:
+            # Sort by length descending to match longer phrases first
+            for phrase in sorted(MULTI_WORD_TERMS, key=len, reverse=True):
                 phrase_words = phrase.split()
                 if i + len(phrase_words) <= len(words):
                     # Join words first, then strip punctuation at the end for comparison

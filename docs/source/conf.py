@@ -88,6 +88,10 @@ def render_svg_logo(path):
     return content
 
 
+# Add extra paths that contain custom files here, relative to this directory.
+# These files are copied directly to the root of the documentation.
+html_extra_path = ['robots.txt']
+
 # html_theme = 'sphinx_book_theme'
 html_theme = 'pydata_sphinx_theme'
 html_theme_options = {
@@ -117,7 +121,7 @@ html_theme_options = {
         'icon': 'fab fa-github',
     }],
     'use_edit_page_button': True,
-    'announcement': None,
+    'announcement': '',  # Put announcements such as meetups here.
     'secondary_sidebar_items': [
         'page-toc',
         'edit-this-page',
@@ -181,7 +185,6 @@ exclude_patterns = [
     '_gallery_original',
     'generated-examples',
 ]
-myst_heading_anchors = 3
 myst_url_schemes = {
     'http': None,
     'https': None,
@@ -218,6 +221,18 @@ googleanalytics_id = 'G-92WF3MDCJV'
 autosectionlabel_prefix_document = True
 
 suppress_warnings = ['autosectionlabel.*']
+
+# Adapted from vllm-project/vllm
+# see https://docs.readthedocs.io/en/stable/reference/environment-variables.html # noqa
+READTHEDOCS_VERSION_TYPE = os.environ.get('READTHEDOCS_VERSION_TYPE')
+if READTHEDOCS_VERSION_TYPE == "tag":
+    # remove the warning banner if the version is a tagged release
+    header_file = os.path.join(os.path.dirname(__file__),
+                               "_templates/header.html")
+    # The file might be removed already if the build is triggered multiple times
+    # (readthedocs build both HTML and PDF versions separately)
+    if os.path.exists(header_file):
+        os.remove(header_file)
 
 
 def setup(app):

@@ -3,7 +3,7 @@
 vSphere
 =======
 
-This document is provided for users who use VMware vSphere provider and helps them set up basic configurations on VMware vSphere to meet the needs of running SkyPilot tasks.
+This document is provided for users who use VMware vSphere provider and helps them set up basic configuration on VMware vSphere to meet the needs of running SkyPilot tasks.
 
 .. _cloud-prepare-vsphere-tags:
 
@@ -273,7 +273,7 @@ Follow the steps bellow to tag the VM template:
 .. image:: ../../images/screenshots/vsphere/content-lib-item-tag-adding.png
     :width: 80%
     :align: center
-    :alt: Content Lib Item Taging
+    :alt: Content Lib Item Tagging
 
 .. _cloud-prepare-vsphere-references:
 

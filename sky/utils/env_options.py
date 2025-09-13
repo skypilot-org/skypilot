@@ -19,8 +19,17 @@ class Options(enum.Enum):
     # will not be multiple identities, and skipping the check can increase
     # robustness.
     SKIP_CLOUD_IDENTITY_CHECK = ('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', False)
+    # Internal: This environment variable is set to "true" by Buildkite
+    # agent when running tests. It is used to identify when SkyPilot is
+    # running in a Buildkite container environment, which requires special
+    # handling for networking between containers.
+    RUNNING_IN_BUILDKITE = ('BUILDKITE', False)
+    # Internal: This is used for testing to enable grpc for communication
+    # between the API server and the Skylet.
+    ENABLE_GRPC = ('SKYPILOT_ENABLE_GRPC', False)
 
     def __init__(self, env_var: str, default: bool) -> None:
+        super().__init__()
         self.env_var = env_var
         self.default = default
 

@@ -3,10 +3,6 @@
 Installation
 ==================
 
-.. note::
-
-    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`pip uninstall grpcio; conda install -c conda-forge grpcio=1.43.0` prior to installing SkyPilot.
-
 Install SkyPilot using pip:
 
 .. tab-set::
@@ -17,26 +13,30 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.11.
+          # SkyPilot requires 3.7 <= python <= 3.13.
           conda create -y -n sky python=3.10
           conda activate sky
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install "skypilot[kubernetes]"
           pip install "skypilot[aws]"
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
           pip install "skypilot[oci]"
+          pip install "skypilot[nebius]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
           pip install "skypilot[fluidstack]"
           pip install "skypilot[paperspace]"
           pip install "skypilot[cudo]"
+          # IBM is only supported for Python <= 3.11
           pip install "skypilot[ibm]"
+          # SCP is only supported for Python <= 3.11
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
-          pip install "skypilot[nebius]"
+          # Nebius is only supported for Python >= 3.10
+
           pip install "skypilot[all]"
 
 
@@ -46,17 +46,18 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.11.
+          # SkyPilot requires 3.7 <= python <= 3.13.
           conda create -y -n sky python=3.10
           conda activate sky
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
           pip install "skypilot-nightly[oci]"
+          pip install "skypilot-nightly[nebius]"
           pip install "skypilot-nightly[lambda]"
           pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[fluidstack]"
@@ -66,7 +67,6 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
-          pip install "skypilot-nightly[nebius]"
           pip install "skypilot-nightly[all]"
 
 
@@ -76,20 +76,21 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.11.
+          # SkyPilot requires 3.7 <= python <= 3.13.
           conda create -y -n sky python=3.10
           conda activate sky
 
           git clone https://github.com/skypilot-org/skypilot.git
           cd skypilot
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install -e ".[kubernetes]"
           pip install -e ".[aws]"
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
           pip install -e ".[oci]"
+          pip install -e ".[nebius]"
           pip install -e ".[lambda]"
           pip install -e ".[runpod]"
           pip install -e ".[fluidstack]"
@@ -98,7 +99,6 @@ Install SkyPilot using pip:
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
-          pip install -e ".[nebius]"
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
@@ -127,15 +127,52 @@ To use more than one cloud, combine the pip extras:
           pip install -e ".[kubernetes,aws,gcp]"
 
 
-Installing via ``uv`` is also supported:
+Installing via ``uv``
+----------------------
 
-.. code-block:: shell
+SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast Python package installer:
 
-  uv venv --seed --python 3.10
-  uv pip install "skypilot[kubernetes,aws,gcp]"
-  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-  uv pip install --prerelease allow azure-cli
-  uv pip install "skypilot[all]"
+.. tab-set::
+
+    .. tab-item:: uv venv
+        :sync: uv-venv-tab
+
+        .. code-block:: shell
+
+          # Create a virtual environment with pip pre-installed (required for SkyPilot)
+          uv venv --seed --python 3.10
+          source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+          
+          # Install SkyPilot with your chosen cloud providers
+          uv pip install "skypilot[kubernetes,aws,gcp]"
+          
+          # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+          uv pip install --prerelease allow azure-cli
+          uv pip install "skypilot[azure]"
+
+        .. note::
+          
+          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment. 
+          SkyPilot needs ``pip`` to build wheels for remote cluster setup.
+
+    .. tab-item:: uv tool
+        :sync: uv-tool-tab
+
+        .. code-block:: shell
+
+          # Install as a globally available tool with pip included
+          uv tool install --with pip "skypilot[aws,gcp]"
+          
+          # Or with all cloud providers
+          uv tool install --with pip "skypilot[all]"
+          
+          # Now you can use sky directly
+          sky check
+
+        .. note::
+          
+          The ``--with pip`` flag is **required** when using ``uv tool install``. 
+          Without it, SkyPilot will fail when building wheels for remote clusters.
 
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
@@ -187,6 +224,7 @@ This will produce a summary like:
     Cudo: enabled
     IBM: enabled
     SCP: enabled
+    Seeweb: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
@@ -214,11 +252,14 @@ If you already have cloud access set up on your local machine, run ``sky check``
 
 Otherwise, configure access to at least one cloud using the following guides.
 
+
+.. _kubernetes-installation:
+
 Kubernetes
 ~~~~~~~~~~
 
 SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
-(e.g., EKS, GKE). The only requirement is a valid kubeconfig at
+(e.g., EKS, GKE, Nebius Managed Kubernetes). The only requirement is a valid kubeconfig at
 :code:`~/.kube/config`.
 
 .. code-block:: shell
@@ -229,25 +270,31 @@ SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
 
 See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
+.. tip::
+   If you do not have access to a Kubernetes cluster, you can :ref:`deploy a local Kubernetes cluster on your laptop <kubernetes-setup-kind>` with ``sky local up``.
+
 .. _aws-installation:
 
 AWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`__). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
+To set up AWS credentials, log into the AWS console and `create an access key for yourself <https://docs.aws.amazon.com/IAM/latest/UserGuide/access-key-self-managed.html#Using_CreateAccessKey>`_. If you don't see the "Security credentials" link shown in the AWS instructions, you may be using SSO; see :ref:`aws-sso`.
+
+Now configure your credentials.
 
 .. code-block:: shell
-
-  # Install boto
-  pip install boto3
 
   # Configure your AWS credentials
   aws configure
 
+- For **AWS Access Key ID**, copy the "Access key" value from console.
+- For the **AWS Secret Access Key**, copy the "Secret access key" value from console.
+- The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
+
 To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructions.
 
-**Optional**: To create a new AWS user with minimal permissions for SkyPilot, see :ref:`AWS User Creation <cloud-permissions-aws>`.
+**Optional**: To create a new AWS user with minimal permissions for SkyPilot, see :ref:`dedicated-aws-user`.
 
 .. _installation-gcp:
 
@@ -292,6 +339,60 @@ Azure
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
 
+Nebius
+~~~~~~
+
+`Nebius <https://nebius.com/>`__ is the ultimate cloud for AI explorers. To configure Nebius access, install and configure `Nebius CLI <https://docs.nebius.com/cli/quickstart>`__:
+
+.. code-block:: shell
+
+  mkdir -p ~/.nebius
+  nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
+  nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
+
+
+**Optional**: You can specify specific project ID and fabric in `~/.sky/config.yaml`, see :ref:`Configuration project_id and fabric for Nebius <config-yaml-nebius>`.
+
+Alternatively, you can also use a service account to access Nebius, see :ref:`Using Service Account for Nebius <nebius-service-account>`.
+
+To use `Nebius Managed Kubernetes <https://nebius.com/services/managed-kubernetes>`_, see :ref:`Kubernetes Installation <kubernetes-installation>`. Retrieve the Kubernetes credential with:
+
+.. code-block:: shell
+
+  nebius mk8s cluster get-credentials --id <cluster_id> --external --kubeconfig $HOME/.kube/config
+
+Nebius also offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
+SkyPilot can download/upload data to Nebius buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Nebius support, run:
+
+.. code-block:: shell
+
+  # Install boto
+  pip install boto3
+  # Configure your Nebius Object Storage credentials
+  aws configure --profile nebius
+
+In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instructions to generate Nebius credentials <https://docs.nebius.com/object-storage/quickstart#env-configure>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
+
+.. code-block:: bash
+
+  aws configure set aws_access_key_id $NB_ACCESS_KEY_AWS_ID --profile nebius
+  aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
+  aws configure set region <REGION> --profile nebius
+  aws configure set endpoint_url <ENDPOINT>  --profile nebius
+
+
+RunPod
+~~~~~~~~~~
+
+`RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**. Then, run:
+
+.. code-block:: shell
+
+  pip install "runpod>=1.6.1"
+  runpod config
+
+
+
 OCI
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -319,8 +420,9 @@ By default, the provisioned nodes will be in the root `compartment <https://docs
 .. code-block:: text
 
   oci:
-    default:
-      compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
+    region_configs:
+      default:
+        compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
 
 
 Lambda Cloud
@@ -332,6 +434,22 @@ Lambda Cloud
 
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
+
+
+Together AI
+~~~~~~~~~~~~~~~~~~
+
+`Together AI <https://together.ai/>`_ offers GPU *instant clusters*. Accessing them is similar to using :ref:`Kubernetes <kubernetes-installation>`:
+
+1. Launch a Together `Instant Cluster <https://api.together.ai/clusters/create>`_ with cluster type selected as Kubernetes
+2. Get the Kubernetes config for the cluster
+3. Save the kubeconfig to a file, e.g., ``./together.kubeconfig``
+4. Copy the kubeconfig to your ``~/.kube/config`` or merge the Kubernetes config with your existing kubeconfig file by running:
+
+.. code-block:: shell
+
+  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config    
+
 
 Paperspace
 ~~~~~~~~~~~~~~~~~~
@@ -351,17 +469,9 @@ Vast
 .. code-block:: shell
 
   pip install "vastai-sdk>=0.1.12"
-  echo "<your_api_key_here>" > ~/.vast_api_key
+  mkdir -p ~/.config/vastai
+  echo "<your_api_key_here>" > ~/.config/vastai/vast_api_key
 
-RunPod
-~~~~~~~~~~
-
-`RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**. Then, run:
-
-.. code-block:: shell
-
-  pip install "runpod>=1.6.1"
-  runpod config
 
 
 Fluidstack
@@ -497,6 +607,8 @@ Here is an example of configuration within the credential file:
 
 After configuring the vSphere credentials, ensure that the necessary preparations for vSphere are completed. Please refer to this guide for more information: :ref:`Cloud Preparation for vSphere <cloud-prepare-vsphere>`
 
+.. _cloudflare-r2-installation:
+
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~
 
@@ -530,78 +642,98 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
-Nebius
-~~~~~~
-
-`Nebius <https://nebius.com/>`__ is the ultimate cloud for AI explorers. To configure Nebius access, install and configure `Nebius CLI <https://docs.nebius.com/cli/quickstart>`__:
-
-.. code-block:: shell
-
-  mkdir -p ~/.nebius
-  nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
-
-If you have one tenant you can run:
-
-.. code-block:: shell
-
-  nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
-
-You can specify a preferable project ID, which will be used if a project ID is required in the designated region.
-
-.. code-block:: shell
-
-  echo $NEBIUS_PROJECT_ID > ~/.nebius/NEBIUS_PROJECT_ID.txt
-
-To use *Service Account* authentication, follow these steps:
-
-1. **Create a Service Account** using the Nebius web console.
-2. **Generate PEM Keys**:
-
-.. code-block:: shell
-
-   openssl genrsa -out private.pem 4096 && openssl rsa -in private.pem -outform PEM -pubout -out public.pem
-
-3.  **Generate and Save the Credentials File**:
-
-* Save the file as `~/.nebius/credentials.json`.
-* Ensure the file matches the expected format below:
-
-.. code-block:: json
-
-     {
-         "subject-credentials": {
-             "alg": "RS256",
-             "private-key": "PKCS#8 PEM with new lines escaped as \n",
-             "kid": "public-key-id",
-             "iss": "service-account-id",
-             "sub": "service-account-id"
-         }
-     }
 
 
-**Important Notes:**
 
-* The `NEBIUS_IAM_TOKEN` file, if present, will take priority for authentication.
-* Service Accounts are restricted to a single region. Ensure you configure the Service Account for the appropriate region during creation.
+Seeweb
+~~~~~~~~~~~~~~~~~~
 
-Nebius offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
-SkyPilot can download/upload data to Nebius buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Nebius support, run:
+`Seeweb <https://www.seeweb.it/>`_ Seeweb is your European Cloud Provider specialized in high-performance Cloud solutions and GPU servers ideal for powering artificial intelligence efficiently and sustainably. With a 100% renewable energy-powered infrastructure and an excellent price-performance ratio, Seeweb enables AI innovation with a responsible environmental impact.
 
-.. code-block:: shell
 
-  # Install boto
-  pip install boto3
-  # Configure your Nebius Object Storage credentials
-  aws configure --profile nebius
+Setup
+======
 
-In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instructions to generate Nebius credentials <https://docs.nebius.com/object-storage/quickstart#env-configure>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
+
+Prerequisites
+^^^^^^^^^^^^^^^
+
+* A Seeweb Cloud account.
+* A Seeweb API token with permissions to create servers.
+* (Recommended) An SSH public key added to your Seeweb profile.
+* **ecsapi** 0.2.0 installed <https://pypi.org/project/ecsapi/> :
 
 .. code-block:: bash
 
-  aws configure set aws_access_key_id $NB_ACCESS_KEY_AWS_ID --profile nebius
-  aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
-  aws configure set region eu-west1 --profile nebius
-  aws configure set endpoint_url https://storage.eu-west1.nebius.cloud:443  --profile nebius
+   pip install ecsapi
+
+
+Flow to generate an API token for GPU compute access:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Create a `billing account by registering at <https://aop.seeweb.it/en#>`__.
+2. Log into your `Seeweb dashboard : <https://cloudcenter.seeweb.it/>`__.
+3. Navigate to *Compute → API Token* in the control panel. __.
+4. Click **`"NEW TOKEN"**, assign a name, and confirm.`__.
+5. **Copy the generated token** , it can now be used to authenticate all Seeweb services.
+
+
+Authentication
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+SkyPilot reads your credentials from a Seeweb key file.
+Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
+
+::
+
+    [DEFAULT]
+    api_key = <your-api-token>
+
+
+
+The directory :code:`~/.seeweb_cloud` must exist and be readable by you.
+
+
+
+Verify credentials:
+^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: bash
+
+   sky check seeweb
+
+If successful you will see::
+
+  Seeweb: enabled [compute]
+
+  🎉 Enabled infra 🎉
+  Seeweb [compute]
+
+
+
+Limitations
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **No spot instances** – ``use_spot`` is ignored on Seeweb.
+* **No Storage implemented** – ``--storage`` is not supported.
+* **Ports** – ``ports:`` stanza is not implemented; configure firewall rules manually via Seeweb.
+* **Custom Docker images** via ``--image`` are unsupported.
+
+Troubleshooting
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Authentication fails:** ensure ``api_key`` is configured correctly.
+* **SSH access denied:** confirm your public key is added to Seeweb before launching servers; otherwise retrieve the one‑time root password from the Seeweb panel.
+* **Instance type unavailable:** not all plans exist in every region. Either specify a region that supports the plan or let SkyPilot auto‑select.
+
+See also
+^^^^^^^^^^^^^^^^^^^^^
+
+* `Seeweb API docs <https://docs.seeweb.it/>`_
+* `SkyPilot GitHub <https://github.com/skypilot-org/skypilot>`_
+* `Example Seeweb integration <https://github.com/m4oc/skypilot/tree/SeewebSky>`_
+
+
 
 Request quotas for first time users
 --------------------------------------

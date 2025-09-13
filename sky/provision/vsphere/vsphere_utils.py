@@ -5,23 +5,17 @@ import os
 import ssl
 from typing import Any, Dict, List, Optional
 
-import yaml
-
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import vsphere as vsphere_adaptor
-from sky.clouds.service_catalog import vsphere_catalog
-from sky.clouds.service_catalog.common import get_catalog_path
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_accelerators_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_hosts_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_images_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
+from sky.catalog import vsphere_catalog
+from sky.catalog.common import get_catalog_path
+from sky.catalog.data_fetchers.fetch_vsphere import initialize_accelerators_csv
+from sky.catalog.data_fetchers.fetch_vsphere import initialize_hosts_csv
+from sky.catalog.data_fetchers.fetch_vsphere import initialize_images_csv
+from sky.catalog.data_fetchers.fetch_vsphere import (
     initialize_instance_image_mapping_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_vms_csv)
+from sky.catalog.data_fetchers.fetch_vsphere import initialize_vms_csv
 from sky.provision.vsphere.common import vim_utils
 from sky.provision.vsphere.common.cls_api_client import ClsApiClient
 from sky.provision.vsphere.common.cls_api_helper import ClsApiHelper
@@ -32,6 +26,7 @@ from sky.provision.vsphere.common.vim_utils import create_spec_with_script
 from sky.provision.vsphere.common.vim_utils import poweron_vm
 from sky.provision.vsphere.common.vim_utils import wait_for_tasks
 from sky.provision.vsphere.common.vim_utils import wait_internal_ip_ready
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -322,7 +317,7 @@ def get_vsphere_credentials(name=None):
     assert os.path.exists(
         credential_path), f'Missing credential file at {credential_path}.'
     with open(credential_path, 'r', encoding='utf-8') as file:
-        credential = yaml.safe_load(file)
+        credential = yaml_utils.safe_load(file)
         vcenters = credential['vcenters']
         if name is None:
             return vcenters

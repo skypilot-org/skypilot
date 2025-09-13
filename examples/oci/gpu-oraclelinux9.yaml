@@ -2,7 +2,7 @@ name: gpu-task
 
 resources:
   # Optional; if left out, automatically pick the cheapest cloud.
-  cloud: oci
+  infra: oci
 
   accelerators: A10:1
 

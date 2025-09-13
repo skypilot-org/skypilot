@@ -6,6 +6,28 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
+_REGION_CONFIG_CLOUDS = ['nebius', 'oci']
+
+# Kubernetes API use list to represent dictionary fields with patch strategy
+# merge and each item is indexed by the patch merge key. The following map
+# maps the field name to the patch merge key.
+# pylint: disable=line-too-long
+# Ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#podspec-v1-core
+# NOTE: field containers and imagePullSecrets are not included deliberately for
+# backward compatibility (we only support one container per pod now).
+_PATCH_MERGE_KEYS = {
+    'initContainers': 'name',
+    'ephemeralContainers': 'name',
+    'volumes': 'name',
+    'volumeMounts': 'name',
+    'resourceClaims': 'name',
+    'env': 'name',
+    'hostAliases': 'ip',
+    'topologySpreadConstraints': 'topologyKey',
+    'ports': 'containerPort',
+    'volumeDevices': 'devicePath',
+}
+
 
 class Config(Dict[str, Any]):
     """SkyPilot config that supports setting/getting values with nested keys."""
@@ -112,14 +134,39 @@ def _recursive_update(
         disallowed_override_keys: Optional[List[Tuple[str,
                                                       ...]]] = None) -> Config:
     """Recursively updates base configuration with override configuration"""
+
+    def _update_k8s_config(
+        base_config: Config,
+        override_config: Dict[str, Any],
+        allowed_override_keys: Optional[List[Tuple[str, ...]]] = None,
+        disallowed_override_keys: Optional[List[Tuple[str,
+                                                      ...]]] = None) -> Config:
+        """Updates the top-level k8s config with the override config."""
+        for key, value in override_config.items():
+            (next_allowed_override_keys, next_disallowed_override_keys
+            ) = _check_allowed_and_disallowed_override_keys(
+                key, allowed_override_keys, disallowed_override_keys)
+            if key in ['custom_metadata', 'pod_config'] and key in base_config:
+                merge_k8s_configs(base_config[key], value,
+                                  next_allowed_override_keys,
+                                  next_disallowed_override_keys)
+            elif (isinstance(value, dict) and key in base_config and
+                  isinstance(base_config[key], dict)):
+                _recursive_update(base_config[key], value,
+                                  next_allowed_override_keys,
+                                  next_disallowed_override_keys)
+            else:
+                base_config[key] = value
+        return base_config
+
     for key, value in override_config.items():
         (next_allowed_override_keys, next_disallowed_override_keys
         ) = _check_allowed_and_disallowed_override_keys(
             key, allowed_override_keys, disallowed_override_keys)
         if key == 'kubernetes' and key in base_config:
-            merge_k8s_configs(base_config[key], value,
-                              next_allowed_override_keys,
-                              next_disallowed_override_keys)
+            _update_k8s_config(base_config[key], value,
+                               next_allowed_override_keys,
+                               next_disallowed_override_keys)
         elif (isinstance(value, dict) and key in base_config and
               isinstance(base_config[key], dict)):
             _recursive_update(base_config[key], value,
@@ -146,7 +193,6 @@ def _get_nested(configs: Optional[Dict[str, Any]],
             curr = value
         else:
             return default_value
-    logger.debug(f'User config: {".".join(keys)} -> {curr}')
     return curr
 
 
@@ -185,20 +231,80 @@ def merge_k8s_configs(
                 merge_k8s_configs(base_config[key][0], value[0],
                                   next_allowed_override_keys,
                                   next_disallowed_override_keys)
-            elif key in ['volumes', 'volumeMounts']:
-                # If the key is 'volumes' or 'volumeMounts', we search for
-                # item with the same name and merge it.
-                for new_volume in value:
-                    new_volume_name = new_volume.get('name')
-                    if new_volume_name is not None:
-                        destination_volume = next(
+            # For list fields with patch strategy "merge", we merge the list
+            # by the patch merge key.
+            elif key in _PATCH_MERGE_KEYS:
+                patch_merge_key = _PATCH_MERGE_KEYS[key]
+                for override_item in value:
+                    override_item_name = override_item.get(patch_merge_key)
+                    if override_item_name is not None:
+                        existing_base_item = next(
                             (v for v in base_config[key]
-                             if v.get('name') == new_volume_name), None)
-                        if destination_volume is not None:
-                            merge_k8s_configs(destination_volume, new_volume)
+                             if v.get(patch_merge_key) == override_item_name),
+                            None)
+                        if existing_base_item is not None:
+                            merge_k8s_configs(existing_base_item, override_item)
                         else:
-                            base_config[key].append(new_volume)
+                            base_config[key].append(override_item)
+                    else:
+                        base_config[key].append(override_item)
             else:
                 base_config[key].extend(value)
         else:
             base_config[key] = value
+
+
+def get_cloud_config_value_from_dict(
+        dict_config: Dict[str, Any],
+        cloud: str,
+        keys: Tuple[str, ...],
+        region: Optional[str] = None,
+        default_value: Optional[Any] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+    """Returns the nested key value by reading from config
+    Order to get the property_name value:
+    1. if region is specified,
+       try to get the value from <cloud>/<region_key>/<region>/keys
+    2. if no region or no override,
+       try to get it at the cloud level <cloud>/keys
+    3. if not found at cloud level,
+       return either default_value if specified or None
+    """
+    input_config = Config(dict_config)
+    region_key = None
+    if cloud == 'kubernetes':
+        region_key = 'context_configs'
+    elif cloud in _REGION_CONFIG_CLOUDS:
+        region_key = 'region_configs'
+
+    per_context_config = None
+    if region is not None and region_key is not None:
+        per_context_config = input_config.get_nested(
+            keys=(cloud, region_key, region) + keys,
+            default_value=None,
+            override_configs=override_configs)
+        if not per_context_config and cloud in _REGION_CONFIG_CLOUDS:
+            # TODO (kyuds): Backward compatibility, remove after 0.11.0.
+            per_context_config = input_config.get_nested(
+                keys=(cloud, region) + keys,
+                default_value=None,
+                override_configs=override_configs)
+            if per_context_config is not None:
+                logger.info(
+                    f'{cloud} configuration is using the legacy format. \n'
+                    'This format will be deprecated after 0.11.0, refer to '
+                    '`https://docs.skypilot.co/en/latest/reference/config.html` '  # pylint: disable=line-too-long
+                    'for the new format. Please use `region_configs` to specify region specific configuration.'
+                )
+    # if no override found for specified region
+    general_config = input_config.get_nested(keys=(cloud,) + keys,
+                                             default_value=default_value,
+                                             override_configs=override_configs)
+
+    if (cloud == 'kubernetes' and isinstance(general_config, dict) and
+            isinstance(per_context_config, dict)):
+        merge_k8s_configs(general_config, per_context_config)
+        return general_config
+    else:
+        return (general_config
+                if per_context_config is None else per_context_config)

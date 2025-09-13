@@ -1,22 +1,24 @@
 """Vsphere cloud implementation."""
-import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
-import requests
-
+from sky import catalog
 from sky import clouds
-from sky.clouds import service_catalog
+from sky.adaptors import common as adaptors_common
 from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.vsphere_utils import get_vsphere_credentials
 from sky.provision.vsphere.vsphere_utils import initialize_vsphere_data
-from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
+    import requests
+
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+    from sky.utils import volume as volume_lib
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 _CLOUD_VSPHERE = 'vsphere'
 _CREDENTIAL_FILES = [
@@ -49,8 +51,16 @@ class Vsphere(clouds.Cloud):
             (f'Spot instances are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Custom disk tiers are not supported in {_REPR}.'),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported in '
+             f'{_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             (f'Opening ports is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            (f'High availability controllers are not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            (f'Customized multiple network interfaces '
+             f'are not supported on {_REPR}.'),
     }
 
     _MAX_CLUSTER_NAME_LEN_LIMIT = 80  # The name can't exceeds 80 characters
@@ -82,7 +92,7 @@ class Vsphere(clouds.Cloud):
         zone: Optional[str],
     ) -> List[clouds.Region]:
         del accelerators, zone  # unused
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, _CLOUD_VSPHERE)
 
         if region is not None:
@@ -137,23 +147,26 @@ class Vsphere(clouds.Cloud):
         return 'vSphere'
 
     @classmethod
-    def get_default_instance_type(
-        cls,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional[resources_utils.DiskTier] = None,
-    ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds=_CLOUD_VSPHERE)
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
+                                                 clouds=_CLOUD_VSPHERE)
 
     @classmethod
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
+        return catalog.get_accelerators_from_instance_type(
             instance_type, clouds=_CLOUD_VSPHERE)
 
     @classmethod
@@ -161,8 +174,8 @@ class Vsphere(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(
-            instance_type, clouds=_CLOUD_VSPHERE)
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds=_CLOUD_VSPHERE)
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -176,13 +189,16 @@ class Vsphere(clouds.Cloud):
         zones: Optional[List['clouds.Zone']],
         num_nodes: int,
         dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
         # TODO get image id here.
         del cluster_name, dryrun  # unused
         assert zones is not None, (region, zones)
         zone_names = [zone.name for zone in zones]
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
@@ -225,6 +241,8 @@ class Vsphere(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone,
             )
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
@@ -237,7 +255,7 @@ class Vsphere(clouds.Cloud):
         (
             instance_list,
             fuzzy_candidate_list,
-        ) = service_catalog.get_instance_type_for_accelerator(
+        ) = catalog.get_instance_type_for_accelerator(
             acc,
             acc_count,
             use_spot=resources.use_spot,
@@ -254,21 +272,20 @@ class Vsphere(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to this cloud."""
-
-        try:
-            # pylint: disable=import-outside-toplevel,unused-import
-            # Check pyVmomi installation.
-            import pyVmomi
-        except (ImportError, subprocess.CalledProcessError) as e:
-            return False, (
-                'vSphere dependencies are not installed. '
-                'Run the following commands:'
-                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[vSphere]'
-                f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
-                'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
+        """Checks if the user has access credentials to
+        vSphere's compute service."""
+        dependency_error_msg = (
+            'vSphere dependencies are not installed. '
+            'Run the following commands:'
+            f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[vSphere]'
+            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
+            'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
+        )
+        # Check pyVmomi installation.
+        if not adaptors_common.can_import_modules(['pyVmomi']):
+            return False, dependency_error_msg
 
         required_keys = ['name', 'username', 'password', 'clusters']
         skip_key = 'skip_verification'
@@ -313,10 +330,7 @@ class Vsphere(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type,
-                                                    _CLOUD_VSPHERE)
+        return catalog.instance_type_exists(instance_type, _CLOUD_VSPHERE)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds=_CLOUD_VSPHERE)
+        return catalog.validate_region_zone(region, zone, clouds=_CLOUD_VSPHERE)

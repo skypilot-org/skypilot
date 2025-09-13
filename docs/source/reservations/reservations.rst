@@ -63,7 +63,7 @@ For more details of the fields, see :ref:`config-yaml`.
 Utilizing reservations
 ~~~~~~~~~~~~~~~~~~~~~~
 
-By specifying configurations above, SkyPilot will prioritize using any available capacity in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
+By specifying the configuration above, SkyPilot will prioritize using any available capacity in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
 
 Specifically, SkyPilot's behavior is as follows:
 
@@ -77,7 +77,7 @@ For example, if you are launching a cluster with the following SkyPilot YAML:
 .. code-block:: yaml
 
     resources:
-      cloud: aws
+      infra: aws
       accelerators: A100:8
 
     num_nodes: 2
@@ -95,7 +95,7 @@ SkyPilot will utilize the capacity reservation/block as follows:
 
 .. hint::
 
-    If you have a capacity block with a starting time in the future, you can run ``sky jobs launch --region us-east-1 --gpus H100:8 task.yaml`` to let SkyPilot automatically wait until the starting time is reached. Namely, you don't have to wake up at 4:30am PDT to launch your job on a newly available capacity block.
+    If you have a capacity block with a starting time in the future, you can run ``sky jobs launch --infra aws/us-east-1 --gpus H100:8 task.yaml`` to let SkyPilot automatically wait until the starting time is reached. Namely, you don't have to wake up at 4:30am PDT to launch your job on a newly available capacity block.
 
 
 GCP reservations
@@ -123,6 +123,7 @@ Example:
 
 SkyPilot will utilize the reservations similar to AWS reservations as described in :ref:`utilizing-reservations`.
 
+.. _gcp-dws:
 
 GCP Dynamic Workload Scheduler (DWS)
 -------------------------------------
@@ -131,7 +132,7 @@ GCP `Dynamic Workload Scheduler (DWS) <https://cloud.google.com/blog/products/co
 
 .. tip::
 
-    It has been observed that using DWS can significantly increase the chance of getting a high-end GPU resource, such as A100s and H100s, compared to using on-demand or spot instances.
+    It has been observed that using DWS can significantly increase the chance of getting a high-end GPU resource, such as H100s and H200s, compared to using on-demand or spot instances.
 
 
 Using DWS for VMs
@@ -152,52 +153,99 @@ SkyPilot allows you to launch resources via DWS by specifying the ``gcp.managed_
 
 See :ref:`config-yaml` for more details.
 
-In case you want to specify the DWS configuration for each job/cluster, you can also specify the configuration in the SkyPilot task YAML (see :ref:`here <task-yaml-experimental>`):
+In case you want to specify the DWS configuration for each job/cluster, you can also specify the configuration in the SkyPilot task YAML (see :ref:`here <config-client-job-task-yaml>`):
 
 .. code-block:: yaml
 
-    experimental:
-      config_overrides:
-        gcp:
-          managed_instance_group:
-            run_duration: 3600
-            provision_timeout: 900
+    config:
+      gcp:
+        managed_instance_group:
+          run_duration: 3600
+          provision_timeout: 900
 
     resources:
-      cloud: gcp
+      infra: gcp
       accelerators: A100:8
 
     num_nodes: 4
 
 .. _dws-on-gke:
 
-Using DWS on GKE with Kueue
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Using DWS on GKE
+~~~~~~~~~~~~~~~~~
 
-DWS is also supported on Google Kubernetes Engine (GKE) with Kueue. To enable DWS on GKE, you need to set up your GKE cluster with Kueue and DWS; see the `GCP official docs <https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest>`__.
+SkyPilot can also automatically set up DWS on GKE. To launch clusters or managed jobs
+using DWS on GKE:
 
-To launch a SkyPilot cluster or job on GKE with DWS, you can specify the DWS configuration in the SkyPilot task YAML:
+1. Follow the `official documentation <https://cloud.google.com/kubernetes-engine/docs/how-to/dws-flex-start-training#node-pool-flex>`_ to create a node pool.
+
+2. Configure the following fields in ``~/.sky/config.yaml``:
 
 .. code-block:: yaml
 
-    experimental:
-      config_overrides:
-        kubernetes:
-          pod_config:
-            metadata:
-              annotations:
-                provreq.kueue.x-k8s.io/maxRunDurationSeconds: "3600"
-          provision_timeout: 900
+  kubernetes:
+    autoscaler: gke
+    dws:
+      enabled: true
 
-    resources:
-      cloud: kubernetes
-      accelerators: A100:8
-      labels:
-        kueue.x-k8s.io/queue-name: dws-local-queue
+3. Launch your clusters or managed jobs.
 
-1. ``kueue.x-k8s.io/queue-name``: name of the Kueue queue to submit your resource request to.
-2. ``provreq.kueue.x-k8s.io/maxRunDurationSeconds``: maximum duration for a created instance to be kept alive (in seconds, required).
-3. ``provision_timeout``: timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without getting the requested resources, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
+.. code-block:: yaml
+
+  name: dws
+
+  resources:
+    infra: k8s
+    accelerators: H100:8
+
+  num_nodes: 1
+
+.. note::
+
+  When DWS is enabled, the default ``kubernetes.provision_timeout`` is set to ``600`` seconds (10 minutes). If you encounter provisioning timeout issues, you can increase this value. For example, set it to ``1200`` seconds (20 minutes):
+
+  .. code-block:: yaml
+
+    kubernetes:
+      provision_timeout: 1200
+      autoscaler: gke
+      dws:
+        enabled: true
+
+.. _dws-with-kueue:
+
+Using DWS with Kueue
+^^^^^^^^^^^^^^^^^^^^
+
+You can combine a :ref:`Kueue setup <kubernetes-example-kueue>` with DWS on the GKE cluster. This enables gang-scheduling, i.e., all-or-nothing behavior: GKE allocates all resources of the same request at the same time (e.g., multiple nodes/pods of the same job). 
+See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_ for more details.
+
+When using DWS with Kueue, you can additionally specify `max_run_duration` in ``~/.sky/config.yaml``. With shorter duration, the resources are likely easier to get due to GCP's DWS scheduling behavior.
+
+.. code-block:: yaml
+  :emphasize-lines: 7-7
+
+  kubernetes:
+    # provision_timeout: 1200
+    autoscaler: gke
+    dws:
+      enabled: true
+      # Optional, the maximum runtime of a node, up to the default of seven days
+      max_run_duration: 10m
+    kueue:
+      local_queue_name: skypilot-local-queue
+
+.. note::
+  `Flex-start <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`__ is always enabled when using DWS on GKE. Depending  on whether Kueue is enabled, the behavior of allocating new resources is different:
+
+  .. dropdown:: DWS with flex-start with/without Kueue
+
+    * Flex-start without Kueue: GKE allocates resources node by node.
+
+    * Flex-start with Kueue (queued provisioning): GKE allocates all requested resources at the same time (gang-scheduling).
+
+    See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_ for more details.
+
 
 Long-term reservations
 ----------------------

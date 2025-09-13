@@ -11,9 +11,8 @@ service:
 
 resources:
   ports: 8080
-  cloud: gcp
+  infra: gcp/*/us-central1-a
   cpus: 2+
-  zone: us-central1-a
   use_spot: true
 
 workdir: examples/serve/http_server

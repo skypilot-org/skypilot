@@ -241,7 +241,7 @@ With the above setup, you can now scale out to run many jobs in parallel.
 
 To run many jobs at once, we will launch the jobs as :ref:`SkyPilot managed jobs <managed-jobs>`. We can control the hyperparameter environment variables independently for each managed job.
 
-You can use normal loops in bash or Python to iterate over possible hyperparamters:
+You can use normal loops in bash or Python to iterate over possible hyperparameters:
 
 .. tab-set::
 
@@ -282,7 +282,6 @@ You can use normal loops in bash or Python to iterate over possible hyperparamte
                 sky.jobs.launch(
                   task,
                   name=f'train-job{job_idx}',
-                  retry_until_up=True,
                 )
               )
               job_idx += 1
@@ -302,10 +301,10 @@ Job statuses can be checked via ``sky jobs queue``:
   Fetching managed jobs...
   Managed jobs
   In progress tasks: 10 RUNNING
-  ID  TASK  NAME        RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
-  10  -     train-job10 1x[V100:4] 5 mins ago   5m 5s          1m 12s        0            RUNNING
-  9   -     train-job9  1x[V100:4] 6 mins ago   6m 11s         2m 23s        0            RUNNING
-  8   -     train-job8  1x[V100:4] 7 mins ago   7m 15s         3m 31s        0            RUNNING
+  ID  TASK  NAME        REQUESTED   SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+  10  -     train-job10 1x[V100:4]  5 mins ago   5m 5s          1m 12s        0            RUNNING
+  9   -     train-job9  1x[V100:4]  6 mins ago   6m 11s         2m 23s        0            RUNNING
+  8   -     train-job8  1x[V100:4]  7 mins ago   7m 15s         3m 31s        0            RUNNING
   ...
 
 

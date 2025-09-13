@@ -21,6 +21,29 @@
     z-index: 10001 !important; /* Set to 10001 to avoid overlap with kapa */
 }
 
+/* Override the default PyData sphinx theme announcement styling */
+.bd-header-announcement {
+    background-color: var(--pst-color-surface) !important;
+    border: none !important;
+    padding: 4px !important;
+    min-height: 0 !important;
+    height: auto !important;
+}
+
+.bd-header-announcement__content {
+    background-color: var(--pst-color-surface) !important;
+    color: var(--pst-color-text-base) !important;
+    padding: 0 !important;
+}
+
+.bd-header-announcement__content > div {
+    padding: 4px 8px !important;
+    line-height: 1 !important;
+}
+
+.bd-header-announcement a {
+    color: var(--pst-color-link) !important;
+}
 
 html[data-theme="light"] {
   --pst-color-link: #176de8;

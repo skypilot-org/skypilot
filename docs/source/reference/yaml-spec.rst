@@ -26,10 +26,8 @@ Below is the configuration syntax and some example values.  See details under ea
   :ref:`num_nodes <yaml-spec-num-nodes>`: 4
 
   :ref:`resources <yaml-spec-resources>`:
-    # Location.
-    :ref:`cloud <yaml-spec-resources-cloud>`: aws
-    :ref:`region <yaml-spec-resources-region>`: us-east-1
-    :ref:`zone <yaml-spec-resources-zone>`: us-east-1a
+    # Infra to use. Click to see schema and example values.
+    :ref:`infra <yaml-spec-resources-infra>`: aws
 
     # Hardware.
     :ref:`accelerators <yaml-spec-resources-accelerators>`: H100:8
@@ -41,19 +39,26 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
+    :ref:`network_tier <yaml-spec-resources-network-tier>`: best
 
     # Config.
     :ref:`image_id <yaml-spec-resources-image-id>`: ami-0868a20f5a3bf9702
     :ref:`ports <yaml-spec-resources-ports>`: 8081
     :ref:`labels <yaml-spec-resources-labels>`:
       my-label: my-value
+    :ref:`autostop <yaml-spec-resources-autostop>`:
+      idle_minutes: 10
+      wait_for: none
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
-      - cloud: aws
-        region: us-west-2
+      - infra: aws/us-west-2
         accelerators: H100
-      - cloud: gcp
+      - infra: gcp/us-central1
         accelerators: H100
+
+    :ref:`ordered <yaml-spec-resources-ordered>`:
+      - infra: aws/us-east-1
+      - infra: aws/us-west-2
 
     :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
 
@@ -62,8 +67,17 @@ Below is the configuration syntax and some example values.  See details under ea
     MY_LOCAL_PATH: tmp-workdir
     MODEL_SIZE: 13b
 
+  :ref:`secrets <yaml-spec-secrets>`:
+    MY_HF_TOKEN: my-secret-value
+    WANDB_API_KEY: my-secret-value-2
+
+  :ref:`volumes <yaml-spec-new-volumes>`:
+    /mnt/data: volume-name
+
   :ref:`file_mounts <yaml-spec-file-mounts>`:
+    # Sync a local directory to a remote directory
     /remote/path: /local/path
+    # Mount a S3 bucket to a remote directory
     /checkpoints:
       source: s3://existing-bucket
       mode: MOUNT
@@ -78,6 +92,10 @@ Below is the configuration syntax and some example values.  See details under ea
     echo "Begin run."
     python train.py
     echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
+
+  :ref:`config <yaml-spec-config>`:
+    kubernetes:
+      provision_timeout: 600
 
 Fields
 ----------
@@ -98,13 +116,40 @@ Task name (optional), used for display purposes.
 ``workdir``
 ~~~~~~~~~~~
 
-Working directory (optional), synced to ``~/sky_workdir`` on the remote cluster each time launch or exec is run with the yaml file.
+``workdir`` can be a local working directory or a git repository (optional). It is synced or cloned to ``~/sky_workdir`` on the remote cluster each time ``sky launch`` or ``sky exec`` is run with the YAML file.
 
-Commands in ``setup`` and ``run`` will be executed under it.
+**Local Directory**:
+
+If ``workdir`` is a local path, the entire directory is synced to the remote cluster. To exclude files from syncing, see :ref:`exclude-uploading-files`.
 
 If a relative path is used, it's evaluated relative to the location from which ``sky`` is called.
 
-To exclude files from syncing, see https://docs.skypilot.co/en/latest/examples/syncing-code-artifacts.html#exclude-uploading-files
+**Git Repository**:
+
+If ``workdir`` is a git repository, the ``url`` field is required and can be in one of the following formats:
+
+* HTTPS: ``https://github.com/skypilot-org/skypilot.git``
+* SSH: ``ssh://git@github.com/skypilot-org/skypilot.git``
+* SCP: ``git@github.com:skypilot-org/skypilot.git``
+
+The ``ref`` field specifies the git reference to checkout, which can be:
+
+* A branch name (e.g., ``main``, ``develop``)
+* A tag name (e.g., ``v1.0.0``)
+* A commit hash (e.g., ``abc123def456``)
+
+**Authentication for Private Repositories**:
+
+*For HTTPS URLs*: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
+
+*For SSH/SCP URLs*: SkyPilot will attempt to authenticate using SSH keys in the following order:
+
+1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
+2. SSH key configured in ``~/.ssh/config`` for the git host
+3. Default SSH key at ``~/.ssh/id_rsa``
+4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
+
+Commands in ``setup`` and ``run`` will be executed under ``~/sky_workdir``.
 
 .. code-block:: yaml
 
@@ -116,6 +161,13 @@ OR
 
   workdir: ../my-project  # Relative path
 
+OR
+
+.. code-block:: yaml
+
+  workdir:
+    url: https://github.com/skypilot-org/skypilot.git
+    ref: main
 
 .. _yaml-spec-num-nodes:
 
@@ -141,58 +193,127 @@ Per-node resource requirements (optional).
 .. code-block:: yaml
 
   resources:
-    cloud: aws
+    infra: aws
     instance_type: p3.8xlarge
 
 
-.. _yaml-spec-resources-cloud:
+.. _yaml-spec-resources-infra:
 
-``resources.cloud``
+``resources.infra``
 ~~~~~~~~~~~~~~~~~~~
 
-The cloud to use (optional).
+
+Infrastructure to use (optional).
+
+Schema: ``<cloud>/<region>/<zone>`` (region
+and zone are optional), or ``k8s/<context-name>`` (context-name is optional).
+Wildcards are supported in any component.
+
+Example values: ``aws``, ``aws/us-east-1``, ``aws/us-east-1/us-east-1a``,
+``aws/*/us-east-1a``, ``k8s``, ``k8s/my-cluster-context``.
 
 .. code-block:: yaml
 
   resources:
-    cloud: aws
+    infra: aws  # Use any available AWS region/zone.
+
+
+.. code-block:: yaml
+
+  resources:
+    infra: k8s  # Use any available Kubernetes context.
+
+You can also specify a specific region, zone, or Kubernetes context.
+
+.. code-block:: yaml
+
+  resources:
+    infra: aws/us-east-1
+
+
+.. code-block:: yaml
+
+  resources:
+    infra: aws/us-east-1/us-east-1a
+
+
+.. code-block:: yaml
+
+  resources:
+    infra: k8s/my-h100-cluster-context
+
+
+.. _yaml-spec-resources-autostop:
+
+``resources.autostop``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Autostop configuration (optional).
+
+Controls whether and when to automatically stop or tear down the cluster after it becomes idle. See :ref:`auto-stop` for more details.
+
+Format:
+
+- ``true``: Use default idle minutes (5)
+- ``false``: Disable autostop
+- ``<num>``: Stop after this many idle minutes
+- ``<num><unit>``: Stop after this much time
+- Object with configuration:
+
+  - ``idle_minutes``: Number of idle minutes before stopping
+  - ``down``: If true, tear down the cluster instead of stopping it
+  - ``wait_for``: Determines the condition for resetting the idleness timer.
+    Options:
+
+    - ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish
+    - ``jobs``: Only wait for in‑progress jobs
+    - ``none``: Wait for nothing; autostop right after ``idle_minutes``
+
+``<unit>`` can be one of:
+- ``m``: minutes (default if not specified)
+- ``h``: hours
+- ``d``: days
+- ``w``: weeks
+
+
+Example:
+
+.. code-block:: yaml
+
+  resources:
+    autostop: true  # Stop after default idle minutes (5)
 
 OR
 
 .. code-block:: yaml
 
   resources:
-    cloud: gcp
+    autostop: 10  # Stop after 10 minutes
 
-
-.. _yaml-spec-resources-region:
-
-``resources.region``
-~~~~~~~~~~~~~~~~~~~~
-
-The region to use (optional).
-
-Auto-failover will be disabled if this is specified.
+OR
 
 .. code-block:: yaml
 
   resources:
-    region: us-east-1
+    autostop: 10h  # Stop after 10 hours
 
-
-.. _yaml-spec-resources-zone:
-
-``resources.zone``
-~~~~~~~~~~~~~~~~~~
-
-The zone to use (optional).
-
-Auto-failover will be disabled if this is specified.
+OR
 
 .. code-block:: yaml
 
   resources:
-    zone: us-east-1a
+    autostop:
+      idle_minutes: 10
+      down: true  # Use autodown instead of autostop
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop:
+      idle_minutes: 10
+      wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
 
 
 .. _yaml-spec-resources-accelerators:
@@ -319,12 +440,20 @@ OR
 ``resources.memory``
 ~~~~~~~~~~~~~~~~~~~~
 
-Memory in GiB per node (optional).
+Memory specification per node (optional).
 
 Format:
 
--  ``<num>``: exactly ``<num>`` GiB
--  ``<num>+``: at least ``<num>`` GiB
+-  ``<num>``: exactly ``<num>`` GB
+-  ``<num>+``: at least ``<num>`` GB
+-  ``<num><unit>``: memory with unit (e.g., ``1024MB``, ``64GB``)
+
+Units supported (case-insensitive):
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes) (default if not specified)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
 
 Example: ``32+`` means first try to find an instance type with >= 32 GiB. If not found, use the next cheapest instance with more than 32 GiB.
 
@@ -338,7 +467,7 @@ OR
 .. code-block:: yaml
 
   resources:
-    memory: 64
+    memory: 64GB
 
 .. _yaml-spec-resources-instance-type:
 
@@ -375,14 +504,34 @@ If unspecified, defaults to ``false`` (on-demand instances).
 ``resources.disk_size``
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Disk size in GB to allocate for OS (mounted at ``/``).
+Integer disk size in GB to allocate for OS (mounted at ``/``) OR specify units.
 
 Increase this if you have a large working directory or tasks that write out large outputs.
+
+Units supported (case-insensitive):
+
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
+
+.. warning::
+
+   The disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
 
 .. code-block:: yaml
 
   resources:
     disk_size: 256
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    disk_size: 256GB
+
 
 
 .. _yaml-spec-resources-disk-tier:
@@ -415,6 +564,27 @@ OR
 
   resources:
     disk_tier: best
+
+
+.. _yaml-spec-resources-network-tier:
+
+``resources.network_tier``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Network tier to use (optional).
+
+Could be one of ``'standard'`` or ``'best'`` (default: ``'standard'``).
+
+If ``'best'`` is specified, use the best network tier available on the specified infra. This currently supports:
+
+- ``infra: gcp``: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
+- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
+- ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes
+- ``infra: k8s/my-gke-cluster``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
+
+.. code-block:: yaml
+
+  resources:
+    network_tier: best
 
 
 .. _yaml-spec-resources-ports:
@@ -483,7 +653,7 @@ If not specified, SkyPilot will use the default debian-based image suitable for 
 
 **Docker support**
 
-You can specify docker image to use by setting the image_id to ``docker:<image name>`` for Azure, AWS and GCP. For example,
+You can specify docker image to use by setting the image_id to ``docker:<image name>`` for Azure, AWS, GCP, and RunPod. For example,
 
 .. code-block:: yaml
 
@@ -589,7 +759,7 @@ https://github.com/IBM/vpc-img-inst
 .. code-block:: yaml
 
   resources:
-    image_id: ami-0868a20f5a3bf9702  # AWS example
+    image_id: ami-0868a20f5a3bf9702  # IBM example
     # image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310  # GCP example
     # image_id: docker:pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime # Docker example
 
@@ -601,6 +771,29 @@ OR
     image_id:
       us-east-1: ami-123
       us-west-2: ami-456
+
+
+**RunPod**
+
+RunPod natively supports Docker images. You can specify any Docker image:
+
+.. code-block:: yaml
+
+  resources:
+    image_id: docker:ubuntu:22.04
+    # Or use a specific registry
+    image_id: docker:nvcr.io/nvidia/pytorch:24.10-py3
+
+For multi-region deployments, you can specify different images per region:
+
+.. code-block:: yaml
+
+  resources:
+    image_id:
+      US: docker:us-registry.io/myapp:latest
+      CA: docker:ca-registry.io/myapp:latest
+      CZ: docker:eu-registry.io/myapp:latest
+
 
 .. _yaml-spec-resources-labels:
 
@@ -639,36 +832,40 @@ Candidate resources (optional).
 
 If specified, SkyPilot will only use these candidate resources to launch the cluster.
 
-The fields specified outside of ``any_of``, ``ordered`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``any_of``, ``ordered`` will override the default values.
+The fields specified outside of ``any_of`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``any_of`` will override the default values.
 
-- ``any_of``: means that SkyPilot will try to find a resource that matches any of the candidate resources, i.e. the failover order will be decided by the optimizer.
-- ``ordered``: means that SkyPilot will failover through the candidate resources with the specified order.
-
-Note: accelerators under ``any_of`` and ``ordered`` cannot be a list or set.
+``any_of`` means that SkyPilot will try to find a resource that matches any of the candidate resources, i.e. the failover order will be decided by the optimizer.
 
 Example:
 
 .. code-block:: yaml
 
   resources:
+    accelerators: H100
     any_of:
-      - cloud: aws
-        region: us-west-2
-        accelerators: H100
-      - cloud: gcp
-        accelerators: H100
+      - infra: aws/us-west-2
+      - infra: gcp/us-central1
 
-OR
+.. _yaml-spec-resources-ordered:
+
+``resources.ordered``
+~~~~~~~~~~~~~~~~~~~~~~
+Ordered candidate resources (optional).
+
+If specified, SkyPilot will failover through the candidate resources with the specified order.
+
+The fields specified outside of ``ordered`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``ordered`` will override the default values.
+
+``ordered`` means that SkyPilot will failover through the candidate resources with the specified order.
+
+Example:
 
 .. code-block:: yaml
 
   resources:
     ordered:
-      - cloud: aws
-        region: us-east-1
-      - cloud: aws
-        region: us-west-2
-
+      - infra: aws/us-east-1
+      - infra: aws/us-west-2
 
 .. _yaml-spec-resources-job-recovery:
 
@@ -713,26 +910,6 @@ These values can be accessed in the ``file_mounts``, ``setup``, and ``run`` sect
 
 Values set here can be overridden by a CLI flag: ``sky launch/exec --env ENV=val`` (if ``ENV`` is present).
 
-For costumized non-root docker image in RunPod, you need to set ``SKYPILOT_RUNPOD_DOCKER_USERNAME`` to specify the login username for the docker image. See :ref:`docker-containers-as-runtime-environments` for more.
-
-If you want to use a docker image as runtime environment in a private registry, you can specify your username, password, and registry server as task environment variable.  For example:
-
-.. code-block:: yaml
-
-  envs:
-    SKYPILOT_DOCKER_USERNAME: <username>
-    SKYPILOT_DOCKER_PASSWORD: <password>
-    SKYPILOT_DOCKER_SERVER: <registry server>
-
-SkyPilot will execute ``docker login --username <username> --password <password> <registry server>`` before pulling the docker image. For ``docker login``, see https://docs.docker.com/engine/reference/commandline/login/
-
-You could also specify any of them through the CLI flag if you don't want to store them in your yaml file or if you want to generate them for constantly changing password. For example:
-
-.. code-block:: yaml
-
-  sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
-
-For more information about docker support in SkyPilot, please refer to the ``image_id`` section above.
 
 Example of using envs:
 
@@ -742,6 +919,65 @@ Example of using envs:
     MY_BUCKET: skypilot-data
     MODEL_SIZE: 13b
     MY_LOCAL_PATH: tmp-workdir
+
+.. dropdown:: Docker login authentication with environment variables
+
+  For costumized non-root docker image in RunPod, you need to set ``SKYPILOT_RUNPOD_DOCKER_USERNAME`` to specify the login username for the docker image. See :ref:`docker-containers-as-runtime-environments` for more.
+
+  If you want to use a docker image as runtime environment in a private registry, you can specify your username, password, and registry server as task environment variable.  For example:
+
+  .. code-block:: yaml
+
+    envs:
+      SKYPILOT_DOCKER_USERNAME: <username>
+      SKYPILOT_DOCKER_PASSWORD: <password>
+      SKYPILOT_DOCKER_SERVER: <registry server>
+
+  SkyPilot will execute ``docker login --username <username> --password <password> <registry server>`` before pulling the docker image. For ``docker login``, see https://docs.docker.com/engine/reference/commandline/login/
+
+  You could also specify any of them through the CLI flag if you don't want to store them in your yaml file or if you want to generate them for constantly changing password. For example:
+
+  .. code-block:: yaml
+
+    sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
+
+  For more information about docker support in SkyPilot, please refer to :ref:`Using private docker registries <docker-containers-private-registries>`.
+
+  You can also use :ref:`secrets <yaml-spec-secrets>` to set the authentication above.
+
+.. _yaml-spec-secrets:
+
+``secrets``
+~~~~~~~~~~~
+
+Secrets (optional).
+
+Secrets are similar to :ref:`envs <yaml-spec-envs>` above but can only be used in the ``setup`` and ``run``, and will be redacted in the entrypoint/YAML in the dashboard.
+
+Values set here can be overridden by a CLI flag: ``sky launch/exec --secret SECRET=val`` (if ``SECRET`` is present).
+
+Example:
+
+.. code-block:: yaml
+
+  secrets:
+    HF_TOKEN: my-huggingface-token
+    WANDB_API_KEY: my-wandb-api-key
+
+.. _yaml-spec-new-volumes:
+
+``volumes``
+~~~~~~~~~~~
+
+SkyPilot supports managing volumes resource for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
+
+Example:
+
+.. code-block:: yaml
+
+  volumes:
+    /mnt/data: volume-name
+
 
 .. _yaml-spec-file-mounts:
 
@@ -776,7 +1012,7 @@ Example:
       source: /local/path/datasets  # Source path, can be local or bucket URI. Optional, do not specify to create an empty bucket.
       store: s3  # Could be either 's3', 'gcs', 'azure', 'r2', 'oci', or 'ibm'; default: None. Optional.
       persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
-      mode: MOUNT  # Either MOUNT or COPY. Defaults to MOUNT. Optional.
+      mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
     # Copies a cloud object store URI to the cluster. Can be private buckets.
     /datasets-s3: s3://my-awesome-dataset
@@ -862,42 +1098,35 @@ OR
     python my_script.py --data-dir /remote/data --output-dir /remote/output
 
 
+.. _yaml-spec-config:
 .. _task-yaml-experimental:
 
-Global config overrides
----------------------------
+``config``
+~~~~~~~~~~
 
-To override the :ref:`global configs <config-yaml>` in ``~/.sky/config.yaml`` at a task level:
+:ref:`Advanced configuration options <config-client-job-task-yaml>` to apply to the task.
+
+Example:
 
 .. code-block:: yaml
 
-  experimental:
-    # Override the configs in ~/.sky/config.yaml from a task level.
-    #
-    # The following fields can be overridden. Please refer to docs of Advanced
-    # Configuration for more details of those fields:
-    # https://docs.skypilot.co/en/latest/reference/config.html
-    config_overrides:
-      docker:
-        run_options: ...
-      kubernetes:
-        pod_config: ...
-        provision_timeout: ...
-      gcp:
-        managed_instance_group: ...
-      nvidia_gpus:
-        disable_ecc: ...
-
-.. note::
-
-  Experimental features and APIs may be changed or removed in the future.
+  config:
+    docker:
+      run_options: ...
+    kubernetes:
+      pod_config: ...
+      provision_timeout: ...
+    gcp:
+      managed_instance_group: ...
+    nvidia_gpus:
+      disable_ecc: ...
 
 .. _service-yaml-spec:
 
 SkyServe Service
 ================
 
-To define a YAML for use for :ref:services <sky-serve>, use previously mentioned fields to describe each replica, then add a service section to describe the entire service.
+To define a YAML for use for :ref:`services <sky-serve>`, use previously mentioned fields to describe each replica, then add a service section to describe the entire service.
 
 Syntax
 

@@ -98,7 +98,7 @@ class Precondition(abc.ABC):
                 return False
 
             # Check if the request has been cancelled
-            request = api_requests.get_request(self.request_id)
+            request = await api_requests.get_request_async(self.request_id)
             if request is None:
                 logger.error(f'Request {self.request_id} not found')
                 return False
@@ -112,7 +112,8 @@ class Precondition(abc.ABC):
                     return True
                 if status_msg is not None and status_msg != last_status_msg:
                     # Update the status message if it has changed.
-                    with api_requests.update_request(self.request_id) as req:
+                    async with api_requests.update_request_async(
+                            self.request_id) as req:
                         assert req is not None, self.request_id
                         req.status_msg = status_msg
                     last_status_msg = status_msg
@@ -161,14 +162,15 @@ class ClusterStartCompletePrecondition(Precondition):
         # We unify these situations into a single state: the process of starting
         # the cluster is done (either normally or abnormally) but cluster is not
         # in UP status.
-        requests = api_requests.get_request_tasks(
-            status=[
-                api_requests.RequestStatus.RUNNING,
-                api_requests.RequestStatus.PENDING
-            ],
-            include_request_names=['sky.launch', 'sky.start'],
-            cluster_names=[self.cluster_name])
+        requests = await api_requests.get_request_tasks_async(
+            req_filter=api_requests.RequestTaskFilter(
+                status=[
+                    api_requests.RequestStatus.RUNNING,
+                    api_requests.RequestStatus.PENDING
+                ],
+                include_request_names=['sky.launch', 'sky.start'],
+                cluster_names=[self.cluster_name]))
         if len(requests) == 0:
-            # No runnning or pending tasks, the start process is done.
+            # No running or pending tasks, the start process is done.
             return True, None
         return False, f'Waiting for cluster {self.cluster_name} to be UP.'

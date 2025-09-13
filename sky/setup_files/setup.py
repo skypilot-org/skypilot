@@ -45,6 +45,7 @@ original_init_content = None
 system = platform.system()
 
 
+# Keep in sync with sky/server/common.py get_skypilot_version_on_disk()
 def find_version():
     # Extract version information from filepath
     # Adapted from:
@@ -160,7 +161,7 @@ setuptools.setup(
     author='SkyPilot Team',
     license='Apache 2.0',
     readme='README.md',
-    description='SkyPilot: An intercloud broker for the clouds',
+    description='SkyPilot: Run AI on Any Infra — Unified, Faster, Cheaper.',
     long_description=long_description,
     long_description_content_type='text/markdown',
     setup_requires=['wheel'],
@@ -177,6 +178,8 @@ setuptools.setup(
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: OS Independent',
         'Topic :: Software Development :: Libraries :: Python Modules',

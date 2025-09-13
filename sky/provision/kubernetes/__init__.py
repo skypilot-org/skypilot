@@ -11,3 +11,8 @@ from sky.provision.kubernetes.instance import wait_instances
 from sky.provision.kubernetes.network import cleanup_ports
 from sky.provision.kubernetes.network import open_ports
 from sky.provision.kubernetes.network import query_ports
+from sky.provision.kubernetes.volume import apply_volume
+from sky.provision.kubernetes.volume import delete_volume
+from sky.provision.kubernetes.volume import get_all_volumes_usedby
+from sky.provision.kubernetes.volume import get_volume_usedby
+from sky.provision.kubernetes.volume import map_all_volumes_usedby

@@ -30,7 +30,7 @@ num_nodes: 2
 resources:
   accelerators: A100:8 # Make sure you use 8 GPU instances
   use_spot: True
-  cloud: gcp
+  infra: gcp
 
 file_mounts: 
   ./torch_ddp_benchmark.py: ./examples/torch_ddp_benchmark/torch_ddp_benchmark.py

@@ -37,11 +37,6 @@ How it works:
 .. features a simple YAML spec to describe your services (referred to as a *service
 .. YAML* in the following) and a centralized controller to manage the deployments.
 
-
-.. tip::
-
-  To get started with SkyServe, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
-
 Quick tour: LLM serving
 -----------------------
 
@@ -221,7 +216,7 @@ This example will spin up two replicas of the service,
 each listening on port 8080. A replica is considered ready when it responds to
 :code:`GET /` with a 200 status code. You can customize the readiness
 probe by specifying a different path in the :code:`readiness_probe` field.
-You can find more configurations at :ref:`Service YAML Specification
+You can find more configuration options at :ref:`Service YAML Specification
 <service-yaml-spec>`.
 
 Use ``sky serve up`` to spin up the service:
@@ -488,6 +483,13 @@ Thus, **no user action is needed** to manage its lifecycle.
 
 You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
 
+High availability controller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyServe also supports a High Availability Controller mode when running controller on Kubernetes. This ensures your services remain available even if the controller pod experiences unexpected failures. The controller state is preserved using persistent volumes, allowing seamless recovery with minimal disruption to your running services.
+
+For more details on setting up and configuring high availability, see :ref:`High availability controller <sky-serve-high-availability-controller>`.
+
 .. _customizing-sky-serve-controller-resources:
 
 Customizing SkyServe controller resources
@@ -508,11 +510,26 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
     # NOTE: these settings only take effect for a new SkyServe controller, not if
     # you have an existing one.
     controller:
+      # Enable high availability mode for the controller (optional).
+      #
+      # When set to true, the controller will be deployed with high availability
+      # capabilities on Kubernetes using Deployments. This allows the controller and load balancer
+      # to automatically recover from failures (e.g., node failures, pod crashes)
+      # and maintain service continuity.
+      #
+      # NOTE: This feature is ONLY supported when Kubernetes cloud is enabled. To enable kubernetes, see :ref:`Kubernetes Setup <kubernetes-setup>`.
+      # The service controller cluster will be scheduled to kubernetes. The k8s deployment needs to be always-on to keep the controller running. If using a local kubernetes deployment (e.g. `sky local up`), keeping the laptop/machines up is required.
+      # When enabled:
+      # - The controller is deployed as a Kubernetes Deployment instead of a Pod
+      # - Automatic pod rescheduling and recovery is handled by Kubernetes
+      #
+      # Default: false.
+      high_availability: true
+
       resources:
         # All configs below are optional.
         # Specify the location of the SkyServe controller.
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         # Specify the maximum number of services that can be run concurrently.
         cpus: 2+  # number of vCPUs, max concurrent services = min(4 * cpus, memory in GiB)
         # Specify the disk_size in GB of the SkyServe controller.

@@ -4,15 +4,17 @@ import copy
 from multiprocessing import pool
 import re
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Type
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
 
 from sky import sky_logging
 from sky.adaptors import gcp
 from sky.provision import common
 from sky.provision import constants as provision_constants
+from sky.provision.gcp import config as gcp_config
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -56,11 +58,13 @@ def _filter_instances(
 # for terminated instances, if they have already been fully deleted.
 @common_utils.retry
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
@@ -82,7 +86,8 @@ def query_instances(
     )
 
     raw_statuses = {}
-    statuses = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst_id, instance in instances.items():
         raw_status = instance[handler.STATUS_FIELD]
         raw_statuses[inst_id] = raw_status
@@ -96,7 +101,7 @@ def query_instances(
             status = None
         if non_terminated_only and status is None:
             continue
-        statuses[inst_id] = status
+        statuses[inst_id] = (status, None)
 
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     if handler == instance_utils.GCPTPUVMInstance:
@@ -530,9 +535,11 @@ def terminate_instances(
     use_mig = provider_config.get('use_managed_instance_group', False)
     if use_mig:
         # Deleting the MIG will also delete the instances.
-        instance_utils.GCPManagedInstanceGroup.delete_mig(
-            project_id, zone, cluster_name_on_cloud)
-        return
+        mig_exists_and_deleted = (
+            instance_utils.GCPManagedInstanceGroup.delete_mig(
+                project_id, zone, cluster_name_on_cloud))
+        if mig_exists_and_deleted:
+            return
 
     label_filters = {
         provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
@@ -568,6 +575,25 @@ def terminate_instances(
         raise RuntimeError(f'Failed to terminate instances: {errs}')
     # We don't wait for the instances to be terminated, as it can take a long
     # time (same as what we did in ray's node_provider).
+
+
+def cleanup_custom_multi_network(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    failover: bool = False,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, cluster_name_on_cloud
+    project_id = provider_config['project_id']
+    region = provider_config['region']
+    enable_gpu_direct = provider_config.get('enable_gpu_direct', False)
+    network_tier = provider_config.get('network_tier', 'standard')
+
+    if (enable_gpu_direct or
+            network_tier == resources_utils.NetworkTier.BEST.value):
+        gcp_config.delete_gpu_direct_vpcs_and_subnets(cluster_name_on_cloud,
+                                                      project_id, region,
+                                                      failover)
 
 
 def open_ports(

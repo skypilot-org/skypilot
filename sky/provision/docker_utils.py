@@ -18,16 +18,18 @@ logger = sky_logging.init_logger(__name__)
 SETUP_ENV_VARS_CMD = (
     'prefix_cmd() '
     '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-    'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
-    '~/container_env_var.sh && '
-    '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;'
-)
+    'export -p > ~/container_env_var.sh && '
+    '$(prefix_cmd) '
+    'mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;')
 
 # Docker daemon may not be ready when the machine is firstly started. The error
 # message starts with the following string. We should wait for a while and retry
 # the command.
 DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
                                 'the Docker daemon socket')
+
+DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
+
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
 
@@ -94,6 +96,21 @@ def check_bind_mounts_cmd(cname, docker_cmd):
 
 def check_docker_image(cname, docker_cmd):
     return _check_helper(cname, '.Config.Image', docker_cmd)
+
+
+def maybe_remove_container_cmds(container_name, docker_cmd):
+    """Remove the container if it exists. If not, it will be a no-op.
+    """
+    docker_rm = [
+        docker_cmd,
+        'rm',
+        '-f',
+        container_name,
+        '2>/dev/null',
+        '||',
+        'true',
+    ]
+    return ' '.join(docker_rm)
 
 
 def docker_start_cmds(
@@ -188,22 +205,25 @@ class DockerInitializer:
                 stream_logs=False,
                 separate_stderr=separate_stderr,
                 log_path=self.log_path)
-            if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr and
-                    wait_for_docker_daemon):
-                if time.time() - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:
-                    if rc == 0:
-                        # Set returncode to 1 if failed to connect to docker
-                        # daemon after timeout.
-                        rc = 1
-                    break
-                # Close the cached connection to make the permission update of
-                # ssh user take effect, e.g. usermod -aG docker $USER, called
-                # by cloud-init of Azure.
-                self.runner.close_cached_connection()
-                logger.info('Failed to connect to docker daemon. It might be '
-                            'initializing, retrying in 5 seconds...')
-                time.sleep(5)
-                continue
+            if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr or
+                    DOCKER_SOCKET_NOT_READY_STR in stdout + stderr):
+                if wait_for_docker_daemon:
+                    if time.time(
+                    ) - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:
+                        if rc == 0:
+                            # Set returncode to 1 if failed to connect to docker
+                            # daemon after timeout.
+                            rc = 1
+                        break
+                    # Close the cached connection to make the permission update
+                    # of ssh user take effect, e.g. usermod -aG docker $USER,
+                    # called by cloud-init of Azure.
+                    self.runner.close_cached_connection()
+                    logger.info(
+                        'Failed to connect to docker daemon. It might be '
+                        'initializing, retrying in 5 seconds...')
+                    time.sleep(5)
+                    continue
             break
         subprocess_utils.handle_returncode(
             rc,
@@ -236,12 +256,26 @@ class DockerInitializer:
 
             docker_login_config.process_credential()
 
-            self._run(
-                f'{self.docker_cmd} login --username '
-                f'{docker_login_config.username} '
-                f'--password {docker_login_config.password} '
-                f'{docker_login_config.server}',
-                wait_for_docker_daemon=True)
+            if docker_login_config.password:
+                # Password is allowed to be empty, in that case, we will not run
+                # the login command, and assume that the image pulling is
+                # authenticated by the IAM permission on the VM.
+                self._run(
+                    f'{self.docker_cmd} login --username '
+                    f'{shlex.quote(docker_login_config.username)} '
+                    f'--password {shlex.quote(docker_login_config.password)} '
+                    f'{shlex.quote(docker_login_config.server)}',
+                    wait_for_docker_daemon=True)
+            elif docker_login_config.server.endswith('-docker.pkg.dev'):
+                # Docker image server is on GCR, we need to do additional setup
+                # to pull the image.
+                # When no username or password is provided, we assume that
+                # we are on GCP VM (i.e. gcloud auth configure-docker is
+                # enough), or the image server is public.
+                # For the former case, gcloud should be available, and latter
+                # should be fine to fail the following command.
+                self._run('gcloud auth configure-docker '
+                          f'{docker_login_config.server} --quiet || true')
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             specific_image = docker_login_config.format_image(specific_image)
@@ -283,6 +317,10 @@ class DockerInitializer:
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
                 'sudo systemctl restart docker; } || true')
             user_docker_run_options = self.docker_config.get('run_options', [])
+            remove_container_cmd = maybe_remove_container_cmds(
+                self.container_name,
+                self.docker_cmd,
+            )
             start_command = docker_start_cmds(
                 specific_image,
                 self.container_name,
@@ -290,7 +328,7 @@ class DockerInitializer:
                     self._auto_configure_shm(user_docker_run_options)),
                 self.docker_cmd,
             )
-            self._run(start_command)
+            self._run(f'{remove_container_cmd}; {start_command}')
 
         # SkyPilot: Setup Commands.
         # TODO(zhwu): the following setups should be aligned with the kubernetes
@@ -341,13 +379,16 @@ class DockerInitializer:
         # `mesg: ttyname failed: inappropriate ioctl for device`.
         # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         port = constants.DEFAULT_DOCKER_PORT
+        # In case the port is already configured in the sshd_config file
+        # in some images, we delete it first and then append the new one.
         # pylint: disable=anomalous-backslash-in-string
         self._run(
-            f'sudo sed -i "s/#Port 22/Port {port}/" /etc/ssh/sshd_config;'
+            'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config;'
+            f'sudo echo "Port {port}" >> /etc/ssh/sshd_config;'
             'mkdir -p ~/.ssh;'
             'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
             'sudo service ssh start;'
-            'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;'
+            'sudo sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;'
             f'{SETUP_ENV_VARS_CMD}',
             run_env='docker')
 

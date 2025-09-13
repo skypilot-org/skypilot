@@ -1,0 +1,293 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: server_deployment_test
+templates:
+  - templates/api-deployment.yaml
+tests:
+  - it: should mount kubeconfig correctly when useKubeconfig is enabled
+    set:
+      kubernetesCredentials.useKubeconfig: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: kube-config
+            mountPath: /root/.kube
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: kube-config
+            secret:
+              secretName: kube-credentials
+
+  - it: should persist .kube directory when sshNodePool is enabled
+    set:
+      apiService.sshNodePools: test
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.kube
+            subPath: .kube
+
+  - it: should merge kubeconfig from .kube and configmap when useKubeconfig and sshNodePool are both enabled
+    set:
+      kubernetesCredentials.useKubeconfig: true
+      apiService.sshNodePools: test
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: kube-config
+            mountPath: /var/skypilot/kubeconfig
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.kube
+            subPath: .kube
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KUBECONFIG
+            value: /root/.kube/config:/var/skypilot/kubeconfig/config
+
+  # Test cases for upgradeStrategy configuration
+  - it: should use Recreate strategy by default
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+
+  - it: should use RollingUpdate strategy when configured with external database via secret
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: false
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 1
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 0
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_APISERVER_UUID
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.uid
+
+  - it: should use RollingUpdate strategy when configured with external database via connection string
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionString: postgresql://user:pass@host:5432/db
+      storage.enabled: false
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 1
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 0
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_APISERVER_UUID
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.uid
+
+  - it: should fail RollingUpdate strategy without external database
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+    asserts:
+      - failedTemplate:
+          errorMessage: "External database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString when using RollingUpdate strategy"
+
+  - it: should fail RollingUpdate strategy with local storage enabled
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "Local storage is not supported when using RollingUpdate strategy. Use recreate upgrade strategy or set storage.enabled to false."
+
+  # Test cases for dbConnectionSecretName configuration
+  - it: should set database connection environment variable from secret
+    set:
+      apiService.dbConnectionSecretName: my-db-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DB_CONNECTION_URI
+            valueFrom:
+              secretKeyRef:
+                name: my-db-secret
+                key: connection_string
+
+  # Test cases for dbConnectionString configuration
+  - it: should set database connection environment variable from connection string
+    set:
+      apiService.dbConnectionString: postgresql://user:pass@host:5432/db
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DB_CONNECTION_URI
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-db-connection
+                key: connection_string
+
+  - it: should not set database connection environment variables when neither secret nor string is configured
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DB_CONNECTION_URI
+
+  - it: should enable service accounts when auth.serviceAccount.enabled is explicitly true
+    set:
+      auth.serviceAccount.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+            value: "true"
+
+  - it: should disable service accounts when auth.serviceAccount.enabled is explicitly false
+    set:
+      auth.serviceAccount.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+
+  - it: should respect auth.serviceAccount.enabled over apiService.enableServiceAccounts
+    set:
+      auth.serviceAccount.enabled: false
+      apiService.enableServiceAccounts: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+
+  - it: should fallback to apiService.enableServiceAccounts when auth.serviceAccount.enabled is null
+    set:
+      auth.serviceAccount.enabled: null
+      apiService.enableServiceAccounts: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+
+  - it: should mount r2 credentials correctly when r2Credentials is enabled
+    set:
+      r2Credentials.enabled: true
+      r2Credentials.r2SecretName: my-r2-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: r2-config
+            emptyDir: {}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: r2-config
+            mountPath: /root/.cloudflare
+            readOnly: true
+
+  - it: should create r2 init container with correct configuration
+    set:
+      r2Credentials.enabled: true
+      r2Credentials.r2SecretName: my-r2-secret
+      apiService.image: test-image:latest
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: setup-r2-credentials
+
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "cat > /root/.cloudflare/r2.credentials"
+
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            env:
+              - name: R2_CREDENTIALS
+                valueFrom:
+                  secretKeyRef:
+                    name: my-r2-secret
+                    key: r2.credentials
+              - name: R2_ACCOUNT_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: my-r2-secret
+                    key: accountid
+
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            volumeMounts:
+              - name: r2-config
+                mountPath: /root/.cloudflare
+
+  - it: should not mount r2 credentials when r2Credentials is disabled
+    set:
+      r2Credentials.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: r2-config
+            emptyDir: {}
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: r2-credentials
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: r2-config
+            mountPath: /root/.cloudflare
+
+  - it: should use default r2SecretName when not specified
+    set:
+      r2Credentials.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: r2-config
+            emptyDir: {}
+
+  - it: should not create r2 init container when r2Credentials is disabled
+    set:
+      r2Credentials.enabled: false
+      # Other containers could exist, but r2 setup shouldn't happen
+      awsCredentials.enabled: true
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "setup-r2-credentials"
+      - notMatchRegexRaw:
+          pattern: "R2_CREDENTIALS"

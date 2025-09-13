@@ -3,15 +3,14 @@ import copy
 import logging
 import math
 import os
-from typing import Any, Dict, Optional, Union
-
-import yaml
+from typing import Any, Dict, List, Optional, Union
 
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
+from sky.utils import yaml_utils
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ def bootstrap_instances(
     _configure_services(namespace, context, config.provider_config)
 
     networking_mode = network_utils.get_networking_mode(
-        config.provider_config.get('networking_mode'))
+        config.provider_config.get('networking_mode'), context)
     if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         config = _configure_ssh_jump(namespace, context, config)
 
@@ -556,69 +555,74 @@ def _configure_skypilot_system_namespace(
 
 
 def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
-    """Creates sidecars required for FUSE mounting.
+    """Creates the privileged daemonset required for FUSE mounting.
 
     FUSE mounting in Kubernetes without privileged containers requires us to
-    run a sidecar container with the necessary capabilities. We run a daemonset
-    which exposes the host /dev/fuse device as a Kubernetes resource. The
-    SkyPilot pod requests this resource to mount the FUSE filesystem.
+    run a privileged daemonset which accepts fusermount requests via unix
+    domain socket and perform the mount/unmount operations on the host /dev/fuse
+    device.
 
     We create this daemonset in the skypilot_system_namespace, which is
-    configurable in the provider config. This allows the FUSE mounting sidecar
-    to be shared across multiple tenants. The default namespace is
+    configurable in the provider config. This allows the daemonset to be
+    shared across multiple tenants. The default namespace is
     'skypilot-system' (populated in clouds.Kubernetes).
+
+    For legacy smarter-device-manager daemonset, we keep it as is since it may
+    still be used by other tenants.
     """
 
-    logger.info('_configure_fuse_mounting: Setting up FUSE device manager.')
+    logger.info(
+        '_configure_fuse_mounting: Setting up fusermount-server daemonset.')
 
-    fuse_device_manager_namespace = provider_config['skypilot_system_namespace']
+    fuse_proxy_namespace = provider_config['skypilot_system_namespace']
     context = kubernetes_utils.get_context_from_config(provider_config)
 
-    # Read the device manager YAMLs from the manifests directory
+    # Read the YAMLs from the manifests directory
     root_dir = os.path.dirname(os.path.dirname(__file__))
 
-    # Load and create the ConfigMap
-    logger.info('_configure_fuse_mounting: Creating configmap.')
-    config_map_path = os.path.join(
-        root_dir, 'kubernetes/manifests/smarter-device-manager-configmap.yaml')
-    with open(config_map_path, 'r', encoding='utf-8') as file:
-        config_map = yaml.safe_load(file)
-    kubernetes_utils.merge_custom_metadata(config_map['metadata'])
-    try:
-        kubernetes.core_api(context).create_namespaced_config_map(
-            fuse_device_manager_namespace, config_map)
-    except kubernetes.api_exception() as e:
-        if e.status == 409:
-            logger.info('_configure_fuse_mounting: ConfigMap already exists '
-                        f'in namespace {fuse_device_manager_namespace!r}')
-        else:
-            raise
-    else:
-        logger.info('_configure_fuse_mounting: ConfigMap created '
-                    f'in namespace {fuse_device_manager_namespace!r}')
-
     # Load and create the DaemonSet
+    # TODO(aylei): support customize and upgrade the fusermount-server image
     logger.info('_configure_fuse_mounting: Creating daemonset.')
     daemonset_path = os.path.join(
-        root_dir, 'kubernetes/manifests/smarter-device-manager-daemonset.yaml')
+        root_dir, 'kubernetes/manifests/fusermount-server-daemonset.yaml')
     with open(daemonset_path, 'r', encoding='utf-8') as file:
-        daemonset = yaml.safe_load(file)
+        daemonset = yaml_utils.safe_load(file)
     kubernetes_utils.merge_custom_metadata(daemonset['metadata'])
     try:
         kubernetes.apps_api(context).create_namespaced_daemon_set(
-            fuse_device_manager_namespace, daemonset)
+            fuse_proxy_namespace, daemonset)
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.info('_configure_fuse_mounting: DaemonSet already exists '
-                        f'in namespace {fuse_device_manager_namespace!r}')
+                        f'in namespace {fuse_proxy_namespace!r}')
+            existing_ds = kubernetes.apps_api(
+                context).read_namespaced_daemon_set(
+                    daemonset['metadata']['name'], fuse_proxy_namespace)
+            ds_image = daemonset['spec']['template']['spec']['containers'][0][
+                'image']
+            if existing_ds.spec.template.spec.containers[0].image != ds_image:
+                logger.info(
+                    '_configure_fuse_mounting: Updating DaemonSet image.')
+                kubernetes.apps_api(context).patch_namespaced_daemon_set(
+                    daemonset['metadata']['name'], fuse_proxy_namespace,
+                    daemonset)
+        elif e.status == 403 or e.status == 401:
+            logger.error('SkyPilot does not have permission to create '
+                         'fusermount-server DaemonSet in namespace '
+                         f'{fuse_proxy_namespace!r}, Error: {e.reason}. '
+                         'Please check the permissions of the SkyPilot service '
+                         'account or contact your cluster admin to create the '
+                         'DaemonSet manually. '
+                         'Reference: https://docs.skypilot.co/reference/kubernetes/kubernetes-setup.html#kubernetes-setup-fuse')  # pylint: disable=line-too-long
+            raise
         else:
             raise
     else:
         logger.info('_configure_fuse_mounting: DaemonSet created '
-                    f'in namespace {fuse_device_manager_namespace!r}')
+                    f'in namespace {fuse_proxy_namespace!r}')
 
-    logger.info('FUSE device manager setup complete '
-                f'in namespace {fuse_device_manager_namespace!r}')
+    logger.info('fusermount-server daemonset setup complete '
+                f'in namespace {fuse_proxy_namespace!r}')
 
 
 def _configure_services(namespace: str, context: Optional[str],
@@ -662,4 +666,9 @@ def _configure_services(namespace: str, context: Optional[str],
 
 
 class KubernetesError(Exception):
-    pass
+
+    def __init__(self,
+                 *args,
+                 insufficent_resources: Optional[List[str]] = None):
+        self.insufficent_resources = insufficent_resources
+        super().__init__(*args)

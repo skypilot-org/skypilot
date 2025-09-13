@@ -6,6 +6,7 @@ Kubernetes Examples
 .. toctree::
    :maxdepth: 1
 
-   Dynamic Workload Scheduler <https://github.com/GoogleCloudPlatform/ai-on-gke/tree/main/tutorials-and-examples/skypilot/dws-and-kueue>
-   Kueue <https://github.com/GoogleCloudPlatform/ai-on-gke/tree/main/tutorials-and-examples/skypilot/dws-and-kueue>
-   Multi-region Kubernetes <https://github.com/GoogleCloudPlatform/ai-on-gke/tree/main/tutorials-and-examples/skypilot>
+   Kueue <kueue-example>
+   Dynamic Workload Scheduler <https://gke-ai-labs.dev/docs/tutorials/skypilot/resource-management-using-kueue/>
+   Kueue with GKE DWS <https://gke-ai-labs.dev/docs/tutorials/skypilot/resource-management-using-kueue/>
+   Multi-region Kubernetes <https://gke-ai-labs.dev/docs/tutorials/skypilot/cross-region-capacity-chasing/>

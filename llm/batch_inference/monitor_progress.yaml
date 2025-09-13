@@ -5,7 +5,7 @@ workdir: .
 resources:
   cpus: 2
   memory: 8+
-  cloud: aws
+  infra: aws
   ports:
     - 8000
 

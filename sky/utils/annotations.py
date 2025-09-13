@@ -1,14 +1,19 @@
 """Annotations for public APIs."""
 
 import functools
-from typing import Callable, Literal
+from typing import Callable, Literal, TypeVar
+
+from typing_extensions import ParamSpec
 
 # Whether the current process is a SkyPilot API server process.
 is_on_api_server = True
-FUNCTIONS_NEED_RELOAD_CACHE = []
+_FUNCTIONS_NEED_RELOAD_CACHE = []
+
+T = TypeVar('T')
+P = ParamSpec('P')
 
 
-def client_api(func):
+def client_api(func: Callable[P, T]) -> Callable[P, T]:
     """Mark a function as a client-side API.
 
     Code invoked by server-side functions will find annotations.is_on_api_server
@@ -38,14 +43,20 @@ def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
         lru_cache_kwargs: Keyword arguments for functools.lru_cache.
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:
         if scope == 'global':
             return functools.lru_cache(*lru_cache_args,
                                        **lru_cache_kwargs)(func)
         else:
             cached_func = functools.lru_cache(*lru_cache_args,
                                               **lru_cache_kwargs)(func)
-            FUNCTIONS_NEED_RELOAD_CACHE.append(cached_func)
+            _FUNCTIONS_NEED_RELOAD_CACHE.append(cached_func)
             return cached_func
 
     return decorator
+
+
+def clear_request_level_cache():
+    """Clear the request-level cache."""
+    for func in _FUNCTIONS_NEED_RELOAD_CACHE:
+        func.cache_clear()

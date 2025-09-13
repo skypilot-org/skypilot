@@ -139,7 +139,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Optional[LocalDockerResourceHandle]:
+    ) -> Tuple[Optional[LocalDockerResourceHandle], bool]:
         """Builds docker image for the task and returns cluster name as handle.
 
         Since resource demands are ignored, There's no provisioning in local
@@ -149,7 +149,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         assert task.name is not None, ('Task name cannot be None - have you '
                                        'specified a task name?')
         if dryrun:
-            return None
+            return None, False
         if retry_until_up:
             logger.warning(
                 f'Retrying until up is not supported in backend: {self.NAME}. '
@@ -175,10 +175,11 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                                                 requested_resources=set(
                                                     task.resources),
                                                 ready=False)
-        return handle
+        return handle, False
 
     def _sync_workdir(self, handle: LocalDockerResourceHandle,
-                      workdir: Path) -> None:
+                      workdir: Union[Path, Dict[str, Any]],
+                      envs_and_secrets: Dict[str, str]) -> None:
         """Workdir is sync'd by adding to the docker image.
 
         This happens in the execute step.
@@ -276,7 +277,6 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  detach_run: bool,
                  dryrun: bool = False) -> None:
         """ Launches the container."""
-
         if detach_run:
             raise NotImplementedError('detach_run=True is not supported in '
                                       'LocalDockerBackend.')
@@ -364,7 +364,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                 if k.startswith(_DOCKER_LABEL_PREFIX):
                     # Remove 'skymeta_' from key
                     metadata[k[len(_DOCKER_LABEL_PREFIX):]] = v
-            self.images[c.name] = [c.image, metadata]
+            self.images[c.name] = (c.image, metadata)
             self.containers[c.name] = c
 
     def _execute_task_one_node(self, handle: LocalDockerResourceHandle,
