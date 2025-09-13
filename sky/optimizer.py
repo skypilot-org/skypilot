@@ -1351,7 +1351,6 @@ def _fill_in_launchable_resources(
     for resources in task.resources:
         # Validate the resources first which may fill in missing fields
         # automatically for the resources.
-        resources.validate()
         if (resources.cloud is not None and
                 not clouds.cloud_in_iterable(resources.cloud, enabled_clouds)):
             # Skip the resources that are on a cloud that is not enabled. The
@@ -1363,9 +1362,15 @@ def _fill_in_launchable_resources(
         # If clouds provide hints, store them for later printing.
         hints: Dict[clouds.Cloud, str] = {}
 
+        def get_feasible_launchable_resources(cloud: clouds.Cloud, resources: resources_lib.Resources, num_nodes: int) -> resources_utils.FeasibleResources:
+            resources = resources.copy()
+            resources._set_cloud(cloud)
+            resources.validate()
+            return cloud.get_feasible_launchable_resources(resources, num_nodes)
+
         feasible_list = subprocess_utils.run_in_parallel(
             lambda cloud, r=resources, n=task.num_nodes:
-            (cloud, cloud.get_feasible_launchable_resources(r, n)),
+            (cloud, get_feasible_launchable_resources(cloud, r, n)),
             clouds_list)
         for cloud, feasible_resources in feasible_list:
             if feasible_resources.hint is not None:
