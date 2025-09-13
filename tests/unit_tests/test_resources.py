@@ -140,6 +140,16 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
     _run_label_test(allowed_labels, invalid_labels, cloud=clouds.AWS())
 
 
+# I am not sure why these tests were failing, commenting out for now.
+# @mock.patch('sky.catalog.instance_type_exists', return_value=True)
+# @mock.patch('sky.catalog.get_accelerators_from_instance_type',
+#             return_value={'fake-acc': 2})
+# @mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+#             return_value='/dev/sda1')
+# @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+# @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
+# def test_aws_make_deploy_variables(*mocks) -> None:
+@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='x86_64')
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
@@ -228,6 +238,16 @@ def test_aws_make_deploy_variables(*mocks) -> None:
                                        'variables generated')
 
 
+# I am not sure why these tests were failing, commenting out for now.
+# @mock.patch('sky.catalog.instance_type_exists', return_value=True)
+# @mock.patch('sky.catalog.get_accelerators_from_instance_type',
+#             return_value={'fake-acc': 2})
+# @mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+#             return_value='/dev/xvda')
+# @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+# @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
+# def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
+@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='x86_64')
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
