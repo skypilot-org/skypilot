@@ -9,7 +9,7 @@ provisioning and distributed execution on many nodes.
 For example, here is a simple example to train a GPT-like model (inspired by Karpathy's `minGPT <https://github.com/karpathy/minGPT>`_) across 2 nodes with Distributed Data Parallel (DDP) in PyTorch.
 
 .. code-block:: yaml
-  :emphasize-lines: 6,19,23-24,26
+  :emphasize-lines: 6,23,27-29
 
   name: minGPT-ddp
 
@@ -25,7 +25,7 @@ For example, here is a simple example to train a GPT-like model (inspired by Kar
       # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
       uv venv --python 3.10
       source .venv/bin/activate
-      uv pip install -r requirements.txt "numpy<2" "torch==1.12.1+cu113" --extra-index-url https://download.pytorch.org/whl/cu113
+      uv pip install -r requirements.txt "numpy<2" "torch==2.7.1+cu118" --extra-index-url https://download.pytorch.org/whl/cu118
 
   run: |
       cd examples
@@ -39,8 +39,8 @@ For example, here is a simple example to train a GPT-like model (inspired by Kar
       torchrun \
       --nnodes=$SKYPILOT_NUM_NODES \
       --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
-      --master_addr=$MASTER_ADDR \
       --node_rank=${SKYPILOT_NODE_RANK} \
+      --master_addr=$MASTER_ADDR \
       --master_port=8008 \
       main.py
 
