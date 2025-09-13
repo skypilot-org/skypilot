@@ -23,7 +23,7 @@ from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
-# Pattern to extract home directory from command output, handling MOTD contamination
+# Pattern to extract home directory from command output
 _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 
 # Rsync options
@@ -187,7 +187,7 @@ class CommandRunner:
         return '-'.join(str(x) for x in self.node)
 
     def _get_remote_home_dir(self) -> str:
-        # Use pattern matching to extract home directory, handling MOTD contamination.
+        # Use pattern matching to extract home directory.
         # Some container images print MOTD when login shells start, which can
         # contaminate command output. We use a unique pattern to extract the
         # actual home directory reliably.
@@ -198,7 +198,7 @@ class CommandRunner:
         if rc != 0:
             raise ValueError('Failed to get remote home directory: '
                              f'{output + stderr}')
-        
+
         # Extract home directory using pattern matching
         home_dir_match = _HOME_DIR_PATTERN.search(output)
         if home_dir_match:

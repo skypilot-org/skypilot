@@ -1293,7 +1293,7 @@ def get_cluster_info(
                                     stream_logs=False)
     _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
                                  head_pod_name, rc, stdout + stderr)
-    
+
     # Extract SSH user using pattern matching
     ssh_user_match = _SSH_USER_PATTERN.search(stdout)
     if ssh_user_match:
