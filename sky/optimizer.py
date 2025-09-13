@@ -1362,7 +1362,9 @@ def _fill_in_launchable_resources(
         # If clouds provide hints, store them for later printing.
         hints: Dict[clouds.Cloud, str] = {}
 
-        def get_feasible_launchable_resources(cloud: clouds.Cloud, resources: resources_lib.Resources, num_nodes: int) -> resources_utils.FeasibleResources:
+        def get_feasible_launchable_resources(
+                cloud: clouds.Cloud, resources: resources_lib.Resources,
+                num_nodes: int) -> resources_utils.FeasibleResources:
             resources = resources.copy()
             resources._set_cloud(cloud)
             resources.validate()
