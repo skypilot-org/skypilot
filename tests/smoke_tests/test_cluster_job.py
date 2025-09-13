@@ -2018,7 +2018,10 @@ def test_long_setup_run_script(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Test min-gpt on Kubernetes ----------
+# ---------- Test min-gpt ----------
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
+@pytest.mark.no_seeweb  # Seeweb does not support multi-node
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('train_file', [
     'examples/distributed-pytorch/train.yaml',
