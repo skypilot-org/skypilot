@@ -2023,7 +2023,7 @@ def test_long_setup_run_script(generic_cloud: str):
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('train_file', [
     'examples/distributed-pytorch/train.yaml',
-    'examples/distributed-pytorch/train-rdvz.yaml'
+    'examples/distributed-pytorch/train-rdzv.yaml'
 ])
 def test_min_gpt_kubernetes(train_file):
     accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
