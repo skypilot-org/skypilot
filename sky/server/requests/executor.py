@@ -323,8 +323,8 @@ def override_request_env_and_config(
             try:
                 if (request_name is not None and
                         request_name != 'sky.workspaces.get'):
-                    # Rejecting requests to workspaces that the user does not have
-                    # permission to access.
+                    # Rejecting requests to workspaces that the user does not
+                    # have permission to access.
                     workspaces_core.reject_request_for_unauthorized_workspace(
                         user)
                 else:
