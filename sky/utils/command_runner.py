@@ -919,7 +919,6 @@ class KubernetesCommandRunner(CommandRunner):
         else:
             return f'pod/{self.pod_name}'
 
-
     def port_forward_command(
             self,
             port_forward: List[Tuple[int, int]],
