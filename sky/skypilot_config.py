@@ -415,10 +415,17 @@ def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
 def get_active_workspace(force_user_workspace: bool = False) -> str:
     context_workspace = getattr(_active_workspace_context, 'workspace', None)
     if not force_user_workspace and context_workspace is not None:
-        logger.debug(f'Get context workspace: {context_workspace}')
+        logger.debug(f'Got context workspace: {context_workspace}')
         return context_workspace
-    return get_nested(keys=('active_workspace',),
-                      default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
+    active_workspace = get_nested(keys=('active_workspace',),
+                                  default_value=None)
+    if active_workspace is None:
+        logger.debug(f'No active workspace found, using default workspace: '
+                     f'{constants.SKYPILOT_DEFAULT_WORKSPACE}')
+        active_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+    else:
+        logger.debug(f'Got active workspace: {active_workspace}')
+    return active_workspace
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
