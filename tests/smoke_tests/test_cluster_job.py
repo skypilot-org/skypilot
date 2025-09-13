@@ -2021,36 +2021,40 @@ def test_long_setup_run_script(generic_cloud: str):
 # ---------- Test min-gpt on Kubernetes ----------
 @pytest.mark.kubernetes
 @pytest.mark.resource_heavy
-def test_min_gpt_kubernetes():
+@pytest.mark.parametrize('train_file', ['examples/distributed-pytorch/train.yaml', 'examples/distributed-pytorch/train-rdvz.yaml'])
+def test_min_gpt_kubernetes(train_file):
     accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     name = smoke_tests_utils.get_cluster_name()
-    original_yaml_path = 'examples/distributed-pytorch/train.yaml'
 
-    with open(original_yaml_path, 'r') as f:
-        content = f.read()
+    def read_and_modify(file_path: str) -> str:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # Let the train exit after 1 epoch
+        modified_content = content.replace('main.py',
+                                        'main.py trainer_config.max_epochs=1')
+        modified_content = re.sub(r'accelerators:\s*[^\n]+',
+                                f'accelerators: {accelerator}', modified_content)
 
-    # Let the train exit after 1 epoch
-    modified_content = content.replace('main.py',
-                                       'main.py trainer_config.max_epochs=1')
+        # Create a temporary YAML file with the modified content
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(read_and_modify(file_path))
+            f.flush()
+            train_file_path = f.name
+        return train_file_path
 
-    modified_content = re.sub(r'accelerators:\s*[^\n]+',
-                              f'accelerators: {accelerator}', modified_content)
+    dist_train_file = read_and_modify(train_file)
 
-    # Create a temporary YAML file with the modified content
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
-        f.write(modified_content)
-        f.flush()
-
-        test = smoke_tests_utils.Test(
-            'min_gpt_kubernetes',
-            [
-                f'sky launch -y -c {name} --infra kubernetes {f.name}',
-                f'sky logs {name} 1 --status',
-            ],
-            f'sky down -y {name}',
-            timeout=20 * 60,
-        )
-        smoke_tests_utils.run_one_test(test)
+    test = smoke_tests_utils.Test(
+        'min_gpt_kubernetes',
+        [
+            f'sky launch -y -c {name} --infra kubernetes {dist_train_file}',
+            f'sky logs {name} 1 --status',
+            
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Test GCP network tier ----------
