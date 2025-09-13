@@ -1,0 +1,7 @@
+resources:
+  accelerators:
+    - T4: 1
+    - L4: 1
+
+setup: echo "Testing list of dicts accelerators"
+run: echo "This should work now"

@@ -1,0 +1,8 @@
+resources:
+  accelerators:
+    - T4: 1
+    - "V100:2"
+    - A100: 1
+
+setup: echo "Testing mixed list format"
+run: echo "This should also work"

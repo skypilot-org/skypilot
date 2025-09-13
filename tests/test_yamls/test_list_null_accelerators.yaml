@@ -1,0 +1,7 @@
+resources:
+  accelerators:
+    - T4: 1
+    - V100: null
+
+setup: echo "Testing with null values"
+run: echo "Null should default to 1"

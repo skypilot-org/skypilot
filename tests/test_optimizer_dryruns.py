@@ -7,6 +7,7 @@ from typing import Callable, Optional, Set
 
 from click import testing as cli_testing
 import pytest
+import yaml
 
 import sky
 from sky import clouds
@@ -519,6 +520,25 @@ def test_parse_accelerators_from_yaml():
         assert 'The "accelerators" field as a str ' in str(e.value)
 
 
+def test_parse_accelerators_list_of_dicts_from_yaml():
+    """Test parsing accelerators from YAML with list of dicts format."""
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators:
+          - T4: 1
+          - L4: 2""")
+
+    # This should create 2 separate resource configurations
+    task = sky.Task.from_yaml_config(yaml.safe_load(spec))
+    assert len(task.resources) == 2
+
+    # Check that both accelerator types are present across the resources
+    all_accels = {}
+    for r in task.resources:
+        all_accels.update(r.accelerators)
+    assert all_accels == {'T4': 1, 'L4': 2}
+
+
 def test_invalid_num_nodes():
     for invalid_value in (-1, 2.2, 1.0):
         with pytest.raises(ValueError) as e:
@@ -526,6 +546,26 @@ def test_invalid_num_nodes():
                 task = sky.Task()
                 task.num_nodes = invalid_value
             assert 'num_nodes should be a positive int' in str(e.value)
+
+
+def test_parse_accelerators_mixed_list_from_yaml():
+    """Test parsing mixed accelerator format."""
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators:
+          - T4: 1
+          - "V100:2"
+          - A100: 1""")
+
+    # This should create 3 separate resource configurations
+    task = sky.Task.from_yaml_config(yaml.safe_load(spec))
+    assert len(task.resources) == 3
+
+    # Check all accelerator types are present
+    all_accels = {}
+    for r in task.resources:
+        all_accels.update(r.accelerators)
+    assert all_accels == {'T4': 1, 'V100': 2, 'A100': 1}
 
 
 def test_parse_empty_yaml():
