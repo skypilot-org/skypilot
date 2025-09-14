@@ -1,6 +1,6 @@
 # formatting
 # match the version with .pre-commit-config.yaml
-yapf==0.32.0
+yapf==0.43.0
 # match the version with .pre-commit-config.yaml
 pylint==2.14.5
 # formatting the node_providers code from upstream ray-project/ray project

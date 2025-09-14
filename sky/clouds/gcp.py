@@ -322,10 +322,10 @@ class GCP(clouds.Cloud):
                                             use_spot,
                                             region=region,
                                             zone=None)
-        
+
         for r in regions:
             assert r.zones is not None, r
-            
+
             # Handle cross-zone placement for multi-node clusters
             if nodes_placement == 'cross-zone' and num_nodes > 1:
                 # For cross-zone placement, select different zones for different nodes
@@ -513,7 +513,8 @@ class GCP(clouds.Cloud):
         r = resources
         # Find GPU spec, if any.
         # Handle cross-zone placement
-        if r.nodes_placement == 'cross-zone' and len(zones) > 1 and num_nodes > 1:
+        if r.nodes_placement == 'cross-zone' and len(
+                zones) > 1 and num_nodes > 1:
             # For cross-zone, we pass different zones for head and workers
             all_zone_names = [z.name for z in zones[:num_nodes]]
             resources_vars = {

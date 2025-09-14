@@ -1320,7 +1320,7 @@ class RetryingVmProvisioner(object):
                     continue
                 # Don't override zones if cross-zone placement is requested
                 if (to_provision.zone is not None and
-                    to_provision.nodes_placement != 'cross-zone'):
+                        to_provision.nodes_placement != 'cross-zone'):
                     zones = [clouds.Zone(name=to_provision.zone)]
                 yield zones
 
@@ -1549,8 +1549,8 @@ class RetryingVmProvisioner(object):
                 # as it will only apply to newly-created instances.
                 ports_to_open_on_launch = (
                     list(resources_utils.port_ranges_to_set(to_provision.ports))
-                    if to_provision.cloud.OPEN_PORTS_VERSION <=
-                    clouds.OpenPortsVersion.LAUNCH_ONLY else None)
+                    if to_provision.cloud.OPEN_PORTS_VERSION
+                    <= clouds.OpenPortsVersion.LAUNCH_ONLY else None)
                 try:
                     controller = controller_utils.Controllers.from_name(
                         cluster_name)
@@ -2304,8 +2304,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def _update_cluster_info(self):
         # When a cluster is on a cloud that does not support the new
         # provisioner, we should skip updating cluster_info.
-        if (self.launched_resources.cloud.PROVISIONER_VERSION >=
-                clouds.ProvisionerVersion.SKYPILOT):
+        if (self.launched_resources.cloud.PROVISIONER_VERSION
+                >= clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
             config = {}
             # It is possible that the cluster yaml is not available when
@@ -2477,8 +2477,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         launched_resources = self.launched_resources.assert_launchable()
         updated_to_skypilot_provisioner_after_provisioned = (
-            launched_resources.cloud.PROVISIONER_VERSION >=
-            clouds.ProvisionerVersion.SKYPILOT and
+            launched_resources.cloud.PROVISIONER_VERSION
+            >= clouds.ProvisionerVersion.SKYPILOT and
             self.cached_external_ips is not None and
             self.cached_cluster_info is None)
         if updated_to_skypilot_provisioner_after_provisioned:
@@ -2487,8 +2487,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'provisioner after cluster {self.cluster_name} was '
                 f'provisioned. Cached IPs are used for connecting to the '
                 'cluster.')
-        if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR >=
-                launched_resources.cloud.PROVISIONER_VERSION or
+        if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR
+                >= launched_resources.cloud.PROVISIONER_VERSION or
                 updated_to_skypilot_provisioner_after_provisioned):
             ip_list = (self.cached_external_ips
                        if force_cached else self.external_ips())
@@ -3241,8 +3241,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_utils.port_ranges_to_set(prev_ports))
         if open_new_ports:
             launched_resources = handle.launched_resources.assert_launchable()
-            if not (launched_resources.cloud.OPEN_PORTS_VERSION <=
-                    clouds.OpenPortsVersion.LAUNCH_ONLY):
+            if not (launched_resources.cloud.OPEN_PORTS_VERSION
+                    <= clouds.OpenPortsVersion.LAUNCH_ONLY):
                 with rich_utils.safe_status(
                         ux_utils.spinner_message(
                             'Launching - Opening new ports')):
@@ -4936,8 +4936,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             to_provision = handle.launched_resources
             assert to_provision is not None
             to_provision = to_provision.assert_launchable()
-            if (to_provision.cloud.OPEN_PORTS_VERSION <=
-                    clouds.OpenPortsVersion.LAUNCH_ONLY):
+            if (to_provision.cloud.OPEN_PORTS_VERSION
+                    <= clouds.OpenPortsVersion.LAUNCH_ONLY):
                 if not requested_ports_set <= current_ports_set:
                     current_cloud = to_provision.cloud
                     with ux_utils.print_exception_no_traceback():

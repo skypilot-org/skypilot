@@ -302,11 +302,14 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             all_errors = []
             for i in range(to_start_count):
                 # Calculate which zone to use for this instance
-                instance_index = len(resumed_instance_ids) + len(created_instance_ids)
+                instance_index = len(resumed_instance_ids) + len(
+                    created_instance_ids)
                 zone_index = instance_index % len(cross_zone_zones)
                 instance_zone = cross_zone_zones[zone_index]
 
-                logger.info(f'Cross-zone: Creating instance {instance_index} in zone {instance_zone}')
+                logger.info(
+                    f'Cross-zone: Creating instance {instance_index} in zone {instance_zone}'
+                )
 
                 # Create one instance at a time in the appropriate zone
                 errors, instance_ids = resource.create_instances(
@@ -366,8 +369,9 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 
         if not all_pending_instances:
             break
-        logger.debug(f'run_instances: Waiting for {len(all_pending_instances)} instances '
-                     'in PENDING status.')
+        logger.debug(
+            f'run_instances: Waiting for {len(all_pending_instances)} instances '
+            'in PENDING status.')
         time.sleep(constants.POLL_INTERVAL)
 
     # Check if the number of running instances is the same as the requested.

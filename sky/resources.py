@@ -403,14 +403,15 @@ class Resources:
         self._set_autostop_config(autostop)
         self._set_priority(priority)
         self._set_volumes(volumes)
-        
+
         # Validate nodes_placement
         if nodes_placement is not None:
             valid_placements = ['cross-zone']
             if nodes_placement not in valid_placements:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Invalid nodes_placement: {nodes_placement}. '
-                                   f'Valid options are: {valid_placements}')
+                    raise ValueError(
+                        f'Invalid nodes_placement: {nodes_placement}. '
+                        f'Valid options are: {valid_placements}')
         self._nodes_placement = nodes_placement
 
     def validate(self):
@@ -1833,7 +1834,8 @@ class Resources:
             autostop=override.pop('autostop', current_autostop_config),
             priority=override.pop('priority', self.priority),
             volumes=override.pop('volumes', self.volumes),
-            nodes_placement=override.pop('nodes_placement', self.nodes_placement),
+            nodes_placement=override.pop('nodes_placement',
+                                         self.nodes_placement),
             infra=override.pop('infra', None),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
@@ -2157,7 +2159,8 @@ class Resources:
         resources_fields['autostop'] = config.pop('autostop', None)
         resources_fields['priority'] = config.pop('priority', None)
         resources_fields['volumes'] = config.pop('volumes', None)
-        resources_fields['nodes_placement'] = config.pop('nodes_placement', None)
+        resources_fields['nodes_placement'] = config.pop(
+            'nodes_placement', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
         resources_fields['_docker_username_for_runpod'] = config.pop(
@@ -2294,8 +2297,8 @@ class Resources:
             accelerators = state.pop('_accelerators', None)
             if accelerators is not None:
                 accelerators = {
-                    accelerator_registry.canonicalize_accelerator_name(
-                        acc, cloud=None): acc_count
+                    accelerator_registry.canonicalize_accelerator_name(acc,
+                                                                       cloud=None): acc_count
                     for acc, acc_count in accelerators.items()
                 }
             state['_accelerators'] = accelerators

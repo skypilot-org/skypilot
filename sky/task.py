@@ -232,8 +232,7 @@ def _with_docker_username_for_runpod(
         return resources
     return (type(resources)(
         r.copy(_docker_username_for_runpod=docker_username_for_runpod,
-               nodes_placement=r.nodes_placement)
-        for r in resources))
+               nodes_placement=r.nodes_placement) for r in resources))
 
 
 class Task:
