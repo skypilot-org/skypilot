@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import colorama
 
+import sky
 from sky import catalog
 from sky import check as sky_check
 from sky import clouds
@@ -37,7 +38,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_DISK_SIZE_GB = 256
+_DEFAULT_DISK_SIZE_GB = 256
 
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
@@ -133,7 +134,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 28
+    _VERSION = 29
 
     def __init__(
         self,
@@ -158,6 +159,7 @@ class Resources:
         autostop: Union[bool, int, str, Dict[str, Any], None] = None,
         priority: Optional[int] = None,
         volumes: Optional[List[Dict[str, Any]]] = None,
+        nodes_placement: Optional[str] = None,
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
@@ -287,7 +289,7 @@ class Resources:
         if infra is not None:
             infra_info = infra_utils.InfraInfo.from_str(infra)
             # Infra takes precedence over individually specified parameters
-            cloud = registry.CLOUD_REGISTRY.from_str(infra_info.cloud)
+            cloud = sky.CLOUD_REGISTRY.from_str(infra_info.cloud)
             region = infra_info.region
             zone = infra_info.zone
 
@@ -319,7 +321,7 @@ class Resources:
             self._disk_size = int(
                 resources_utils.parse_memory_resource(disk_size, 'disk_size'))
         else:
-            self._disk_size = DEFAULT_DISK_SIZE_GB
+            self._disk_size = _DEFAULT_DISK_SIZE_GB
 
         self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
@@ -401,6 +403,15 @@ class Resources:
         self._set_autostop_config(autostop)
         self._set_priority(priority)
         self._set_volumes(volumes)
+        
+        # Validate nodes_placement
+        if nodes_placement is not None:
+            valid_placements = ['cross-zone']
+            if nodes_placement not in valid_placements:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid nodes_placement: {nodes_placement}. '
+                                   f'Valid options are: {valid_placements}')
+        self._nodes_placement = nodes_placement
 
     def validate(self):
         """Validate the resources and infer the missing fields if possible."""
@@ -482,7 +493,7 @@ class Resources:
             network_tier = f', network_tier={self.network_tier.value}'
 
         disk_size = ''
-        if self.disk_size != DEFAULT_DISK_SIZE_GB:
+        if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
         ports = ''
@@ -645,6 +656,10 @@ class Resources:
     @property
     def volumes(self) -> Optional[List[Dict[str, Any]]]:
         return self._volumes
+
+    @property
+    def nodes_placement(self) -> Optional[str]:
+        return self._nodes_placement
 
     @property
     def autostop_config(self) -> Optional[AutostopConfig]:
@@ -1260,14 +1275,10 @@ class Resources:
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
             return None
-        # Handle dict image_id
-        if len(self.image_id) == 1:
-            # Check if the single key matches the region or is None (any region)
-            image_key = list(self.image_id.keys())[0]
-            if image_key == self.region or image_key is None:
-                image_id = self.image_id[image_key]
-                if image_id.startswith('docker:'):
-                    return image_id[len('docker:'):]
+        if len(self.image_id) == 1 and self.region in self.image_id:
+            image_id = self.image_id[self.region]
+            if image_id.startswith('docker:'):
+                return image_id[len('docker:'):]
         return None
 
     def _try_validate_image_id(self) -> None:
@@ -1337,19 +1348,13 @@ class Resources:
                     'Kubernetes, please explicitly specify the cloud.') from e
 
         if self._region is not None:
-            # If the image_id has None as key (region-agnostic),
-            # use it for any region
-            if None in self._image_id:
-                # Replace None key with the actual region
-                self._image_id = {self._region: self._image_id[None]}
-            elif self._region not in self._image_id:
+            if self._region not in self._image_id:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'image_id {self._image_id} should contain the image '
                         f'for the specified region {self._region}.')
-            else:
-                # Narrow down the image_id to the specified region.
-                self._image_id = {self._region: self._image_id[self._region]}
+            # Narrow down the image_id to the specified region.
+            self._image_id = {self._region: self._image_id[self._region]}
 
         # Check the image_id's are valid.
         for region, image_id in self._image_id.items():
@@ -1776,7 +1781,7 @@ class Resources:
             self._accelerators is None,
             self._accelerator_args is None,
             not self._use_spot_specified,
-            self._disk_size == DEFAULT_DISK_SIZE_GB,
+            self._disk_size == _DEFAULT_DISK_SIZE_GB,
             self._disk_tier is None,
             self._network_tier is None,
             self._image_id is None,
@@ -1828,6 +1833,7 @@ class Resources:
             autostop=override.pop('autostop', current_autostop_config),
             priority=override.pop('priority', self.priority),
             volumes=override.pop('volumes', self.volumes),
+            nodes_placement=override.pop('nodes_placement', self.nodes_placement),
             infra=override.pop('infra', None),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
@@ -2151,6 +2157,7 @@ class Resources:
         resources_fields['autostop'] = config.pop('autostop', None)
         resources_fields['priority'] = config.pop('priority', None)
         resources_fields['volumes'] = config.pop('volumes', None)
+        resources_fields['nodes_placement'] = config.pop('nodes_placement', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
         resources_fields['_docker_username_for_runpod'] = config.pop(
@@ -2207,6 +2214,7 @@ class Resources:
             config['network_tier'] = self.network_tier.value
         add_if_not_none('ports', self.ports)
         add_if_not_none('labels', self.labels)
+        add_if_not_none('nodes_placement', self.nodes_placement)
         if self.volumes is not None:
             # Convert DiskTier/StorageType enum to string value for each volume
             volumes = []
@@ -2265,7 +2273,7 @@ class Resources:
             accelerator_args = state.pop('accelerator_args', None)
             state['_accelerator_args'] = accelerator_args
 
-            disk_size = state.pop('disk_size', DEFAULT_DISK_SIZE_GB)
+            disk_size = state.pop('disk_size', _DEFAULT_DISK_SIZE_GB)
             state['_disk_size'] = disk_size
 
         if version < 2:
@@ -2402,6 +2410,9 @@ class Resources:
         if version < 28:
             self._no_missing_accel_warnings = state.get(
                 '_no_missing_accel_warnings', None)
+
+        if version < 29:
+            self._nodes_placement = state.get('_nodes_placement', None)
 
         self.__dict__.update(state)
 
