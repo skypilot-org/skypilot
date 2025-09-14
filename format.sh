@@ -123,7 +123,7 @@ isort --profile black -l 88 -m 3 "sky/skylet/providers/ibm"
 # TODO(zhwu): When more of the codebase is typed properly, the mypy flags
 # should be set to do a more stringent check.
 echo 'SkyPilot mypy:'
-mypy $(cat tests/mypy_files.txt)
+mypy $(cat tests/mypy_files.txt) --cache-dir=/dev/null
 
 # Run Pylint
 echo 'Sky Pylint:'
