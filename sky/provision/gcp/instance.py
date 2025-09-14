@@ -297,48 +297,95 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             )
 
     if to_start_count > 0:
-        errors, created_instance_ids = resource.create_instances(
-            cluster_name_on_cloud,
-            project_id,
-            availability_zone,
-            config.node_config,
-            labels,
-            to_start_count,
-            total_count=config.count,
-            include_head_node=head_instance_id is None)
-        if errors:
-            error = common.ProvisionerError('Failed to launch instances.')
-            error.errors = errors
-            raise error
-        if head_instance_id is None:
-            head_instance_id = created_instance_ids[0]
+        if is_cross_zone:
+            # For cross-zone, create instances in different zones
+            all_errors = []
+            for i in range(to_start_count):
+                # Calculate which zone to use for this instance
+                instance_index = len(resumed_instance_ids) + len(created_instance_ids)
+                zone_index = instance_index % len(cross_zone_zones)
+                instance_zone = cross_zone_zones[zone_index]
+
+                logger.info(f'Cross-zone: Creating instance {instance_index} in zone {instance_zone}')
+
+                # Create one instance at a time in the appropriate zone
+                errors, instance_ids = resource.create_instances(
+                    cluster_name_on_cloud,
+                    project_id,
+                    instance_zone,
+                    config.node_config,
+                    labels,
+                    1,  # Create one instance at a time
+                    total_count=config.count,
+                    include_head_node=(head_instance_id is None and i == 0))
+
+                if errors:
+                    all_errors.extend(errors)
+                else:
+                    created_instance_ids.extend(instance_ids)
+                    if head_instance_id is None and i == 0:
+                        head_instance_id = instance_ids[0]
+
+            if all_errors:
+                error = common.ProvisionerError('Failed to launch instances.')
+                error.errors = all_errors
+                raise error
+        else:
+            # Original single-zone logic
+            errors, created_instance_ids = resource.create_instances(
+                cluster_name_on_cloud,
+                project_id,
+                availability_zone,
+                config.node_config,
+                labels,
+                to_start_count,
+                total_count=config.count,
+                include_head_node=head_instance_id is None)
+            if errors:
+                error = common.ProvisionerError('Failed to launch instances.')
+                error.errors = errors
+                raise error
+            if head_instance_id is None:
+                head_instance_id = created_instance_ids[0]
+
+    # Wait for all instances to be running
+    zones_to_check = cross_zone_zones if is_cross_zone else [availability_zone]
 
     while True:
         # wait until all instances are running
-        instances = resource.filter(
-            project_id=project_id,
-            zone=availability_zone,
-            label_filters=filter_labels,
-            status_filters=resource.PENDING_STATES,
-        )
-        if not instances:
+        all_pending_instances = {}
+        for zone in zones_to_check:
+            instances = resource.filter(
+                project_id=project_id,
+                zone=zone,
+                label_filters=filter_labels,
+                status_filters=resource.PENDING_STATES,
+            )
+            if instances:
+                all_pending_instances.update(instances)
+
+        if not all_pending_instances:
             break
-        logger.debug(f'run_instances: Waiting for {len(instances)} instances '
+        logger.debug(f'run_instances: Waiting for {len(all_pending_instances)} instances '
                      'in PENDING status.')
         time.sleep(constants.POLL_INTERVAL)
 
     # Check if the number of running instances is the same as the requested.
-    instances = resource.filter(
-        project_id=project_id,
-        zone=availability_zone,
-        label_filters=filter_labels,
-        status_filters=[resource.RUNNING_STATE],
-    )
-    if len(instances) != config.count:
+    all_running_instances = {}
+    for zone in zones_to_check:
+        instances = resource.filter(
+            project_id=project_id,
+            zone=zone,
+            label_filters=filter_labels,
+            status_filters=[resource.RUNNING_STATE],
+        )
+        all_running_instances.update(instances)
+
+    if len(all_running_instances) != config.count:
         logger.warning('The number of running instances is different from '
                        'the requested number after provisioning '
                        f'(requested: {config.count}, '
-                       f'observed: {len(instances)}). '
+                       f'observed: {len(all_running_instances)}). '
                        'This could be some instances failed to start '
                        'or some resource leak.')
 
@@ -355,9 +402,15 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             tpu_node,
             vpc_name,
         )
+    # For cross-zone, return the zone of the head node
+    head_zone = availability_zone
+    if is_cross_zone and head_instance_id:
+        # The head node is always the first instance, which uses the first zone
+        head_zone = cross_zone_zones[0]
+
     return common.ProvisionRecord(provider_name='gcp',
                                   region=region,
-                                  zone=availability_zone,
+                                  zone=head_zone,
                                   cluster_name=cluster_name_on_cloud,
                                   head_instance_id=head_instance_id,
                                   resumed_instance_ids=resumed_instance_ids,
