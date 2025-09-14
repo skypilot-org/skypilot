@@ -367,7 +367,7 @@ class DockerInitializer:
         # pylint: disable=anomalous-backslash-in-string
         self._run(
             'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config;'
-            f'sudo echo "Port {port}" >> /etc/ssh/sshd_config;'
+            f'echo "Port {port}" | sudo tee -a /etc/ssh/sshd_config > /dev/null;'
             'mkdir -p ~/.ssh;'
             'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
             'sudo service ssh start;'
