@@ -18,7 +18,7 @@ logger = sky_logging.init_logger(__name__)
 SETUP_ENV_VARS_CMD = (
     'prefix_cmd() '
     '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-    'export -p > ~/container_env_var.sh && '
+    'export -p | grep -v RAY_RUNTIME_ENV_HOOK > ~/container_env_var.sh && '
     '$(prefix_cmd) '
     'mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;')
 
