@@ -157,6 +157,10 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     project_id = config.provider_config['project_id']
     availability_zone = config.provider_config['availability_zone']
 
+    # Handle cross-zone placement
+    cross_zone_zones = config.provider_config.get('cross_zone_zones', [])
+    is_cross_zone = len(cross_zone_zones) > 1
+
     # SKY: 'TERMINATED' for compute VM, 'STOPPED' for TPU VM
     # 'STOPPING' means the VM is being stopped, which needs
     # to be included to avoid creating a new VM.

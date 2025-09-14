@@ -515,14 +515,12 @@ class GCP(clouds.Cloud):
         # Handle cross-zone placement
         if r.nodes_placement == 'cross-zone' and len(zones) > 1 and num_nodes > 1:
             # For cross-zone, we pass different zones for head and workers
-            head_zone = zones[0].name
-            worker_zones = [z.name for z in zones[1:num_nodes]]  # Get zones for workers
+            all_zone_names = [z.name for z in zones[:num_nodes]]
             resources_vars = {
                 'instance_type': r.instance_type,
                 'region': region_name,
                 'zones': zone_name,  # Default for compatibility
-                'head_zone': head_zone,
-                'worker_zones': worker_zones,
+                'cross_zone_zones': all_zone_names,  # List of zones for cross-zone
                 'is_cross_zone': True,
                 'gpu': None,
                 'gpu_count': None,
@@ -541,8 +539,6 @@ class GCP(clouds.Cloud):
                 'instance_type': r.instance_type,
                 'region': region_name,
                 'zones': zone_name,
-                'head_zone': zone_name,
-                'worker_zones': [],
                 'is_cross_zone': False,
                 'gpu': None,
                 'gpu_count': None,
