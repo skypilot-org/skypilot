@@ -55,6 +55,7 @@ import Link from 'next/link';
 
 // Workspace-aware API functions (cacheable)
 export async function getWorkspaceClusters(workspaceName) {
+  console.error(`[WORKSPACE DEBUG] getWorkspaceClusters called for workspace: ${workspaceName}`);
   try {
     const clusters = await apiClient.fetch('/status', {
       cluster_names: null,
@@ -62,8 +63,9 @@ export async function getWorkspaceClusters(workspaceName) {
       include_credentials: false,
       override_skypilot_config: { active_workspace: workspaceName },
     });
+    console.error(`[WORKSPACE DEBUG] getWorkspaceClusters raw response for ${workspaceName}:`, clusters.length, 'clusters');
 
-    return clusters.map((cluster) => ({
+    const mappedClusters = clusters.map((cluster) => ({
       status:
         cluster.status === 'UP'
           ? 'RUNNING'
@@ -86,7 +88,17 @@ export async function getWorkspaceClusters(workspaceName) {
       to_down: cluster.to_down,
       metadata: cluster.metadata,
       resources_str: cluster.resources_str,
+      workspace: cluster.workspace || 'default', // Preserve workspace info
     }));
+    
+    // Filter clusters to only include those that belong to the requested workspace
+    const filteredClusters = mappedClusters.filter(cluster => 
+      cluster.workspace === workspaceName
+    );
+    
+    console.error(`[WORKSPACE DEBUG] getWorkspaceClusters for ${workspaceName}: ${mappedClusters.length} total -> ${filteredClusters.length} filtered`);
+    console.error(`[WORKSPACE DEBUG] Filtered clusters:`, filteredClusters.map(c => ({name: c.cluster, workspace: c.workspace})));
+    return filteredClusters;
   } catch (error) {
     console.error(
       `Error fetching clusters for workspace ${workspaceName}:`,
@@ -107,8 +119,23 @@ export async function getWorkspaceManagedJobs(workspaceName) {
     const id = response.headers.get('X-Skypilot-Request-ID');
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     const data = await fetchedData.json();
-
-    return data.return_value ? JSON.parse(data.return_value) : { jobs: [] };
+    const jobsData = data.return_value ? JSON.parse(data.return_value) : { jobs: [] };
+    
+    // Ensure workspace information is preserved and filter by workspace
+    if (jobsData.jobs) {
+      jobsData.jobs = jobsData.jobs.map(job => ({
+        ...job,
+        workspace: job.workspace || 'default'
+      }));
+      
+      // Filter jobs to only include those that belong to the requested workspace
+      const originalJobCount = jobsData.jobs.length;
+      jobsData.jobs = jobsData.jobs.filter(job => job.workspace === workspaceName);
+      
+      console.error(`[WORKSPACE DEBUG] getWorkspaceManagedJobs for ${workspaceName}: ${originalJobCount} total -> ${jobsData.jobs.length} filtered`);
+    }
+    
+    return jobsData;
   } catch (error) {
     console.error(
       `Error fetching managed jobs for workspace ${workspaceName}:`,
@@ -407,20 +434,18 @@ export function Workspaces() {
 
       workspaceDataArray.forEach(
         ({ workspaceName, enabledClouds, clusters, managedJobs }) => {
-          // Add workspace info to clusters
+          // Debug logging
+          console.error(`[WORKSPACE DEBUG] Processing workspace ${workspaceName}:`);
+          console.error(`[WORKSPACE DEBUG] - Clusters:`, clusters.length, clusters.map(c => ({name: c.cluster, workspace: c.workspace})));
+          console.error(`[WORKSPACE DEBUG] - Jobs:`, managedJobs.jobs.length, managedJobs.jobs.map(j => ({name: j.name, workspace: j.workspace})));
+          
+          // Clusters and jobs already have workspace info from API calls
           clusters.forEach((cluster) => {
-            clustersResponse.push({
-              ...cluster,
-              workspace: workspaceName,
-            });
+            clustersResponse.push(cluster);
           });
 
-          // Add workspace info to jobs
           managedJobs.jobs.forEach((job) => {
-            allJobs.push({
-              ...job,
-              workspace: workspaceName,
-            });
+            allJobs.push(job);
           });
 
           enabledCloudsMap[workspaceName] = enabledClouds;
@@ -448,8 +473,11 @@ export function Workspaces() {
 
       // Process clusters
       let totalRunningClusters = 0;
+      console.error(`[WORKSPACE DEBUG] Processing ${clustersResponse.length} total clusters for stats:`);
       clustersResponse.forEach((cluster) => {
         const wsName = cluster.workspace || 'default';
+        console.error(`[WORKSPACE DEBUG] Cluster ${cluster.cluster} -> workspace ${wsName} (original: ${cluster.workspace})`);
+        
         if (!workspaceStatsAggregator[wsName]) {
           workspaceStatsAggregator[wsName] = {
             name: wsName,
