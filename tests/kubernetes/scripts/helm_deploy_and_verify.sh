@@ -2,61 +2,60 @@
 set -e
 
 # Configuration
-CLUSTER_NAME="skypilot-helm-test-cluster"
-PROJECT_ID=$(gcloud config get-value project)
-ZONE="us-central1-a"  # Replace with your preferred zone
-NODE_COUNT=2
-MACHINE_TYPE="e2-standard-8"  # 8 vCPU, 32GB memory
-PACKAGE_NAME=${1:-"skypilot-nightly"}  # Accept package name as first argument, default to skypilot-nightly
-HELM_VERSION=${2:-"latest"}  # Accept version as second argument, default to latest
+PACKAGE_NAME=${1:-"skypilot-nightly"}
+HELM_VERSION=${2:-"latest"}
+NAMESPACE=${3:-"skypilot"}
+RELEASE_NAME=${4:-"skypilot"}
+WEB_USERNAME=${5:-"skypilot"}
 
-# Cleanup function
-cleanup() {
-    echo "Cleaning up..."
-    echo "Deleting GKE cluster: $CLUSTER_NAME"
-    gcloud container clusters delete $CLUSTER_NAME \
-        --project=$PROJECT_ID \
-        --zone=$ZONE \
-        --quiet || true
-    echo "Cleanup complete"
-}
-
-# Set up trap
-trap cleanup EXIT
-
-echo "Using GCP Project ID: $PROJECT_ID"
-echo "Installing SkyPilot Helm chart version: $HELM_VERSION"
-
-# Create GKE cluster
-echo "Creating GKE cluster..."
-gcloud container clusters create $CLUSTER_NAME \
-    --project=$PROJECT_ID \
-    --zone=$ZONE \
-    --num-nodes=$NODE_COUNT \
-    --machine-type=$MACHINE_TYPE \
-    --enable-ip-alias \
-    --enable-autoscaling \
-    --min-nodes=1 \
-    --max-nodes=3
-
-# Get credentials
-echo "Getting cluster credentials..."
-gcloud container clusters get-credentials $CLUSTER_NAME --zone=$ZONE --project=$PROJECT_ID
+echo "Deploying SkyPilot Helm chart..."
+echo "Package Name: $PACKAGE_NAME"
+echo "Helm Version: $HELM_VERSION"
+echo "Namespace: $NAMESPACE"
+echo "Release Name: $RELEASE_NAME"
 
 # Add SkyPilot Helm repository
 echo "Adding SkyPilot Helm repository..."
 helm repo add skypilot https://helm.skypilot.co
 helm repo update
 
-# Set up namespace and release name
-NAMESPACE=skypilot
-RELEASE_NAME=skypilot
-WEB_USERNAME=skypilot
 # Generate a random 16-character password using /dev/urandom (macOS compatible)
 WEB_PASSWORD=$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
 
 # Create auth string
 AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
+
+# Setup AWS credentials from default profile
+echo "Setting up AWS credentials from default profile..."
+AWS_CREDENTIALS_FILE="$HOME/.aws/credentials"
+
+if [ -f "$AWS_CREDENTIALS_FILE" ]; then
+    echo "Found AWS credentials file, extracting from default profile..."
+    AWS_ACCESS_KEY_ID=$(grep -A 10 "^\[default\]" "$AWS_CREDENTIALS_FILE" | grep "^aws_access_key_id" | head -1 | sed 's/.*= *//')
+    AWS_SECRET_ACCESS_KEY=$(grep -A 10 "^\[default\]" "$AWS_CREDENTIALS_FILE" | grep "^aws_secret_access_key" | head -1 | sed 's/.*= *//')
+
+    if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+        echo "Creating AWS credentials secret..."
+        kubectl create secret generic aws-credentials \
+          --namespace $NAMESPACE \
+          --from-literal=aws_access_key_id="${AWS_ACCESS_KEY_ID}" \
+          --from-literal=aws_secret_access_key="${AWS_SECRET_ACCESS_KEY}" \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+        echo "✓ AWS credentials secret created"
+        AWS_CREDENTIALS_ENABLED=true
+    else
+        echo "❌ Error: Could not extract AWS credentials from default profile"
+        echo "   Please ensure your ~/.aws/credentials file has a [default] section with:"
+        echo "   aws_access_key_id = YOUR_ACCESS_KEY"
+        echo "   aws_secret_access_key = YOUR_SECRET_KEY"
+        exit 1
+    fi
+else
+    echo "❌ Error: AWS credentials file not found at: $AWS_CREDENTIALS_FILE"
+    echo "   Please create the file with your AWS credentials in the [default] section"
+    exit 1
+fi
 
 # Deploy SkyPilot API server
 echo "Deploying SkyPilot API server..."
@@ -70,10 +69,24 @@ else
     extra_flag="--version $SEMVER_VERSION"
 fi
 
-helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME $extra_flag \
-    --namespace $NAMESPACE \
-    --create-namespace \
+# Prepare Helm command arguments
+HELM_ARGS=(
+    --namespace $NAMESPACE
+    --create-namespace
     --set ingress.authCredentials=$AUTH_STRING
+)
+
+# Add AWS credentials settings if enabled
+if [ "$AWS_CREDENTIALS_ENABLED" = true ]; then
+    HELM_ARGS+=(
+        --set awsCredentials.enabled=true
+        --set awsCredentials.awsSecretName=aws-credentials
+    )
+    echo "✓ AWS credentials will be enabled in Helm deployment"
+fi
+
+echo "Executing: helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME $extra_flag ${HELM_ARGS[*]}"
+helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME $extra_flag "${HELM_ARGS[@]}"
 
 # Wait for pods to be ready
 echo "Waiting for pods to be ready..."
@@ -138,7 +151,10 @@ if [ -z "$RETURNED_VERSION" ] || [ ${#RETURNED_VERSION} -le 1 ]; then
 fi
 
 if [ "$HELM_VERSION" != "latest" ]; then
-    if [ "$RETURNED_VERSION" != "$HELM_VERSION" ]; then
+    # Convert HELM_VERSION to match the returned version format (dash to dot)
+    EXPECTED_VERSION=$(echo "$HELM_VERSION" | sed 's/-dev\./\.dev/')
+
+    if [ "$RETURNED_VERSION" != "$EXPECTED_VERSION" ]; then
         echo "Error: Version mismatch! Expected: $HELM_VERSION, Got: $RETURNED_VERSION"
         exit 1
     fi
@@ -146,3 +162,8 @@ if [ "$HELM_VERSION" != "latest" ]; then
 else
     echo "Using latest version. Skipping version verification. Deployed version: $RETURNED_VERSION"
 fi
+
+echo "Helm deployment and verification completed successfully!"
+echo "API Endpoint: $ENDPOINT"
+echo "Username: $WEB_USERNAME"
+echo "Password: $WEB_PASSWORD"
