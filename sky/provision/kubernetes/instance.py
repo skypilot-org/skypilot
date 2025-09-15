@@ -24,6 +24,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
+from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -302,8 +303,46 @@ def _raise_command_running_error(message: str, command: str, pod_name: str,
         f'code {rc}: {command!r}\nOutput: {stdout}.')
 
 
+def _cluster_had_autoscale_event(namespace, context, search_start):
+    """Detects whether the cluster had a autoscaling event after a
+    specified datetime.
+
+    Args:
+        namespace: kubernetes namespace
+        context: kubernetes context
+        search_start (datetime.datetime): filter for events that occurred
+            after search_start
+    
+    Returns:
+        A boolean whether the cluster has an autoscaling event or not.
+    """
+    assert namespace is not None
+    autoscaling_reasons = set(
+        ['TriggeredScaleUp', 'SuccessfulRescale', 'ScalingReplicaSet'])
+
+    def _convert_to_utc(timestamp):
+        if timestamp.tzinfo is None:
+            return timestamp.replace(tzinfo=datetime.timezone.utc)
+        return timestamp.astimezone(datetime.timezone.utc)
+
+    try:
+        events = kubernetes.core_api(context).list_namespaced_event(
+            namespace=namespace)
+        for event in events.items:
+            ts = event.last_timestamp
+            if ts and _convert_to_utc(ts) > search_start:
+                if event.reason in autoscaling_reasons:
+                    return True
+        return False
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Error occurred while detecting cluster autoscaler: {e}')
+        return False
+
+
 @timeline.event
-def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
+def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
+                               cluster_name: str,
+                               create_pods_start: datetime.datetime):
     """Wait for all pods to be scheduled.
 
     Wait for all pods including jump pod to be scheduled, and if it
@@ -312,12 +351,24 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
     allocated and we can exit.
 
     If timeout is set to a negative value, this method will wait indefinitely.
+
+    Will update the spinner message to indicate autoscaling if autoscaling
+    is happening.
     """
     # Create a set of pod names we're waiting for
     if not new_nodes:
         return
     expected_pod_names = {node.metadata.name for node in new_nodes}
     start_time = time.time()
+
+    # Utils for autoscaler detection
+    autoscaler_config = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('autoscaler',),
+        default_value=None)
+    autoscaler_config_set = autoscaler_config is not None
+    is_autoscaling = False
 
     def _evaluate_timeout() -> bool:
         # If timeout is negative, retry indefinitely.
@@ -328,12 +379,13 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
     while _evaluate_timeout():
         # Get all pods in a single API call using the cluster name label
         # which all pods in new_nodes should share
-        cluster_name = new_nodes[0].metadata.labels[
+        cluster_name_on_cloud = new_nodes[0].metadata.labels[
             k8s_constants.TAG_SKYPILOT_CLUSTER_NAME]
         pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
             label_selector=
-            f'{k8s_constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
+            f'{k8s_constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name_on_cloud}'
+        ).items
 
         # Get the set of found pod names and check if we have all expected pods
         found_pod_names = {pod.metadata.name for pod in pods}
@@ -357,6 +409,20 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
 
         if all_scheduled:
             return
+
+        # Check if cluster is autoscaling and update spinner message.
+        # Minor optimization to not query k8s api after autoscaling
+        # event was detected. This is useful because there isn't any
+        # autoscaling complete event.
+        if autoscaler_config_set and not is_autoscaling:
+            if _cluster_had_autoscale_event(namespace, context,
+                                            create_pods_start):
+                is_autoscaling = True
+                rich_utils.force_update_status(
+                    ux_utils.spinner_message(
+                        'Launching (Kubernetes cluster may be scaling up)',
+                        cluster_name=cluster_name))
+
         time.sleep(1)
 
     # Handle pod scheduling errors
@@ -761,13 +827,14 @@ def _wait_for_deployment_pod(context,
 
 
 @timeline.event
-def _create_pods(region: str, cluster_name_on_cloud: str,
+def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Create pods based on the config."""
     provider_config = config.provider_config
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
+    create_pods_start = datetime.datetime.now(datetime.timezone.utc)
 
     to_create_deployment = 'deployment_spec' in pod_spec
     if to_create_deployment:
@@ -1047,7 +1114,12 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
 
     # Wait until the pods are scheduled and surface cause for error
     # if there is one
-    _wait_for_pods_to_schedule(namespace, context, pods, provision_timeout)
+    _wait_for_pods_to_schedule(namespace, context, pods, provision_timeout,
+                               cluster_name, create_pods_start)
+    # Reset spinner message here because it might have hinted autoscaling
+    # while waiting for pods to schedule.
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Launching', cluster_name=cluster_name))
     # Wait until the pods and their containers are up and running, and
     # fail early if there is an error
     logger.debug(f'run_instances: waiting for pods to be running (pulling '
@@ -1068,11 +1140,11 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     )
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     try:
-        return _create_pods(region, cluster_name_on_cloud, config)
+        return _create_pods(region, cluster_name, cluster_name_on_cloud, config)
     except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
         e_msg = common_utils.format_exception(e).replace('\n', ' ')
         logger.warning('run_instances: Error occurred when creating pods: '
