@@ -312,7 +312,7 @@ def _cluster_had_autoscale_event(namespace, context, search_start):
         context: kubernetes context
         search_start (datetime.datetime): filter for events that occurred
             after search_start
-    
+
     Returns:
         A boolean whether the cluster has an autoscaling event or not.
     """
