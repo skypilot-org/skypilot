@@ -65,7 +65,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
             cloud = instance['cloud']
             shade_instance_type = instance['shade_instance_type']
             instance_type = f'{cloud}_{shade_instance_type.replace("_", "-")}'
-            gpu_type = config['gpu_type']
+            gpu_type = config['gpu_type'].replace('_', '-')
             gpu_count = float(config['num_gpus'])
             vcpus = float(config['vcpus'])
             memory_gb = int(config['memory_in_gb'])
