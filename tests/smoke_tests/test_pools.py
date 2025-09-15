@@ -36,6 +36,7 @@ def wait_until_pool_ready(pool_name: str,
         f'sleep {time_between_checks}; '
         'done')
 
+
 def test_vllm_pool(generic_cloud: str):
     pool_config = textwrap.dedent(f"""
     envs:
@@ -154,8 +155,9 @@ def test_vllm_pool(generic_cloud: str):
                 'test_vllm_pool',
                 [
                     f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully created pool"',
-                    wait_until_pool_ready(pool_name,
-                                          timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                    wait_until_pool_ready(
+                        pool_name,
+                        timeout=smoke_tests_utils.get_timeout(generic_cloud)),
                     f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."',
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
