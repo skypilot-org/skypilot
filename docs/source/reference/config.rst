@@ -68,6 +68,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
       - context1
       - context2
+    :ref:`allow_all_contexts`: false
     :ref:`custom_metadata <config-yaml-kubernetes-custom-metadata>`:
       labels:
         mylabel: myvalue
@@ -1131,6 +1132,15 @@ Name of the service account to use for remote authentication.
 List of allowed Kubernetes contexts (optional).
 
 List of context names that SkyPilot is allowed to use.
+
+.. _config-yaml-kubernetes-allow-all-contexts:
+
+``kubernetes.allow_all_contexts``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Allow to use all available Kubernetes contexts (optional).
+
+Set to true to allow SkyPilot to use all available Kubernetes contexts.
 
 .. _config-yaml-kubernetes-custom-metadata:
 

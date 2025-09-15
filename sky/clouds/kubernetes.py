@@ -188,6 +188,14 @@ class Kubernetes(clouds.Cloud):
         ]
 
         if allowed_contexts is None:
+            allow_all_contexts_cfg = skypilot_config.get_workspace_cloud(
+                'kubernetes').get('allow_all_contexts', False)
+            allow_all_contexts_env = kubernetes_utils.are_all_contexts_allowed()
+
+            if allow_all_contexts_cfg or allow_all_contexts_env:
+                allowed_contexts = all_contexts
+
+        if allowed_contexts is None:
             # Try kubeconfig if present
             current_context = (
                 kubernetes_utils.get_current_kube_config_context_name())
