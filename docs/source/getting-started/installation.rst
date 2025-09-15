@@ -651,84 +651,23 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 Seeweb
 ~~~~~~~~~~~~~~~~~~
 
-`Seeweb <https://www.seeweb.it/>`_ Seeweb is your European Cloud Provider specialized in high-performance Cloud solutions and GPU servers ideal for powering artificial intelligence efficiently and sustainably. With a 100% renewable energy-powered infrastructure and an excellent price-performance ratio, Seeweb enables AI innovation with a responsible environmental impact.
-
-Prerequisites
-~~~~~~~~~~~~~~~~~~
-
-* A Seeweb Cloud account.
-* A Seeweb API token with permissions to create servers.
-* (Recommended) An SSH public key added to your Seeweb profile.
-* **ecsapi** 0.2.0 installed <https://pypi.org/project/ecsapi/> :
-
-.. code-block:: bash
-
-   pip install ecsapi
+`Seeweb <https://www.seeweb.it/>`_ is your European GPU Cloud Provider. To access Seeweb:
 
 
-Flow to generate an API token for GPU compute access:
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1. Log into your `Seeweb dashboard : <https://cloudcenter.seeweb.it/>`__.
+2. Navigate to *Compute → API Token* in the control panel, and create **New TOKEN**.
+3. Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
 
-1. Create a `billing account by registering at <https://aop.seeweb.it/en#>`__.
-2. Log into your `Seeweb dashboard : <https://cloudcenter.seeweb.it/>`__.
-3. Navigate to *Compute → API Token* in the control panel. __.
-4. Click **`"NEW TOKEN"**, assign a name, and confirm.`__.
-5. **Copy the generated token** , it can now be used to authenticate all Seeweb services.
-
-
-Authentication
-~~~~~~~~~~~~~~~~~~
-
-SkyPilot reads your credentials from a Seeweb key file.
-Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
-
-::
+.. code-block::
 
     [DEFAULT]
     api_key = <your-api-token>
 
-
-
-The directory :code:`~/.seeweb_cloud` must exist and be readable by you.
-
-
-
-Verify credentials:
-~~~~~~~~~~~~~~~~~~
+4. install Seeweb Library:
 
 .. code-block:: bash
 
-   sky check seeweb
-
-If successful you will see::
-
-  Seeweb: enabled [compute]
-
-  🎉 Enabled infra 🎉
-  Seeweb [compute]
-
-
-
-Limitations
-~~~~~~~~~~~~~~~~~~
-
-* **No spot instances** – ``use_spot`` is ignored on Seeweb.
-* **No Storage implemented** – ``--storage`` is not supported.
-* **Custom Docker images** via ``--image`` are unsupported.
-
-Troubleshooting
-~~~~~~~~~~~~~~~~~~
-
-* **Authentication fails:** ensure ``api_key`` is configured correctly.
-* **SSH access denied:** confirm your public key is added to Seeweb before launching servers; otherwise retrieve the one‑time root password from the Seeweb panel.
-* **Instance type unavailable:** not all plans exist in every region. Either specify a region that supports the plan or let SkyPilot auto‑select.
-
-See also
-~~~~~~~~~~~~~~~~~~
-
-* `Seeweb API docs <https://docs.seeweb.it/>`_
-* `SkyPilot GitHub <https://github.com/skypilot-org/skypilot>`_
-* `Example Seeweb integration <https://github.com/m4oc/skypilot/tree/SeewebSky>`_
+   pip install ecsapi
 
 
 
