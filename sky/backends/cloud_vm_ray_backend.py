@@ -1561,13 +1561,6 @@ class RetryingVmProvisioner(object):
                     f'Failed to provision on cloud {to_provision.cloud} due to '
                     f'invalid cloud config: {common_utils.format_exception(e)}')
 
-            logger.info(
-                f'config_dict["config_hash"]: {config_dict["config_hash"]}')
-            logger.info(
-                f'skip_if_config_hash_matches: {skip_if_config_hash_matches}')
-            logger.info(
-                f'config_dict["config_hash"] == skip_if_config_hash_matches: {config_dict["config_hash"] == skip_if_config_hash_matches}'
-            )
             if ('config_hash' in config_dict and
                     skip_if_config_hash_matches == config_dict['config_hash']):
                 logger.debug('Skipping provisioning of cluster with matching '
@@ -2139,15 +2132,8 @@ class RetryingVmProvisioner(object):
         prev_cluster_ever_up = to_provision_config.prev_cluster_ever_up
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
-        logger.info(
-            f'to_provision_config.prev_config_hash: {to_provision_config.prev_config_hash}'
-        )
-        logger.info(
-            f'skip_unnecessary_provisioning: {skip_unnecessary_provisioning}')
         skip_if_config_hash_matches = (to_provision_config.prev_config_hash if
                                        skip_unnecessary_provisioning else None)
-        logger.info(
-            f'skip_if_config_hash_matches: {skip_if_config_hash_matches}')
 
         failover_history: List[Exception] = list()
         resource_exceptions: Dict[resources_lib.Resources, Exception] = dict()
@@ -3405,8 +3391,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
-                logger.info(f'local_wheel_path: {local_wheel_path}')
-                logger.info(f'wheel_hash: {wheel_hash}')
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
                 # within the given region first, then optionally retry on all

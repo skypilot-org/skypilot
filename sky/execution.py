@@ -413,14 +413,8 @@ def _execute_dag(
         task.sync_storage_mounts()
 
     try:
-        logger.info('try')
         provisioning_skipped = False
         if Stage.PROVISION in stages:
-            logger.info(f'Stage.PROVISION in stages: {stages}')
-            logger.info(f'handle is None: {handle is None}')
-            logger.info(
-                f'skip_unnecessary_provisioning: {skip_unnecessary_provisioning}'
-            )
             assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
@@ -433,7 +427,6 @@ def _execute_dag(
                 cluster_name=cluster_name,
                 retry_until_up=retry_until_up,
                 skip_unnecessary_provisioning=skip_unnecessary_provisioning)
-            logger.info(f'provisioning_skipped: {provisioning_skipped}')
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -629,12 +622,9 @@ def launch(
     stages = None
     skip_unnecessary_provisioning = False
     # Check if cluster exists and we are doing fast provisioning
-    logger.info(f'fast: {fast}, cluster_name: {cluster_name}')
     if fast and cluster_name is not None:
         cluster_status, maybe_handle = (
             backend_utils.refresh_cluster_status_handle(cluster_name))
-        logger.info(
-            f'cluster_status: {cluster_status}, maybe_handle: {maybe_handle}')
         if cluster_status == status_lib.ClusterStatus.INIT:
             # If the cluster is INIT, it may be provisioning. We want to prevent
             # concurrent calls from queueing up many sequential reprovision
@@ -681,8 +671,6 @@ def launch(
     # see the setup logs when inspecting the launch process to know
     # excatly what the job is waiting for.
     detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
-    logger.info(
-        f'skip_unnecessary_provisioning: {skip_unnecessary_provisioning}')
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,

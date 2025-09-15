@@ -239,10 +239,9 @@ def test_launch_fast(generic_cloud: str):
             # First launch to create the cluster
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
-            f'sky api info',
 
             # Second launch to test fast launch - should not reprovision
-            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
             ' echo "$s" && '
             # Validate that cluster was not re-launched.
             '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
