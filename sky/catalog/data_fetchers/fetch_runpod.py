@@ -15,11 +15,154 @@ import argparse
 import os
 import sys
 import traceback
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 import runpod
 from runpod.api import graphql
+
+# The API currently returns a dynamic number of vCPUs per pod that
+# changes frequently (less than 30 mins)
+# Therefore we hard code a default number of vCPUs from:
+# 1. The previous catalog, if the GPU exists there
+# 2. Or if not, the pricing page https://www.runpod.io/pricing
+# 3. Otherwise, the minimum of the returned# vCPU count from the API
+# The max count of GPUs per pod is set to 8 apart from A40 at 10
+DEFAULT_MAX_GPUS = 8
+DEFAULT_GPU_INFO: Dict[str, Dict[str, Union[int, float]]] = {
+    'A100-80GB': {
+        'vcpus': 8.0,
+        'max_count': 8
+    },
+    'A100-80GB-SXM': {
+        'vcpus': 16.0,
+        'max_count': 8
+    },
+    'A30': {
+        'vcpus': 8.0,
+        'max_count': 8
+    },
+    'A40': {
+        'vcpus': 9.0,
+        'max_count': 10
+    },
+    'B200': {
+        'vcpus': 36.0,
+        'max_count': 8
+    },
+    'H100': {
+        'vcpus': 16.0,
+        'max_count': 8
+    },
+    'H100-NVL': {
+        'vcpus': 16.0,
+        'max_count': 8
+    },
+    'H100-SXM': {
+        'vcpus': 20.0,
+        'max_count': 8
+    },
+    'H200-SXM': {
+        'vcpus': 20.0,
+        'max_count': 8
+    },
+    'L4': {
+        'vcpus': 4.0,
+        'max_count': 8
+    },
+    'L40': {
+        'vcpus': 16.0,
+        'max_count': 8
+    },
+    'L40S': {
+        'vcpus': 16,
+        'max_count': 8
+    },
+    'MI300X': {
+        'vcpus': 24.0,
+        'max_count': 8
+    },
+    'RTX2000-Ada': {
+        'vcpus': 6.0,
+        'max_count': 8
+    },
+    'RTX3070': {
+        'vcpus': 8.0,
+        'max_count': 8
+    },
+    'RTX3080': {
+        'vcpus': 8.0,
+        'max_count': 8
+    },
+    'RTX3080-Ti': {
+        'vcpus': 8.0,
+        'max_count': 8
+    },
+    'RTX3090': {
+        'vcpus': 16.0,
+        'max_count': 8
+    },
+    'RTX3090-Ti': {
+        'vcpus': 12.0,
+        'max_count': 8
+    },
+    'RTX4000-Ada': {
+        'vcpus': 9.0,
+        'max_count': 8
+    },
+    'RTX4090': {
+        'vcpus': 16.0,
+        'max_count': 8
+    },
+    'RTX5000-Ada': {
+        'vcpus': 6.0,
+        'max_count': 8
+    },
+    'RTX5080': {
+        'vcpus': 5.0,
+        'max_count': 8
+    },
+    'RTX5090': {
+        'vcpus': 5.0,
+        'max_count': 8
+    },
+    'RTX6000-Ada': {
+        'vcpus': 14.0,
+        'max_count': 8
+    },
+    'RTXA4000': {
+        'vcpus': 6.0,
+        'max_count': 8
+    },
+    'RTXA4500': {
+        'vcpus': 12.0,
+        'max_count': 8
+    },
+    'RTXA5000': {
+        'vcpus': 6.0,
+        'max_count': 8
+    },
+    'RTXA6000': {
+        'vcpus': 4.0,
+        'max_count': 8
+    },
+    'RTXPRO6000': {
+        'vcpus': 14.0,
+        'max_count': 8
+    },
+    'RTXPRO6000-MaxQ': {
+        'vcpus': 18.0,
+        'max_count': 8
+    },
+    'RTXPRO6000-WK': {
+        'vcpus': 32.0,
+        'max_count': 8
+    },
+    'V100-SXM2-32GB': {
+        'vcpus': 20.0,
+        'max_count': 8
+    }
+}
 
 # for backwards compatibility, force rename some gpus.
 # map the generated name to the original name
@@ -42,13 +185,6 @@ USEFUL_COLUMNS = [
     'Price',
     'AvailabilityZone',
 ]
-
-# Default values for instance specifications
-# These are only used if the API response does not include vCPUs or memory.
-# Usually that means the gpu is not available in the desired quantity.
-DEFAULT_VCPUS = 8.0
-DEFAULT_MEMORY_GIB = 80.0
-MEMORY_PER_GPU = 80.0  # Base memory per GPU
 
 # Mapping of regions to their availability zones
 REGION_ZONES = {
@@ -162,13 +298,21 @@ def format_gpu_name(gpu_type: Dict[str, Any]) -> str:
 def get_gpu_info(gpu_type: Dict[str, Any],
                  gpu_count: int) -> Optional[Dict[str, Any]]:
     """Extract relevant GPU information from RunPod GPU type data."""
-    # Use minVcpu lowestPrice if available, otherwise use defaults
-    vcpus = gpu_type.get('lowestPrice', {}).get('minVcpu')
-    # This is the GPU memory not the CPU memory.
+    gpu_name = format_gpu_name(gpu_type)
+    vcpus = DEFAULT_GPU_INFO.get(gpu_name, {}).get('vcpus')
+
+    # Use minVcpu lowestPrice if defaults not available
+    # Don't use this value by default as it is dynamic and changes often
+    if vcpus is None:
+        # Returns vcpus already scaled by the GPU count
+        vcpus = gpu_type.get('lowestPrice', {}).get('minVcpu')
+    else:
+        vcpus = vcpus * gpu_count
+
+    # This is the VRAM memory per GPU, not the CPU memory
     memory = gpu_type.get('memoryInGb')
 
     # Return None if memory or vcpus not valid
-    gpu_name = format_gpu_name(gpu_type)
     if not isinstance(vcpus, (float, int)) or vcpus <= 0:
         print(f'Skipping GPU {gpu_name}:'
               ' vCPUs must be a positive number, not {vcpus}')
@@ -184,7 +328,7 @@ def get_gpu_info(gpu_type: Dict[str, Any],
         'AcceleratorName': gpu_name,
         'AcceleratorCount': float(gpu_count),
         'vCPUs': float(vcpus),
-        'MemoryGiB': float(memory),
+        'MemoryGiB': float(memory * gpu_count),
         'GpuInfo': gpu_name,
     }
 
@@ -194,10 +338,15 @@ def get_instance_configurations(gpu_id: str) -> List[Dict]:
     instances = []
     detailed_gpu_1 = get_gpu_details(gpu_id, gpu_count=1)
     base_gpu_name = format_gpu_name(detailed_gpu_1)
-    gpu_counts = detailed_gpu_1.get('lowestPrice',
-                                    {}).get('availableGpuCounts', [])
 
-    for gpu_count in gpu_counts:
+    # If the GPU isn't in DEFAULT_GPU_INFO we default to a max of 8 GPUs
+    if base_gpu_name in DEFAULT_GPU_INFO:
+        max_gpu_count = DEFAULT_GPU_INFO['base_gpu_name'].get(
+            'max_count', DEFAULT_MAX_GPUS)
+    else:
+        max_gpu_count = DEFAULT_MAX_GPUS
+
+    for gpu_count in range(1, int(max_gpu_count) + 1):
         # Get detailed GPU info for this count
         if gpu_count == 1:
             detailed_gpu = detailed_gpu_1
