@@ -230,6 +230,7 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
                     mtime = os.path.getmtime(entry_path)
                     if mtime > max_time:
                         max_time = mtime
+                        logger.info(f'new max_time from {entry_path}: {max_time}')
                 except OSError:
                     # Handle cases where file might have been deleted after
                     # listing
