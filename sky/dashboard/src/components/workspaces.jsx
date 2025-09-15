@@ -53,6 +53,94 @@ import { sortData } from '@/data/utils';
 import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
 import Link from 'next/link';
 
+// Workspace-aware API functions (cacheable)
+export async function getWorkspaceClusters(workspaceName) {
+  try {
+    const clusters = await apiClient.fetch('/status', {
+      cluster_names: null,
+      all_users: true,
+      include_credentials: false,
+      override_skypilot_config: { active_workspace: workspaceName },
+    });
+
+    const mappedClusters = clusters.map((cluster) => ({
+      status:
+        cluster.status === 'UP'
+          ? 'RUNNING'
+          : cluster.status === 'STOPPED'
+            ? 'STOPPED'
+            : cluster.status === 'INIT'
+              ? 'LAUNCHING'
+              : 'TERMINATED',
+      cluster: cluster.name,
+      user: cluster.user_name,
+      user_hash: cluster.user_hash,
+      cluster_hash: cluster.cluster_hash,
+      cloud: cluster.cloud,
+      region: cluster.region,
+      zone: cluster.zone,
+      launched_at: cluster.launched_at,
+      handle: cluster.handle,
+      last_use: cluster.last_use,
+      autostop: cluster.autostop,
+      to_down: cluster.to_down,
+      metadata: cluster.metadata,
+      resources_str: cluster.resources_str,
+      workspace: cluster.workspace || 'default', // Preserve workspace info
+    }));
+
+    // Filter clusters to only include those that belong to the requested workspace
+    const filteredClusters = mappedClusters.filter(
+      (cluster) => cluster.workspace === workspaceName
+    );
+    return filteredClusters;
+  } catch (error) {
+    console.error(
+      `Error fetching clusters for workspace ${workspaceName}:`,
+      error
+    );
+    return [];
+  }
+}
+
+export async function getWorkspaceManagedJobs(workspaceName) {
+  try {
+    const response = await apiClient.post('/jobs/queue/v2', {
+      all_users: true,
+      verbose: true,
+      override_skypilot_config: { active_workspace: workspaceName },
+    });
+
+    const id = response.headers.get('X-Skypilot-Request-ID');
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    const data = await fetchedData.json();
+    const jobsData = data.return_value
+      ? JSON.parse(data.return_value)
+      : { jobs: [] };
+
+    // Ensure workspace information is preserved and filter by workspace
+    if (jobsData.jobs) {
+      jobsData.jobs = jobsData.jobs.map((job) => ({
+        ...job,
+        workspace: job.workspace || 'default',
+      }));
+
+      // Filter jobs to only include those that belong to the requested workspace
+      jobsData.jobs = jobsData.jobs.filter(
+        (job) => job.workspace === workspaceName
+      );
+    }
+
+    return jobsData;
+  } catch (error) {
+    console.error(
+      `Error fetching managed jobs for workspace ${workspaceName}:`,
+      error
+    );
+    return { jobs: [] };
+  }
+}
+
 // Workspace configuration description component
 const WorkspaceConfigDescription = ({ workspaceName, config }) => {
   if (!config) return null;
@@ -310,28 +398,52 @@ export function Workspaces() {
       setLoading(true);
     }
     try {
-      const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] =
-        await Promise.all([
-          dashboardCache.get(getWorkspaces),
-          dashboardCache.get(getClusters),
-          dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
-        ]);
-
+      // First, get the list of workspaces the user has access to
+      const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
       setRawWorkspacesData(fetchedWorkspacesConfig);
       const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
-      // Fetch enabled clouds for all workspaces using cache
-      const enabledCloudsArray = await Promise.all(
-        configuredWorkspaceNames.map((wsName) =>
-          dashboardCache.get(getEnabledClouds, [wsName])
-        )
+      // Fetch data for each workspace in parallel using workspace-aware API calls
+      const workspaceDataPromises = configuredWorkspaceNames.map(
+        async (wsName) => {
+          const [enabledClouds, clusters, managedJobs] = await Promise.all([
+            dashboardCache.get(getEnabledClouds, [wsName]),
+            dashboardCache.get(getWorkspaceClusters, [wsName]),
+            dashboardCache.get(getWorkspaceManagedJobs, [wsName]),
+          ]);
+
+          return {
+            workspaceName: wsName,
+            enabledClouds,
+            clusters: clusters || [],
+            managedJobs: managedJobs || { jobs: [] },
+          };
+        }
       );
-      const enabledCloudsMap = Object.fromEntries(
-        configuredWorkspaceNames.map((wsName, index) => [
-          wsName,
-          enabledCloudsArray[index],
-        ])
+
+      const workspaceDataArray = await Promise.all(workspaceDataPromises);
+
+      // Aggregate all clusters and jobs with workspace information
+      const clustersResponse = [];
+      const allJobs = [];
+      const enabledCloudsMap = {};
+
+      workspaceDataArray.forEach(
+        ({ workspaceName, enabledClouds, clusters, managedJobs }) => {
+          // Clusters and jobs already have workspace info from API calls
+          clusters.forEach((cluster) => {
+            clustersResponse.push(cluster);
+          });
+
+          managedJobs.jobs.forEach((job) => {
+            allJobs.push(job);
+          });
+
+          enabledCloudsMap[workspaceName] = enabledClouds;
+        }
       );
+
+      const managedJobsResponse = { jobs: allJobs };
 
       // Build cluster to workspace mapping
       const clusterNameToWorkspace = Object.fromEntries(
@@ -354,6 +466,7 @@ export function Workspaces() {
       let totalRunningClusters = 0;
       clustersResponse.forEach((cluster) => {
         const wsName = cluster.workspace || 'default';
+
         if (!workspaceStatsAggregator[wsName]) {
           workspaceStatsAggregator[wsName] = {
             name: wsName,
@@ -396,12 +509,16 @@ export function Workspaces() {
       // Finalize workspace details
       const finalWorkspaceDetails = Object.values(workspaceStatsAggregator)
         .filter((ws) => configuredWorkspaceNames.includes(ws.name))
-        .map((ws) => ({
-          ...ws,
-          clouds: Array.isArray(enabledCloudsMap[ws.name])
+        .map((ws) => {
+          const enabledClouds = Array.isArray(enabledCloudsMap[ws.name])
             ? enabledCloudsMap[ws.name]
-            : [],
-        }))
+            : [];
+
+          return {
+            ...ws,
+            clouds: enabledClouds,
+          };
+        })
         .sort((a, b) => a.name.localeCompare(b.name));
 
       setWorkspaceDetails(finalWorkspaceDetails);
@@ -433,7 +550,7 @@ export function Workspaces() {
     // Set up refresh interval
     const interval = setInterval(() => {
       fetchData(false); // Don't show loading on background refresh
-    }, REFRESH_INTERVAL);
+    }, REFRESH_INTERVALS.REFRESH_INTERVAL);
 
     return () => clearInterval(interval);
   }, []);
@@ -529,6 +646,8 @@ export function Workspaces() {
 
       // Invalidate cache to ensure fresh data is fetched (same as manual refresh)
       dashboardCache.invalidate(getWorkspaces);
+      dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
+      dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
 
       await fetchData(true); // Show loading during refresh
     } catch (error) {
@@ -547,9 +666,11 @@ export function Workspaces() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
     dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
+
+    // Invalidate workspace-specific caches
+    dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
+    dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
 
     fetchData(true); // Show loading on manual refresh
   };
