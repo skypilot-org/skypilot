@@ -500,12 +500,23 @@ _get_request_sql = (f'SELECT {", ".join(REQUEST_COLUMNS)} FROM {REQUEST_TABLE} '
 
 
 def _get_request_no_lock(request_id: str) -> Optional[Request]:
-    """Get a SkyPilot API request."""
+    """Get a SkyPilot API request.
+
+    Be strict first (exact match), then fall back to prefix match for
+    backward compatibility with short IDs.
+    """
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(_get_request_sql, (request_id + '%',))
+        # Try exact match first
+        cursor.execute(
+            f'SELECT {", ".join(REQUEST_COLUMNS)} FROM {REQUEST_TABLE} '
+            'WHERE request_id = ?', (request_id,))
         row = cursor.fetchone()
+        if row is None:
+            # Fallback to prefix match (LIKE) to support short IDs
+            cursor.execute(_get_request_sql, (request_id + '%',))
+            row = cursor.fetchone()
         if row is None:
             return None
     return Request.from_row(row)

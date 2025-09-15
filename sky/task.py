@@ -25,6 +25,7 @@ from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import yaml
@@ -570,7 +571,7 @@ class Task:
         secrets_overrides: Optional[List[Tuple[str, str]]] = None,
     ) -> 'Task':
         user_specified_yaml = config.pop('_user_specified_yaml',
-                                         common_utils.dump_yaml_str(config))
+                                         yaml_utils.dump_yaml_str(config))
         # More robust handling for 'envs': explicitly convert keys and values to
         # str, since users may pass '123' as keys/values which will get parsed
         # as int causing validate_schema() to fail.

@@ -634,7 +634,7 @@ class RayCodeGen:
                 # sleep for the same interval as --vfs-cache-poll-interval
                 sleep {constants.RCLONE_CACHE_REFRESH_INTERVAL}
                 flushed=1
-                for file in {constants.RCLONE_LOG_DIR}/*; do
+                for file in {constants.RCLONE_MOUNT_CACHED_LOG_DIR}/*; do
                     exitcode=0
                     tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?
                     if [ $exitcode -ne 0 ]; then
@@ -809,9 +809,9 @@ class FailoverCloudErrorHandlerV1:
         style = colorama.Style
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
 
-        for zone in zones:  # type: ignore[union-attr]
+        for z in zones:  # type: ignore[union-attr]
             _add_to_blocked_resources(blocked_resources,
-                                      launchable_resources.copy(zone=zone.name))
+                                      launchable_resources.copy(zone=z.name))
 
     @staticmethod
     def update_blocklist_on_error(
@@ -837,10 +837,10 @@ class FailoverCloudErrorHandlerV1:
             # workers' provisioning failed).  Simply block the zones.
             assert stderr is None, stderr
             if zones is not None:
-                for zone in zones:
+                for z in zones:
                     _add_to_blocked_resources(
                         blocked_resources,
-                        launchable_resources.copy(zone=zone.name))
+                        launchable_resources.copy(zone=z.name))
             return False  # definitely_no_nodes_launched
         assert stdout is not None and stderr is not None, (stdout, stderr)
 
@@ -914,15 +914,20 @@ class FailoverCloudErrorHandlerV2:
                      launchable_resources: 'resources_lib.Resources',
                      region: 'clouds.Region', zones: List['clouds.Zone'],
                      err: Exception):
-        assert zones and len(zones) == 1, zones
-        zone = zones[0]
+        # Support single or multiple zones (e.g., cross-zone placement).
+        # Previously asserted exactly one zone, which breaks cross-zone.
+        assert zones and len(zones) >= 1, zones
+        zone_names = [z.name for z in zones]
 
         if not isinstance(err, provision_common.ProvisionerError):
-            logger.warning(f'{colorama.Style.DIM}Got an unparsed error: {err}; '
-                           f'blocking resources by its zone {zone.name}'
-                           f'{colorama.Style.RESET_ALL}')
-            _add_to_blocked_resources(blocked_resources,
-                                      launchable_resources.copy(zone=zone.name))
+            logger.warning(
+                f'{colorama.Style.DIM}Got an unparsed error: {err}; '
+                f'blocking resources by zone(s) {zone_names}'
+                f'{colorama.Style.RESET_ALL}')
+            for z in zones:
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=z.name))
             return
         errors = err.errors
 
@@ -956,23 +961,26 @@ class FailoverCloudErrorHandlerV2:
                 # However, UNSUPPORTED_OPERATION is observed empirically
                 # when VM is preempted during creation.  This seems to be
                 # not documented by GCP.
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
+                for z in zones:
+                    _add_to_blocked_resources(
+                        blocked_resources,
+                        launchable_resources.copy(zone=z.name))
             elif code in ['RESOURCE_NOT_READY']:
                 # This code is returned when the VM is still STOPPING.
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
+                for z in zones:
+                    _add_to_blocked_resources(
+                        blocked_resources,
+                        launchable_resources.copy(zone=z.name))
             elif code in ['RESOURCE_OPERATION_RATE_EXCEEDED']:
                 # This code can happen when the VM is being created with a
                 # machine image, and the VM and the machine image are on
                 # different zones. We already have the retry when calling the
                 # insert API, but if it still fails, we should block the zone
                 # to avoid infinite retry.
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
+                for z in zones:
+                    _add_to_blocked_resources(
+                        blocked_resources,
+                        launchable_resources.copy(zone=z.name))
             elif code in [3, 8, 9]:
                 # Error code 3 means TPU is preempted during creation.
                 # Example:
@@ -983,9 +991,10 @@ class FailoverCloudErrorHandlerV2:
                 # Error code 9 means TPU resources is insufficient reserved
                 # capacity. Example:
                 # {'code': 9, 'message': 'Insufficient reserved capacity. Contact customer support to increase your reservation. [EID: 0x2f8bc266e74261a]'} # pylint: disable=line-too-long
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
+                for z in zones:
+                    _add_to_blocked_resources(
+                        blocked_resources,
+                        launchable_resources.copy(zone=z.name))
             elif code == 'RESOURCE_NOT_FOUND':
                 # https://github.com/skypilot-org/skypilot/issues/1797
                 # In the inner provision loop we have used retries to
@@ -993,9 +1002,10 @@ class FailoverCloudErrorHandlerV2:
                 # likely out of capacity. The provision loop will terminate
                 # any potentially live VMs before moving onto the next
                 # zone.
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
+                for z in zones:
+                    _add_to_blocked_resources(
+                        blocked_resources,
+                        launchable_resources.copy(zone=z.name))
             elif code == 'VPC_NOT_FOUND':
                 # User has specified a VPC that does not exist. On GCP, VPC is
                 # global. So we skip the entire cloud.
@@ -1029,9 +1039,15 @@ class FailoverCloudErrorHandlerV2:
                     # Example:
                     # "Quota 'TPUV2sPreemptiblePodPerProjectPerZoneForTPUAPI'
                     # exhausted. Limit 32 in zone europe-west4-a"
-                    _add_to_blocked_resources(
-                        blocked_resources,
-                        launchable_resources.copy(zone=zone.name))
+                    if zones is None:
+                        _add_to_blocked_resources(
+                            blocked_resources,
+                            launchable_resources.copy(zone=None))
+                    else:
+                        for z in zones:
+                            _add_to_blocked_resources(
+                                blocked_resources,
+                                launchable_resources.copy(zone=z.name))
 
             elif 'Requested disk size cannot be smaller than the image size' in message:
                 logger.info('Skipping all regions due to disk size issue.')
@@ -1054,15 +1070,27 @@ class FailoverCloudErrorHandlerV2:
                 # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
                 # Details: "Location us-east1-d is not found or access is
                 # unauthorized.">
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
+                if 'zone' not in locals():
+                    _add_to_blocked_resources(
+                        blocked_resources,
+                        launchable_resources.copy(zone=None))
+                else:
+                    for z in zones:
+                        _add_to_blocked_resources(
+                            blocked_resources,
+                            launchable_resources.copy(zone=z.name))
             else:
                 logger.debug('Got unparsed error blocking resources by zone: '
                              f'{e}.')
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
+                if zones is None:
+                    _add_to_blocked_resources(
+                        blocked_resources,
+                        launchable_resources.copy(zone=None))
+                else:
+                    for z in zones:
+                        _add_to_blocked_resources(
+                            blocked_resources,
+                            launchable_resources.copy(zone=z.name))
 
     @staticmethod
     def _lambda_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -1126,10 +1154,10 @@ class FailoverCloudErrorHandlerV2:
             _add_to_blocked_resources(blocked_resources,
                                       launchable_resources.copy(zone=None))
         else:
-            for zone in zones:
+            for z in zones:
                 _add_to_blocked_resources(
                     blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
+                    launchable_resources.copy(zone=z.name))
 
     @staticmethod
     def update_blocklist_on_error(
@@ -2490,13 +2518,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR
                 >= launched_resources.cloud.PROVISIONER_VERSION or
                 updated_to_skypilot_provisioner_after_provisioned):
-            ip_list = (self.cached_external_ips
-                       if force_cached else self.external_ips())
+            # For multi-node clusters, ensure we have all nodes' IPs before
+            # constructing runners. cached_external_ips may only contain the
+            # head immediately after provision; refresh if needed.
+            ip_list = self.cached_external_ips if force_cached else self.external_ips()
+            if (ip_list is None or
+                    (self.launched_nodes > 1 and len(ip_list) < self.launched_nodes)):
+                try:
+                    self.update_cluster_ips(max_attempts=3)
+                except Exception:
+                    pass
+                ip_list = self.external_ips()
             if ip_list is None:
                 return []
-            # Potentially refresh the external SSH ports, in case the existing
-            # cluster before #2491 was launched without external SSH ports
-            # cached.
             port_list = self.external_ssh_ports()
             runners = command_runner.SSHCommandRunner.make_runner_list(
                 zip(ip_list, port_list), **ssh_credentials)
@@ -2640,6 +2674,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         else:
             num_ips = 1
         return num_ips
+
+    @property
+    def is_grpc_enabled_with_flag(self) -> bool:
+        """Whether gRPC is enabled on this handle AND runtime flag is on.
+
+        Kept for compatibility with clients expecting this attribute.
+        """
+        return env_options.Options.ENABLE_GRPC.get() and bool(getattr(self, 'is_grpc_enabled', False))
 
     def __setstate__(self, state):
         self._version = self._VERSION
@@ -4918,15 +4960,52 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
+            # If the new task explicitly requests cross-zone placement, but the
+            # existing cluster was not launched with cross-zone, do not reuse it.
+            try:
+                requested_cross_zone = False
+                try:
+                    # task.resources can be a set/list; take one to inspect.
+                    first_res = list(task.resources)[0]
+                    requested_cross_zone = (getattr(first_res, 'nodes_placement', None) == 'cross-zone' and  # type: ignore
+                                            getattr(task, 'num_nodes', 1) > 1)
+                except Exception:
+                    pass
+                if requested_cross_zone:
+                    yaml_dict = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
+                    provider_cfg = (yaml_dict or {}).get('provider', {}) if yaml_dict is not None else {}
+                    cross_zone_zones = provider_cfg.get('cross_zone_zones')
+                    is_cross_zone = provider_cfg.get('is_cross_zone')
+                    if not (is_cross_zone or (isinstance(cross_zone_zones, list) and len(cross_zone_zones) >= 2)):
+                        with ux_utils.print_exception_no_traceback():
+                            raise exceptions.ResourcesMismatchError(
+                                'Requested cross-zone placement for a multi-node cluster, '
+                                f'but existing cluster {cluster_name!r} was not launched '
+                                'with cross-zone. Please run `sky down --purge ' + cluster_name +
+                                "` or use a new cluster name.")
+            except exceptions.ResourcesMismatchError:
+                raise
+            except Exception:
+                # Be conservative; if we cannot determine, fall through to normal checks.
+                pass
             self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             # Take a random resource in order to get resource info that applies
             # to all resources.
             one_task_resource = list(task.resources)[0]
-            # Assume resources share the same ports.
+            # Assume resources share the same ports across variants; if not,
+            # raise a clear mismatch error instead of a bare assert.
             for resource in task.resources:
-                assert resource.ports == one_task_resource.ports
+                if resource.ports != one_task_resource.ports:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesMismatchError(
+                            'Requested resources specify different port sets '
+                            'across variants, which is not supported.\n'
+                            f'  First variant ports: {one_task_resource.ports}\n'
+                            f'  Mismatched ports:    {resource.ports}\n'
+                            'Please ensure all resource variants use the same '
+                            'ports or launch with a single resource spec.')
             requested_ports_set = resources_utils.port_ranges_to_set(
                 one_task_resource.ports)
             current_ports_set = resources_utils.port_ranges_to_set(
@@ -5193,7 +5272,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'Mounting {len(storage_mounts)} storage{plural}', log_path))
 
         for dst, storage_obj in storage_mounts.items():
-            storage_obj.construct()
+            try:
+                storage_obj.construct()
+            except AssertionError as e:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        f'AssertionError while constructing storage {storage_obj.name!r} '
+                        f'for mount path {dst}: {e}')
             if not os.path.isabs(dst) and not dst.startswith('~/'):
                 dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
             # Raised when the bucket is externall removed before re-mounting
@@ -5205,9 +5290,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'mounted on cluster {handle.cluster_name!r}. Please '
                         'verify that the bucket exists. The cluster started '
                         'successfully without mounting the bucket.')
-            # Get the first store and use it to mount
-            store = list(storage_obj.stores.values())[0]
-            assert store is not None, storage_obj
+            # Get the first available store and use it to mount
+            store = next((s for s in storage_obj.stores.values() if s is not None), None)
+            if store is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageExternalDeletionError(
+                        f'The bucket, {storage_obj.name!r}, could not be '
+                        f'mounted on cluster {handle.cluster_name!r}. Please '
+                        'verify that the bucket exists. The cluster started '
+                        'successfully without mounting the bucket.')
             if storage_obj.mode == storage_lib.StorageMode.MOUNT:
                 mount_cmd = store.mount_command(dst)
                 action_message = 'Mounting'

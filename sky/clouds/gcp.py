@@ -328,20 +328,50 @@ class GCP(clouds.Cloud):
 
             # Handle cross-zone placement for multi-node clusters
             if nodes_placement == 'cross-zone' and num_nodes > 1:
-                # For cross-zone placement, select different zones for different nodes
+                # Cross-zone placement with region-stickiness:
+                # generate multiple zone combinations within the same region
+                # so that if one zone lacks capacity, we retry other zones
+                # in this region before failing over to other regions.
                 zones_list = list(r.zones)
                 if len(zones_list) < 2:
                     # Need at least 2 zones for cross-zone placement
                     continue
 
-                # Select zones ensuring no two nodes are in the same zone
-                selected_zones = []
-                for i in range(num_nodes):
-                    zone_idx = i % len(zones_list)
-                    selected_zones.append(zones_list[zone_idx])
+                # Limit k to available zones
+                k = min(num_nodes, len(zones_list))
 
-                # Yield the list of zones (one per node)
-                yield selected_zones
+                # Strategy:
+                # 1) First, a simple round-robin selection of the first k zones
+                #    to preserve previous behavior.
+                # 2) Then, yield additional combinations by rotating the start
+                #    index to cover alternatives within this region.
+                # This keeps us in the same region while exploring other zones.
+                # Example: zones=[a,b,c], num_nodes=2 -> [a,b], [a,c], [b,c]
+
+                # Helper to build a k-sized selection from a start index
+                def pick_from(start: int):
+                    sel = []
+                    for i in range(k):
+                        idx = (start + i) % len(zones_list)
+                        sel.append(zones_list[idx])
+                    return sel
+
+                yielded: set[tuple[str, ...]] = set()
+
+                # 1) Initial selection
+                initial = pick_from(0)
+                key = tuple(z.name for z in initial)
+                if key not in yielded:
+                    yielded.add(key)
+                    yield initial
+
+                # 2) Rotations: try different starting zones within the region
+                for start in range(1, len(zones_list)):
+                    combo = pick_from(start)
+                    key = tuple(z.name for z in combo)
+                    if key not in yielded:
+                        yielded.add(key)
+                        yield combo
             else:
                 # Default behavior: GCP provisioner currently takes 1 zone per request
                 for zone in r.zones:
@@ -534,6 +564,10 @@ class GCP(clouds.Cloud):
                     r.instance_type,
                     GCP.failover_disk_tier(r.instance_type, r.disk_tier)),
             }
+            # Debug logging to verify cross-zone variables
+            logger.debug(
+                'GCP.make_deploy_resources_variables: nodes_placement=%s, num_nodes=%s, zones=%s, is_cross_zone=%s, cross_zone_zones=%s',
+                r.nodes_placement, num_nodes, [z.name for z in zones], resources_vars.get('is_cross_zone'), resources_vars.get('cross_zone_zones', None))
         else:
             # Single zone case
             resources_vars = {
