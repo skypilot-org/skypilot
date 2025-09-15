@@ -69,13 +69,13 @@ from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
-    import grpc
     import requests
     from requests import adapters
     from requests.packages.urllib3.util import retry as retry_lib
     import rich.progress as rich_progress
     import yaml
 
+    import grpc
     from sky import resources as resources_lib
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
@@ -1220,9 +1220,11 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     Rather than constructing the whole byte sequence, which may be quite large,
     we construct it incrementally by using hash.update() to add new bytes.
     """
-
+    logger.info(f'_deterministic_cluster_yaml_hash: {tmp_yaml_path}')
     # Load the yaml contents so that we can directly remove keys.
     yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
+    import pprint
+    logger.info(f'yaml_config: {pprint.pformat(yaml_config)}')
     for key_list in _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH:
         dict_to_remove_from = yaml_config
         found_key = True
