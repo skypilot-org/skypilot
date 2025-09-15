@@ -356,10 +356,7 @@
                             "type": "boolean"
                         },
                         "hosts": {
-                            "type": [
-                                "string",
-                                "null"
-                            ]
+                            "type": "string"
                         },
                         "ingressClassName": {
                             "type": "string"
