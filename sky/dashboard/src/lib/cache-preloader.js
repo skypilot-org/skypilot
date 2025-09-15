@@ -5,9 +5,10 @@ import dashboardCache from './cache';
 import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
 import { getManagedJobsWithClientPagination } from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
+import { getWorkspaceClusters, getWorkspaceManagedJobs } from '@/components/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { getVolumes } from '@/data/connectors/volumes';
-import { getGPUs, getCloudInfrastructure } from '@/data/connectors/infra';
+import { getWorkspaceAwareInfrastructure, getCloudInfrastructure } from '@/data/connectors/infra';
 import { getSSHNodePools } from '@/data/connectors/ssh-node-pools';
 
 /**
@@ -24,7 +25,6 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
-    getGPUs: { fn: getGPUs, args: [] },
     getCloudInfrastructure: {
       fn: getCloudInfrastructure,
       args: [false],
@@ -36,6 +36,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Functions with arguments (require dynamic data)
   dynamic: {
     getEnabledClouds: { fn: getEnabledClouds, requiresWorkspaces: true },
+    getWorkspaceAwareInfrastructure: { fn: getWorkspaceAwareInfrastructure, requiresWorkspaces: true },
   },
 
   // Page-specific function requirements
@@ -43,9 +44,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     clusters: ['getClusters', 'getClusterHistory', 'getWorkspaces'],
     jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
     infra: [
-      'getClusters',
-      'getManagedJobs',
-      'getGPUs',
+      'getWorkspaceAwareInfrastructure',
       'getCloudInfrastructure',
       'getSSHNodePools',
     ],
@@ -110,10 +109,14 @@ class CachePreloader {
    */
   async _loadPageData(page, force = false) {
     const requiredFunctions = DASHBOARD_CACHE_FUNCTIONS.pages[page];
+    console.log(`[CachePreloader] Loading data for page: ${page}, required functions:`, requiredFunctions);
     const promises = [];
 
     for (const functionName of requiredFunctions) {
+      console.log(`[CachePreloader] Processing function: ${functionName}`);
+      
       if (DASHBOARD_CACHE_FUNCTIONS.base[functionName]) {
+        console.log(`[CachePreloader] ${functionName} found in base functions`);
         // Base function (no arguments)
         const { fn, args } = DASHBOARD_CACHE_FUNCTIONS.base[functionName];
         if (force) {
@@ -123,12 +126,21 @@ class CachePreloader {
           dashboardCache.get(fn, args).then((result) => {
             // Mark this function as recently preloaded
             this._markAsPreloaded(fn, args);
+            console.log(`[CachePreloader] Base function ${functionName} completed`);
+            
             return result;
           })
         );
       } else if (functionName === 'getEnabledClouds') {
+        console.log(`[CachePreloader] ${functionName} using dynamic enabled clouds loader`);
         // Dynamic function that requires workspace data
         promises.push(this._loadEnabledCloudsForAllWorkspaces(force));
+      } else if (functionName === 'getWorkspaceAwareInfrastructure') {
+        console.log(`[CachePreloader] ${functionName} using dynamic workspace-aware infrastructure loader`);
+        // Dynamic function that requires workspace data
+        promises.push(this._loadWorkspaceAwareInfrastructure(force));
+      } else {
+        console.warn(`[CachePreloader] Unknown function: ${functionName}`);
       }
     }
 
@@ -142,12 +154,16 @@ class CachePreloader {
    */
   async _loadEnabledCloudsForAllWorkspaces(force = false) {
     try {
+      console.log('[CachePreloader] Loading enabled clouds for all workspaces...');
+      
       // First get workspaces
       if (force) {
         dashboardCache.invalidate(getWorkspaces);
       }
       const workspacesData = await dashboardCache.get(getWorkspaces);
       const workspaceNames = Object.keys(workspacesData || {});
+      
+      console.log(`[CachePreloader] Loading enabled clouds for ${workspaceNames.length} workspaces:`, workspaceNames);
 
       // Then load enabled clouds for each workspace
       const promises = workspaceNames.map((wsName) => {
@@ -158,8 +174,105 @@ class CachePreloader {
       });
 
       await Promise.allSettled(promises);
+      console.log('[CachePreloader] Completed loading enabled clouds for all workspaces');
     } catch (error) {
       console.error('[CachePreloader] Error loading enabled clouds:', error);
+    }
+  }
+
+  /**
+   * Load workspace clusters for all workspaces
+   * @private
+   */
+  async _loadWorkspaceClustersForAllWorkspaces(force = false) {
+    try {
+      console.log('[CachePreloader] Loading workspace clusters for all workspaces...');
+      
+      // First get workspaces
+      const workspacesData = await dashboardCache.get(getWorkspaces);
+      const workspaceNames = Object.keys(workspacesData || {});
+      
+      console.log(`[CachePreloader] Loading clusters for ${workspaceNames.length} workspaces:`, workspaceNames);
+
+      // Then load clusters for each workspace
+      const promises = workspaceNames.map((wsName) => {
+        if (force) {
+          dashboardCache.invalidate(getWorkspaceClusters, [wsName]);
+        }
+        return dashboardCache.get(getWorkspaceClusters, [wsName]);
+      });
+
+      await Promise.allSettled(promises);
+      console.log('[CachePreloader] Completed loading workspace clusters for all workspaces');
+    } catch (error) {
+      console.error('[CachePreloader] Error loading workspace clusters:', error);
+    }
+  }
+
+  /**
+   * Load workspace managed jobs for all workspaces
+   * @private
+   */
+  async _loadWorkspaceManagedJobsForAllWorkspaces(force = false) {
+    try {
+      console.log('[CachePreloader] Loading workspace managed jobs for all workspaces...');
+      
+      // First get workspaces
+      const workspacesData = await dashboardCache.get(getWorkspaces);
+      const workspaceNames = Object.keys(workspacesData || {});
+      
+      console.log(`[CachePreloader] Loading managed jobs for ${workspaceNames.length} workspaces:`, workspaceNames);
+
+      // Then load managed jobs for each workspace
+      const promises = workspaceNames.map((wsName) => {
+        if (force) {
+          dashboardCache.invalidate(getWorkspaceManagedJobs, [wsName]);
+        }
+        return dashboardCache.get(getWorkspaceManagedJobs, [wsName]);
+      });
+
+      await Promise.allSettled(promises);
+      console.log('[CachePreloader] Completed loading workspace managed jobs for all workspaces');
+    } catch (error) {
+      console.error('[CachePreloader] Error loading workspace managed jobs:', error);
+    }
+  }
+
+  /**
+   * Load workspace-aware infrastructure data for all workspaces
+   * @private
+   */
+  async _loadWorkspaceAwareInfrastructure(force = false) {
+    try {
+      console.log('[CachePreloader] Starting workspace-aware infrastructure preload...');
+      
+      // First preload the main workspace-aware infrastructure function
+      if (force) {
+        dashboardCache.invalidate(getWorkspaceAwareInfrastructure, [false]);
+      }
+      
+      // This will trigger the main function which internally calls workspace-specific functions
+      console.log('[CachePreloader] Calling getWorkspaceAwareInfrastructure...');
+      const infraResult = await dashboardCache.get(getWorkspaceAwareInfrastructure, [false]); // Pass false for forceRefresh
+      this._markAsPreloaded(getWorkspaceAwareInfrastructure, [false]);
+      console.log('[CachePreloader] getWorkspaceAwareInfrastructure completed');
+
+      // Additionally, preload all workspace-specific functions using dedicated methods
+      console.log('[CachePreloader] Starting dedicated workspace-specific preloading...');
+      
+      const preloadPromises = [
+        this._loadEnabledCloudsForAllWorkspaces(force),
+        this._loadWorkspaceClustersForAllWorkspaces(force),
+        this._loadWorkspaceManagedJobsForAllWorkspaces(force)
+      ];
+      
+      await Promise.allSettled(preloadPromises);
+      console.log('[CachePreloader] Completed all workspace-specific preloading');
+      
+      return infraResult;
+    } catch (error) {
+      console.error('[CachePreloader] Error loading workspace-aware infrastructure:', error);
+      throw error; // Re-throw to see the error in the main preload flow
     }
   }
 
@@ -208,6 +321,9 @@ class CachePreloader {
           } else if (functionName === 'getEnabledClouds') {
             // Dynamic function that requires workspace data
             await this._loadEnabledCloudsForAllWorkspaces(false);
+          } else if (functionName === 'getWorkspaceAwareInfrastructure') {
+            // Dynamic function that requires workspace data
+            await this._loadWorkspaceAwareInfrastructure(false);
           }
           console.log(
             `[CachePreloader] Background loaded function: ${functionName}`

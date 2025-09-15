@@ -23,12 +23,14 @@ import {
   openGrafana,
 } from '@/utils/grafana';
 import {
-  getWorkspaceInfrastructure,
+  getWorkspaceAwareInfrastructure,
   getCloudInfrastructure,
   getContextJobs,
 } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import { getEnabledClouds } from '@/data/connectors/workspaces';
+import { getWorkspaceClusters, getWorkspaceManagedJobs } from '@/components/workspaces';
 import {
   getSSHNodePools,
   updateSSHNodePools,
@@ -258,19 +260,17 @@ export function InfrastructureSection({
                             )}
                           </td>
                           <td className="p-3">
-                            {!isJobsDataLoading ? (
-                              jobsData[contextStatsKey]?.jobs || 0 > 0 ? (
-                                <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                                  {jobsData[contextStatsKey]?.jobs}
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                  0
-                                </span>
-                              )
+                            {!hasContextStats ? (
+                              <div className="flex items-center justify-center">
+                                <CircularProgress size={12} />
+                              </div>
+                            ) : stats.jobs > 0 ? (
+                              <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                                {stats.jobs}
+                              </span>
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
+                                0
                               </span>
                             )}
                           </td>
@@ -1708,10 +1708,10 @@ export function GPUs() {
 
   const fetchKubernetesData = async (forceRefresh) => {
     try {
-      // Use the new workspace-aware infrastructure fetching
+      // Use the new workspace-aware infrastructure fetching with caching
       const infraData = forceRefresh
-        ? await getWorkspaceInfrastructure()
-        : await dashboardCache.get(getWorkspaceInfrastructure);
+        ? await getWorkspaceAwareInfrastructure(true)
+        : await dashboardCache.get(getWorkspaceAwareInfrastructure, [false]);
 
       if (infraData) {
         const {
@@ -1769,11 +1769,9 @@ export function GPUs() {
 
   const fetchManagedJobsData = async (forceRefresh) => {
     try {
-      const jobsData = forceRefresh
-        ? await getManagedJobs({ allUsers: true })
-        : await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
-      const jobs = jobsData?.jobs || [];
-      setSshAndKubeJobsData(await getContextJobs(jobs));
+      // Legacy managed jobs fetching disabled - now using workspace-aware data from contextStats
+      console.log('[DEBUG] Legacy fetchManagedJobsData disabled - using workspace-aware contextStats');
+      setSshAndKubeJobsData({});
       setSshAndKubeJobsDataLoading(false);
     } catch (error) {
       console.error('Error in fetchManagedJobsData:', error);
@@ -1785,8 +1783,8 @@ export function GPUs() {
   const fetchCloudData = async (forceRefresh) => {
     try {
       const cloudData = forceRefresh
-        ? await getCloudInfrastructure()
-        : await dashboardCache.get(getCloudInfrastructure, [forceRefresh]);
+        ? await getCloudInfrastructure(false)
+        : await dashboardCache.get(getCloudInfrastructure, [false]);
 
       // Set cloud data with defensive checks
       if (cloudData) {
@@ -1815,7 +1813,7 @@ export function GPUs() {
     try {
       const pools = forceRefresh
         ? await getSSHNodePools()
-        : await dashboardCache.get(getSSHNodePools);
+        : await dashboardCache.get(getSSHNodePools, []);
       setSshNodePools(pools);
       setSshLoading(false);
     } catch (error) {
@@ -1929,13 +1927,18 @@ export function GPUs() {
     };
   }, []);
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
-    dashboardCache.invalidate(getWorkspaceInfrastructure);
+    dashboardCache.invalidate(getWorkspaceAwareInfrastructure, [false]);
     dashboardCache.invalidate(getCloudInfrastructure, [false]);
-    dashboardCache.invalidate(getSSHNodePools);
+    dashboardCache.invalidate(getSSHNodePools, []);
+    
+    // Invalidate workspace-aware caches (similar to workspaces page)
+    dashboardCache.invalidateFunction(getWorkspaceClusters);
+    dashboardCache.invalidateFunction(getWorkspaceManagedJobs);
+    dashboardCache.invalidateFunction(getEnabledClouds);
 
     if (refreshDataRef.current) {
       refreshDataRef.current({
@@ -1943,24 +1946,10 @@ export function GPUs() {
         forceRefresh: true, // Force refresh to run sky check
       });
     }
-  };
+  }, []); // Empty dependency array since all dependencies are refs or stable functions
 
-  // Effect for keyboard shortcut (Cmd+R / Ctrl+R) to force refresh
-  useEffect(() => {
-    const handleKeyDown = (event) => {
-      // Check for Cmd+R (Mac) or Ctrl+R (Windows/Linux)
-      if ((event.metaKey || event.ctrlKey) && event.key === 'r') {
-        event.preventDefault(); // Prevent browser refresh
-        handleRefresh(); // Trigger our force refresh
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, []);
+  // Note: Removed custom Cmd+R handler to be consistent with other pages
+  // The browser's default refresh behavior works fine and is more reliable
 
   // Calculate summary data
   const totalGpuTypes = (allGPUs || []).length;

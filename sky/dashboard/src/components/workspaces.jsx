@@ -120,15 +120,36 @@ export async function getWorkspaceManagedJobs(workspaceName) {
 
     // Ensure workspace information is preserved and filter by workspace
     if (jobsData.jobs) {
+      console.log(`[DEBUG] getWorkspaceManagedJobs(${workspaceName}) - Raw jobs from API:`, jobsData.jobs.length);
+      console.log(`[DEBUG] Raw job details:`, jobsData.jobs.map(job => ({
+        id: job.job_id,
+        status: job.status,
+        workspace: job.workspace,
+        cluster_region: job.cluster_region,
+        region: job.region
+      })));
+      
       jobsData.jobs = jobsData.jobs.map((job) => ({
         ...job,
         workspace: job.workspace || 'default',
       }));
 
       // Filter jobs to only include those that belong to the requested workspace
+      const beforeFilter = jobsData.jobs.length;
       jobsData.jobs = jobsData.jobs.filter(
         (job) => job.workspace === workspaceName
       );
+      
+      console.log(`[DEBUG] getWorkspaceManagedJobs(${workspaceName}) - After filtering: ${jobsData.jobs.length} jobs (was ${beforeFilter})`);
+      if (jobsData.jobs.length > 0) {
+        console.log(`[DEBUG] Filtered job details:`, jobsData.jobs.map(job => ({
+          id: job.job_id,
+          status: job.status,
+          workspace: job.workspace,
+          cluster_region: job.cluster_region,
+          region: job.region
+        })));
+      }
     }
 
     return jobsData;
