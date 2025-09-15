@@ -1,11 +1,10 @@
 """gRPC service implementations for skylet."""
 
-from io import StringIO
+import io
 import os
 import time
 
 import grpc
-
 from sky import exceptions
 from sky import sky_logging
 from sky.jobs import state as managed_job_state
@@ -22,7 +21,7 @@ from sky.skylet import log_lib
 logger = sky_logging.init_logger(__name__)
 
 DEFAULT_LOG_CHUNK_SIZE = 32 * 1024  # 32KB
-DEFAULT_LOG_CHUNK_INTERVAL = 0.1  # 100ms
+DEFAULT_LOG_CHUNK_INTERVAL = 0.01  # 10ms
 
 
 class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
@@ -71,14 +70,14 @@ class LogChunkBuffer:
             max_size: Maximum buffer size in bytes before flushing
             flush_interval: Maximum time in seconds before flushing
         """
-        self.buffer = StringIO()
+        self._buffer = io.StringIO()
         self.max_size = max_size
         self.flush_interval = flush_interval
         self.last_flush = time.time()
 
     def _should_flush(self) -> bool:
         """Check if the buffer should be flushed."""
-        return (self.buffer.tell() >= self.max_size or
+        return (self._buffer.tell() >= self.max_size or
                 time.time() - self.last_flush >= self.flush_interval)
 
     def flush(self) -> str:
@@ -87,11 +86,11 @@ class LogChunkBuffer:
         Returns:
             The buffered log lines as a single string
         """
-        if not self.buffer.tell():
+        if not self._buffer.tell():
             return ''
-        chunk = self.buffer.getvalue()
-        self.buffer.truncate(0)
-        self.buffer.seek(0)
+        chunk = self._buffer.getvalue()
+        self._buffer.truncate(0)
+        self._buffer.seek(0)
         self.last_flush = time.time()
         return chunk
 
@@ -104,12 +103,12 @@ class LogChunkBuffer:
         Returns:
             True if buffer should be flushed after adding the line
         """
-        self.buffer.write(line)
+        self._buffer.write(line)
         return self._should_flush()
 
     def close(self) -> None:
         """Close the buffer."""
-        self.buffer.close()
+        self._buffer.close()
 
 
 class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
