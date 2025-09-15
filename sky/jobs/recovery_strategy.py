@@ -5,18 +5,19 @@ In the YAML file, the user can specify the strategy to use for managed jobs.
 resources:
     job_recovery: EAGER_NEXT_REGION
 """
-import time
+import asyncio
+import logging
 import traceback
 import typing
-from typing import Optional
+from typing import Optional, Set
 
 from sky import backends
 from sky import dag as dag_lib
 from sky import exceptions
-from sky import execution
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.client import sdk
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
@@ -24,6 +25,7 @@ from sky.serve import serve_utils
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import context_utils
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -41,7 +43,7 @@ MAX_JOB_CHECKING_RETRY = 10
 # Minutes to job cluster autodown. This should be significantly larger than
 # managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS, to avoid tearing down the
 # cluster before its status can be updated by the job controller.
-_AUTODOWN_MINUTES = 5
+_AUTODOWN_MINUTES = 10
 
 
 class StrategyExecutor:
@@ -49,15 +51,33 @@ class StrategyExecutor:
 
     RETRY_INIT_GAP_SECONDS = 60
 
-    def __init__(self, cluster_name: Optional[str], backend: 'backends.Backend',
-                 task: 'task_lib.Task', max_restarts_on_errors: int,
-                 job_id: int, task_id: int, pool: Optional[str]) -> None:
+    def __init__(
+        self,
+        cluster_name: Optional[str],
+        backend: 'backends.Backend',
+        task: 'task_lib.Task',
+        max_restarts_on_errors: int,
+        job_id: int,
+        task_id: int,
+        job_logger: logging.Logger,
+        pool: Optional[str],
+        starting: Set[int],
+        starting_lock: asyncio.Lock,
+        starting_signal: asyncio.Condition,
+    ) -> None:
         """Initialize the strategy executor.
 
         Args:
             cluster_name: The name of the cluster.
             backend: The backend to use. Only CloudVMRayBackend is supported.
             task: The task to execute.
+            max_restarts_on_errors: Maximum number of restarts on errors.
+            job_id: The ID of the job.
+            task_id: The ID of the task.
+            job_logger: Logger instance for this specific job.
+            starting: Set of job IDs that are currently starting.
+            starting_lock: Lock to synchronize starting jobs.
+            starting_signal: Condition to signal when a job can start.
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
@@ -74,12 +94,26 @@ class StrategyExecutor:
         self.task_id = task_id
         self.pool = pool
         self.restart_cnt_on_failure = 0
+        self._logger = job_logger
         self.job_id_on_pool_cluster: Optional[int] = None
+        self.starting = starting
+        self.starting_lock = starting_lock
+        self.starting_signal = starting_signal
 
     @classmethod
-    def make(cls, cluster_name: Optional[str], backend: 'backends.Backend',
-             task: 'task_lib.Task', job_id: int, task_id: int,
-             pool: Optional[str]) -> 'StrategyExecutor':
+    def make(
+        cls,
+        cluster_name: Optional[str],
+        backend: 'backends.Backend',
+        task: 'task_lib.Task',
+        job_id: int,
+        task_id: int,
+        job_logger: logging.Logger,
+        pool: Optional[str],
+        starting: Set[int],
+        starting_lock: asyncio.Lock,
+        starting_signal: asyncio.Condition,
+    ) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
         resource_list = list(task.resources)
@@ -111,9 +145,10 @@ class StrategyExecutor:
         assert job_recovery_strategy is not None, job_recovery_name
         return job_recovery_strategy(cluster_name, backend, task,
                                      max_restarts_on_errors, job_id, task_id,
-                                     pool)
+                                     job_logger, pool, starting, starting_lock,
+                                     starting_signal)
 
-    def launch(self) -> float:
+    async def launch(self) -> float:
         """Launch the cluster for the first time.
 
         It can fail if resource is not available. Need to check the cluster
@@ -125,11 +160,11 @@ class StrategyExecutor:
         Raises: Please refer to the docstring of self._launch().
         """
 
-        job_submit_at = self._launch(max_retry=None)
+        job_submit_at = await self._launch(max_retry=None)
         assert job_submit_at is not None
         return job_submit_at
 
-    def recover(self) -> float:
+    async def recover(self) -> float:
         """Relaunch the cluster after failure and wait until job starts.
 
         When recover() is called the cluster should be in STOPPED status (i.e.
@@ -139,13 +174,11 @@ class StrategyExecutor:
         """
         raise NotImplementedError
 
-    def _try_cancel_jobs(self):
-        from sky import core  # pylint: disable=import-outside-toplevel
-
+    async def _try_cancel_jobs(self):
         if self.cluster_name is None:
             return
-        handle = global_user_state.get_handle_from_cluster_name(
-            self.cluster_name)
+        handle = await context_utils.to_thread(
+            global_user_state.get_handle_from_cluster_name, self.cluster_name)
         if handle is None or self.pool is not None:
             return
         try:
@@ -174,9 +207,16 @@ class StrategyExecutor:
                 kwargs = dict(all=True)
             else:
                 kwargs = dict(job_ids=[self.job_id_on_pool_cluster])
-            core.cancel(cluster_name=self.cluster_name,
-                        **kwargs,
-                        _try_cancel_if_cluster_is_init=True)
+            request_id = await context_utils.to_thread(
+                sdk.cancel,
+                cluster_name=self.cluster_name,
+                **kwargs,
+                _try_cancel_if_cluster_is_init=True,
+            )
+            await context_utils.to_thread(
+                sdk.get,
+                request_id,
+            )
         except Exception as e:  # pylint: disable=broad-except
             logger.info('Failed to cancel the job on the cluster. The cluster '
                         'might be already down or the head node is preempted.'
@@ -184,9 +224,9 @@ class StrategyExecutor:
                         f'{common_utils.format_exception(e)}\n'
                         'Terminating the cluster explicitly to ensure no '
                         'remaining job process interferes with recovery.')
-            self._cleanup_cluster()
+            await context_utils.to_thread(self._cleanup_cluster)
 
-    def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
+    async def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
 
         Returns:
@@ -200,32 +240,34 @@ class StrategyExecutor:
             # Avoid the infinite loop, if any bug happens.
             job_checking_retry_cnt += 1
             try:
-                cluster_status, _ = (
-                    backend_utils.refresh_cluster_status_handle(
-                        self.cluster_name,
-                        force_refresh_statuses=set(status_lib.ClusterStatus)))
+                cluster_status, _ = (await context_utils.to_thread(
+                    backend_utils.refresh_cluster_status_handle,
+                    self.cluster_name,
+                    force_refresh_statuses=set(status_lib.ClusterStatus)))
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
                 # loop.
                 # TODO(zhwu): log the unexpected error to usage collection
                 # for future debugging.
-                logger.info(f'Unexpected exception: {e}\nFailed to get the '
-                            'refresh the cluster status. Retrying.')
+                self._logger.info(
+                    f'Unexpected exception: {e}\nFailed to get the '
+                    'refresh the cluster status. Retrying.')
                 continue
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster can be preempted before the job is
                 # launched.
                 # Break to let the retry launch kick in.
-                logger.info('The cluster is preempted before the job '
-                            'is submitted.')
+                self._logger.info('The cluster is preempted before the job '
+                                  'is submitted.')
                 # TODO(zhwu): we should recover the preemption with the
                 # recovery strategy instead of the current while loop.
                 break
 
             try:
-                status = managed_job_utils.get_job_status(
+                status = await managed_job_utils.get_job_status(
                     self.backend,
                     self.cluster_name,
+                    job_logger=self._logger,
                     job_id=self.job_id_on_pool_cluster)
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
@@ -234,14 +276,16 @@ class StrategyExecutor:
                 # get_job_status, so it should not happen here.
                 # TODO(zhwu): log the unexpected error to usage collection
                 # for future debugging.
-                logger.info(f'Unexpected exception: {e}\nFailed to get the '
-                            'job status. Retrying.')
+                self._logger.info(
+                    f'Unexpected exception: {e}\nFailed to get the '
+                    'job status. Retrying.')
                 continue
 
             # Check the job status until it is not in initialized status
             if status is not None and status > job_lib.JobStatus.INIT:
                 try:
-                    job_submitted_at = managed_job_utils.get_job_timestamp(
+                    job_submitted_at = await context_utils.to_thread(
+                        managed_job_utils.get_job_timestamp,
                         self.backend,
                         self.cluster_name,
                         self.job_id_on_pool_cluster,
@@ -250,11 +294,13 @@ class StrategyExecutor:
                 except Exception as e:  # pylint: disable=broad-except
                     # If we failed to get the job timestamp, we will retry
                     # job checking loop.
-                    logger.info(f'Unexpected Exception: {e}\nFailed to get '
-                                'the job start timestamp. Retrying.')
+                    self._logger.info(
+                        f'Unexpected Exception: {e}\nFailed to get '
+                        'the job start timestamp. Retrying.')
                     continue
             # Wait for the job to be started
-            time.sleep(managed_job_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
+            await asyncio.sleep(
+                managed_job_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
         return None
 
     def _cleanup_cluster(self) -> None:
@@ -263,10 +309,10 @@ class StrategyExecutor:
         if self.pool is None:
             managed_job_utils.terminate_cluster(self.cluster_name)
 
-    def _launch(self,
-                max_retry: Optional[int] = 3,
-                raise_on_failure: bool = True,
-                recovery: bool = False) -> Optional[float]:
+    async def _launch(self,
+                      max_retry: Optional[int] = 3,
+                      raise_on_failure: bool = True,
+                      recovery: bool = False) -> Optional[float]:
         """Implementation of launch().
 
         The function will wait until the job starts running, but will leave the
@@ -307,56 +353,107 @@ class StrategyExecutor:
         while True:
             retry_cnt += 1
             try:
-                with scheduler.scheduled_launch(self.job_id):
+                async with scheduler.scheduled_launch(
+                        self.job_id,
+                        self.starting,
+                        self.starting_lock,
+                        self.starting_signal,
+                        self._logger,
+                ):
                     # The job state may have been PENDING during backoff -
                     # update to STARTING or RECOVERING.
                     # On the first attempt (when retry_cnt is 1), we should
                     # already be in STARTING or RECOVERING.
                     if retry_cnt > 1:
-                        state.set_restarting(self.job_id, self.task_id,
-                                             recovery)
+                        await state.set_restarting_async(
+                            self.job_id, self.task_id, recovery)
                     try:
                         usage_lib.messages.usage.set_internal()
                         if self.pool is None:
                             assert self.cluster_name is not None
-                            # Detach setup, so that the setup failure can be
-                            # detected by the controller process (job_status ->
-                            # FAILED_SETUP).
-                            execution.launch(
-                                self.dag,
-                                cluster_name=self.cluster_name,
-                                # We expect to tear down the cluster as soon as
-                                # the job is finished. However, in case the
-                                # controller dies, we may end up with a
-                                # resource leak.
-                                # Ideally, we should autodown to be safe,
-                                # but it's fine to disable it for now, as
-                                # Nebius doesn't support autodown yet.
-                                # TODO(kevin): set down=True once Nebius
-                                # supports autodown.
-                                # idle_minutes_to_autostop=_AUTODOWN_MINUTES,
-                                # down=True,
-                                _is_launched_by_jobs_controller=True)
+                            log_file = _get_logger_file(self._logger)
+                            request_id = None
+                            try:
+                                request_id = await context_utils.to_thread(
+                                    sdk.launch,
+                                    self.dag,
+                                    cluster_name=self.cluster_name,
+                                    # We expect to tear down the cluster as soon
+                                    # as the job is finished. However, in case
+                                    # the controller dies, we may end up with a
+                                    # resource leak.
+                                    # Ideally, we should autodown to be safe,
+                                    # but it's fine to disable it for now, as
+                                    # Nebius doesn't support autodown yet.
+                                    # TODO(kevin): set down=True once Nebius
+                                    # supports autodown.
+                                    # idle_minutes_to_autostop=(
+                                    #     _AUTODOWN_MINUTES),
+                                    # down=True,
+                                    _is_launched_by_jobs_controller=True,
+                                )
+                                if log_file is None:
+                                    raise OSError('Log file is None')
+                                with open(log_file, 'a', encoding='utf-8') as f:
+                                    await context_utils.to_thread(
+                                        sdk.stream_and_get,
+                                        request_id,
+                                        output_stream=f,
+                                    )
+                            except asyncio.CancelledError:
+                                if request_id:
+                                    req = await context_utils.to_thread(
+                                        sdk.api_cancel, request_id)
+                                    try:
+                                        await context_utils.to_thread(
+                                            sdk.get, req)
+                                    except Exception as e:  # pylint: disable=broad-except
+                                        # we must still return a CancelledError
+                                        self._logger.error(
+                                            f'Failed to cancel the job: {e}')
+                                raise
+                            self._logger.info('Managed job cluster launched.')
                         else:
-                            self.cluster_name = (
-                                serve_utils.get_next_cluster_name(
-                                    self.pool, self.job_id))
+                            self.cluster_name = await (context_utils.to_thread(
+                                serve_utils.get_next_cluster_name, self.pool,
+                                self.job_id))
                             if self.cluster_name is None:
                                 raise exceptions.NoClusterLaunchedError(
                                     'No cluster name found in the pool.')
-                            job_id_on_pool_cluster, _ = execution.exec(
-                                self.dag, cluster_name=self.cluster_name)
+                            request_id = None
+                            try:
+                                request_id = await context_utils.to_thread(
+                                    sdk.exec,
+                                    self.dag,
+                                    cluster_name=self.cluster_name,
+                                )
+                                job_id_on_pool_cluster, _ = (
+                                    await context_utils.to_thread(
+                                        sdk.get, request_id))
+                            except asyncio.CancelledError:
+                                if request_id:
+                                    req = await context_utils.to_thread(
+                                        sdk.api_cancel, request_id)
+                                    try:
+                                        await context_utils.to_thread(
+                                            sdk.get, req)
+                                    except Exception as e:  # pylint: disable=broad-except
+                                        # we must still return a CancelledError
+                                        self._logger.error(
+                                            f'Failed to cancel the job: {e}')
+                                raise
                             assert job_id_on_pool_cluster is not None, (
                                 self.cluster_name, self.job_id)
                             self.job_id_on_pool_cluster = job_id_on_pool_cluster
-                            state.set_job_id_on_pool_cluster(
+                            await state.set_job_id_on_pool_cluster_async(
                                 self.job_id, job_id_on_pool_cluster)
-                        logger.info('Managed job cluster launched.')
+                        self._logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,
                             exceptions.ResourcesMismatchError) as e:
-                        logger.error('Failure happened before provisioning. '
-                                     f'{common_utils.format_exception(e)}')
+                        self._logger.error(
+                            'Failure happened before provisioning. '
+                            f'{common_utils.format_exception(e)}')
                         if raise_on_failure:
                             raise exceptions.ProvisionPrechecksError(
                                 reasons=[e])
@@ -384,28 +481,30 @@ class StrategyExecutor:
                             reasons_str = '; '.join(
                                 common_utils.format_exception(err)
                                 for err in reasons)
-                            logger.error(
+                            self._logger.error(
                                 'Failure happened before provisioning. '
                                 f'Failover reasons: {reasons_str}')
                             if raise_on_failure:
                                 raise exceptions.ProvisionPrechecksError(
                                     reasons)
                             return None
-                        logger.info('Failed to launch a cluster with error: '
-                                    f'{common_utils.format_exception(e)})')
+                        self._logger.info(
+                            'Failed to launch a cluster with error: '
+                            f'{common_utils.format_exception(e)})')
                     except Exception as e:  # pylint: disable=broad-except
                         # If the launch fails, it will be recovered by the
                         # following code.
-                        logger.info('Failed to launch a cluster with error: '
-                                    f'{common_utils.format_exception(e)})')
+                        self._logger.info(
+                            'Failed to launch a cluster with error: '
+                            f'{common_utils.format_exception(e)})')
                         with ux_utils.enable_traceback():
-                            logger.info(
+                            self._logger.info(
                                 f'  Traceback: {traceback.format_exc()}')
                     else:  # No exception, the launch succeeds.
                         # At this point, a sky.launch() has succeeded. Cluster
                         # may be UP (no preemption since) or DOWN (newly
                         # preempted).
-                        job_submitted_at = (
+                        job_submitted_at = await (
                             self._wait_until_job_starts_on_cluster())
                         if job_submitted_at is not None:
                             return job_submitted_at
@@ -413,7 +512,7 @@ class StrategyExecutor:
                         # launch.
                         # TODO(zhwu): log the unexpected error to usage
                         # collection for future debugging.
-                        logger.info(
+                        self._logger.info(
                             'Failed to successfully submit the job to the '
                             'launched cluster, due to unexpected submission '
                             'errors or the cluster being preempted during '
@@ -421,7 +520,7 @@ class StrategyExecutor:
 
                     # If we get here, the launch did not succeed. Tear down the
                     # cluster and retry.
-                    self._cleanup_cluster()
+                    await context_utils.to_thread(self._cleanup_cluster)
                     if max_retry is not None and retry_cnt >= max_retry:
                         # Retry forever if max_retry is None.
                         if raise_on_failure:
@@ -444,15 +543,13 @@ class StrategyExecutor:
 
             except exceptions.NoClusterLaunchedError:
                 # Update the status to PENDING during backoff.
-                state.set_backoff_pending(self.job_id, self.task_id)
+                await state.set_backoff_pending_async(self.job_id, self.task_id)
                 # Calculate the backoff time and sleep.
-                # We retry immediately for worker pool, since no sky.launch()
-                # is called and the overhead is minimal.
                 gap_seconds = (backoff.current_backoff()
                                if self.pool is None else 1)
-                logger.info('Retrying to launch the cluster in '
-                            f'{gap_seconds:.1f} seconds.')
-                time.sleep(gap_seconds)
+                self._logger.info('Retrying to launch the cluster in '
+                                  f'{gap_seconds:.1f} seconds.')
+                await asyncio.sleep(gap_seconds)
                 continue
             else:
                 # The inner loop should either return or throw
@@ -478,26 +575,39 @@ class FailoverStrategyExecutor(StrategyExecutor):
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
 
-    def __init__(self, cluster_name: Optional[str], backend: 'backends.Backend',
-                 task: 'task_lib.Task', max_restarts_on_errors: int,
-                 job_id: int, task_id: int, pool: Optional[str]) -> None:
+    def __init__(
+        self,
+        cluster_name: Optional[str],
+        backend: 'backends.Backend',
+        task: 'task_lib.Task',
+        max_restarts_on_errors: int,
+        job_id: int,
+        task_id: int,
+        job_logger: logging.Logger,
+        pool: Optional[str],
+        starting: Set[int],
+        starting_lock: asyncio.Lock,
+        starting_signal: asyncio.Condition,
+    ) -> None:
         super().__init__(cluster_name, backend, task, max_restarts_on_errors,
-                         job_id, task_id, pool)
+                         job_id, task_id, job_logger, pool, starting,
+                         starting_lock, starting_signal)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
         # preempted.)
         self._launched_resources: Optional['resources.Resources'] = None
 
-    def _launch(self,
-                max_retry: Optional[int] = 3,
-                raise_on_failure: bool = True,
-                recovery: bool = False) -> Optional[float]:
-        job_submitted_at = super()._launch(max_retry, raise_on_failure,
-                                           recovery)
+    async def _launch(self,
+                      max_retry: Optional[int] = 3,
+                      raise_on_failure: bool = True,
+                      recovery: bool = False) -> Optional[float]:
+        job_submitted_at = await super()._launch(max_retry, raise_on_failure,
+                                                 recovery)
         if job_submitted_at is not None and self.cluster_name is not None:
             # Only record the cloud/region if the launch is successful.
-            handle = global_user_state.get_handle_from_cluster_name(
+            handle = await context_utils.to_thread(
+                global_user_state.get_handle_from_cluster_name,
                 self.cluster_name)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), (
                 'Cluster should be launched.', handle)
@@ -507,7 +617,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
             self._launched_resources = None
         return job_submitted_at
 
-    def recover(self) -> float:
+    async def recover(self) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
         #    so that it will try on the current region first until timeout.
         # 2. Tear down the cluster, if the step 1 failed to launch the cluster.
@@ -515,7 +625,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
         #    original user specification.
 
         # Step 1
-        self._try_cancel_jobs()
+        await self._try_cancel_jobs()
 
         while True:
             # Add region constraint to the task, to retry on the same region
@@ -529,31 +639,32 @@ class FailoverStrategyExecutor(StrategyExecutor):
                     cloud=launched_cloud, region=launched_region, zone=None)
                 task.set_resources({new_resources})
                 # Not using self.launch to avoid the retry until up logic.
-                job_submitted_at = self._launch(raise_on_failure=False,
-                                                recovery=True)
+                job_submitted_at = await self._launch(raise_on_failure=False,
+                                                      recovery=True)
                 # Restore the original dag, i.e. reset the region constraint.
                 task.set_resources(original_resources)
                 if job_submitted_at is not None:
                     return job_submitted_at
 
             # Step 2
-            logger.debug('Terminating unhealthy cluster and reset cloud '
-                         'region.')
-            self._cleanup_cluster()
+            self._logger.debug('Terminating unhealthy cluster and reset cloud '
+                               'region.')
+            await context_utils.to_thread(self._cleanup_cluster)
 
             # Step 3
-            logger.debug('Relaunch the cluster  without constraining to prior '
-                         'cloud/region.')
+            self._logger.debug(
+                'Relaunch the cluster  without constraining to prior '
+                'cloud/region.')
             # Not using self.launch to avoid the retry until up logic.
-            job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
-                                            raise_on_failure=False,
-                                            recovery=True)
+            job_submitted_at = await self._launch(max_retry=self._MAX_RETRY_CNT,
+                                                  raise_on_failure=False,
+                                                  recovery=True)
             if job_submitted_at is None:
                 # Failed to launch the cluster.
                 gap_seconds = self.RETRY_INIT_GAP_SECONDS
-                logger.info('Retrying to recover the cluster in '
-                            f'{gap_seconds:.1f} seconds.')
-                time.sleep(gap_seconds)
+                self._logger.info('Retrying to recover the cluster in '
+                                  f'{gap_seconds:.1f} seconds.')
+                await asyncio.sleep(gap_seconds)
                 continue
 
             return job_submitted_at
@@ -585,7 +696,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
                                                   -> R1Z1 (success)
     """
 
-    def recover(self) -> float:
+    async def recover(self) -> float:
         # 1. Terminate the current cluster
         # 2. Launch again by explicitly blocking the previously launched region
         # (this will failover through the entire search space except the
@@ -597,12 +708,14 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
         # task.resources.
 
         # Step 1
-        logger.debug('Terminating unhealthy cluster and reset cloud region.')
-        self._cleanup_cluster()
+        self._logger.debug(
+            'Terminating unhealthy cluster and reset cloud region.')
+        await context_utils.to_thread(self._cleanup_cluster)
 
         # Step 2
-        logger.debug('Relaunch the cluster skipping the previously launched '
-                     'cloud/region.')
+        self._logger.debug(
+            'Relaunch the cluster skipping the previously launched '
+            'cloud/region.')
         if self._launched_resources is not None:
             task = self.dag.tasks[0]
             requested_resources = self._launched_resources
@@ -619,26 +732,35 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
                                              region=launched_region)
                 }
                 # Not using self.launch to avoid the retry until up logic.
-                job_submitted_at = self._launch(raise_on_failure=False,
-                                                recovery=True)
+                job_submitted_at = await self._launch(raise_on_failure=False,
+                                                      recovery=True)
                 task.blocked_resources = None
                 if job_submitted_at is not None:
                     return job_submitted_at
 
         while True:
             # Step 3
-            logger.debug('Relaunch the cluster without constraining to prior '
-                         'cloud/region.')
+            self._logger.debug(
+                'Relaunch the cluster without constraining to prior '
+                'cloud/region.')
             # Not using self.launch to avoid the retry until up logic.
-            job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
-                                            raise_on_failure=False,
-                                            recovery=True)
+            job_submitted_at = await self._launch(max_retry=self._MAX_RETRY_CNT,
+                                                  raise_on_failure=False,
+                                                  recovery=True)
             if job_submitted_at is None:
                 # Failed to launch the cluster.
                 gap_seconds = self.RETRY_INIT_GAP_SECONDS
-                logger.info('Retrying to recover the cluster in '
-                            f'{gap_seconds:.1f} seconds.')
-                time.sleep(gap_seconds)
+                self._logger.info('Retrying to recover the cluster in '
+                                  f'{gap_seconds:.1f} seconds.')
+                await asyncio.sleep(gap_seconds)
                 continue
 
             return job_submitted_at
+
+
+def _get_logger_file(file_logger: logging.Logger) -> Optional[str]:
+    """Gets the file path that the logger writes to."""
+    for handler in file_logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            return handler.baseFilename
+    return None

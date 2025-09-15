@@ -85,7 +85,7 @@ The above is achieved by configuring the following section in the config file:
              disabled: false
              tenant_id: Nebius tenant ID (tenant-xxxxxxxx)
              credentials_file_path: ~/.nebius/credentials-file-name.json
-             domain: api.nebius.com:443
+             domain: api.nebius.cloud:443
 
 To apply the configuration, follow the following steps:
 

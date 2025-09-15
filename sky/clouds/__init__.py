@@ -29,6 +29,7 @@ from sky.clouds.paperspace import Paperspace
 from sky.clouds.primeintellect import PrimeIntellect
 from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
+from sky.clouds.seeweb import Seeweb
 from sky.clouds.ssh import SSH
 from sky.clouds.vast import Vast
 from sky.clouds.vsphere import Vsphere
@@ -60,6 +61,7 @@ __all__ = [
     'Fluidstack',
     'Nebius',
     'Hyperbolic',
+    'Seeweb',
     # Utility functions
     'cloud_in_iterable',
 ]
