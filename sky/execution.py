@@ -622,9 +622,12 @@ def launch(
     stages = None
     skip_unnecessary_provisioning = False
     # Check if cluster exists and we are doing fast provisioning
+    logger.info(f'fast: {fast}, cluster_name: {cluster_name}')
     if fast and cluster_name is not None:
         cluster_status, maybe_handle = (
             backend_utils.refresh_cluster_status_handle(cluster_name))
+        logger.info(
+            f'cluster_status: {cluster_status}, maybe_handle: {maybe_handle}')
         if cluster_status == status_lib.ClusterStatus.INIT:
             # If the cluster is INIT, it may be provisioning. We want to prevent
             # concurrent calls from queueing up many sequential reprovision
@@ -671,7 +674,8 @@ def launch(
     # see the setup logs when inspecting the launch process to know
     # excatly what the job is waiting for.
     detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
-
+    logger.info(
+        f'skip_unnecessary_provisioning: {skip_unnecessary_provisioning}')
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
