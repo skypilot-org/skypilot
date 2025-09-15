@@ -563,3 +563,113 @@ def tail_logs(job_id: Optional[int],
         except FileNotFoundError:
             print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                   f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
+
+
+def tail_logs_iter(job_id: Optional[int],
+                   log_dir: Optional[str],
+                   managed_job_id: Optional[int] = None,
+                   follow: bool = True,
+                   tail: int = 0) -> Iterator[str]:
+    """Tail the logs of a job. This is mostly the same as tail_logs, but
+    returns an iterator instead of printing to stdout/stderr."""
+    if job_id is None:
+        # This only happens when job_lib.get_latest_job_id() returns None,
+        # which means no job has been submitted to this cluster. See
+        # sky.skylet.job_lib.JobLibCodeGen.tail_logs for more details.
+        logger.info('Skip streaming logs as no job has been submitted.')
+        return
+    job_str = f'job {job_id}'
+    if managed_job_id is not None:
+        job_str = f'managed job {managed_job_id}'
+    if log_dir is None:
+        msg = f'{job_str.capitalize()} not found (see `sky queue`).'
+        yield msg + '\n'
+        return
+    logger.debug(f'Tailing logs for job, real job_id {job_id}, managed_job_id '
+                 f'{managed_job_id}.')
+    log_path = os.path.join(log_dir, 'run.log')
+    log_path = os.path.expanduser(log_path)
+
+    status = job_lib.update_job_status([job_id], silent=True)[0]
+
+    # Wait for the log to be written. This is needed due to the `ray submit`
+    # will take some time to start the job and write the log.
+    retry_cnt = 0
+    while status is not None and not status.is_terminal():
+        retry_cnt += 1
+        if os.path.exists(log_path) and status != job_lib.JobStatus.INIT:
+            break
+        if retry_cnt >= SKY_LOG_WAITING_MAX_RETRY:
+            err = (f'{colorama.Fore.RED}ERROR: Logs for '
+                   f'{job_str} (status: {status.value}) does not exist '
+                   f'after retrying {retry_cnt} times.'
+                   f'{colorama.Style.RESET_ALL}')
+            yield err + '\n'
+            return
+        waiting = (f'INFO: Waiting {SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
+                   'to be written...')
+        yield waiting + '\n'
+        time.sleep(SKY_LOG_WAITING_GAP_SECONDS)
+        status = job_lib.update_job_status([job_id], silent=True)[0]
+
+    start_stream_at = LOG_FILE_START_STREAMING_AT
+    # Explicitly declare the type to avoid mypy warning.
+    lines: Iterable[str] = []
+    if follow and status in [
+            job_lib.JobStatus.SETTING_UP,
+            job_lib.JobStatus.PENDING,
+            job_lib.JobStatus.RUNNING,
+    ]:
+        # Not using `ray job logs` because it will put progress bar in
+        # multiple lines.
+        with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
+            # Using `_follow` instead of `tail -f` to streaming the whole
+            # log and creating a new process for tail.
+            start_streaming = False
+            if tail > 0:
+                head_lines_of_log_file = _peek_head_lines(log_file)
+                lines = collections.deque(log_file, maxlen=tail)
+                start_streaming = _should_stream_the_whole_tail_lines(
+                    head_lines_of_log_file, lines, start_stream_at)
+                for line in lines:
+                    if start_stream_at in line:
+                        start_streaming = True
+                    if start_streaming:
+                        yield line
+            # Now, the cursor is at the end of the last lines
+            # if tail > 0
+            for line in _follow_job_logs(log_file,
+                                         job_id=job_id,
+                                         start_streaming=start_streaming,
+                                         start_streaming_at=start_stream_at):
+                yield line
+    else:
+        try:
+            start_streaming = False
+            with open(log_path, 'r', encoding='utf-8') as log_file:
+                if tail > 0:
+                    # If tail > 0, we need to read the last n lines.
+                    # We use double ended queue to rotate the last n lines.
+                    head_lines_of_log_file = _peek_head_lines(log_file)
+                    lines = collections.deque(log_file, maxlen=tail)
+                    start_streaming = _should_stream_the_whole_tail_lines(
+                        head_lines_of_log_file, lines, start_stream_at)
+                else:
+                    lines = log_file
+                for line in lines:
+                    if start_stream_at in line:
+                        start_streaming = True
+                    if start_streaming:
+                        yield line
+                status_str = status.value if status is not None else 'None'
+                # Only show "Job finished" for actually terminal states
+                if status is not None and status.is_terminal():
+                    finish = ux_utils.finishing_message(
+                        f'Job finished (status: {status_str}).')
+                    yield finish + '\n'
+            return
+        except FileNotFoundError:
+            err = (
+                f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
+                f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
+            yield err + '\n'

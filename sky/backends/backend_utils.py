@@ -16,8 +16,8 @@ import tempfile
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
-                    TypeVar, Union)
+from typing import (Any, Callable, Dict, Iterator, List, Optional, Sequence,
+                    Set, Tuple, TypeVar, Union)
 import uuid
 
 import aiohttp
@@ -3727,6 +3727,27 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
 
     raise RuntimeError(
         f'Failed to invoke Skylet after {max_attempts} attempts: {last_exception}'
+    ) from last_exception
+
+
+def invoke_skylet_streaming_with_retries(
+        stream_func: Callable[..., Iterator[T]]) -> Iterator[T]:
+    """Generic helper for making Skylet streaming gRPC requests."""
+    max_attempts = 3
+    backoff = common_utils.Backoff(initial_backoff=0.5)
+    last_exception: Optional[Exception] = None
+
+    for _ in range(max_attempts):
+        try:
+            for response in stream_func():
+                yield response
+            return
+        except grpc.RpcError as e:
+            last_exception = e
+            _handle_grpc_error(e, backoff.current_backoff())
+
+    raise RuntimeError(
+        f'Failed to stream Skylet response after {max_attempts} attempts'
     ) from last_exception
 
 

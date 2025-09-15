@@ -19,8 +19,8 @@ import textwrap
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Optional,
+                    Set, Tuple, Union)
 
 import colorama
 import psutil
@@ -3131,6 +3131,13 @@ class SkyletClient:
     ) -> 'jobsv1_pb2.GetLogDirsForJobsResponse':
         return self._jobs_stub.GetLogDirsForJobs(request, timeout=timeout)
 
+    def tail_logs(
+        self,
+        request: 'jobsv1_pb2.TailLogsRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> Iterator['jobsv1_pb2.TailLogsResponse']:
+        return self._jobs_stub.TailLogs(request, timeout=timeout)
+
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
@@ -4645,6 +4652,29 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             The exit code of the tail command. Returns code 100 if the job has
             failed. See exceptions.JobExitCode for possible return codes.
         """
+        if handle.is_grpc_enabled_with_flag:
+            last_exit_code = 0
+            try:
+                request = jobsv1_pb2.TailLogsRequest(
+                    job_id=job_id,
+                    managed_job_id=managed_job_id,
+                    follow=follow,
+                    tail=tail)
+                for resp in backend_utils.invoke_skylet_streaming_with_retries(
+                        lambda: SkyletClient(handle.get_grpc_channel()
+                                            ).tail_logs(request, timeout=None)):
+                    if resp.log_line:
+                        sys.stdout.write(resp.log_line)
+                    last_exit_code = resp.exit_code
+                sys.stdout.flush()
+                return last_exit_code
+            except exceptions.SkyletMethodNotImplementedError:
+                pass
+            except grpc.RpcError as e:
+                if e.code() == grpc.StatusCode.CANCELLED:
+                    return last_exit_code
+                raise e
+
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
                                                follow=follow,
