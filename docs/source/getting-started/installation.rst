@@ -36,6 +36,8 @@ Install SkyPilot using pip:
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
           # Nebius is only supported for Python >= 3.10
+          pip install "skypilot[seeweb]"
+          # Seeweb is only supported for Python >= 3.10
 
           pip install "skypilot[all]"
 
@@ -228,6 +230,7 @@ This will produce a summary like:
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
+    Seeweb: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
 output hints on how to resolve them. You can also refer to the cloud setup
@@ -650,13 +653,8 @@ Seeweb
 
 `Seeweb <https://www.seeweb.it/>`_ Seeweb is your European Cloud Provider specialized in high-performance Cloud solutions and GPU servers ideal for powering artificial intelligence efficiently and sustainably. With a 100% renewable energy-powered infrastructure and an excellent price-performance ratio, Seeweb enables AI innovation with a responsible environmental impact.
 
-
-Setup
-======
-
-
 Prerequisites
-^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~
 
 * A Seeweb Cloud account.
 * A Seeweb API token with permissions to create servers.
@@ -679,7 +677,7 @@ Flow to generate an API token for GPU compute access:
 
 
 Authentication
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~
 
 SkyPilot reads your credentials from a Seeweb key file.
 Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
@@ -696,7 +694,7 @@ The directory :code:`~/.seeweb_cloud` must exist and be readable by you.
 
 
 Verify credentials:
-^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
@@ -712,22 +710,21 @@ If successful you will see::
 
 
 Limitations
-^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~
 
 * **No spot instances** – ``use_spot`` is ignored on Seeweb.
 * **No Storage implemented** – ``--storage`` is not supported.
-* **Ports** – ``ports:`` stanza is not implemented; configure firewall rules manually via Seeweb.
 * **Custom Docker images** via ``--image`` are unsupported.
 
 Troubleshooting
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~
 
 * **Authentication fails:** ensure ``api_key`` is configured correctly.
 * **SSH access denied:** confirm your public key is added to Seeweb before launching servers; otherwise retrieve the one‑time root password from the Seeweb panel.
 * **Instance type unavailable:** not all plans exist in every region. Either specify a region that supports the plan or let SkyPilot auto‑select.
 
 See also
-^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~
 
 * `Seeweb API docs <https://docs.seeweb.it/>`_
 * `SkyPilot GitHub <https://github.com/skypilot-org/skypilot>`_
