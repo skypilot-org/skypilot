@@ -172,19 +172,20 @@ get_previous_version() {
 cleanup() {
     echo "Cleaning up..."
 
-    # Set environment variable for cleanup script
+    # Clean up Sky resources only if API_ENDPOINT is set
     if [ -n "$API_ENDPOINT" ]; then
+        echo "Cleaning up Sky resources..."
         export SKYPILOT_API_SERVER_ENDPOINT="$API_ENDPOINT"
         echo "Set SKYPILOT_API_SERVER_ENDPOINT=$API_ENDPOINT for cleanup"
-    fi
 
-    # Clean up Sky resources
-    echo "Cleaning up Sky resources..."
-    if [ -f "$SCRIPT_DIR/../../smoke_tests/docker/stop_sky_resource.sh" ]; then
-        echo "Running stop_sky_resource.sh..."
-        bash "$SCRIPT_DIR/../../smoke_tests/docker/stop_sky_resource.sh"
+        if [ -f "$SCRIPT_DIR/../../smoke_tests/docker/stop_sky_resource.sh" ]; then
+            echo "Running stop_sky_resource.sh..."
+            bash "$SCRIPT_DIR/../../smoke_tests/docker/stop_sky_resource.sh"
+        else
+            echo "❌ Error: stop_sky_resource.sh not found at $SCRIPT_DIR/../../smoke_tests/docker/stop_sky_resource.sh"
+        fi
     else
-        echo "❌ Error: stop_sky_resource.sh not found at $SCRIPT_DIR/../../smoke_tests/docker/stop_sky_resource.sh"
+        echo "No API_ENDPOINT set, skipping Sky resource cleanup"
     fi
 
     # Delete GKE cluster
