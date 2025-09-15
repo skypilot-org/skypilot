@@ -412,5 +412,5 @@ async def test_set_backoff_pending_async_no_matching_rows(_mock_jobs_db_conn):
 
     # Call set_backoff_pending_async - should raise ManagedJobStatusError
     with pytest.raises(state.exceptions.ManagedJobStatusError,
-                      match='Failed to set the task back to pending'):
+                       match='Failed to set the task back to pending'):
         await state.set_backoff_pending_async(job_id, 0)
