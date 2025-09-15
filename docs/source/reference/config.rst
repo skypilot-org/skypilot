@@ -68,7 +68,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
       - context1
       - context2
-    :ref:`allow_all_contexts`: false
+    :ref:`allow_all_contexts <config-yaml-kubernetes-allow-all-contexts>`: false
     :ref:`custom_metadata <config-yaml-kubernetes-custom-metadata>`:
       labels:
         mylabel: myvalue
