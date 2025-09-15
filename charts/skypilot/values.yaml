@@ -548,11 +548,13 @@ prometheus:
     enabled: false
   alertmanager:
     enabled: false
-  image:
-    repository: quay.io/prometheus-operator/prometheus-config-reloader
-    tag: v0.83.0
-    digest: ""
-    pullPolicy: IfNotPresent
+  configmapReload:
+    prometheus: 
+      image:
+        repository: quay.io/prometheus-operator/prometheus-config-reloader
+        tag: v0.83.0
+        digest: ""
+        pullPolicy: IfNotPresent
 
 # Set configuration for Grafana helm chart
 # Refer to https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md for available values.
