@@ -509,6 +509,12 @@ def _setup_watcher(log_file: TextIO, setup_output_iterator: Iterator[str],
     def is_setup_complete(line: str) -> bool:
         return 'Setup complete' == line
 
+    def is_setup_error(line: str) -> bool:
+        if line.startswith('ERROR:'):
+            print(line, end='', flush=True)
+            return True
+        return False
+
     def get_next_non_blocking() -> Optional[str]:
         nonlocal log_file
         fd = log_file.fileno()
@@ -523,14 +529,20 @@ def _setup_watcher(log_file: TextIO, setup_output_iterator: Iterator[str],
             return None
 
     # Step 1: parse until we see the first setup log.
-    # Get output from follow_job_logs
-    line = next(setup_output_iterator)
-    while not is_setup_line(line):
-        print(line, end='', flush=True)
-        try:
-            line = next(setup_output_iterator)
-        except StopIteration:
+    should_continue = False
+    line = None
+    for line in setup_output_iterator:
+        if is_setup_error(line):
             return
+        if is_setup_line(line):
+            should_continue = True
+            break
+        print(line, end='', flush=True)
+
+    if not should_continue:
+        # Don't look for setup logs if we stopped iteration because we
+        # ran out of logs.
+        return
 
     # Step 2: parse using a spinner until setup is complete.
     setup_timeout = SKY_LOG_SETUP_SPINNER_TIMEOUT
@@ -580,6 +592,8 @@ def _setup_watcher(log_file: TextIO, setup_output_iterator: Iterator[str],
                 'progress')):
         while True:
             if line:
+                if is_setup_error(line):
+                    return
                 pid, _, message = parse_setup_line(line)
                 if pid and message:
                     update_pids(line)
@@ -595,12 +609,8 @@ def _setup_watcher(log_file: TextIO, setup_output_iterator: Iterator[str],
             line = get_next_non_blocking()
 
     # Step 3: print the running logs.
-    while True:
-        try:
-            line = next(setup_output_iterator)
-            print(line, end='', flush=True)
-        except StopIteration:
-            return
+    for line in setup_output_iterator:
+        print(line, end='', flush=True)
 
 
 def tail_logs(job_id: Optional[int],
