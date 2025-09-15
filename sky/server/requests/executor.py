@@ -329,10 +329,12 @@ def override_request_env_and_config(
                     workspaces_core.reject_request_for_unauthorized_workspace(
                         user)
                 except exceptions.PermissionDeniedError as e:
-                    logger.debug(f'{request_id} permission denied to workspace: '
-                                 f'{skypilot_config.get_active_workspace()}: {e}')
+                    logger.debug(
+                        f'{request_id} permission denied to workspace: '
+                        f'{skypilot_config.get_active_workspace()}: {e}')
                     raise e
-            logger.debug(f'{request_id} permission granted to {request_name} request')
+            logger.debug(
+                f'{request_id} permission granted to {request_name} request')
             yield
     finally:
         # We need to call the save_timeline() since atexit will not be
