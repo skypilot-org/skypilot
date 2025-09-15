@@ -516,6 +516,11 @@ prometheus:
     persistentVolume:
       enabled: true
       size: 10Gi
+    image:
+      repository: quay.io/prometheus/prometheus
+      tag: ""
+      digest: ""
+      pullPolicy: IfNotPresent
   # Configure additional scrape configs using extraScrapeConfigs
   extraScrapeConfigs: |
     # Static scrape target for SkyPilot API server GPU metrics
@@ -531,12 +536,23 @@ prometheus:
     enabled: true
     metricLabelsAllowlist:
       - pods=[skypilot-cluster]
+    image:
+      registry: registry.k8s.io
+      repository: kube-state-metrics/kube-state-metrics
+      tag: ""
+      sha: ""
+      pullPolicy: IfNotPresent
   prometheus-node-exporter:
     enabled: false
   prometheus-pushgateway:
     enabled: false
   alertmanager:
     enabled: false
+  image:
+    repository: quay.io/prometheus-operator/prometheus-config-reloader
+    tag: v0.83.0
+    digest: ""
+    pullPolicy: IfNotPresent
 
 # Set configuration for Grafana helm chart
 # Refer to https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md for available values.
@@ -589,6 +605,12 @@ grafana:
     # Enable dashboards discovery in grafana sidecar.
     dashboards:
       enabled: true
+    image:
+      registry: quay.io
+      repository: kiwigrid/k8s-sidecar
+      tag: "1.30.0"
+      sha: ""
+    imagePullPolicy: IfNotPresent
   # Add dashboard provider configuration to load dashboards from default directory
   dashboardProviders:
     dashboardproviders.yaml:
@@ -603,3 +625,18 @@ grafana:
         updateIntervalSeconds: 30
         options:
           path: /var/lib/grafana/dashboards/default
+  image:
+    registry: docker.io
+    repository: grafana/grafana
+    tag: ""
+    sha: ""
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+  initChownData:
+    enabled: true
+    image:
+      registry: docker.io
+      repository: library/busybox
+      tag: "1.31.1"
+      sha: ""
+      pullPolicy: IfNotPresent
