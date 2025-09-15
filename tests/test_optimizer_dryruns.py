@@ -685,7 +685,7 @@ def test_disk_tier_mismatch(enable_all_clouds):
             assert f'is not supported' in str(e.value), str(e.value)
 
 
-def test_optimize_disk_tier(enable_all_clouds):
+def test_optimize_disk_tier(monkeypatch, enable_all_clouds):
 
     def _get_all_candidate_cloud(r: sky.Resources) -> Set[clouds.Cloud]:
         task = sky.Task()
@@ -693,6 +693,9 @@ def test_optimize_disk_tier(enable_all_clouds):
         _, per_cloud_candidates, _, _ = optimizer._fill_in_launchable_resources(
             task, blocked_resources=None)
         return set(per_cloud_candidates.keys())
+
+    monkeypatch.setattr(sky.resources.Resources, '_try_validate_disk_tier',
+                        lambda *args, **kwargs: None)
 
     # All cloud supports BEST disk tier.
     best_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.BEST)
