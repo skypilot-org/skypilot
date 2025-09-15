@@ -413,8 +413,14 @@ def _execute_dag(
         task.sync_storage_mounts()
 
     try:
+        logger.info('try')
         provisioning_skipped = False
         if Stage.PROVISION in stages:
+            logger.info(f'Stage.PROVISION in stages: {stages}')
+            logger.info(f'handle is None: {handle is None}')
+            logger.info(
+                f'skip_unnecessary_provisioning: {skip_unnecessary_provisioning}'
+            )
             assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
@@ -427,6 +433,7 @@ def _execute_dag(
                 cluster_name=cluster_name,
                 retry_until_up=retry_until_up,
                 skip_unnecessary_provisioning=skip_unnecessary_provisioning)
+            logger.info(f'provisioning_skipped: {provisioning_skipped}')
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
