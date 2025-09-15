@@ -438,9 +438,7 @@ def test_multi_echo(generic_cloud: str):
     if generic_cloud == 'kubernetes':
         # EKS does not support spot instances
         # Assume tests using a remote api server endpoint do not support spot instances
-        use_spot = not smoke_tests_utils.is_eks_cluster(
-        ) and not smoke_tests_utils.api_server_endpoint_configured_in_env_file(
-        )
+        use_spot = not smoke_tests_utils.is_eks_cluster()
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     test = smoke_tests_utils.Test(
         'multi_echo',
@@ -506,6 +504,24 @@ def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_huggingface_arm64(generic_cloud: str):
+    accelerator = 'T4g'
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'huggingface_glue_imdb_app_arm',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --gpus {accelerator} examples/huggingface_glue_imdb_app_arm.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} --gpus {accelerator} examples/huggingface_glue_imdb_app_arm.yaml',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1717,6 +1733,9 @@ def test_aws_custom_image():
         # Test python>=3.12 where SkyPilot should automatically create a separate
         # conda env for runtime with python 3.10.
         'docker:continuumio/miniconda3:latest',
+        # Test image with custom MOTD that can potentially interfere with
+        # SSH user/rsync path detection.
+        'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
@@ -2002,39 +2021,49 @@ def test_long_setup_run_script(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Test min-gpt on Kubernetes ----------
-@pytest.mark.kubernetes
+# ---------- Test min-gpt ----------
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
+@pytest.mark.no_seeweb  # Seeweb does not support multi-node
 @pytest.mark.resource_heavy
-def test_min_gpt_kubernetes():
+@pytest.mark.parametrize('train_file', [
+    'examples/distributed-pytorch/train.yaml',
+    'examples/distributed-pytorch/train-rdzv.yaml'
+])
+def test_min_gpt(generic_cloud: str, train_file: str):
     accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     name = smoke_tests_utils.get_cluster_name()
-    original_yaml_path = 'examples/distributed-pytorch/train.yaml'
 
-    with open(original_yaml_path, 'r') as f:
-        content = f.read()
+    def read_and_modify(file_path: str) -> str:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # Let the train exit after 1 epoch
+        modified_content = content.replace(
+            'main.py', 'main.py trainer_config.max_epochs=1')
+        modified_content = re.sub(r'accelerators:\s*[^\n]+',
+                                  f'accelerators: {accelerator}',
+                                  modified_content)
 
-    # Let the train exit after 1 epoch
-    modified_content = content.replace('main.py',
-                                       'main.py trainer_config.max_epochs=1')
+        # Create a temporary YAML file with the modified content
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(modified_content)
+            f.flush()
+            train_file_path = f.name
+        return train_file_path
 
-    modified_content = re.sub(r'accelerators:\s*[^\n]+',
-                              f'accelerators: {accelerator}', modified_content)
+    dist_train_file = read_and_modify(train_file)
 
-    # Create a temporary YAML file with the modified content
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
-        f.write(modified_content)
-        f.flush()
-
-        test = smoke_tests_utils.Test(
-            'min_gpt_kubernetes',
-            [
-                f'sky launch -y -c {name} --infra kubernetes {f.name}',
-                f'sky logs {name} 1 --status',
-            ],
-            f'sky down -y {name}',
-            timeout=20 * 60,
-        )
-        smoke_tests_utils.run_one_test(test)
+    test = smoke_tests_utils.Test(
+        'min_gpt_kubernetes',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} {dist_train_file}',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Test GCP network tier ----------

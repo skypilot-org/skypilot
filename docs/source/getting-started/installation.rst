@@ -142,17 +142,17 @@ SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast 
           # Create a virtual environment with pip pre-installed (required for SkyPilot)
           uv venv --seed --python 3.10
           source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-          
+
           # Install SkyPilot with your chosen cloud providers
           uv pip install "skypilot[kubernetes,aws,gcp]"
-          
+
           # Azure CLI has an issue with uv, and requires '--prerelease allow'.
           uv pip install --prerelease allow azure-cli
           uv pip install "skypilot[azure]"
 
         .. note::
-          
-          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment. 
+
+          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment.
           SkyPilot needs ``pip`` to build wheels for remote cluster setup.
 
     .. tab-item:: uv tool
@@ -162,16 +162,16 @@ SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast 
 
           # Install as a globally available tool with pip included
           uv tool install --with pip "skypilot[aws,gcp]"
-          
+
           # Or with all cloud providers
           uv tool install --with pip "skypilot[all]"
-          
+
           # Now you can use sky directly
           sky check
 
         .. note::
-          
-          The ``--with pip`` flag is **required** when using ``uv tool install``. 
+
+          The ``--with pip`` flag is **required** when using ``uv tool install``.
           Without it, SkyPilot will fail when building wheels for remote clusters.
 
 
@@ -448,7 +448,7 @@ Together AI
 
 .. code-block:: shell
 
-  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config    
+  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config
 
 
 Paperspace

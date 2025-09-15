@@ -201,7 +201,11 @@ extras_require: Dict[str, List[str]] = {
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
     'nebius': [
+        # Nebius requires grpcio and protobuf, so we need to include
+        # our constraints here.
         'nebius>=0.2.47',
+        GRPC,
+        PROTOBUF,
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi>=0.2.0'],

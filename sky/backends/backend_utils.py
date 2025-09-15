@@ -2335,7 +2335,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                                                 handle,
                                                 requested_resources=None,
                                                 ready=True,
-                                                is_launch=False)
+                                                is_launch=False,
+                                                update_only=True)
         return global_user_state.get_cluster_from_name(cluster_name)
 
     # All cases below are transitioning the cluster to non-UP states.
@@ -2545,7 +2546,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                                                 handle,
                                                 requested_resources=None,
                                                 ready=False,
-                                                is_launch=False)
+                                                is_launch=False,
+                                                update_only=True)
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
@@ -3721,13 +3723,24 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
             return func()
         except grpc.RpcError as e:
             last_exception = e
-            if e.code() == grpc.StatusCode.INTERNAL:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.SkyletInternalError(e.details())
-            elif e.code() == grpc.StatusCode.UNAVAILABLE:
-                time.sleep(backoff.current_backoff())
-            else:
-                raise e
+            _handle_grpc_error(e, backoff.current_backoff())
+
     raise RuntimeError(
         f'Failed to invoke Skylet after {max_attempts} attempts: {last_exception}'
     ) from last_exception
+
+
+def _handle_grpc_error(e: 'grpc.RpcError', current_backoff: float) -> None:
+    if e.code() == grpc.StatusCode.INTERNAL:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.SkyletInternalError(e.details())
+    elif e.code() == grpc.StatusCode.UNAVAILABLE:
+        time.sleep(current_backoff)
+    elif e.code() == grpc.StatusCode.UNIMPLEMENTED:
+        # Handle backwards compatibility: old server doesn't implement this RPC.
+        # Let the caller fall back to legacy execution.
+        raise exceptions.SkyletMethodNotImplementedError(
+            f'gRPC method not implemented on server, falling back to legacy execution: {e.details()}'
+        )
+    else:
+        raise e
