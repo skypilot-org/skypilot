@@ -506,6 +506,7 @@ runtimeClassName:
 
 # Set configuration for Prometheus helm chart
 # Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
+# @schema skipProperties:true
 prometheus:
   enabled: false
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
@@ -539,6 +540,7 @@ prometheus:
 
 # Set configuration for Grafana helm chart
 # Refer to https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md for available values.
+# @schema skipProperties:true
 grafana:
   enabled: false
   persistence:
@@ -589,7 +591,6 @@ grafana:
       enabled: true
   # Add dashboard provider configuration to load dashboards from default directory
   dashboardProviders:
-    # @schema skipProperties:true
     dashboardproviders.yaml:
       apiVersion: 1
       providers:
