@@ -654,8 +654,125 @@ available_node_types:
                 # after v0.11.0 release.
                 touch /tmp/apt_ssh_setup_started
 
-                DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
-                echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
+                # Helper: run apt-get update with retries
+                apt_update_with_retries() {
+                  # do not fail the whole shell; we handle return codes
+                  set +e
+                  local log=/tmp/apt-update.log
+                  local tries=3
+                  local delay=1
+                  local i
+                  for i in $(seq 1 $tries); do
+                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update >> "$log" 2>&1 && { set -e; return 0; }
+                    echo "apt-get update attempt $i/$tries failed; retrying in ${delay}s" >> "$log"
+                    sleep $delay
+                    delay=$((delay * 2))
+                  done
+                  set -e
+                  return 1
+                }
+                apt_install_with_retries() {
+                  local packages="$@"
+                  [ -z "$packages" ] && return 0
+                  set +e
+                  local log=/tmp/apt-update.log
+                  local tries=3
+                  local delay=1
+                  local i
+                  for i in $(seq 1 $tries); do
+                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $packages && { set -e; return 0; }
+                    echo "apt-get install failed for: $packages (attempt $i/$tries). Running -f install and retrying..." >> "$log"
+                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get -f install -y >> "$log" 2>&1 || true
+                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get clean >> "$log" 2>&1 || true
+                    sleep $delay
+                    delay=$((delay * 2))
+                  done
+                  set -e
+                  return 1
+                }
+                apt_update_install_with_retries() {
+                  apt_update_with_retries
+                  apt_install_with_retries "$@"
+                }
+                backup_dir=/etc/apt/sources.list.backup_skypilot
+                backup_source() {
+                  $(prefix_cmd) mkdir -p "$backup_dir"
+                  if [ -f /etc/apt/sources.list ] && [ ! -f "$backup_dir/sources.list" ]; then
+                    $(prefix_cmd) cp -a /etc/apt/sources.list "$backup_dir/sources.list" || true
+                  fi
+                }
+                restore_source() {
+                  if [ -f "$backup_dir/sources.list" ]; then
+                    $(prefix_cmd) cp -a "$backup_dir/sources.list" /etc/apt/sources.list || true
+                  fi
+                }
+                update_apt_sources() {
+                  local host=$1
+                  local apt_file=$2
+                  $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" $apt_file
+                }
+                # Helper: install packages across mirrors with retries
+                apt_install_with_mirrors() {
+                  local required=$1; shift
+                  local packages="$@"
+                  [ -z "$packages" ] && return 0
+                  set +e
+                  # Install packages with default sources first
+                  local log=/tmp/apt-update.log
+                  echo "$(date +%Y-%m-%d\ %H:%M:%S) Installing packages: $packages" >> "$log"
+                  restore_source
+                  apt_update_install_with_retries $packages >> "$log" 2>&1 && { set -e; return 0; }
+                  echo "Install failed with default sources: $packages" >> "$log"
+                  # Detect distro (ubuntu/debian)
+                  local APT_OS="unknown"
+                  if [ -f /etc/os-release ]; then
+                    . /etc/os-release
+                    case "$ID" in
+                      debian) APT_OS="debian" ;;
+                      ubuntu) APT_OS="ubuntu" ;;
+                      *)
+                        if [ -n "$ID_LIKE" ]; then
+                          case " $ID $ID_LIKE " in
+                            *ubuntu*) APT_OS="ubuntu" ;;
+                            *debian*) APT_OS="debian" ;;
+                          esac
+                        fi
+                        ;;
+                    esac
+                  fi
+                  # Build mirror candidates
+                  # deb.debian.org is a CDN endpoint, if one backend goes down,
+                  # the CDN automatically fails over to another mirror,
+                  # so we only retry for ubuntu here.
+                  if [ "$APT_OS" = "ubuntu" ]; then
+                    # Backup current sources once
+                    backup_source
+                    # Selected from https://launchpad.net/ubuntu/+archivemirrors
+                    # and results from apt-select
+                    local MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"
+                    for host in $MIRROR_CANDIDATES; do
+                      echo "Trying APT mirror ($APT_OS): $host" >> "$log"
+                      if [ -f /etc/apt/sources.list ]; then
+                        update_apt_sources $host /etc/apt/sources.list
+                      else
+                        echo "Error: /etc/apt/sources.list not found" >> "$log"
+                        break
+                      fi
+                      apt_update_install_with_retries $packages >> "$log" 2>&1 && { set -e; return 0; }
+                      echo "Install failed with mirror ($APT_OS): $host" >> "$log"
+                      # Restore to default sources
+                      restore_source
+                    done
+                  fi
+                  set -e
+                  if [ "$required" = "1" ]; then
+                    echo "Error: required package install failed across all mirrors: $packages" >> "$log"
+                    return 1
+                  else
+                    echo "Optional package install failed across all mirrors: $packages; skipping." >> "$log"
+                    return 0
+                  fi
+                }
                 # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
                 # so that both fusemount and fusermount3 can be masked before enabling SSH access.
                 PACKAGES="rsync curl wget netcat gcc patch pciutils fuse fuse3 openssh-server";
@@ -682,7 +799,7 @@ available_node_types:
                 done;
                 if [ ! -z "$INSTALL_FIRST" ]; then
                   echo "Installing core packages: $INSTALL_FIRST";
-                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $INSTALL_FIRST;
+                  apt_install_with_mirrors 1 $INSTALL_FIRST || { echo "Error: core package installation failed." >> /tmp/apt-update.log; exit 1; }
                 fi;
                 # SSH and other packages are not necessary, so we disable set -e
                 set +e

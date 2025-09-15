@@ -4,9 +4,11 @@ NOTE: whenever an API change is made in this file, we need to bump the
 jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
+import asyncio
 import collections
 import datetime
 import enum
+import logging
 import os
 import pathlib
 import shlex
@@ -14,11 +16,11 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import Any, Deque, Dict, List, Optional, Set, TextIO, Tuple, Union
+from typing import (Any, Deque, Dict, List, Literal, Optional, Set, TextIO,
+                    Tuple, Union)
 
 import colorama
 import filelock
-from typing_extensions import Literal
 
 from sky import backends
 from sky import exceptions
@@ -27,6 +29,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
@@ -37,6 +40,7 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
@@ -47,18 +51,22 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import grpc
     import psutil
 
     import sky
     from sky import dag as dag_lib
+    from sky.schemas.generated import jobsv1_pb2
 else:
     psutil = adaptors_common.LazyImport('psutil')
+    grpc = adaptors_common.LazyImport('grpc')
+    jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
-SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
-JOB_STATUS_CHECK_GAP_SECONDS = 20
+# This is a tradeoff between the latency and the resource usage.
+JOB_STATUS_CHECK_GAP_SECONDS = 15
 
 # Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
@@ -82,7 +90,7 @@ _JOB_CANCELLED_MESSAGE = (
 # blocking for a long time. This should be significantly longer than the
 # JOB_STATUS_CHECK_GAP_SECONDS to avoid timing out before the controller can
 # update the state.
-_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 40
+_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
 
 class ManagedJobQueueResultType(enum.Enum):
@@ -99,7 +107,11 @@ class UserSignal(enum.Enum):
 
 
 # ====== internal functions ======
-def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
+def terminate_cluster(
+        cluster_name: str,
+        max_retry: int = 6,
+        _logger: logging.Logger = logger,  # pylint: disable=invalid-name
+) -> None:
     """Terminate the cluster."""
     from sky import core  # pylint: disable=import-outside-toplevel
     retry_cnt = 0
@@ -122,18 +134,18 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
-            logger.debug(f'The cluster {cluster_name} is already down.')
+            _logger.debug(f'The cluster {cluster_name} is already down.')
             return
         except Exception as e:  # pylint: disable=broad-except
             retry_cnt += 1
             if retry_cnt >= max_retry:
                 raise RuntimeError(
                     f'Failed to terminate the cluster {cluster_name}.') from e
-            logger.error(
+            _logger.error(
                 f'Failed to terminate the cluster {cluster_name}. Retrying.'
                 f'Details: {common_utils.format_exception(e)}')
             with ux_utils.enable_traceback():
-                logger.error(f'  Traceback: {traceback.format_exc()}')
+                _logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(backoff.current_backoff())
 
 
@@ -183,6 +195,9 @@ def _validate_consolidation_mode_config(
 # Use LRU Cache so that the check is only done once.
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        return True
+
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
     # We should only do this check on API server, as the controller will not
@@ -199,6 +214,7 @@ def ha_recovery_for_consolidation_mode():
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
     runner = command_runner.LocalProcessCommandRunner()
+    scheduler.maybe_start_controllers()
     with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('jobs_'),
               'w',
               encoding='utf-8') as f:
@@ -214,7 +230,7 @@ def ha_recovery_for_consolidation_mode():
             # just keep running.
             if controller_pid is not None:
                 try:
-                    if _controller_process_alive(controller_pid, job_id):
+                    if controller_process_alive(controller_pid, job_id):
                         f.write(f'Controller pid {controller_pid} for '
                                 f'job {job_id} is still running. '
                                 'Skipping recovery.\n')
@@ -227,7 +243,7 @@ def ha_recovery_for_consolidation_mode():
 
             if job['schedule_state'] not in [
                     managed_job_state.ManagedJobScheduleState.DONE,
-                    managed_job_state.ManagedJobScheduleState.WAITING
+                    managed_job_state.ManagedJobScheduleState.WAITING,
             ]:
                 script = managed_job_state.get_ha_recovery_script(job_id)
                 if script is None:
@@ -242,56 +258,81 @@ def ha_recovery_for_consolidation_mode():
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
-def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
-                   job_id: Optional[int]) -> Optional['job_lib.JobStatus']:
+async def get_job_status(
+        backend: 'backends.CloudVmRayBackend', cluster_name: str,
+        job_id: Optional[int],
+        job_logger: logging.Logger) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
     FAILED_SETUP or CANCELLED.
     """
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    # TODO(luca) make this async
+    handle = await context_utils.to_thread(
+        global_user_state.get_handle_from_cluster_name, cluster_name)
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
-        logger.info(f'Cluster {cluster_name} not found.')
+        job_logger.info(f'Cluster {cluster_name} not found.')
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
     for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
         try:
-            logger.info('=== Checking the job status... ===')
-            statuses = backend.get_job_status(handle,
-                                              job_ids=job_ids,
-                                              stream_logs=False)
+            job_logger.info('=== Checking the job status... ===')
+            statuses = await context_utils.to_thread(backend.get_job_status,
+                                                     handle,
+                                                     job_ids=job_ids,
+                                                     stream_logs=False)
             status = list(statuses.values())[0]
             if status is None:
-                logger.info('No job found.')
+                job_logger.info('No job found.')
             else:
-                logger.info(f'Job status: {status}')
-            logger.info('=' * 34)
+                job_logger.info(f'Job status: {status}')
+            job_logger.info('=' * 34)
             return status
-        except exceptions.CommandError as e:
+        except (exceptions.CommandError, grpc.RpcError,
+                grpc.FutureTimeoutError) as e:
             # Retry on k8s transient network errors. This is useful when using
             # coreweave which may have transient network issue sometimes.
-            if (e.detailed_reason is not None and
-                    _JOB_K8S_TRANSIENT_NW_MSG in e.detailed_reason):
+            is_transient_error = False
+            detailed_reason = None
+            if isinstance(e, exceptions.CommandError):
+                detailed_reason = e.detailed_reason
+                if (detailed_reason is not None and
+                        _JOB_K8S_TRANSIENT_NW_MSG in detailed_reason):
+                    is_transient_error = True
+            elif isinstance(e, grpc.RpcError):
+                detailed_reason = e.details()
+                if e.code() in [
+                        grpc.StatusCode.UNAVAILABLE,
+                        grpc.StatusCode.DEADLINE_EXCEEDED
+                ]:
+                    is_transient_error = True
+            elif isinstance(e, grpc.FutureTimeoutError):
+                detailed_reason = 'Timeout'
+            if is_transient_error:
                 logger.info('Failed to connect to the cluster. Retrying '
                             f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
                 logger.info('=' * 34)
-                time.sleep(1)
+                await asyncio.sleep(1)
             else:
-                logger.info(f'Failed to get job status: {e.detailed_reason}')
+                logger.info(f'Failed to get job status: {detailed_reason}')
                 logger.info('=' * 34)
                 return None
     return None
 
 
-def _controller_process_alive(pid: int, job_id: int) -> bool:
+def controller_process_alive(pid: int, job_id: int) -> bool:
     """Check if the controller process is alive."""
     try:
+        if pid < 0:
+            # new job controller process will always be negative
+            pid = -pid
         process = psutil.Process(pid)
         cmd_str = ' '.join(process.cmdline())
-        return process.is_running() and f'--job-id {job_id}' in cmd_str
+        return process.is_running() and ((f'--job-id {job_id}' in cmd_str) or
+                                         ('controller' in cmd_str))
     except psutil.NoSuchProcess:
         return False
 
@@ -466,7 +507,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             failure_reason = f'No controller pid set for {schedule_state.value}'
         else:
             logger.debug(f'Checking controller pid {pid}')
-            if _controller_process_alive(pid, job_id):
+            if controller_process_alive(pid, job_id):
                 # The controller is still running, so this job is fine.
                 continue
 
@@ -526,9 +567,32 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                       job_id: Optional[int], get_end_time: bool) -> float:
     """Get the submitted/ended time of the job."""
-    code = job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
-        job_id=job_id, get_ended_time=get_end_time)
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    assert handle is not None, (
+        f'handle for cluster {cluster_name!r} should not be None')
+    if handle.is_grpc_enabled_with_flag:
+        try:
+            if get_end_time:
+                end_ts_request = jobsv1_pb2.GetJobEndedTimestampRequest(
+                    job_id=job_id)
+                end_ts_response = backend_utils.invoke_skylet_with_retries(
+                    lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel()).get_job_ended_timestamp(
+                            end_ts_request))
+                return end_ts_response.timestamp
+            else:
+                submit_ts_request = jobsv1_pb2.GetJobSubmittedTimestampRequest(
+                    job_id=job_id)
+                submit_ts_response = backend_utils.invoke_skylet_with_retries(
+                    lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel()).get_job_submitted_timestamp(
+                            submit_ts_request))
+                return submit_ts_response.timestamp
+        except exceptions.SkyletMethodNotImplementedError:
+            pass
+
+    code = (job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
+        job_id=job_id, get_ended_time=get_end_time))
     returncode, stdout, stderr = backend.run_on_head(handle,
                                                      code,
                                                      stream_logs=False,
@@ -552,8 +616,13 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
                                  cluster_name,
                                  job_id=job_id,
                                  get_end_time=True)
-    except exceptions.CommandError as e:
-        if e.returncode == 255:
+    except (exceptions.CommandError, grpc.RpcError,
+            grpc.FutureTimeoutError) as e:
+        if isinstance(e, exceptions.CommandError) and e.returncode == 255 or \
+                (isinstance(e, grpc.RpcError) and e.code() in [
+                    grpc.StatusCode.UNAVAILABLE,
+                    grpc.StatusCode.DEADLINE_EXCEEDED,
+                ]) or isinstance(e, grpc.FutureTimeoutError):
             # Failed to connect - probably the instance was preempted since the
             # job completed. We shouldn't crash here, so just log and use the
             # current time.
@@ -565,7 +634,9 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
             raise
 
 
-def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
+def event_callback_func(
+        job_id: int, task_id: Optional[int],
+        task: Optional['sky.Task']) -> managed_job_state.AsyncCallbackType:
     """Run event callback for the task."""
 
     def callback_func(status: str):
@@ -604,7 +675,10 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
             f'Bash:{event_callback},log_path:{log_path},result:{result}')
         logger.info(f'=== END: event callback for {status!r} ===')
 
-    return callback_func
+    async def async_callback_func(status: str):
+        return await context_utils.to_thread(callback_func, status)
+
+    return async_callback_func
 
 
 # ======== user functions ========
@@ -651,8 +725,32 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             logger.info(f'Job {job_id} is already in terminal state '
                         f'{job_status.value}. Skipped.')
             continue
+        elif job_status == managed_job_state.ManagedJobStatus.PENDING:
+            # the if is a short circuit, this will be atomic.
+            cancelled = managed_job_state.set_pending_cancelled(job_id)
+            if cancelled:
+                cancelled_job_ids.append(job_id)
+                continue
 
         update_managed_jobs_statuses(job_id)
+
+        job_controller_pid = managed_job_state.get_job_controller_pid(job_id)
+        if job_controller_pid is not None and job_controller_pid < 0:
+            # This is a consolidated job controller, so we need to cancel the
+            # with the controller server API
+            try:
+                # we create a file as a signal to the controller server
+                signal_file = pathlib.Path(
+                    managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
+                signal_file.touch()
+                cancelled_job_ids.append(job_id)
+            except OSError as e:
+                logger.error(f'Failed to cancel job {job_id} '
+                             f'with controller server: {e}')
+                # don't add it to the to be cancelled job ids, since we don't
+                # know for sure yet.
+                continue
+            continue
 
         job_workspace = managed_job_state.get_workspace(job_id)
         if current_workspace is not None and job_workspace != current_workspace:
@@ -660,7 +758,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             continue
 
         # Send the signal to the jobs controller.
-        signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
+        signal_file = (pathlib.Path(
+            managed_job_constants.SIGNAL_FILE_PREFIX.format(job_id)))
         # Filelock is needed to prevent race condition between signal
         # check/removal and signal writing.
         with filelock.FileLock(str(signal_file) + '.lock'):
@@ -1159,8 +1258,7 @@ def dump_managed_job_queue(
                 # It's possible for a WAITING/ALIVE_WAITING job to be ready to
                 # launch, but the scheduler just hasn't run yet.
                 managed_job_state.ManagedJobScheduleState.WAITING,
-                managed_job_state.ManagedJobScheduleState.ALIVE_WAITING,
-        ):
+                managed_job_state.ManagedJobScheduleState.ALIVE_WAITING):
             # This job will not block others.
             continue
 
@@ -1370,12 +1468,12 @@ def load_managed_job_queue(
     """Load job queue from json string."""
     result = message_utils.decode_payload(payload)
     result_type = ManagedJobQueueResultType.DICT
-    status_counts = {}
+    status_counts: Dict[str, int] = {}
     if isinstance(result, dict):
-        jobs = result['jobs']
-        total = result['total']
+        jobs: List[Dict[str, Any]] = result['jobs']
+        total: int = result['total']
         status_counts = result.get('status_counts', {})
-        total_no_filter = result.get('total_no_filter', total)
+        total_no_filter: int = result.get('total_no_filter', total)
     else:
         jobs = result
         total = len(jobs)

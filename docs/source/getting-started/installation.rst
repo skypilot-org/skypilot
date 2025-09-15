@@ -3,10 +3,6 @@
 Installation
 ==================
 
-.. note::
-
-    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`pip uninstall grpcio; conda install -c conda-forge grpcio=1.43.0` prior to installing SkyPilot.
-
 Install SkyPilot using pip:
 
 .. tab-set::
@@ -228,6 +224,7 @@ This will produce a summary like:
     Cudo: enabled
     IBM: enabled
     SCP: enabled
+    Seeweb: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
@@ -438,6 +435,22 @@ Lambda Cloud
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
+
+Together AI
+~~~~~~~~~~~~~~~~~~
+
+`Together AI <https://together.ai/>`_ offers GPU *instant clusters*. Accessing them is similar to using :ref:`Kubernetes <kubernetes-installation>`:
+
+1. Launch a Together `Instant Cluster <https://api.together.ai/clusters/create>`_ with cluster type selected as Kubernetes
+2. Get the Kubernetes config for the cluster
+3. Save the kubeconfig to a file, e.g., ``./together.kubeconfig``
+4. Copy the kubeconfig to your ``~/.kube/config`` or merge the Kubernetes config with your existing kubeconfig file by running:
+
+.. code-block:: shell
+
+  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config    
+
+
 Paperspace
 ~~~~~~~~~~~~~~~~~~
 
@@ -628,6 +641,25 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 .. note::
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
+
+
+
+
+Seeweb
+~~~~~~~~~~~~~~~~~~
+
+`Seeweb <https://www.seeweb.it/>`_ is your European GPU Cloud Provider. To access Seeweb:
+
+
+1. Log into your `Seeweb dashboard : <https://cloudcenter.seeweb.it/>`__.
+2. Navigate to *Compute → API Token* in the control panel, and create **New TOKEN**.
+3. Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
+
+.. code-block::
+
+    [DEFAULT]
+    api_key = <your-api-token>
+
 
 
 Request quotas for first time users

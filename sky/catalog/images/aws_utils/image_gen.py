@@ -26,6 +26,7 @@ parser.add_argument('--base-image-id',
                     help='The base AMI of the source AMI.')
 parser.add_argument('--os-type', default='ubuntu', help='The OS type')
 parser.add_argument('--os-version', default='22.04', help='The OS version')
+parser.add_argument('--arch', default='x86_64', help='The architecture')
 parser.add_argument('--output-csv',
                     default='images.csv',
                     help='The output CSV file name')
@@ -75,8 +76,12 @@ def make_image_public(image_id, region):
 
 def copy_image_and_make_public(target_region):
     # Copy the AMI to the target region
-    ami_name = (f'skypilot-aws-{args.processor}-{args.os_type}-'
-                f'{time.strftime("%y%m%d")}')
+    if args.arch == 'arm64':
+        ami_name = (f'skypilot-aws-{args.processor}-{args.os_type}-{args.arch}-'
+                    f'{time.strftime("%y%m%d")}')
+    else:
+        ami_name = (f'skypilot-aws-{args.processor}-{args.os_type}-'
+                    f'{time.strftime("%y%m%d")}')
     copy_command = (
         f'aws ec2 copy-image --source-region {args.region} '
         f'--source-image-id {args.image_id} --region {target_region} '
@@ -106,9 +111,12 @@ def copy_image_and_make_public(target_region):
 def write_image_to_csv(image_id, region):
     with open(args.output_csv, 'a', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile)
+        if args.arch == 'arm64':
+            tag = f'skypilot:custom-{args.processor}-{args.os_type}-{args.arch}'
+        else:
+            tag = f'skypilot:custom-{args.processor}-{args.os_type}'
         row = [
-            f'skypilot:custom-{args.processor}-{args.os_type}', region,
-            args.os_type, args.os_version, image_id,
+            tag, region, args.os_type, args.os_version, image_id,
             time.strftime('%Y%m%d'), args.base_image_id
         ]
         writer.writerow(row)
