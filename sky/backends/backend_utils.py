@@ -75,6 +75,7 @@ if typing.TYPE_CHECKING:
     from requests.packages.urllib3.util import retry as retry_lib
     import rich.progress as rich_progress
     import yaml
+
     from sky import resources as resources_lib
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
