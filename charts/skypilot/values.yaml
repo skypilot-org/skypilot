@@ -505,9 +505,10 @@ securityContext:
 runtimeClassName:
 
 # Set configuration for Prometheus helm chart
+# Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
+# @schema skipProperties:true
 prometheus:
   enabled: false
-  # Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
   # it is recommended to install and manage prometheus separately.
   # SkyPilot API server will be automatically discovered by the prometheus if it runs with the default kubernetes discovery configuration.
@@ -538,9 +539,10 @@ prometheus:
     enabled: false
 
 # Set configuration for Grafana helm chart
+# Refer to https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md for available values.
+# @schema skipProperties:true
 grafana:
   enabled: false
-  # Refer to https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md for available values.
   persistence:
     enabled: true
     size: 10Gi
@@ -559,7 +561,6 @@ grafana:
     enableAuthedIngress: true
     path: "/grafana"
     ingressClassName: nginx
-    # @schema type: [string, null]
     hosts: null
   grafana.ini:
     server:
@@ -590,7 +591,6 @@ grafana:
       enabled: true
   # Add dashboard provider configuration to load dashboards from default directory
   dashboardProviders:
-    # @schema skipProperties:true
     dashboardproviders.yaml:
       apiVersion: 1
       providers:

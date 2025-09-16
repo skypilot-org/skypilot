@@ -282,8 +282,8 @@ def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
 
 @contextlib.contextmanager
 def override_request_env_and_config(
-        request_body: payloads.RequestBody,
-        request_id: str) -> Generator[None, None, None]:
+        request_body: payloads.RequestBody, request_id: str,
+        request_name: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
     try:
@@ -319,9 +319,22 @@ def override_request_env_and_config(
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config,
                 request_body.override_skypilot_config_path):
-            # Rejecting requests to workspaces that the user does not have
-            # permission to access.
-            workspaces_core.reject_request_for_unauthorized_workspace(user)
+            # Skip permission check for sky.workspaces.get request
+            # as it is used to determine which workspaces the user
+            # has access to.
+            if request_name != 'sky.workspaces.get':
+                try:
+                    # Reject requests that the user does not have permission
+                    # to access.
+                    workspaces_core.reject_request_for_unauthorized_workspace(
+                        user)
+                except exceptions.PermissionDeniedError as e:
+                    logger.debug(
+                        f'{request_id} permission denied to workspace: '
+                        f'{skypilot_config.get_active_workspace()}: {e}')
+                    raise e
+            logger.debug(
+                f'{request_id} permission granted to {request_name} request')
             yield
     finally:
         # We need to call the save_timeline() since atexit will not be
@@ -402,7 +415,8 @@ def _request_execution_wrapper(request_id: str,
         # captured in the log file.
         try:
             with sky_logging.add_debug_log_handler(request_id), \
-                override_request_env_and_config(request_body, request_id), \
+                override_request_env_and_config(
+                    request_body, request_id, request_name), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
