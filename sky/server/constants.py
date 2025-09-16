@@ -63,4 +63,4 @@ DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
 DAEMON_RESTART_INTERVAL_SECONDS = 20
 
 # Cookie header for stream request id.
-STREAM_REQUEST_HEADER = 'X-Stream-Request-ID'
+STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'
