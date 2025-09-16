@@ -688,9 +688,28 @@ def test_helm_deploy_gke(request):
     test = smoke_tests_utils.Test(
         'helm_deploy_gke',
         [
-            f'bash tests/kubernetes/scripts/helm_upgrade.sh {package_name} {helm_version}',
+            f'bash tests/kubernetes/scripts/helm_upgrade.sh {package_name} {helm_version} gcp',
         ],
         # GKE termination requires longer timeout.
+        timeout=50 * 60)
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_helm_deploy_eks(request):
+    if not request.config.getoption('--helm-package'):
+        # Test pulls image from dockerhub, unrelated to codebase. Package name
+        # indicates intentional testing - without it, test is meaningless.
+        pytest.skip('Skipping test as helm package is not set')
+
+    helm_version = request.config.getoption('--helm-version')
+    package_name = request.config.getoption('--helm-package')
+    test = smoke_tests_utils.Test(
+        'helm_deploy_eks',
+        [
+            f'bash tests/kubernetes/scripts/helm_upgrade.sh {package_name} {helm_version} eks',
+        ],
+        # EKS termination requires longer timeout.
         timeout=50 * 60)
     smoke_tests_utils.run_one_test(test)
 
