@@ -32,6 +32,9 @@ DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
 
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
+# Install AWS CLI v2 (not v1 from pip) as it's required for ECR authentication
+# AWS CLI v2 is installed as a standalone binary, not a Python package
+# Ref: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 INSTALL_AWS_CLI_CMD = (
     'which aws || ((command -v unzip >/dev/null 2>&1 || '
     '(sudo apt-get update && sudo apt-get install -y unzip)) && '
@@ -275,6 +278,7 @@ class DockerInitializer:
                 # AWS ECR: Use aws ecr get-login-password for authentication
                 # ECR format: <account-id>.dkr.ecr.<region>.amazonaws.com
                 # This command uses the IAM credentials from the EC2 instance
+                # Ref: https://docs.aws.amazon.com/AmazonECR/latest/userguide/registry_auth.html
                 region = _extract_region_from_ecr_server(
                     docker_login_config.server)
 
