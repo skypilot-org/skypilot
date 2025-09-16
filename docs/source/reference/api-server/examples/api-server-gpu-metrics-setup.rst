@@ -18,63 +18,46 @@ Before you begin, make sure your Kubernetes cluster meets the following
 requirements:
 
 * **NVIDIA GPUs** are available on your worker nodes.
-* The `NVIDIA device plugin <https://github.com/NVIDIA/k8s-device-plugin>`__
-  and the NVIDIA **GPU Operator** are installed.
+* The `NVIDIA device plugin <https://github.com/NVIDIA/k8s-device-plugin>`_
+  is installed.
 * **DCGM-Exporter** is running on the cluster and exposes metrics on
   port ``9400``.  Most GPU Operator installations already deploy DCGM-Exporter for you.
+* `Node Exporter <https://prometheus.io/docs/guides/node-exporter/>`_ is running on the cluster and exposes metrics on port ``9100``. This is required only if you want to monitor the CPU and Memory metrics.
 
-.. dropdown:: Service for the DCGM-Exporter Pods
+Depend on different Kubernetes environments, some additional setup may be required.
 
-    Ensure that a Kubernetes Service for DCGM-Exporter exists and includes the following annotations so Prometheus can scrape its metrics:
+Take `CoreWeave managed Kubernetes cluster <https://docs.coreweave.com/docs/products/cks>`_ for example:
 
-    .. code-block:: bash
+The node exporter and the dcgm exporter are already deployed on the cluster. You can verify this by running the following commands:
 
-        annotations:
-          prometheus.io/port: 9400
-          prometheus.io/path: /metrics
-          prometheus.io/scrape: true
+.. code-block:: bash
 
-    If the service is not created, you can deploy it using the following yaml and command.
+    kubectl get pods -n cw-exporters
 
-    ``dcgm_service.yaml``:
+To make the Prometheus server scrape the metrics from the node exporter and the dcgm exporter, you need to create a service for each of them.
 
-    .. code-block:: yaml
+.. code-block:: bash
 
-        apiVersion: v1
-        kind: Service
-        metadata:
-          name: dcgm-exporter
-          labels:
-            app: dcgm-exporter
-          annotations:
-            prometheus.io/scrape: "true"
-            prometheus.io/port: "9400"
-            prometheus.io/path: "/metrics"
-        spec:
-          selector:
-            app.kubernetes.io/name: dcgm-exporter
-          ports:
-          - name: metrics
-            port: 9400
-            targetPort: 9400
-            protocol: TCP
-          type: ClusterIP
+    kubectl create -f https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/metrics/dcgm_service.yaml -n cw-exporters
+    kubectl create -f https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/metrics/node_exporter_service.yaml -n cw-exporters
 
-    .. code-block:: bash
+Check that the service endpoints are created by running the following commands:
 
-        kubectl create -f dcgm_service.yaml -n $NAMESPACE
+.. code-block:: bash
 
-    ``$NAMESPACE`` is the namespace where the DCGM-Exporter is deployed.
+    kubectl get endpoints -n cw-exporters
 
-If this is the Kubernetes cluster you will be deploying the SkyPilot API server on, these
-are the only prerequisites. Otherwise, make sure to also helm install the SkyPilot Prometheus
-server using the following command:
+If this is not the Kubernetes cluster you will be deploying the SkyPilot API server on, install the SkyPilot Prometheus server:
 
 .. code-block:: bash
 
     helm upgrade --install skypilot skypilot/skypilot-prometheus-server --devel \
      --namespace skypilot \
      --create-namespace
+
+If you are using the Nebius Kubernetes cluster, refer to :ref:`api-server-gpu-metrics-setup-nebius` for how to setup the GPU metrics.
+
+.. _api-server-setup-dcgm-metrics-scraping:
 
 Set up DCGM metrics scraping
 ----------------------------
@@ -107,6 +90,10 @@ By default, the SkyPilot dashboard exposes the following metrics:
 * GPU utilization
 * GPU memory usage
 * GPU power usage
+* GPU temperature
+* CPU utilization
+* Memory usage
+
 
 However, all `metrics <https://github.com/NVIDIA/dcgm-exporter/blob/main/etc/dcp-metrics-included.csv>`__ exported by DCGM exporter
 can be accessed via Prometheus/Grafana including GPU errors, NVLink stats and more.
