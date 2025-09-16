@@ -8,14 +8,13 @@ from sky import sky_logging
 from sky.jobs import state as managed_job_state
 from sky.schemas.generated import autostopv1_pb2
 from sky.schemas.generated import autostopv1_pb2_grpc
+from sky.schemas.generated import jobsv1_pb2
+from sky.schemas.generated import jobsv1_pb2_grpc
 from sky.schemas.generated import servev1_pb2
 from sky.schemas.generated import servev1_pb2_grpc
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
-from sky.schemas.generated import jobsv1_pb2
-from sky.schemas.generated import jobsv1_pb2_grpc
-from sky.serve import serve_state
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib

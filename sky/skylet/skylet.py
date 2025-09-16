@@ -9,8 +9,8 @@ import grpc
 import sky
 from sky import sky_logging
 from sky.schemas.generated import autostopv1_pb2_grpc
-from sky.schemas.generated import servev1_pb2_grpc
 from sky.schemas.generated import jobsv1_pb2_grpc
+from sky.schemas.generated import servev1_pb2_grpc
 from sky.skylet import constants
 from sky.skylet import events
 from sky.skylet import services

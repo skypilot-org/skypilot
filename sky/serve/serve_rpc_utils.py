@@ -113,7 +113,7 @@ class RpcRunner:
         assert handle.is_grpc_enabled_with_flag
         request = GetServiceStatusRequestConverter.to_proto(service_names, pool)
         response = backend_utils.invoke_skylet_with_retries(
-            handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
+            lambda: backends.SkyletClient(handle.get_grpc_channel()).
             get_service_status(request))
         pickled = GetServiceStatusResponseConverter.from_proto(response)
         return serve_utils.unpickle_service_status(pickled)
@@ -124,7 +124,7 @@ class RpcRunner:
         assert handle.is_grpc_enabled_with_flag
         request = servev1_pb2.AddVersionRequest(service_name=service_name)
         response = backend_utils.invoke_skylet_with_retries(
-            handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
+            lambda: backends.SkyletClient(handle.get_grpc_channel()).
             add_serve_version(request))
         return response.version
 
@@ -136,7 +136,7 @@ class RpcRunner:
         request = TerminateServiceRequestConverter.to_proto(
             service_names, purge, pool)
         response = backend_utils.invoke_skylet_with_retries(
-            handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
+            lambda: backends.SkyletClient(handle.get_grpc_channel()).
             terminate_services(request))
         return response.message
 
@@ -149,7 +149,7 @@ class RpcRunner:
                                                       replica_id=replica_id,
                                                       purge=purge)
         response = backend_utils.invoke_skylet_with_retries(
-            handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
+            lambda: backends.SkyletClient(handle.get_grpc_channel()).
             terminate_replica(request))
         return response.message
 
@@ -163,7 +163,7 @@ class RpcRunner:
                                                       job_id=job_id,
                                                       pool=pool)
         response = backend_utils.invoke_skylet_with_retries(
-            handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
+            lambda: backends.SkyletClient(handle.get_grpc_channel()).
             wait_service_registration(request))
         return response.lb_port
 
@@ -177,6 +177,6 @@ class RpcRunner:
                                                    mode=mode.value,
                                                    pool=pool)
         response = backend_utils.invoke_skylet_with_retries(
-            handle, lambda: backends.SkyletClient(handle.get_grpc_channel()).
+            lambda: backends.SkyletClient(handle.get_grpc_channel()).
             update_service(request))
         return response.encoded_message
