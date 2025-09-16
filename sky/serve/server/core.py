@@ -111,16 +111,17 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
         'Please spin up a service first.',
     )
 
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    use_legacy = not handle.is_grpc_enabled_with_flag
+
     if handle.is_grpc_enabled_with_flag:
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
         try:
             stdout = serve_rpc_utils.RpcRunner.terminate_replica(
                 handle, service_name, replica_id, purge)
-        except grpc.RpcError as e:
-            raise RuntimeError(f'{e.details()} ({e.code()})') from e
-        except grpc.FutureTimeoutError as e:
-            raise RuntimeError('gRPC timed out') from e
-    else:
+        except exceptions.SkyletMethodNotImplementedError:
+            use_legacy = True
+
+    if use_legacy:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 

@@ -86,16 +86,17 @@ def _get_service_record(
     """Get the service record."""
     noun = 'pool' if pool else 'service'
 
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    use_legacy = not handle.is_grpc_enabled_with_flag
+
     if handle.is_grpc_enabled_with_flag:
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
         try:
             service_statuses = serve_rpc_utils.RpcRunner.get_service_status(
                 handle, [service_name], pool)
-        except grpc.RpcError as e:
-            raise RuntimeError(f'{e.details()} ({e.code()})') from e
-        except grpc.FutureTimeoutError as e:
-            raise RuntimeError('gRPC timed out') from e
-    else:
+        except exceptions.SkyletMethodNotImplementedError:
+            use_legacy = True
+
+    if use_legacy:
         code = serve_utils.ServeCodeGen.get_service_status([service_name],
                                                            pool=pool)
         returncode, serve_status_payload, stderr = backend.run_on_head(
@@ -317,11 +318,17 @@ def up(
                 # This function will check the controller job id in the database
                 # and return the endpoint if the job id matches. Otherwise it
                 # will return None.
+                use_legacy = not controller_handle.is_grpc_enabled_with_flag
+
                 if controller_handle.is_grpc_enabled_with_flag:
-                    lb_port = serve_rpc_utils.RpcRunner.wait_service_registration(  # pylint: disable=line-too-long
-                        controller_handle, service_name, controller_job_id,
-                        pool)
-                else:
+                    try:
+                        lb_port = serve_rpc_utils.RpcRunner.wait_service_registration(  # pylint: disable=line-too-long
+                            controller_handle, service_name, controller_job_id,
+                            pool)
+                    except exceptions.SkyletMethodNotImplementedError:
+                        use_legacy = True
+
+                if use_legacy:
                     code = serve_utils.ServeCodeGen.wait_service_registration(
                         service_name, controller_job_id, pool)
                     returncode, lb_port_payload, _ = backend.run_on_head(
@@ -528,15 +535,16 @@ def update(
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
             task, task_type='serve')
 
+    use_legacy = not handle.is_grpc_enabled_with_flag
+
     if handle.is_grpc_enabled_with_flag:
         try:
             current_version = serve_rpc_utils.RpcRunner.add_version(
                 handle, service_name)
-        except grpc.RpcError as e:
-            raise RuntimeError(f'{e.details()} ({e.code()})') from e
-        except grpc.FutureTimeoutError as e:
-            raise RuntimeError('gRPC timed out') from e
-    else:
+        except exceptions.SkyletMethodNotImplementedError:
+            use_legacy = True
+
+    if use_legacy:
         code = serve_utils.ServeCodeGen.add_version(service_name)
         returncode, version_string_payload, stderr = backend.run_on_head(
             handle,
@@ -574,15 +582,16 @@ def update(
                                      {remote_task_yaml_path: service_file.name},
                                      storage_mounts=None)
 
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
         if handle.is_grpc_enabled_with_flag:
             try:
                 _ = serve_rpc_utils.RpcRunner.update_service(
                     handle, service_name, current_version, mode, pool)
-            except grpc.RpcError as e:
-                raise RuntimeError(f'{e.details()} ({e.code()})') from e
-            except grpc.FutureTimeoutError as e:
-                raise RuntimeError('gRPC timed out') from e
-        else:
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+        
+        if use_legacy:
             code = serve_utils.ServeCodeGen.update_service(service_name,
                                                            current_version,
                                                            mode=mode.value,
@@ -665,11 +674,17 @@ def down(
     service_names = None if all else service_names
 
     try:
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
         if handle.is_grpc_enabled_with_flag:
-            assert isinstance(handle, backends.CloudVmRayResourceHandle)
-            stdout = serve_rpc_utils.RpcRunner.terminate_services(
-                handle, service_names, purge, pool)
-        else:
+            try:
+                stdout = serve_rpc_utils.RpcRunner.terminate_services(
+                    handle, service_names, purge, pool)
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+        
+        if use_legacy:
             backend = backend_utils.get_backend_from_handle(handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
             code = serve_utils.ServeCodeGen.terminate_services(
@@ -721,16 +736,17 @@ def status(
         stopped_message=controller_type.value.default_hint_if_non_existent.
         replace('service', noun))
 
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    use_legacy = not handle.is_grpc_enabled_with_flag
+
     if handle.is_grpc_enabled_with_flag:
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
         try:
             service_records = serve_rpc_utils.RpcRunner.get_service_status(
                 handle, service_names, pool)
-        except grpc.RpcError as e:
-            raise RuntimeError(f'{e.details()} ({e.code()})') from e
-        except grpc.FutureTimeoutError as e:
-            raise RuntimeError('gRPC timed out') from e
-    else:
+        except exceptions.SkyletMethodNotImplementedError:
+            use_legacy = True
+    
+    if use_legacy:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 
@@ -856,16 +872,17 @@ def _get_all_replica_targets(
         handle: backends.CloudVmRayResourceHandle,
         pool: bool) -> Set[serve_utils.ServiceComponentTarget]:
     """Helper function to get targets for all live replicas."""
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    use_legacy = not handle.is_grpc_enabled_with_flag
+
     if handle.is_grpc_enabled_with_flag:
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
         try:
             service_records = serve_rpc_utils.RpcRunner.get_service_status(
                 handle, [service_name], pool)
-        except grpc.RpcError as e:
-            raise RuntimeError(f'{e.details()} ({e.code()})') from e
-        except grpc.FutureTimeoutError as e:
-            raise RuntimeError('gRPC timed out') from e
-    else:
+        except exceptions.SkyletMethodNotImplementedError:
+            use_legacy = True
+
+    if use_legacy:
         code = serve_utils.ServeCodeGen.get_service_status([service_name],
                                                            pool=pool)
         returncode, serve_status_payload, stderr = backend.run_on_head(
