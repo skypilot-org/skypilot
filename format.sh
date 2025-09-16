@@ -23,9 +23,9 @@ builtin cd "$ROOT" || exit 1
 
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
 PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
-PYLINT_QUOTES_VERSION=$(pip list | grep pylint-quotes | awk '{print $2}')
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
 BLACK_VERSION=$(black --version | head -n 1 | awk '{print $2}')
+RUFF_VERSION=$(ruff --version | awk '{print $2}')
 
 # # params: tool name, tool version, required version
 tool_version_check() {
@@ -35,11 +35,11 @@ tool_version_check() {
     fi
 }
 
-tool_version_check "yapf" $YAPF_VERSION "$(grep yapf requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "pylint" $PYLINT_VERSION "$(grep "pylint==" requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "$(grep "pylint-quotes==" requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "black" "$BLACK_VERSION" "$(grep black requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "yapf" $YAPF_VERSION "$(grep -m1 '^yapf==' requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "pylint" $PYLINT_VERSION "$(grep -m1 '^pylint==' requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "mypy" "$MYPY_VERSION" "$(grep -m1 '^mypy==' requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "black" "$BLACK_VERSION" "$(grep -m1 '^black==' requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "ruff" "$RUFF_VERSION" "$(grep -m1 '^ruff==' requirements-dev.txt | cut -d'=' -f3)"
 
 YAPF_FLAGS=(
     '--recursive'
@@ -63,8 +63,14 @@ BLACK_INCLUDES=(
 )
 
 PYLINT_FLAGS=(
-    '--load-plugins'  'pylint_quotes'
     '--ignore-paths' 'sky/schemas/generated'
+)
+
+# Ruff only enforces quotes; exclude directories handled by Black or generated.
+RUFF_EXCLUDES=(
+    '--exclude' 'sky/skylet/providers/ibm/**'
+    '--exclude' 'sky/schemas/generated/**'
+    '--exclude' 'build/**'
 )
 
 # Format specified files
@@ -117,6 +123,22 @@ echo 'SkyPilot isort:'
 isort sky tests examples llm docs "${ISORT_YAPF_EXCLUDES[@]}"
 
 isort --profile black -l 88 -m 3 "sky/skylet/providers/ibm"
+
+
+# Run Ruff for quotes normalization (single quotes), before type/lint checks
+echo 'SkyPilot Ruff (quotes):'
+if [[ "$1" == '--files' ]]; then
+    ruff check --select Q --fix --force-exclude "${RUFF_EXCLUDES[@]}" "${@:2}"
+elif [[ "$1" == '--all' ]]; then
+    ruff check --select Q --fix --force-exclude "${RUFF_EXCLUDES[@]}" .
+else
+    changed_py=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | grep -vE '^sky/skylet/providers/ibm/')
+    if [[ -n "$changed_py" ]]; then
+        echo "$changed_py" | tr '\n' '\0' | xargs -0 ruff check --select Q --fix --force-exclude "${RUFF_EXCLUDES[@]}"
+    else
+        echo 'Ruff skipped: no changed Python files.'
+    fi
+fi
 
 
 # Run mypy

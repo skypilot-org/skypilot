@@ -68,13 +68,10 @@ repos:
     rev: v2.14.5  # Match the version from requirements
     hooks:
     -   id: pylint
-        language_version: python3.11 # pylint doesn't support python 3.12 until v3.0.0
-        additional_dependencies:
-            - pylint-quotes==0.2.3  # Match the version from requirements
+        language_version: python3.11 # pinned per repo note
         name: pylint
         args:
             - --rcfile=.pylintrc  # Use your custom pylint configuration
-            - --load-plugins=pylint_quotes  # Load the pylint-quotes plugin
         files: ^sky/  # Only include files from the 'sky/' directory
         exclude: (^sky/skylet/providers/ibm/|^sky/schemas/generated/)
 
@@ -82,3 +79,17 @@ repos:
     rev: v0.1.30  # Match the version from requirements
     hooks:
     -   id: helmlint
+
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+    -   id: ruff
+        name: ruff (quotes only)
+        args:
+          - "--select=Q"
+          - "--fix"
+          - "--force-exclude"
+          - "--exclude=sky/skylet/providers/ibm/**"
+          - "--exclude=sky/schemas/generated/**"
+          - "--exclude=build/**"
+        files: \.(py|pyi)$

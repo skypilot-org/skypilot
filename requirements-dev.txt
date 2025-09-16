@@ -8,7 +8,9 @@ pylint==2.14.5
 black==22.10.0
 # https://github.com/edaniszewski/pylint-quotes
 # match the version with .pre-commit-config.yaml
-pylint-quotes==0.2.3
+pylint-quotes==0.0.0  # deprecated, replaced by ruff
+# enforce quotes via ruff
+ruff==0.6.9
 # match the version with .pre-commit-config.yaml
 toml==0.10.2
 # match the version with .pre-commit-config.yaml
