@@ -260,8 +260,10 @@ class DockerInitializer:
                     f'--password {shlex.quote(docker_login_config.password)} '
                     f'{shlex.quote(docker_login_config.server)}',
                     wait_for_docker_daemon=True)
-            elif docker_login_config.server.endswith('.amazonaws.com'):
+            elif (docker_login_config.server.endswith('.amazonaws.com') and
+                  '.dkr.ecr.' in docker_login_config.server):
                 # AWS ECR: Use aws ecr get-login-password for authentication
+                # ECR format: <account-id>.dkr.ecr.<region>.amazonaws.com
                 # This command uses the IAM credentials from the EC2 instance
                 region = docker_login_config.server.split(
                     '.')[REGION_INDEX_IN_SERVER_URL]

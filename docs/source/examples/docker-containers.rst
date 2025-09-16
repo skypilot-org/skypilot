@@ -153,6 +153,22 @@ you can provide the registry authentication details using :ref:`task environment
 
         The AWS CLI command will be executed on your local machine when launching the cluster, and the resulting token will be used for authentication.
 
+        .. note::
+
+            If your cluster is on AWS, SkyPilot will automatically use the IAM permissions of the EC2 instance to authenticate with ECR, if the ``SKYPILOT_DOCKER_USERNAME`` and ``SKYPILOT_DOCKER_PASSWORD`` are set to empty strings:
+
+            .. code-block:: yaml
+
+              resources:
+                image_id: docker:<your-user-id>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>
+
+              envs:
+                SKYPILOT_DOCKER_USERNAME: ""
+                SKYPILOT_DOCKER_PASSWORD: ""
+                SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.<region>.amazonaws.com
+
+            **Important**: Ensure that the EC2 instance's IAM role has the necessary ECR permissions (``AmazonEC2ContainerRegistryReadOnly`` or appropriate custom policies).
+
         Alternatively, you can use ``sky launch`` with the ``--env`` flag to pass the password:
 
         .. code-block:: bash
