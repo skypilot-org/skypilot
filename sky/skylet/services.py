@@ -1,7 +1,7 @@
 """gRPC service implementations for skylet."""
 
 import os
-import queue as queuelib
+import queue as queue_lib
 import threading
 from typing import Iterable
 
@@ -185,10 +185,14 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
     def _buffered_iter_with_timeout(self, buffer: log_lib.LogBuffer,
                                     iterable: Iterable[str],
                                     timeout: float) -> Iterable[str]:
-        """Iterates over an iterable, writing each value to a buffer,
-        and flushing the buffer when it is full or there is no value
-        within the timeout duration."""
-        queue: queuelib.Queue = queuelib.Queue()
+        """Iterates over an iterable, writing each item to a buffer,
+        and flushing the buffer when it is full or no item is
+        yielded within the timeout duration."""
+        # TODO(kevin): Simplify this using asyncio.timeout, once we move
+        # the skylet event loop and gRPC server to asyncio.
+        # https://docs.python.org/3/library/asyncio-task.html#timeouts
+
+        queue: queue_lib.Queue = queue_lib.Queue()
         sentinel = object()
 
         def producer():
@@ -204,7 +208,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         while True:
             try:
                 item = queue.get(timeout=timeout)
-            except queuelib.Empty:
+            except queue_lib.Empty:
                 out = buffer.flush()
                 if out:
                     yield out
