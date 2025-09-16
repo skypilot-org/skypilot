@@ -243,7 +243,7 @@ async def test_endpoint_api_get(monitor):
     async def test_func():
         await server.api_get('test_req')
 
-    result = await run_endpoint_test(test_func, monitor)
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
     assert not result['blocking'], "/api/get should NOT block the event loop"
 
 
@@ -302,7 +302,7 @@ async def test_endpoint_api_stream(monitor):
             if count > 3:
                 break
 
-    result = await run_endpoint_test(test_func, monitor)
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
     os.unlink(log_file.name)
     assert not result['blocking'], "/api/stream should NOT block the event loop"
 
