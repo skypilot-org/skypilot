@@ -311,7 +311,7 @@ export async function getEnabledClouds(workspaceName = null, expand = false) {
         // which is also a JSON string.
         enabledCloudsData = JSON.parse(resultData.return_value);
         console.log(
-          'Successfully parsed enabled_clouds data from return_value:',
+          `Successfully parsed enabled_clouds data for workspace ${workspaceName}:`,
           enabledCloudsData
         );
       } catch (parseError) {
