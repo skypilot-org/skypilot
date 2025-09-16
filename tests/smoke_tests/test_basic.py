@@ -1771,3 +1771,37 @@ def test_cluster_setup_num_gpus():
             teardown=f'sky down -y {name}',
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_cluster_setup_num_gpus_multiple_entries():
+    """Test that the number of GPUs is set correctly in the setup script."""
+
+    setup_yaml = textwrap.dedent(f"""
+    resources:
+        accelerators: {{A100:8, L4:1}}
+        instance_type: g2-standard-4
+
+    setup: |
+        if [[ "$SKYPILOT_SETUP_NUM_GPUS_PER_NODE" != "1" ]]; then
+            exit 1
+        fi
+
+    run: |
+        echo "Done."
+    """)
+
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(setup_yaml.encode('utf-8'))
+        f.flush()
+        name = smoke_tests_utils.get_cluster_name()
+
+        test = smoke_tests_utils.Test(
+            'test_cluster_setup_num_gpus',
+            [
+                f's=$(sky launch -y -c {name} {f.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
+            ],
+            timeout=smoke_tests_utils.get_timeout('gcp'),
+            teardown=f'sky down -y {name}',
+        )
+        smoke_tests_utils.run_one_test(test)
