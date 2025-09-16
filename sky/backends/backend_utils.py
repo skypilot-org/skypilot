@@ -3756,7 +3756,8 @@ def _handle_grpc_error(e: 'grpc.RpcError', current_backoff: float) -> None:
             raise exceptions.SkyletInternalError(e.details())
     elif e.code() == grpc.StatusCode.UNAVAILABLE:
         time.sleep(current_backoff)
-    elif e.code() == grpc.StatusCode.UNIMPLEMENTED or e.code() == grpc.StatusCode.UNKNOWN:
+    elif e.code() == grpc.StatusCode.UNIMPLEMENTED or e.code(
+    ) == grpc.StatusCode.UNKNOWN:
         # Handle backwards compatibility: old server doesn't implement this RPC.
         # Let the caller fall back to legacy execution.
         raise exceptions.SkyletMethodNotImplementedError(
