@@ -51,9 +51,8 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import psutil
-
     import grpc
+    import psutil
     import sky
     from sky import dag as dag_lib
     from sky.schemas.generated import jobsv1_pb2

@@ -69,13 +69,12 @@ from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
+    import grpc
     import requests
     from requests import adapters
     from requests.packages.urllib3.util import retry as retry_lib
     import rich.progress as rich_progress
     import yaml
-
-    import grpc
     from sky import resources as resources_lib
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend

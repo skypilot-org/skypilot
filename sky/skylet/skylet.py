@@ -5,6 +5,7 @@ import os
 import time
 
 import grpc
+
 import sky
 from sky import sky_logging
 from sky.schemas.generated import autostopv1_pb2_grpc

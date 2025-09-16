@@ -84,6 +84,7 @@ from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import grpc
+
     from sky import dag
     from sky.schemas.generated import autostopv1_pb2
     from sky.schemas.generated import autostopv1_pb2_grpc

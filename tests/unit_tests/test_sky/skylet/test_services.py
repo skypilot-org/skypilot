@@ -4,6 +4,7 @@ from io import StringIO
 import math
 import os
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -20,6 +21,7 @@ class TestTailLogsBuffering(unittest.TestCase):
 
     def setUp(self):
         self.service = services.JobsServiceImpl()
+        self.initial_thread_count = threading.active_count()
 
     def test_successful_job(self):
         """Test reading mocked logs of a finished job.
@@ -77,6 +79,9 @@ class TestTailLogsBuffering(unittest.TestCase):
         final_exit_code = responses[-1].exit_code
         self.assertEqual(final_exit_code, JobExitCode.SUCCEEDED)
 
+        # Verify no thread leaks
+        self.assertEqual(threading.active_count(), self.initial_thread_count)
+
     def test_in_progress_job(self):
         """Test reading mocked logs of an in-progress job.
 
@@ -112,6 +117,8 @@ class TestTailLogsBuffering(unittest.TestCase):
         # For follow=True and RUNNING status, exit code should be NOT_FINISHED.
         self.assertEqual(responses[-1].exit_code, JobExitCode.NOT_FINISHED)
 
+        # Verify no thread leaks
+        self.assertEqual(threading.active_count(), self.initial_thread_count)
 
 class TestLogChunkBuffer(unittest.TestCase):
     """Test cases for LogChunkBuffer class."""
