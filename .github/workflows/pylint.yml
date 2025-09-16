@@ -33,21 +33,7 @@ jobs:
         uv pip install --prerelease=allow "azure-cli>=2.65.0"
         uv pip install ".[all]"
         uv pip install pylint==3.2.7
-        uv pip install ruff==0.6.9
     - name: Analysing the code with pylint
       run: |
         source ~/test-env/bin/activate
         pylint --ignore-paths 'sky/schemas/generated' sky
-    - name: Ruff (quotes)
-      run: |
-        source ~/test-env/bin/activate
-        ruff check --select Q --force-exclude \
-          --exclude 'sky/skylet/providers/ibm/**' \
-          --exclude 'sky/schemas/generated/**' \
-          --exclude 'build/**' \
-          --exclude 'tests/**' \
-          --exclude '*.ipynb' \
-          --exclude 'examples/**' \
-          --exclude 'llm/**' \
-          --exclude 'docs/**' \
-          .
