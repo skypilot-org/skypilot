@@ -5,11 +5,14 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Configuration
+# Provider can be gcp or eks (default: gcp). Usage: helm_upgrade.sh [PACKAGE_NAME] CURRENT_VERSION [PROVIDER]
+PROVIDER=${3:-"gcp"}
 CLUSTER_NAME="skypilot-helm-test-cluster"
 PROJECT_ID=$(gcloud config get-value project)
 ZONE="us-central1-a"  # Replace with your preferred zone
 NODE_COUNT=1
 MACHINE_TYPE="e2-standard-8"  # 8 vCPU, 32GB memory
+EKS_REGION="us-east-2"
 PACKAGE_NAME=${1:-"skypilot-nightly"}  # Accept package name as first argument, default to skypilot-nightly
 CURRENT_VERSION=${2}  # The version to upgrade TO (required parameter)
 NAMESPACE="skypilot"
@@ -28,7 +31,10 @@ if [ -z "$CURRENT_VERSION" ]; then
     exit 1
 fi
 
-echo "Using GCP Project ID: $PROJECT_ID"
+echo "Provider: $PROVIDER"
+if [ "$PROVIDER" = "gcp" ]; then
+    echo "Using GCP Project ID: $PROJECT_ID"
+fi
 echo "Testing Helm upgrade for package: $PACKAGE_NAME"
 echo "Upgrading to version: $CURRENT_VERSION"
 
@@ -188,9 +194,14 @@ cleanup() {
         echo "No API_ENDPOINT set, skipping Sky resource cleanup"
     fi
 
-    # Delete GKE cluster
-    echo "Deleting GKE cluster: $CLUSTER_NAME"
-    "$SCRIPT_DIR/delete_gke_cluster.sh" "$CLUSTER_NAME" "$PROJECT_ID" "$ZONE"
+    # Delete cluster based on provider
+    if [ "$PROVIDER" = "eks" ]; then
+        echo "Deleting EKS cluster: $CLUSTER_NAME"
+        "$SCRIPT_DIR/delete_cluster.sh" eks "$CLUSTER_NAME" "$EKS_REGION"
+    else
+        echo "Deleting GKE cluster: $CLUSTER_NAME"
+        "$SCRIPT_DIR/delete_cluster.sh" gcp "$CLUSTER_NAME" "$PROJECT_ID" "$ZONE"
+    fi
     echo "Cleanup complete"
 }
 
@@ -203,8 +214,12 @@ get_previous_version "$CURRENT_VERSION" "$PACKAGE_NAME"
 echo "Previous version: $PREVIOUS_VERSION"
 
 
-# Create GKE cluster
-"$SCRIPT_DIR/create_gke_cluster.sh" "$CLUSTER_NAME" "$PROJECT_ID" "$ZONE" "$NODE_COUNT" "$MACHINE_TYPE"
+# Create cluster based on provider
+if [ "$PROVIDER" = "eks" ]; then
+    "$SCRIPT_DIR/create_cluster.sh" eks "$CLUSTER_NAME" "$EKS_REGION" "$NODE_COUNT" "m5.2xlarge"
+else
+    "$SCRIPT_DIR/create_cluster.sh" gcp "$CLUSTER_NAME" "$PROJECT_ID" "$ZONE" "$NODE_COUNT" "$MACHINE_TYPE"
+fi
 
 # Deploy previous version
 echo "Deploying previous version ($PREVIOUS_VERSION)..."
