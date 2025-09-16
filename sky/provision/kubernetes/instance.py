@@ -3,6 +3,7 @@ import copy
 import datetime
 import json
 import re
+import sys
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -33,6 +34,9 @@ POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
 _MAX_RETRIES = 3
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
+
+# Pattern to extract SSH user from command output, handling MOTD contamination
+_SSH_USER_PATTERN = re.compile(r'SKYPILOT_SSH_USER: ([^\s\n]+)')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -191,14 +195,20 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                 break
         if event_message is not None:
             if pod_status == 'Pending':
-                logger.info(event_message)
+                out_of = {}
+                # key: resource name, value: (extra message, nice name)
                 if 'Insufficient cpu' in event_message:
-                    raise config_lib.KubernetesError(
-                        _lack_resource_msg('CPU', pod, details=event_message))
+                    out_of['CPU'] = (': Run \'kubectl get nodes -o '
+                                     'custom-columns=NAME:.metadata.name,'
+                                     'CPU:.status.allocatable.cpu\' to check '
+                                     'the available CPUs on the node.', 'CPUs')
                 if 'Insufficient memory' in event_message:
-                    raise config_lib.KubernetesError(
-                        _lack_resource_msg('memory', pod,
-                                           details=event_message))
+                    out_of['memory'] = (': Run \'kubectl get nodes -o '
+                                        'custom-columns=NAME:.metadata.name,'
+                                        'MEMORY:.status.allocatable.memory\' '
+                                        'to check the available memory on the '
+                                        'node.', 'Memory')
+
                 # TODO(aylei): after switching from smarter-device-manager to
                 # fusermount-server, we need a new way to check whether the
                 # fusermount-server daemonset is ready.
@@ -206,41 +216,77 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     key for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                     for key in lf.get_label_keys()
                 ]
-                if pod.spec.node_selector:
-                    for label_key in pod.spec.node_selector.keys():
-                        if label_key in gpu_lf_keys:
-                            # TODO(romilb): We may have additional node
-                            #  affinity selectors in the future - in that
-                            #  case we will need to update this logic.
-                            # TODO(Doyoung): Update the error message raised
-                            # with the multi-host TPU support.
-                            gpu_resource_key = kubernetes_utils.get_gpu_resource_key(context)  # pylint: disable=line-too-long
-                            if 'Insufficient google.com/tpu' in event_message:
-                                extra_msg = (
-                                    f'Verify if '
-                                    f'{pod.spec.node_selector[label_key]}'
-                                    ' is available in the cluster. Note '
-                                    'that multi-host TPU podslices are '
-                                    'currently not unsupported.')
-                                raise config_lib.KubernetesError(
-                                    _lack_resource_msg('TPU',
-                                                       pod,
-                                                       extra_msg,
-                                                       details=event_message))
-                            elif ((f'Insufficient {gpu_resource_key}'
-                                   in event_message) or
-                                  ('didn\'t match Pod\'s node affinity/selector'
-                                   in event_message)):
-                                extra_msg = (
-                                    f'Verify if any node matching label  '
-                                    f'{pod.spec.node_selector[label_key]} and '
-                                    f'sufficient resource {gpu_resource_key} '
-                                    f'is available in the cluster.')
-                                raise config_lib.KubernetesError(
-                                    _lack_resource_msg('GPU',
-                                                       pod,
-                                                       extra_msg,
-                                                       details=event_message))
+                for label_key in gpu_lf_keys:
+                    # TODO(romilb): We may have additional node
+                    #  affinity selectors in the future - in that
+                    #  case we will need to update this logic.
+                    # TODO(Doyoung): Update the error message raised
+                    # with the multi-host TPU support.
+                    gpu_resource_key = kubernetes_utils.get_gpu_resource_key(
+                        context)  # pylint: disable=line-too-long
+                    if ((f'Insufficient {gpu_resource_key}' in event_message) or
+                        ('didn\'t match Pod\'s node affinity/selector'
+                         in event_message) and pod.spec.node_selector):
+                        if 'gpu' in gpu_resource_key.lower():
+                            info_msg = (
+                                ': Run \'sky show-gpus --infra kubernetes\' to '
+                                'see the available GPUs.')
+                        else:
+                            info_msg = ': '
+                        if (pod.spec.node_selector and
+                                label_key in pod.spec.node_selector):
+                            extra_msg = (
+                                f'Verify if any node matching label '
+                                f'{pod.spec.node_selector[label_key]} and '
+                                f'sufficient resource {gpu_resource_key} '
+                                f'is available in the cluster.')
+                            extra_msg = info_msg + ' ' + extra_msg
+                        else:
+                            extra_msg = info_msg
+                        if gpu_resource_key not in out_of or len(
+                                out_of[gpu_resource_key][0]) < len(extra_msg):
+                            out_of[f'{gpu_resource_key}'] = (extra_msg, 'GPUs')
+
+            if len(out_of) > 0:
+                # We are out of some resources. We should raise an error.
+                rsrc_err_msg = 'Insufficient resource capacity on the '
+                rsrc_err_msg += 'cluster:\n'
+                out_of_keys = list(out_of.keys())
+                for i in range(len(out_of_keys)):
+                    rsrc = out_of_keys[i]
+                    (extra_msg, nice_name) = out_of[rsrc]
+                    extra_msg = extra_msg if extra_msg else ''
+                    if i == len(out_of_keys) - 1:
+                        indent = '└──'
+                    else:
+                        indent = '├──'
+                    rsrc_err_msg += (f'{indent} Cluster does not have '
+                                     f'sufficient {nice_name} for your request'
+                                     f'{extra_msg}')
+                    if i != len(out_of_keys) - 1:
+                        rsrc_err_msg += '\n'
+
+                # Emit the error message without logging prefixes for better UX.
+                tmp_handler = sky_logging.EnvAwareHandler(sys.stdout)
+                tmp_handler.flush = sys.stdout.flush
+                tmp_handler.setFormatter(sky_logging.NO_PREFIX_FORMATTER)
+                tmp_handler.setLevel(sky_logging.ERROR)
+                prev_propagate = logger.propagate
+                try:
+                    logger.addHandler(tmp_handler)
+                    logger.propagate = False
+                    logger.error(ux_utils.error_message(f'{rsrc_err_msg}'))
+                finally:
+                    logger.removeHandler(tmp_handler)
+                    logger.propagate = prev_propagate
+                nice_names = [out_of[rsrc][1] for rsrc in out_of_keys]
+                raise config_lib.KubernetesError(
+                    f'{timeout_err_msg} '
+                    f'Pod status: {pod_status} '
+                    f'Details: \'{event_message}\' ',
+                    insufficent_resources=nice_names,
+                )
+
             raise config_lib.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status} '
                                              f'Details: \'{event_message}\' ')
@@ -1233,7 +1279,11 @@ def get_cluster_info(
     assert cpu_request is not None, 'cpu_request should not be None'
 
     ssh_user = 'sky'
-    get_k8s_ssh_user_cmd = 'echo $(whoami)'
+    # Use pattern matching to extract SSH user, handling MOTD contamination.
+    # Some container images (like CUDA-Q) print MOTD when login shells start,
+    # which can contaminate command output. We use a unique pattern to extract
+    # the actual username reliably.
+    get_k8s_ssh_user_cmd = 'echo "SKYPILOT_SSH_USER: $(whoami)"'
     assert head_pod_name is not None
     runner = command_runner.KubernetesCommandRunner(
         ((namespace, context), head_pod_name))
@@ -1243,7 +1293,14 @@ def get_cluster_info(
                                     stream_logs=False)
     _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
                                  head_pod_name, rc, stdout + stderr)
-    ssh_user = stdout.strip()
+
+    # Extract SSH user using pattern matching
+    ssh_user_match = _SSH_USER_PATTERN.search(stdout)
+    if ssh_user_match:
+        ssh_user = ssh_user_match.group(1)
+    else:
+        raise ValueError('Failed to find SSH user identifier: '
+                         f'{stdout + stderr}')
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
 

@@ -1,0 +1,165 @@
+syntax = "proto3";
+
+package jobs.v1;
+
+service JobsService {
+  // Add a new job to the database.
+  rpc AddJob(AddJobRequest) returns (AddJobResponse);
+  // Queue a job for execution.
+  rpc QueueJob(QueueJobRequest) returns (QueueJobResponse);
+  // Update status of all jobs.
+  rpc UpdateStatus(UpdateStatusRequest) returns (UpdateStatusResponse);
+  // Get the job queue.
+  rpc GetJobQueue(GetJobQueueRequest) returns (GetJobQueueResponse);
+  // Cancel jobs.
+  rpc CancelJobs(CancelJobsRequest) returns (CancelJobsResponse);
+  // Fail all in-progress jobs.
+  rpc FailAllInProgressJobs(FailAllInProgressJobsRequest) returns (FailAllInProgressJobsResponse);
+  // Tail job logs.
+  rpc TailLogs(TailLogsRequest) returns (stream TailLogsResponse);
+  // Get job status.
+  rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
+  // Get job submitted timestamp.
+  rpc GetJobSubmittedTimestamp(GetJobSubmittedTimestampRequest) returns (GetJobSubmittedTimestampResponse);
+  // Get job ended timestamp.
+  rpc GetJobEndedTimestamp(GetJobEndedTimestampRequest) returns (GetJobEndedTimestampResponse);
+  // Get log directories for jobs.
+  rpc GetLogDirsForJobs(GetLogDirsForJobsRequest) returns (GetLogDirsForJobsResponse);
+}
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_INIT = 1;
+  JOB_STATUS_PENDING = 2;
+  JOB_STATUS_SETTING_UP = 3;
+  JOB_STATUS_RUNNING = 4;
+  JOB_STATUS_FAILED_DRIVER = 5;
+  JOB_STATUS_SUCCEEDED = 6;
+  JOB_STATUS_FAILED = 7;
+  JOB_STATUS_FAILED_SETUP = 8;
+  JOB_STATUS_CANCELLED = 9;
+}
+
+message AddJobRequest {
+  optional string job_name = 1;
+  string username = 2;
+  string run_timestamp = 3;
+  string resources_str = 4;
+  string metadata = 5;
+}
+
+message AddJobResponse {
+  int64 job_id = 1;
+  string log_dir = 2;
+}
+
+message QueueJobRequest {
+  int64 job_id = 1;
+  optional string codegen = 2;
+  string script_path = 3;
+  string remote_log_dir = 4;
+  optional ManagedJobInfo managed_job = 5;
+}
+
+message ManagedJobInfo {
+  string name = 1;
+  optional string pool = 2;
+  string workspace = 3;
+  string entrypoint = 4;
+  repeated ManagedJobTask tasks = 5;
+}
+
+message ManagedJobTask {
+  int32 task_id = 1;
+  string name = 2;
+  string resources_str = 3;
+  string metadata_json = 4;
+}
+
+message QueueJobResponse {}
+
+message UpdateStatusRequest {}
+
+message UpdateStatusResponse {}
+
+message GetJobQueueRequest {
+  optional string user_hash = 1;
+  bool all_jobs = 2;
+}
+
+message JobInfo {
+  int64 job_id = 1;
+  string job_name = 2;
+  string username = 3;
+  double submitted_at = 4;
+  JobStatus status = 5;
+  string run_timestamp = 6;
+  double start_at = 7;
+  double end_at = 8;
+  string resources = 9;
+  int64 pid = 10;
+  string log_path = 11;
+  string metadata = 12;
+}
+
+message GetJobQueueResponse {
+  repeated JobInfo jobs = 1;
+}
+
+message CancelJobsRequest {
+  repeated int64 job_ids = 1;
+  bool cancel_all = 2;
+  optional string user_hash = 3;
+}
+
+message CancelJobsResponse {
+  repeated int64 cancelled_job_ids = 1;
+}
+
+message FailAllInProgressJobsRequest {}
+
+message FailAllInProgressJobsResponse {}
+
+message TailLogsRequest {
+  optional int64 job_id = 1;
+  optional int64 managed_job_id = 2;
+  bool follow = 3;
+  int32 tail = 4;
+}
+
+message TailLogsResponse {
+  string log_line = 1;
+  int32 exit_code = 2;
+}
+
+message GetJobStatusRequest {
+  repeated int64 job_ids = 1;
+}
+
+message GetJobStatusResponse {
+  map<int64, JobStatus> job_statuses = 1;
+}
+
+message GetJobSubmittedTimestampRequest {
+  optional int64 job_id = 1;
+}
+
+message GetJobSubmittedTimestampResponse {
+  float timestamp = 1;
+}
+
+message GetJobEndedTimestampRequest {
+  optional int64 job_id = 1;
+}
+
+message GetJobEndedTimestampResponse {
+  float timestamp = 1;
+}
+
+message GetLogDirsForJobsRequest {
+  repeated int64 job_ids = 1;
+}
+
+message GetLogDirsForJobsResponse {
+  map<int64, string> job_log_dirs = 1;
+}
