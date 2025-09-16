@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import time
-import fnctl
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sky import exceptions
@@ -197,14 +196,8 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
     @_auto_retry(should_retry=lambda e: isinstance(e, exceptions.CommandError)
                  and e.returncode == 255)
     def _initialize_docker(runner: command_runner.CommandRunner, log_path: str):
-        lockfile = '/tmp/docker_init.lock'
-        with open(lockfile, 'w') as f:
-            fnctl.lockf(f, fnctl.LOCK_EX)
-            try:
-                docker_user = docker_utils.DockerInitializer(docker_config, runner,
+        docker_user = docker_utils.DockerInitializer(docker_config, runner,
                                                      log_path).initialize()
-            finally:
-                fnctl.lockf(f, fnctl.LOCK_UN)
         logger.debug(f'Initialized docker user: {docker_user}')
         return docker_user
 

@@ -259,7 +259,15 @@ class DockerInitializer:
         if self._check_container_exited():
             self.initialized = True
             self._run(f'{self.docker_cmd} start {self.container_name}')
-            self._run('sudo service ssh start', run_env='docker')
+            inner = (
+                f"{self.docker_cmd} exec {self.container_name} "
+                f"/bin/bash -lc {shlex.quote('sudo service ssh start')}"
+            )
+            cmd = (
+                f"flock -s -w 1 /tmp/{self.container_name}.lifecycle.lock "
+                f"-c {shlex.quote(inner)}"
+            )
+            self._run(cmd)
             return self._run('whoami', run_env='docker')
 
         # SkyPilot: Docker login if user specified a private docker registry.
@@ -358,7 +366,10 @@ class DockerInitializer:
                     self._auto_configure_shm(user_docker_run_options)),
                 self.docker_cmd,
             )
-            self._run(f'{remove_container_cmd} && {start_command}')
+            self._run(
+                f"flock -x -w 10 /tmp/{self.container_name}.lifecycle.lock "
+                f"-c {shlex.quote(f'{remove_container_cmd} && {start_command}')}"
+            )
 
         # SkyPilot: Setup Commands.
         # TODO(zhwu): the following setups should be aligned with the kubernetes
@@ -377,12 +388,16 @@ class DockerInitializer:
             run_env='docker')
         # Install dependencies.
         self._run(
-            'sudo apt-get update; '
+            "bash -lc '"
+            "exec 200>/var/tmp/sky_apt.lock; "
+            "flock -x -w 120 200 || exit 1; "
+            "export DEBIAN_FRONTEND=noninteractive; "
+            "sudo apt-get -yq update && "
             # Our mount script will install gcsfuse without fuse package.
             # We need to install fuse package first to enable storage mount.
             # The dpkg option is to suppress the prompt for fuse installation.
-            'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '
-            'rsync curl wget patch openssh-server python3-pip fuse;',
+            "sudo apt-get -o DPkg::Options::=--force-confnew install -y "
+            "rsync curl wget patch openssh-server python3-pip fuse'",
             run_env='docker')
 
         # Copy local authorized_keys to docker container.
