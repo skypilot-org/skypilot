@@ -30,7 +30,10 @@ import {
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getEnabledClouds } from '@/data/connectors/workspaces';
-import { getWorkspaceClusters, getWorkspaceManagedJobs } from '@/components/workspaces';
+import {
+  getWorkspaceClusters,
+  getWorkspaceManagedJobs,
+} from '@/components/workspaces';
 import {
   getSSHNodePools,
   updateSSHNodePools,
@@ -1770,7 +1773,9 @@ export function GPUs() {
   const fetchManagedJobsData = async (forceRefresh) => {
     try {
       // Legacy managed jobs fetching disabled - now using workspace-aware data from contextStats
-      console.log('[DEBUG] Legacy fetchManagedJobsData disabled - using workspace-aware contextStats');
+      console.log(
+        '[DEBUG] Legacy fetchManagedJobsData disabled - using workspace-aware contextStats'
+      );
       setSshAndKubeJobsData({});
       setSshAndKubeJobsDataLoading(false);
     } catch (error) {
@@ -1934,7 +1939,7 @@ export function GPUs() {
     dashboardCache.invalidate(getWorkspaceAwareInfrastructure, [false]);
     dashboardCache.invalidate(getCloudInfrastructure, [false]);
     dashboardCache.invalidate(getSSHNodePools, []);
-    
+
     // Invalidate workspace-aware caches (similar to workspaces page)
     dashboardCache.invalidateFunction(getWorkspaceClusters);
     dashboardCache.invalidateFunction(getWorkspaceManagedJobs);

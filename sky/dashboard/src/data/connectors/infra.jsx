@@ -132,9 +132,11 @@ export async function getWorkspaceAwareInfrastructure(forceRefresh = false) {
     // Step 1: Get accessible workspaces for the user (cached)
     const { getWorkspaces } = await import('@/data/connectors/workspaces');
     const workspacesData = await getWorkspaces();
-    
+
     if (!workspacesData || Object.keys(workspacesData).length === 0) {
-      console.log('[DEBUG] No accessible workspaces found - returning empty result');
+      console.log(
+        '[DEBUG] No accessible workspaces found - returning empty result'
+      );
       return {
         workspaces: {},
         allContextNames: [],
@@ -150,34 +152,43 @@ export async function getWorkspaceAwareInfrastructure(forceRefresh = false) {
 
     // Step 2: Fetch data for each workspace in parallel using workspace-aware API calls (cached)
     const { getEnabledClouds } = await import('@/data/connectors/workspaces');
-    const { getWorkspaceClusters, getWorkspaceManagedJobs } = await import('@/components/workspaces');
+    const { getWorkspaceClusters, getWorkspaceManagedJobs } = await import(
+      '@/components/workspaces'
+    );
     const dashboardCache = (await import('@/lib/cache')).default;
 
     const workspaceDataPromises = workspaceNames.map(async (wsName) => {
       console.log(`[DEBUG] Fetching data for workspace: ${wsName}`);
-      
+
       try {
         const [enabledClouds, clusters, managedJobs] = await Promise.all([
           getEnabledClouds(wsName, true), // expand=true for contexts - call directly to avoid cache key issues
-          forceRefresh ? getWorkspaceClusters(wsName) : dashboardCache.get(getWorkspaceClusters, [wsName]),
-          forceRefresh ? getWorkspaceManagedJobs(wsName) : dashboardCache.get(getWorkspaceManagedJobs, [wsName]),
+          forceRefresh
+            ? getWorkspaceClusters(wsName)
+            : dashboardCache.get(getWorkspaceClusters, [wsName]),
+          forceRefresh
+            ? getWorkspaceManagedJobs(wsName)
+            : dashboardCache.get(getWorkspaceManagedJobs, [wsName]),
         ]);
 
         console.log(`[DEBUG] Workspace ${wsName} data:`, {
           enabledClouds: enabledClouds?.length || 0,
           clusters: clusters?.length || 0,
-          jobs: managedJobs?.jobs?.length || 0
+          jobs: managedJobs?.jobs?.length || 0,
         });
-        
+
         // Add detailed job debugging
         if (managedJobs?.jobs?.length > 0) {
-          console.log(`[DEBUG] Jobs details for ${wsName}:`, managedJobs.jobs.map(job => ({
-            id: job.job_id,
-            status: job.status,
-            workspace: job.workspace,
-            cluster_region: job.cluster_region,
-            cloud: job.cloud
-          })));
+          console.log(
+            `[DEBUG] Jobs details for ${wsName}:`,
+            managedJobs.jobs.map((job) => ({
+              id: job.job_id,
+              status: job.status,
+              workspace: job.workspace,
+              cluster_region: job.cluster_region,
+              cloud: job.cloud,
+            }))
+          );
         }
 
         return {
@@ -187,7 +198,10 @@ export async function getWorkspaceAwareInfrastructure(forceRefresh = false) {
           managedJobs: managedJobs || { jobs: [] },
         };
       } catch (error) {
-        console.error(`[DEBUG] Error fetching data for workspace ${wsName}:`, error);
+        console.error(
+          `[DEBUG] Error fetching data for workspace ${wsName}:`,
+          error
+        );
         return {
           workspaceName: wsName,
           enabledClouds: [],
@@ -206,49 +220,61 @@ export async function getWorkspaceAwareInfrastructure(forceRefresh = false) {
     const allClusters = [];
     const allJobs = [];
 
-    workspaceDataArray.forEach(({ workspaceName, enabledClouds, clusters, managedJobs }) => {
-      console.log(`[DEBUG] Processing workspace ${workspaceName}:`, {
-        enabledClouds: enabledClouds.length,
-        clusters: clusters.length, 
-        jobs: managedJobs.jobs.length
-      });
+    workspaceDataArray.forEach(
+      ({ workspaceName, enabledClouds, clusters, managedJobs }) => {
+        console.log(`[DEBUG] Processing workspace ${workspaceName}:`, {
+          enabledClouds: enabledClouds.length,
+          clusters: clusters.length,
+          jobs: managedJobs.jobs.length,
+        });
 
-      // Extract contexts from enabled clouds
-      enabledClouds.forEach((infraItem) => {
-        console.log(`[DEBUG] Processing infraItem: ${infraItem} for workspace ${workspaceName}`);
-        
-        if (infraItem.toLowerCase().startsWith('kubernetes/')) {
-          const context = infraItem.replace(/^kubernetes\//i, '');
-          console.log(`[DEBUG] Extracted kubernetes context: ${context} from workspace ${workspaceName}`);
-          
-          allContextsAcrossWorkspaces.push(context);
-          if (!contextWorkspaceMap[context]) {
-            contextWorkspaceMap[context] = [];
-          }
-          if (!contextWorkspaceMap[context].includes(workspaceName)) {
-            contextWorkspaceMap[context].push(workspaceName);
-            console.log(`[DEBUG] Added context ${context} -> workspace ${workspaceName} to contextWorkspaceMap`);
-          }
-        } else if (infraItem.toLowerCase().startsWith('ssh/')) {
-          const poolName = infraItem.replace(/^ssh\//i, '');
-          const sshContextName = `ssh-${poolName}`;
-          console.log(`[DEBUG] Extracted SSH context: ${sshContextName} from workspace ${workspaceName}`);
-          
-          allContextsAcrossWorkspaces.push(sshContextName);
-          if (!contextWorkspaceMap[sshContextName]) {
-            contextWorkspaceMap[sshContextName] = [];
-          }
-          if (!contextWorkspaceMap[sshContextName].includes(workspaceName)) {
-            contextWorkspaceMap[sshContextName].push(workspaceName);
-            console.log(`[DEBUG] Added SSH context ${sshContextName} -> workspace ${workspaceName} to contextWorkspaceMap`);
-          }
-        }
-      });
+        // Extract contexts from enabled clouds
+        enabledClouds.forEach((infraItem) => {
+          console.log(
+            `[DEBUG] Processing infraItem: ${infraItem} for workspace ${workspaceName}`
+          );
 
-      // Aggregate clusters and jobs
-      allClusters.push(...clusters);
-      allJobs.push(...managedJobs.jobs);
-    });
+          if (infraItem.toLowerCase().startsWith('kubernetes/')) {
+            const context = infraItem.replace(/^kubernetes\//i, '');
+            console.log(
+              `[DEBUG] Extracted kubernetes context: ${context} from workspace ${workspaceName}`
+            );
+
+            allContextsAcrossWorkspaces.push(context);
+            if (!contextWorkspaceMap[context]) {
+              contextWorkspaceMap[context] = [];
+            }
+            if (!contextWorkspaceMap[context].includes(workspaceName)) {
+              contextWorkspaceMap[context].push(workspaceName);
+              console.log(
+                `[DEBUG] Added context ${context} -> workspace ${workspaceName} to contextWorkspaceMap`
+              );
+            }
+          } else if (infraItem.toLowerCase().startsWith('ssh/')) {
+            const poolName = infraItem.replace(/^ssh\//i, '');
+            const sshContextName = `ssh-${poolName}`;
+            console.log(
+              `[DEBUG] Extracted SSH context: ${sshContextName} from workspace ${workspaceName}`
+            );
+
+            allContextsAcrossWorkspaces.push(sshContextName);
+            if (!contextWorkspaceMap[sshContextName]) {
+              contextWorkspaceMap[sshContextName] = [];
+            }
+            if (!contextWorkspaceMap[sshContextName].includes(workspaceName)) {
+              contextWorkspaceMap[sshContextName].push(workspaceName);
+              console.log(
+                `[DEBUG] Added SSH context ${sshContextName} -> workspace ${workspaceName} to contextWorkspaceMap`
+              );
+            }
+          }
+        });
+
+        // Aggregate clusters and jobs
+        allClusters.push(...clusters);
+        allJobs.push(...managedJobs.jobs);
+      }
+    );
 
     // Step 4: Calculate context stats from workspace-specific data
     const contextStats = calculateWorkspaceContextStats(workspaceDataArray);
@@ -258,18 +284,21 @@ export async function getWorkspaceAwareInfrastructure(forceRefresh = false) {
     const validContexts = [...new Set(allContextsAcrossWorkspaces)].filter(
       (context) => context && typeof context === 'string'
     );
-    
+
     console.log('[DEBUG] About to call getKubernetesGPUsFromContexts with:');
     console.log('[DEBUG] - validContexts:', validContexts);
     console.log('[DEBUG] - contextWorkspaceMap:', contextWorkspaceMap);
-    
-    const gpuData = await getKubernetesGPUsFromContexts(validContexts, contextWorkspaceMap);
+
+    const gpuData = await getKubernetesGPUsFromContexts(
+      validContexts,
+      contextWorkspaceMap
+    );
 
     const finalResult = {
       workspaces: workspaceDataArray.reduce((acc, ws) => {
         acc[ws.workspaceName] = {
           config: workspacesData[ws.workspaceName],
-          contexts: allContextsAcrossWorkspaces.filter(ctx => 
+          contexts: allContextsAcrossWorkspaces.filter((ctx) =>
             contextWorkspaceMap[ctx]?.includes(ws.workspaceName)
           ),
           enabledClouds: ws.enabledClouds,
@@ -288,9 +317,11 @@ export async function getWorkspaceAwareInfrastructure(forceRefresh = false) {
 
     console.log('[DEBUG] Final workspace-aware result:', finalResult);
     return finalResult;
-    
   } catch (error) {
-    console.error('[DEBUG] Failed to fetch workspace-aware infrastructure:', error);
+    console.error(
+      '[DEBUG] Failed to fetch workspace-aware infrastructure:',
+      error
+    );
     return {
       workspaces: {},
       allContextNames: [],
@@ -307,57 +338,69 @@ export async function getWorkspaceAwareInfrastructure(forceRefresh = false) {
 // Helper function to calculate context stats from workspace-specific data
 function calculateWorkspaceContextStats(workspaceDataArray) {
   const contextStats = {};
-  
+
   workspaceDataArray.forEach(({ workspaceName, clusters, managedJobs }) => {
     console.log(`[DEBUG] Calculating stats for workspace ${workspaceName}:`, {
       clusters: clusters.length,
-      jobs: managedJobs.jobs.length
+      jobs: managedJobs.jobs.length,
     });
 
     // Process clusters for this workspace
-    clusters.forEach(cluster => {
+    clusters.forEach((cluster) => {
       let contextKey = null;
-      
+
       if (cluster.cloud === 'Kubernetes') {
         contextKey = `kubernetes/${cluster.region}`;
       } else if (cluster.cloud === 'SSH') {
         contextKey = `ssh/${cluster.region}`;
       }
-      
+
       if (contextKey) {
         // Initialize context stats safely
-        contextStats[contextKey] = contextStats[contextKey] || { clusters: 0, jobs: 0 };
+        contextStats[contextKey] = contextStats[contextKey] || {
+          clusters: 0,
+          jobs: 0,
+        };
         contextStats[contextKey].clusters++;
-        console.log(`[DEBUG] Added cluster to ${contextKey}: ${contextStats[contextKey].clusters} total`);
+        console.log(
+          `[DEBUG] Added cluster to ${contextKey}: ${contextStats[contextKey].clusters} total`
+        );
       }
     });
-    
+
     // Process jobs for this workspace
-    managedJobs.jobs.forEach(job => {
+    managedJobs.jobs.forEach((job) => {
       console.log(`[DEBUG] Processing job for ${workspaceName}:`, {
         job_id: job.job_id,
         status: job.status,
         workspace: job.workspace,
         cluster_region: job.cluster_region,
         region: job.region,
-        cloud: job.cloud
+        cloud: job.cloud,
       });
-      
+
       // Use region field if cluster_region is not available
       const jobRegion = job.cluster_region || job.region;
-      
+
       if (jobRegion) {
         const contextKey = `kubernetes/${jobRegion}`;
         // Initialize context stats safely
-        contextStats[contextKey] = contextStats[contextKey] || { clusters: 0, jobs: 0 };
+        contextStats[contextKey] = contextStats[contextKey] || {
+          clusters: 0,
+          jobs: 0,
+        };
         contextStats[contextKey].jobs++;
-        console.log(`[DEBUG] Added job to ${contextKey}: ${contextStats[contextKey].jobs} total (using ${job.cluster_region ? 'cluster_region' : 'region'})`);
+        console.log(
+          `[DEBUG] Added job to ${contextKey}: ${contextStats[contextKey].jobs} total (using ${job.cluster_region ? 'cluster_region' : 'region'})`
+        );
       } else {
-        console.log(`[DEBUG] Job ${job.job_id} has no cluster_region or region, skipping context stats`);
+        console.log(
+          `[DEBUG] Job ${job.job_id} has no cluster_region or region, skipping context stats`
+        );
       }
     });
   });
-  
+
   return contextStats;
 }
 
@@ -428,22 +471,38 @@ export async function getWorkspaceInfrastructure() {
         );
         if (expandedClouds && Array.isArray(expandedClouds)) {
           expandedClouds.forEach((infraItem) => {
-            console.error(`[DEBUG] Processing infraItem: ${infraItem} for workspace ${workspaceName}`);
+            console.error(
+              `[DEBUG] Processing infraItem: ${infraItem} for workspace ${workspaceName}`
+            );
             if (infraItem.toLowerCase().startsWith('kubernetes/')) {
               const context = infraItem.replace(/^kubernetes\//i, '');
-              console.error(`[DEBUG] Extracted kubernetes context: ${context} from workspace ${workspaceName}`);
+              console.error(
+                `[DEBUG] Extracted kubernetes context: ${context} from workspace ${workspaceName}`
+              );
               allContextsAcrossWorkspaces.push(context);
               if (!contextWorkspaceMap[context]) {
                 contextWorkspaceMap[context] = [];
-                console.error(`[DEBUG] Created new array for context ${context}`);
+                console.error(
+                  `[DEBUG] Created new array for context ${context}`
+                );
               }
-              console.error(`[DEBUG] Current contextWorkspaceMap[${context}]:`, contextWorkspaceMap[context]);
-              console.error(`[DEBUG] Checking if ${workspaceName} is in:`, contextWorkspaceMap[context]);
+              console.error(
+                `[DEBUG] Current contextWorkspaceMap[${context}]:`,
+                contextWorkspaceMap[context]
+              );
+              console.error(
+                `[DEBUG] Checking if ${workspaceName} is in:`,
+                contextWorkspaceMap[context]
+              );
               if (!contextWorkspaceMap[context].includes(workspaceName)) {
                 contextWorkspaceMap[context].push(workspaceName);
-                console.error(`[DEBUG] Added context ${context} -> workspace ${workspaceName} to contextWorkspaceMap`);
+                console.error(
+                  `[DEBUG] Added context ${context} -> workspace ${workspaceName} to contextWorkspaceMap`
+                );
               } else {
-                console.error(`[DEBUG] Context ${context} already has workspace ${workspaceName}, skipping`);
+                console.error(
+                  `[DEBUG] Context ${context} already has workspace ${workspaceName}, skipping`
+                );
               }
               workspaceInfraData[workspaceName].contexts.push(context);
             } else if (infraItem.toLowerCase().startsWith('ssh/')) {
@@ -494,12 +553,15 @@ export async function getWorkspaceInfrastructure() {
     const validContexts = allContextsAcrossWorkspaces.filter(
       (context) => context && typeof context === 'string'
     );
-    
+
     console.error('[DEBUG] About to call getKubernetesGPUsFromContexts with:');
     console.error('[DEBUG] - validContexts:', validContexts);
     console.error('[DEBUG] - contextWorkspaceMap:', contextWorkspaceMap);
-    
-    const gpuData = await getKubernetesGPUsFromContexts(validContexts, contextWorkspaceMap);
+
+    const gpuData = await getKubernetesGPUsFromContexts(
+      validContexts,
+      contextWorkspaceMap
+    );
 
     const finalResult = {
       workspaces: workspaceInfraData,
@@ -533,7 +595,10 @@ export async function getWorkspaceInfrastructure() {
 }
 
 // Helper function to get GPU data for specific contexts
-async function getKubernetesGPUsFromContexts(contextNames, contextWorkspaceMap = {}) {
+async function getKubernetesGPUsFromContexts(
+  contextNames,
+  contextWorkspaceMap = {}
+) {
   try {
     if (!contextNames || contextNames.length === 0) {
       return {
@@ -553,18 +618,21 @@ async function getKubernetesGPUsFromContexts(contextNames, contextWorkspaceMap =
     console.error('[DEBUG] getKubernetesGPUsFromContexts called with:');
     console.error('[DEBUG] - contextNames:', contextNames);
     console.error('[DEBUG] - contextWorkspaceMap:', contextWorkspaceMap);
-    
+
     const contextNodeInfoList = await Promise.all(
       contextNames.map((context) => {
         // Find the first workspace that has access to this context
         // contextWorkspaceMap[context] is an array of workspaces that can access this context
         const workspacesForContext = contextWorkspaceMap[context];
-        const workspaceName = workspacesForContext && workspacesForContext.length > 0 
-          ? workspacesForContext[0] // Use the first available workspace
-          : null;
-        
-        console.error(`[DEBUG] Context ${context} -> workspaces: ${JSON.stringify(workspacesForContext)} -> using: ${workspaceName}`);
-        
+        const workspaceName =
+          workspacesForContext && workspacesForContext.length > 0
+            ? workspacesForContext[0] // Use the first available workspace
+            : null;
+
+        console.error(
+          `[DEBUG] Context ${context} -> workspaces: ${JSON.stringify(workspacesForContext)} -> using: ${workspaceName}`
+        );
+
         return getKubernetesPerNodeGPUs(context, workspaceName);
       })
     );
@@ -770,15 +838,19 @@ async function getKubernetesPerNodeGPUs(context, workspaceName = null) {
     const requestBody = {
       context: context,
     };
-    
+
     // Add workspace override if provided
     if (workspaceName) {
-      requestBody.override_skypilot_config = { active_workspace: workspaceName };
+      requestBody.override_skypilot_config = {
+        active_workspace: workspaceName,
+      };
     }
-    
-    console.error(`[DEBUG] getKubernetesPerNodeGPUs calling API for context ${context} with workspace ${workspaceName}`);
+
+    console.error(
+      `[DEBUG] getKubernetesPerNodeGPUs calling API for context ${context} with workspace ${workspaceName}`
+    );
     console.error(`[DEBUG] Request body:`, requestBody);
-    
+
     const response = await apiClient.post(`/kubernetes_node_info`, requestBody);
     const id =
       response.headers.get('X-Skypilot-Request-ID') ||
@@ -848,7 +920,10 @@ export async function getContextJobs(jobs) {
 
       if (contextKey) {
         // Initialize context stats safely
-        contextStats[contextKey] = contextStats[contextKey] || { clusters: 0, jobs: 0 };
+        contextStats[contextKey] = contextStats[contextKey] || {
+          clusters: 0,
+          jobs: 0,
+        };
         contextStats[contextKey].jobs += 1;
       }
     });
@@ -890,7 +965,10 @@ export async function getContextClusters(clusters) {
 
       if (contextKey) {
         // Initialize context stats safely
-        contextStats[contextKey] = contextStats[contextKey] || { clusters: 0, jobs: 0 };
+        contextStats[contextKey] = contextStats[contextKey] || {
+          clusters: 0,
+          jobs: 0,
+        };
         contextStats[contextKey].clusters += 1;
       }
     });
