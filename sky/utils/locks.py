@@ -259,11 +259,21 @@ class PostgresLock(DistributedLock):
             if not self._connection:
                 self._connection = self._get_connection()
             cursor = self._connection.cursor()
+            # unlock the lock from this session.
             cursor.execute('SELECT pg_advisory_unlock(%s)', (self._lock_key,))
             self._connection.commit()
-            cursor.execute("select pid from pg_locks join pg_stat_activity using (pid) where locktype='advisory' and granted='true' and query LIKE 'SELECT pg_try_advisory_lock(%s)'", (self._lock_key,))
-            result = cursor.fetchall()
-            logger.info(f'unlock result: {result}')
+            # find any other session that is holding the lock.
+            cursor.execute(
+                'select pid from pg_locks join pg_stat_activity using (pid) '
+                'where locktype=\'advisory\' and granted=\'true\' '
+                'and query LIKE \'SELECT pg_try_advisory_lock(%s)\'',
+                (self._lock_key,))
+            results = cursor.fetchall()
+            if results and len(results) > 0:
+                # if any other session is holding the lock, kill it.
+                for result in results:
+                    cursor.execute('SELECT pg_terminate_backend(%s)', (result[0],))
+                self._connection.commit()
         except Exception as e:
             raise RuntimeError(
                 f'Failed to force unlock postgres lock {self.lock_id}: {e}'
