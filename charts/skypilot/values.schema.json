@@ -2,18 +2,6 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
-        "nameOverride": {
-            "type": [
-                "string",
-                "null"
-            ]
-        },
-        "fullnameOverride": {
-            "type": [
-                "string",
-                "null"
-            ]
-        },
         "apiService": {
             "type": "object",
             "properties": {
@@ -253,6 +241,9 @@
                 "type": "object"
             }
         },
+        "fullnameOverride": {
+            "type": "string"
+        },
         "gcpCredentials": {
             "type": "object",
             "properties": {
@@ -449,6 +440,9 @@
                     "type": "string"
                 }
             }
+        },
+        "nameOverride": {
+            "type": "string"
         },
         "nebiusCredentials": {
             "type": "object",
