@@ -688,19 +688,16 @@ def test_helm_deploy_gke(request):
     test = smoke_tests_utils.Test(
         'helm_deploy_gke',
         [
-            f'bash tests/kubernetes/scripts/helm_gcp.sh {package_name} {helm_version}',
+            f'bash tests/kubernetes/scripts/helm_upgrade.sh {package_name} {helm_version}',
         ],
         # GKE termination requires longer timeout.
-        timeout=30 * 60)
+        timeout=50 * 60)
     smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_server
 def test_helm_deploy_okta():
-    if smoke_tests_utils.is_non_docker_remote_api_server():
-        pytest.skip(
-            'Skipping test because it is not relevant for a remotely running API server'
-        )
     test = smoke_tests_utils.Test('helm_deploy_okta', [
         f'bash tests/kubernetes/scripts/helm_okta.sh',
     ])

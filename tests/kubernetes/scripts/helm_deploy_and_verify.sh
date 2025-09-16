@@ -25,6 +25,10 @@ WEB_PASSWORD=$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
 # Create auth string
 AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
 
+# Create namespace first if it doesn't exist
+echo "Creating namespace $NAMESPACE if it doesn't exist..."
+kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
 # Setup AWS credentials from default profile
 echo "Setting up AWS credentials from default profile..."
 AWS_CREDENTIALS_FILE="$HOME/.aws/credentials"
