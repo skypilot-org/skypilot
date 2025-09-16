@@ -872,14 +872,11 @@ available_node_types:
 
                 touch /tmp/apt_ssh_setup_complete
                 echo "=== SSH setup completed ==="
-                ) > /tmp/${STEPS[0]}.log 2>&1
-                if [ "$?" -ne "0" ]; then
-                  {
+                ) > /tmp/${STEPS[0]}.log 2>&1 || {
                   echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed
                   cat /tmp/${STEPS[0]}.log
                   exit 1
-                  }
-                fi
+                }
               ) &
 
               # STEP 2: Install conda, ray and skypilot (for dependencies); start
