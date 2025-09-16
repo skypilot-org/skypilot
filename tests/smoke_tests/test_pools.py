@@ -37,6 +37,31 @@ def wait_until_pool_ready(pool_name: str,
         'done')
 
 
+def wait_until_job_running(pool_name: str,
+                           timeout: int = 30,
+                           time_between_checks: int = 5):
+    return (
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for job to succeed"; exit 1; '
+        'fi; '
+        f's=$(sky jobs queue); '
+        'echo "$s"; '
+        f'if echo "$s" | grep "{pool_name}" | grep "RUNNING"; then '
+        '  break; '
+        'fi; '
+        f'if echo "$s" | grep "{pool_name}" | grep "CANCELLED"; then '
+        '  exit 1; '
+        'fi; '
+        f'if echo "$s" | grep "{pool_name}" | grep "FAILED_CONTROLLER"; then '
+        '  exit 1; '
+        'fi; '
+        'echo "Waiting for job to be running..."; '
+        f'sleep {time_between_checks}; '
+        'done')
+
+
 def test_vllm_pool(generic_cloud: str):
     pool_config = textwrap.dedent(f"""
     envs:
@@ -162,6 +187,154 @@ def test_vllm_pool(generic_cloud: str):
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
                 teardown=f'sky jobs pool down {pool_name} -y',
+            )
+
+            smoke_tests_utils.run_one_test(test)
+
+
+def test_pool_queueing(generic_cloud: str):
+    pool_config = textwrap.dedent(f"""
+    pool:
+        # Specify the number of workers in the pool.
+        workers: 1
+
+    resources:
+        # Specify the resources for each worker, e.g. use either H100 or H200.
+        cpus: 2+
+        memory: 4GB+
+
+    setup: |
+        echo "Small pool"
+        sleep infinity
+    """)
+
+    job_config = textwrap.dedent(f"""
+    name: hi-worker
+
+    resources:
+        cpus: 2
+
+    run: |
+        echo "Hello, world!"
+    """)
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            pool_yaml.write(pool_config.encode())
+            pool_yaml.flush()
+            job_yaml.write(job_config.encode())
+            job_yaml.flush()
+
+            name = smoke_tests_utils.get_cluster_name()
+            pool_name = f'{name}-pool'
+
+            test = smoke_tests_utils.Test(
+                'test_pool_queueing',
+                [
+                    f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully created pool"',
+                    # Immediately attempt to launch the job.
+                    f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -d -y); echo "$s"; echo; echo; echo "$s" | grep "Job submitted"',
+                    # Wait to give the job time to be queued.
+                    'sleep 5',
+                    # Ensure the job is pending.
+                    f'sky jobs queue | grep {pool_name} | grep PENDING',
+                ],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud),
+                teardown=
+                f'sky jobs cancel --pool {pool_name} -y || true && sleep 3 && sky jobs pool down {pool_name} -y',
+            )
+
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server
+@pytest.mark.aws
+def test_pool_preemption(generic_cloud: str):
+    pool_config = textwrap.dedent(f"""
+    pool:
+        # Specify the number of workers in the pool.
+        workers: 1
+
+    resources:
+        # Specify the resources for each worker, e.g. use either H100 or H200.
+        cpus: 2+
+        memory: 4GB+
+
+    setup: |
+        echo "Small pool"
+    """)
+
+    job_config = textwrap.dedent(f"""
+    name: hi-worker
+
+    resources:
+        cpus: 2
+
+    run: |
+        echo "Hello, world!"
+        sleep infinity
+    """)
+
+    region = 'us-east-2'
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            pool_yaml.write(pool_config.encode())
+            pool_yaml.flush()
+            job_yaml.write(job_config.encode())
+            job_yaml.flush()
+
+            name = smoke_tests_utils.get_cluster_name()
+            pool_name = f'{name}-pool'
+            pool_name = common_utils.make_cluster_name_on_cloud(
+                pool_name, sky.AWS.max_cluster_name_length())
+            print(f'pool_name: {pool_name}')
+            # print(f'pool_name_on_cloud: {pool_name_on_cloud}')
+
+            test = smoke_tests_utils.Test(
+                'test_pool_preemption',
+                [
+                    smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                        'aws', name, skip_remote_server_check=True),
+                    f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} --infra aws/{region} -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully created pool"',
+                    wait_until_pool_ready(
+                        pool_name,
+                        timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                    # Launch the job.
+                    f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -d -y); echo "$s"; echo; echo; echo "$s" | grep "Job submitted"',
+                    # Wait until job is running.
+                    wait_until_job_running(
+                        pool_name,
+                        timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                    # Restart the cluster manually.
+                    smoke_tests_utils.run_cloud_cmd_on_cluster(
+                        name,
+                        cmd=(
+                            f'id=`aws ec2 describe-instances --region {region} --filters '
+                            f'Name=tag:ray-cluster-name,Values={pool_name}* '
+                            f'--query Reservations[].Instances[].InstanceId '
+                            f'--output text` && '
+                            f'echo "Instance ID: $id" && '
+                            f'aws ec2 stop-instances --region {region} '
+                            f'--instance-ids $id && '
+                            # Wait for the instance to be stopped before restarting.
+                            f'aws ec2 wait instance-stopped --region {region} '
+                            f'--instance-ids $id && '
+                            # Start the instance.
+                            f'aws ec2 start-instances --region {region} '
+                            f'--instance-ids $id && '
+                            # Wait for the instance to be running.
+                            f'aws ec2 wait instance-running --region {region} '
+                            f'--instance-ids $id'),
+                        skip_remote_server_check=True),
+                    # # Wait until job is running.
+                    wait_until_job_running(
+                        pool_name,
+                        timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                ],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud),
+                teardown=
+                f'sky jobs cancel --pool {pool_name} -y || true && sleep 10 && sky jobs pool down {pool_name} -y && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
             )
 
             smoke_tests_utils.run_one_test(test)
