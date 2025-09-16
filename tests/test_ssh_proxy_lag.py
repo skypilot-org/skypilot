@@ -15,6 +15,7 @@ import time
 from typing import Any, Callable, Dict
 from unittest import mock
 
+import fastapi.exceptions
 import pytest
 
 # Add parent directory to path
@@ -27,6 +28,15 @@ from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
+from sky.utils import context_utils
+
+
+async def _run_endpoint_func(func, *args, **kwargs):
+    # Simulate fast API handling, sync function will be handled at a threadpool
+    if asyncio.iscoroutinefunction(func):
+        return await func(*args, **kwargs)
+    else:
+        return await context_utils.to_thread(func, *args, **kwargs)
 
 
 class SSHLatencyMonitor:
@@ -74,6 +84,18 @@ class SSHLatencyMonitor:
 
 
 # ========== FIXTURES ==========
+@pytest.fixture(scope='session', autouse=True)
+def cleanup_db_conn():
+    """Ensure proper cleanup of db conn after tests."""
+    yield
+    if requests_lib._DB is not None:
+        asyncio.run(requests_lib._DB.close())
+
+
+@pytest.fixture(scope='session', autouse=True)
+def enable_asyncio_debug():
+    """Enable asyncio debug."""
+    os.environ['PYTHONASYNCIODEBUG'] = '1'
 
 
 @pytest.fixture
@@ -199,36 +221,46 @@ async def run_endpoint_test(
 
     monitor.clear()
 
-    # Run concurrent requests while monitoring SSH
-    ssh_task = asyncio.create_task(monitor.monitor_during_operation())
-    test_tasks = []
-    for _ in range(num_concurrent):
-        task = asyncio.create_task(endpoint_func())
-        test_tasks.append(task)
+    for _ in range(3):
+        # Run concurrent requests while monitoring SSH
+        ssh_task = asyncio.create_task(monitor.monitor_during_operation())
+        test_tasks = []
+        for _ in range(num_concurrent):
+            task = asyncio.create_task(endpoint_func())
+            test_tasks.append(task)
 
-    await asyncio.gather(*test_tasks, ssh_task, return_exceptions=True)
+        results = await asyncio.gather(*test_tasks,
+                                       ssh_task,
+                                       return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                raise result
 
-    # Calculate results
-    avg_latency = sum(monitor.latencies) / len(
-        monitor.latencies) if monitor.latencies else 0
-    degradation = monitor.get_degradation(avg_latency)
+        # Calculate results
+        avg_latency = sum(monitor.latencies) / len(
+            monitor.latencies) if monitor.latencies else 0
+        degradation = monitor.get_degradation(avg_latency)
 
-    # Report results
-    status = "❌ BLOCKING" if degradation > expected_degradation_threshold else "✅ OK"
-    print(
-        f"   Latency: {avg_latency*1000:.1f}ms ({degradation:.1f}x) - {status}")
+        # Report results
+        status = "❌ BLOCKING" if degradation > expected_degradation_threshold else "✅ OK"
+        print(
+            f"   Latency: {avg_latency*1000:.1f}ms ({degradation:.1f}x) - {status}"
+        )
+
+        blocking = degradation > expected_degradation_threshold
+        if not blocking:
+            break
 
     return {
         'latency': avg_latency,
         'degradation': degradation,
-        'blocking': degradation > expected_degradation_threshold
+        'blocking': blocking
     }
 
 
 # ========== CATEGORY 1: API REQUEST ENDPOINTS ==========
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_api_get(monitor, mock_blocking_operations):
     """Test /api/get endpoint for blocking operations."""
@@ -244,7 +276,6 @@ async def test_endpoint_api_get(monitor, mock_blocking_operations):
     assert not result['blocking'], "/api/get should NOT block the event loop"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_api_status(monitor, mock_blocking_operations):
     """Test /api/status endpoint for blocking operations."""
@@ -284,7 +315,6 @@ async def test_endpoint_api_cancel(monitor, mock_request,
         'blocking'], "/api/cancel should not block (uses schedule_request)"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_api_stream(monitor, mock_blocking_operations):
     """Test /api/stream endpoint for blocking operations."""
@@ -334,7 +364,7 @@ async def test_endpoint_launch(monitor, mock_request, mock_schedule_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_exec(monitor, mock_request, mock_schedule_request):
+async def test_endpoint_exec(monitor, mock_request):
     """Test /exec endpoint for blocking operations."""
     print("\n🔍 Testing: /exec")
 
@@ -399,10 +429,8 @@ async def test_endpoint_status(monitor, mock_request, mock_schedule_request):
             pass
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
-    # Note: This might have some blocking depending on implementation
-    # Adjust assertion based on actual behavior
-    if result['degradation'] > 5:
-        pytest.skip("/status has known blocking issues")
+    assert not result[
+        'blocking'], "/status should not block (uses schedule_request)"
 
 
 # ========== CATEGORY 3: FILE OPERATIONS ==========
@@ -440,7 +468,6 @@ async def test_endpoint_upload(monitor):
     assert not result['blocking'], "/upload should not block significantly"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_download(monitor, mock_request):
     """Test /download endpoint for blocking operations."""
@@ -466,18 +493,17 @@ async def test_endpoint_download(monitor, mock_request):
                 pass
             finally:
                 import shutil
-                shutil.rmtree(test_dir, ignore_errors=True)
+                await context_utils.to_thread(shutil.rmtree,
+                                              test_dir,
+                                              ignore_errors=True)
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=10)
-    # Download has known blocking due to zip operations
-    if result['blocking']:
-        pytest.skip("/download has known blocking due to zip operations")
+    assert not result['blocking'], "/download should not block the event loop"
 
 
 # ========== CATEGORY 4: COMPLETION ENDPOINTS ==========
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_completion_cluster(monitor):
     """Test /api/completion/cluster_name endpoint for blocking operations."""
@@ -494,12 +520,11 @@ async def test_endpoint_completion_cluster(monitor):
             except:
                 pass
 
-    result = await run_endpoint_test(test_func, monitor)
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
     assert not result[
         'blocking'], "Completion endpoints should not block the event loop"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_completion_storage(monitor):
     """Test /api/completion/storage_name endpoint for blocking operations."""
@@ -516,12 +541,15 @@ async def test_endpoint_completion_storage(monitor):
             except:
                 pass
 
-    result = await run_endpoint_test(test_func, monitor)
+    # Creating too much threads simultaneously also affects the event loop
+    # (CPU contention)
+    # TODO(aylei): should switch to async global_user_state operation instead
+    # of using to_thread
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
     assert not result[
         'blocking'], "Completion endpoints should not block the event loop"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_provision_logs(monitor):
     """Test /provision_logs endpoint for blocking operations."""
@@ -539,11 +567,14 @@ async def test_endpoint_provision_logs(monitor):
                                        None, delay=0.02)):
                 try:
                     body = payloads.ClusterNameBody(cluster_name='test')
-                    await server.provision_logs(body, follow=False)
-                except:
+                    await _run_endpoint_func(server.provision_logs,
+                                             body,
+                                             follow=False)
+                except fastapi.HTTPException:
+                    # The cluster provision log will not be actually found
                     pass
 
-    result = await run_endpoint_test(test_func, monitor)
+    result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
     assert not result[
         'blocking'], "/provision_logs should not block the event loop"
 
@@ -558,13 +589,10 @@ async def test_endpoint_users_list(monitor):
 
     async def test_func():
         # Mock the database calls that fetch users
-        with mock.patch('sky.users.server.get_all_users',
+        with mock.patch('sky.global_user_state.get_all_users',
                         side_effect=create_blocking_mock([], delay=0.2)):
-            try:
-                from sky.users import server as users_server
-                await users_server.users()
-            except:
-                pass
+            from sky.users import server as users_server
+            await _run_endpoint_func(users_server.users)
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=100)
     assert not result['blocking'], "/users should not block the event loop"
@@ -577,20 +605,16 @@ async def test_endpoint_users_export(monitor):
 
     async def test_func():
         # Mock the database calls and CSV generation
-        with mock.patch('sky.users.server.get_all_users',
+        with mock.patch('sky.global_user_state.get_all_users',
                         side_effect=create_blocking_mock([], delay=0.2)):
-            try:
-                from sky.users import server as users_server
-                await users_server.user_export()
-            except:
-                pass
+            from sky.users import server as users_server
+            await _run_endpoint_func(users_server.user_export)
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=100)
     assert not result[
         'blocking'], "/users/export should not block the event loop"
 
 
-@pytest.mark.skip(reason="Skipping due to known blocking issues")
 @pytest.mark.asyncio
 async def test_endpoint_users_service_tokens(monitor):
     """Test /users/service-account-tokens endpoint for blocking operations."""
@@ -601,13 +625,11 @@ async def test_endpoint_users_service_tokens(monitor):
         mock_req.state.auth_user = 'test_user'
 
         # Mock database operations
-        with mock.patch('sky.users.server.get_service_account_tokens',
+        with mock.patch('sky.global_user_state.get_all_service_account_tokens',
                         side_effect=create_blocking_mock([], delay=0.02)):
-            try:
-                from sky.users import server as users_server
-                await users_server.get_service_account_tokens(mock_req)
-            except:
-                pass
+            from sky.users import server as users_server
+            await _run_endpoint_func(users_server.get_service_account_tokens,
+                                     mock_req)
 
     result = await run_endpoint_test(test_func, monitor)
     assert not result[
@@ -681,20 +703,16 @@ async def test_endpoint_ssh_node_pools_list(monitor):
     print("\n🔍 Testing: /ssh_node_pools")
 
     async def test_func():
-        # Mock file I/O operations
-        with mock.patch('sky.ssh_node_pools.server.os.path.exists',
-                        side_effect=create_blocking_mock(True, delay=0.01)):
-            with mock.patch('builtins.open', mock.mock_open(read_data='{}')):
-                try:
-                    from sky.ssh_node_pools import server as ssh_pools_server
-                    await ssh_pools_server.get_ssh_node_pools()
-                except:
-                    pass
+        from sky.ssh_node_pools import server as ssh_pools_server
+
+        # Whatever, we think get_all_pools might be blocking.
+        with mock.patch('sky.ssh_node_pools.core.get_all_pools',
+                        side_effect=create_blocking_mock({}, delay=0.01)):
+            await _run_endpoint_func(ssh_pools_server.get_ssh_node_pools)
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=20)
-    # File I/O operations may cause some blocking
-    if result['degradation'] > 5:
-        pytest.skip("/ssh_node_pools has known blocking due to file I/O")
+    assert not result[
+        'blocking'], "/ssh_node_pools should not block (uses to_thread)"
 
 
 @pytest.mark.asyncio
@@ -915,7 +933,7 @@ async def test_endpoint_validate(monitor):
     print("\n🔍 Testing: /validate")
 
     async def test_func():
-        with mock.patch('sky.server.context_utils.to_thread') as mock_thread:
+        with mock.patch('sky.utils.context_utils.to_thread') as mock_thread:
             # to_thread should handle blocking properly
             async def async_validate(*args):
                 await asyncio.sleep(0.001)

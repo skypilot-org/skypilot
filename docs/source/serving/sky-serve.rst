@@ -483,6 +483,13 @@ Thus, **no user action is needed** to manage its lifecycle.
 
 You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
 
+High availability controller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyServe also supports a High Availability Controller mode when running controller on Kubernetes. This ensures your services remain available even if the controller pod experiences unexpected failures. The controller state is preserved using persistent volumes, allowing seamless recovery with minimal disruption to your running services.
+
+For more details on setting up and configuring high availability, see :ref:`High availability controller <sky-serve-high-availability-controller>`.
+
 .. _customizing-sky-serve-controller-resources:
 
 Customizing SkyServe controller resources

@@ -5,6 +5,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky.adaptors import common
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -287,14 +288,9 @@ class Cudo(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Cudo's compute service."""
-        try:
-            # pylint: disable=import-outside-toplevel,unused-import
-            from cudo_compute import cudo_api
-        except (ImportError, subprocess.CalledProcessError) as e:
-            return False, (
-                f'{cls._DEPENDENCY_HINT}\n'
-                f'{cls._INDENT_PREFIX}'
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+        if not common.can_import_modules(['cudo_api']):
+            return False, (f'{cls._DEPENDENCY_HINT}\n'
+                           f'{cls._INDENT_PREFIX}')
 
         try:
             _run_output('cudoctl --version')

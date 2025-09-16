@@ -515,6 +515,19 @@ def get_request_id(response: 'requests.Response') -> RequestId[T]:
     return RequestId[T](request_id)
 
 
+def get_stream_request_id(
+        response: 'requests.Response') -> Optional[RequestId[T]]:
+    """This is same as the above function, but just for `sdk.stream_and_get.
+    We do this because `/api/stream` may choose the latest request id, and
+    we need to keep track of that information. Request id in this case can
+    be None."""
+    handle_request_error(response)
+    request_id = response.headers.get(server_constants.STREAM_REQUEST_HEADER)
+    if request_id is not None:
+        return RequestId[T](request_id)
+    return None
+
+
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
                       foreground: bool = False,
@@ -538,12 +551,17 @@ def _start_api_server(deploy: bool = False,
 
         # Check available memory before starting the server.
         avail_mem_size_gb: float = common_utils.get_mem_size_gb()
-        if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
+        # pylint: disable=import-outside-toplevel
+        import sky.jobs.utils as job_utils
+        max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
+                      if job_utils.is_consolidation_mode() else
+                      server_constants.MIN_AVAIL_MEM_GB)
+        if avail_mem_size_gb <= max_memory:
             logger.warning(
                 f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only '
                 f'has {avail_mem_size_gb:.1f}GB memory available. '
-                f'At least {server_constants.MIN_AVAIL_MEM_GB}GB is '
-                'recommended to support higher load with better performance.'
+                f'At least {max_memory}GB is recommended to support higher '
+                'load with better performance.'
                 f'{colorama.Style.RESET_ALL}')
 
         args = [sys.executable, *API_SERVER_CMD.split()]
@@ -648,14 +666,16 @@ def _set_metrics_env_var(env: Union[Dict[str, str], os._Environ], metrics: bool,
         deploy: Whether the server is running in deploy mode, which means
             multiple processes might be running.
     """
+    del deploy
     if metrics or os.getenv(constants.ENV_VAR_SERVER_METRICS_ENABLED) == 'true':
         env[constants.ENV_VAR_SERVER_METRICS_ENABLED] = 'true'
-        if deploy:
-            metrics_dir = os.path.join(tempfile.gettempdir(), 'metrics')
-            shutil.rmtree(metrics_dir, ignore_errors=True)
-            os.makedirs(metrics_dir, exist_ok=True)
-            # Refer to https://prometheus.github.io/client_python/multiprocess/
-            env['PROMETHEUS_MULTIPROC_DIR'] = metrics_dir
+        # Always set the metrics dir since we need to collect metrics from
+        # subprocesses like the executor.
+        metrics_dir = os.path.join(tempfile.gettempdir(), 'metrics')
+        shutil.rmtree(metrics_dir, ignore_errors=True)
+        os.makedirs(metrics_dir, exist_ok=True)
+        # Refer to https://prometheus.github.io/client_python/multiprocess/
+        env['PROMETHEUS_MULTIPROC_DIR'] = metrics_dir
 
 
 def check_server_healthy(

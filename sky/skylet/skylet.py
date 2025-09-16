@@ -10,6 +10,7 @@ import sky
 from sky import sky_logging
 from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.schemas.generated import servev1_pb2_grpc
+from sky.schemas.generated import jobsv1_pb2_grpc
 from sky.skylet import constants
 from sky.skylet import events
 from sky.skylet import services
@@ -50,7 +51,8 @@ def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
 
     autostopv1_pb2_grpc.add_AutostopServiceServicer_to_server(
         services.AutostopServiceImpl(), server)
-
+    jobsv1_pb2_grpc.add_JobsServiceServicer_to_server(
+        services.JobsServiceImpl(), server)
     servev1_pb2_grpc.add_ServeServiceServicer_to_server(
         services.ServeServiceImpl(), server)
 

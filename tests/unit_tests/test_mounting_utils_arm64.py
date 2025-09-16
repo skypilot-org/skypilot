@@ -29,7 +29,7 @@ class TestMountingUtilsArm64(unittest.TestCase):
                       cmd)
         # Should install rclone for ARM64
         self.assertIn('rclone', cmd)
-        self.assertIn('ARCH_SUFFIX="arm"', cmd)
+        self.assertIn('ARCH_SUFFIX="arm64"', cmd)
         # Should contain fallback for x86_64 (goofys)
         self.assertIn('goofys', cmd)
 
@@ -59,7 +59,7 @@ class TestMountingUtilsArm64(unittest.TestCase):
                       cmd)
         # Should contain rclone mount command for ARM64
         self.assertIn('rclone mount :s3:', cmd)
-        self.assertIn('--daemon --allow-other', cmd)
+        self.assertIn('--daemon --allow-other --s3-env-auth=true', cmd)
         # Should contain goofys command for x86_64
         self.assertIn('goofys', cmd)
         self.assertIn('--stat-cache-ttl', cmd)
@@ -234,13 +234,13 @@ class TestMountingUtilsArm64(unittest.TestCase):
         """Test that ARM and x86_64 use different package suffixes."""
         install_cmd = mounting_utils.get_s3_mount_install_cmd()
 
-        # ARM64 should use "arm" suffix for rclone
-        self.assertIn('ARCH_SUFFIX="arm"', install_cmd)
+        # ARM64 should use "arm64" suffix for rclone
+        self.assertIn('ARCH_SUFFIX="arm64"', install_cmd)
         # Should have dpkg installation for ARM with arm suffix
         self.assertIn(
             f'rclone-{mounting_utils.RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb',
             install_cmd)
-        # Should have yum installation for ARM with arm suffix
+        # Should have yum installation for ARM with arm64 suffix
         self.assertIn(
             f'rclone-{mounting_utils.RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm',
             install_cmd)

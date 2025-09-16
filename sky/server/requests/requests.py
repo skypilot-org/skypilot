@@ -1,5 +1,6 @@
 """Utilities for REST API."""
 import asyncio
+import atexit
 import contextlib
 import dataclasses
 import enum
@@ -13,8 +14,10 @@ import sqlite3
 import threading
 import time
 import traceback
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import (Any, AsyncContextManager, Callable, Dict, Generator, List,
+                    NamedTuple, Optional, Tuple)
 
+import anyio
 import colorama
 import filelock
 
@@ -25,11 +28,11 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 from sky.utils import common_utils
-from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
 
@@ -298,10 +301,11 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
             prevent killing the caller request.
     """
     request_ids = [
-        request_task.request_id for request_task in get_request_tasks(
+        request_task.request_id
+        for request_task in get_request_tasks(req_filter=RequestTaskFilter(
             cluster_names=[cluster_name],
             status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-            exclude_request_names=[exclude_request_name])
+            exclude_request_names=[exclude_request_name]))
     ]
     kill_requests(request_ids)
 
@@ -321,11 +325,12 @@ def kill_requests(request_ids: Optional[List[str]] = None,
     """
     if request_ids is None:
         request_ids = [
-            request_task.request_id for request_task in get_request_tasks(
+            request_task.request_id
+            for request_task in get_request_tasks(req_filter=RequestTaskFilter(
                 user_id=user_id,
                 status=[RequestStatus.RUNNING, RequestStatus.PENDING],
                 # Avoid cancelling the cancel request itself.
-                exclude_request_names=['sky.api_cancel'])
+                exclude_request_names=['sky.api_cancel']))
         ]
     cancelled_request_ids = []
     for request_id in request_ids:
@@ -402,22 +407,42 @@ _DB = None
 _init_db_lock = threading.Lock()
 
 
+def _init_db_within_lock():
+    global _DB
+    if _DB is None:
+        db_path = os.path.expanduser(
+            server_constants.API_SERVER_REQUEST_DB_PATH)
+        pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
+        _DB = db_utils.SQLiteConn(db_path, create_table)
+
+
 def init_db(func):
     """Initialize the database."""
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        global _DB
         if _DB is not None:
             return func(*args, **kwargs)
         with _init_db_lock:
-            if _DB is None:
-                db_path = os.path.expanduser(
-                    server_constants.API_SERVER_REQUEST_DB_PATH)
-                pathlib.Path(db_path).parents[0].mkdir(parents=True,
-                                                       exist_ok=True)
-                _DB = db_utils.SQLiteConn(db_path, create_table)
+            _init_db_within_lock()
         return func(*args, **kwargs)
+
+    return wrapper
+
+
+def init_db_async(func):
+    """Async version of init_db."""
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        if _DB is not None:
+            return await func(*args, **kwargs)
+        # If _DB is not initialized, init_db_async will be blocked if there
+        # is a thread initializing _DB, this is fine since it occurs on process
+        # startup.
+        with _init_db_lock:
+            _init_db_within_lock()
+        return await func(*args, **kwargs)
 
     return wrapper
 
@@ -439,30 +464,66 @@ def request_lock_path(request_id: str) -> str:
 
 @contextlib.contextmanager
 @init_db
+@metrics_lib.time_me
 def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
-    """Get a SkyPilot API request."""
+    """Get and update a SkyPilot API request."""
     request = _get_request_no_lock(request_id)
     yield request
     if request is not None:
         _add_or_update_request_no_lock(request)
 
 
+@init_db
+@metrics_lib.time_me
+def update_request_async(
+        request_id: str) -> AsyncContextManager[Optional[Request]]:
+    """Async version of update_request.
+
+    Returns an async context manager that yields the request record and
+    persists any in-place updates upon exit.
+    """
+
+    @contextlib.asynccontextmanager
+    async def _cm():
+        request = await _get_request_no_lock_async(request_id)
+        try:
+            yield request
+        finally:
+            if request is not None:
+                await _add_or_update_request_no_lock_async(request)
+
+    return _cm()
+
+
+_get_request_sql = (f'SELECT {", ".join(REQUEST_COLUMNS)} FROM {REQUEST_TABLE} '
+                    'WHERE request_id LIKE ?')
+
+
 def _get_request_no_lock(request_id: str) -> Optional[Request]:
     """Get a SkyPilot API request."""
     assert _DB is not None
-    columns_str = ', '.join(REQUEST_COLUMNS)
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(
-            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-            'WHERE request_id LIKE ?', (request_id + '%',))
+        cursor.execute(_get_request_sql, (request_id + '%',))
         row = cursor.fetchone()
         if row is None:
             return None
     return Request.from_row(row)
 
 
+async def _get_request_no_lock_async(request_id: str) -> Optional[Request]:
+    """Async version of _get_request_no_lock."""
+    assert _DB is not None
+    async with _DB.execute_fetchall_async(_get_request_sql,
+                                          (request_id + '%',)) as rows:
+        row = rows[0] if rows else None
+        if row is None:
+            return None
+    return Request.from_row(row)
+
+
 @init_db
+@metrics_lib.time_me
 def get_latest_request_id() -> Optional[str]:
     """Get the latest request ID."""
     assert _DB is not None
@@ -475,13 +536,57 @@ def get_latest_request_id() -> Optional[str]:
 
 
 @init_db
+@metrics_lib.time_me
 def get_request(request_id: str) -> Optional[Request]:
     """Get a SkyPilot API request."""
     with filelock.FileLock(request_lock_path(request_id)):
         return _get_request_no_lock(request_id)
 
 
+@init_db_async
+@metrics_lib.time_me_async
+async def get_request_async(request_id: str) -> Optional[Request]:
+    """Async version of get_request."""
+    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+        return await _get_request_no_lock_async(request_id)
+
+
+class StatusWithMsg(NamedTuple):
+    status: RequestStatus
+    status_msg: Optional[str] = None
+
+
+@init_db_async
+@metrics_lib.time_me_async
+async def get_request_status_async(
+    request_id: str,
+    include_msg: bool = False,
+) -> Optional[StatusWithMsg]:
+    """Get the status of a request.
+
+    Args:
+        request_id: The ID of the request.
+        include_msg: Whether to include the status message.
+
+    Returns:
+        The status of the request. If the request is not found, returns
+        None.
+    """
+    assert _DB is not None
+    columns = 'status'
+    if include_msg:
+        columns += ', status_msg'
+    sql = f'SELECT {columns} FROM {REQUEST_TABLE} WHERE request_id LIKE ?'
+    async with _DB.execute_fetchall_async(sql, (request_id + '%',)) as rows:
+        if rows is None or len(rows) == 0:
+            return None
+        status = RequestStatus(rows[0][0])
+        status_msg = rows[0][1] if include_msg else None
+        return StatusWithMsg(status, status_msg)
+
+
 @init_db
+@metrics_lib.time_me
 def create_if_not_exists(request: Request) -> bool:
     """Create a SkyPilot API request if it does not exist."""
     with filelock.FileLock(request_lock_path(request.request_id)):
@@ -491,16 +596,20 @@ def create_if_not_exists(request: Request) -> bool:
         return True
 
 
-@init_db
-def get_request_tasks(
-    status: Optional[List[RequestStatus]] = None,
-    cluster_names: Optional[List[str]] = None,
-    user_id: Optional[str] = None,
-    exclude_request_names: Optional[List[str]] = None,
-    include_request_names: Optional[List[str]] = None,
-    finished_before: Optional[float] = None,
-) -> List[Request]:
-    """Get a list of requests that match the given filters.
+@init_db_async
+@metrics_lib.time_me_async
+async def create_if_not_exists_async(request: Request) -> bool:
+    """Async version of create_if_not_exists."""
+    async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
+        if await _get_request_no_lock_async(request.request_id) is not None:
+            return False
+        await _add_or_update_request_no_lock_async(request)
+        return True
+
+
+@dataclasses.dataclass
+class RequestTaskFilter:
+    """Filter for requests.
 
     Args:
         status: a list of statuses of the requests to filter on.
@@ -518,63 +627,98 @@ def get_request_tasks(
         ValueError: If both exclude_request_names and include_request_names are
             provided.
     """
-    if exclude_request_names is not None and include_request_names is not None:
-        raise ValueError(
-            'Only one of exclude_request_names or include_request_names can be '
-            'provided, not both.')
+    status: Optional[List[RequestStatus]] = None
+    cluster_names: Optional[List[str]] = None
+    user_id: Optional[str] = None
+    exclude_request_names: Optional[List[str]] = None
+    include_request_names: Optional[List[str]] = None
+    finished_before: Optional[float] = None
 
-    filters = []
-    filter_params: List[Any] = []
-    if status is not None:
-        status_list_str = ','.join(repr(status.value) for status in status)
-        filters.append(f'status IN ({status_list_str})')
-    if exclude_request_names is not None:
-        exclude_request_names_str = ','.join(
-            repr(name) for name in exclude_request_names)
-        filters.append(f'name NOT IN ({exclude_request_names_str})')
-    if cluster_names is not None:
-        cluster_names_str = ','.join(repr(name) for name in cluster_names)
-        filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
-    if user_id is not None:
-        filters.append(f'{COL_USER_ID} = ?')
-        filter_params.append(user_id)
-    if include_request_names is not None:
-        request_names_str = ','.join(
-            repr(name) for name in include_request_names)
-        filters.append(f'name IN ({request_names_str})')
-    if finished_before is not None:
-        filters.append('finished_at < ?')
-        filter_params.append(finished_before)
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
+    def __post_init__(self):
+        if (self.exclude_request_names is not None and
+                self.include_request_names is not None):
+            raise ValueError(
+                'Only one of exclude_request_names or include_request_names '
+                'can be provided, not both.')
+
+    def build_query(self) -> Tuple[str, List[Any]]:
+        """Build the SQL query and filter parameters.
+
+        Returns:
+            A tuple of (SQL, SQL parameters).
+        """
+        filters = []
+        filter_params: List[Any] = []
+        if self.status is not None:
+            status_list_str = ','.join(
+                repr(status.value) for status in self.status)
+            filters.append(f'status IN ({status_list_str})')
+        if self.exclude_request_names is not None:
+            exclude_request_names_str = ','.join(
+                repr(name) for name in self.exclude_request_names)
+            filters.append(f'name NOT IN ({exclude_request_names_str})')
+        if self.cluster_names is not None:
+            cluster_names_str = ','.join(
+                repr(name) for name in self.cluster_names)
+            filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
+        if self.user_id is not None:
+            filters.append(f'{COL_USER_ID} = ?')
+            filter_params.append(self.user_id)
+        if self.include_request_names is not None:
+            request_names_str = ','.join(
+                repr(name) for name in self.include_request_names)
+            filters.append(f'name IN ({request_names_str})')
+        if self.finished_before is not None:
+            filters.append('finished_at < ?')
+            filter_params.append(self.finished_before)
         filter_str = ' AND '.join(filters)
         if filter_str:
             filter_str = f' WHERE {filter_str}'
         columns_str = ', '.join(REQUEST_COLUMNS)
-        cursor.execute(
-            f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
-            'ORDER BY created_at DESC', filter_params)
-        rows = cursor.fetchall()
-        if rows is None:
-            return []
-    requests = []
-    for row in rows:
-        request = Request.from_row(row)
-        requests.append(request)
-    return requests
+        return (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
+                'ORDER BY created_at DESC'), filter_params
 
 
 @init_db
-def get_api_request_ids_start_with(incomplete: str) -> List[str]:
-    """Get a list of API request ids for shell completion."""
+@metrics_lib.time_me
+def get_request_tasks(req_filter: RequestTaskFilter) -> List[Request]:
+    """Get a list of requests that match the given filters.
+
+    Args:
+        req_filter: the filter to apply to the requests. Refer to
+            RequestTaskFilter for the details.
+    """
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        # Prioritize alive requests (PENDING, RUNNING) over finished ones,
-        # then order by creation time (newest first) within each category.
-        cursor.execute(
-            f"""SELECT request_id FROM {REQUEST_TABLE}
+        cursor.execute(*req_filter.build_query())
+        rows = cursor.fetchall()
+        if rows is None:
+            return []
+    return [Request.from_row(row) for row in rows]
+
+
+@init_db_async
+@metrics_lib.time_me_async
+async def get_request_tasks_async(
+        req_filter: RequestTaskFilter) -> List[Request]:
+    """Async version of get_request_tasks."""
+    assert _DB is not None
+    async with _DB.execute_fetchall_async(*req_filter.build_query()) as rows:
+        if not rows:
+            return []
+    return [Request.from_row(row) for row in rows]
+
+
+@init_db_async
+@metrics_lib.time_me_async
+async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
+    """Get a list of API request ids for shell completion."""
+    assert _DB is not None
+    # Prioritize alive requests (PENDING, RUNNING) over finished ones,
+    # then order by creation time (newest first) within each category.
+    async with _DB.execute_fetchall_async(
+        f"""SELECT request_id FROM {REQUEST_TABLE}
                 WHERE request_id LIKE ?
                 ORDER BY
                     CASE
@@ -582,21 +726,30 @@ def get_api_request_ids_start_with(incomplete: str) -> List[str]:
                         ELSE 1
                     END,
                     created_at DESC
-                LIMIT 1000""", (f'{incomplete}%',))
-        return [row[0] for row in cursor.fetchall()]
+                LIMIT 1000""", (f'{incomplete}%',)) as rows:
+        if not rows:
+            return []
+    return [row[0] for row in rows]
+
+
+_add_or_update_request_sql = (f'INSERT OR REPLACE INTO {REQUEST_TABLE} '
+                              f'({", ".join(REQUEST_COLUMNS)}) VALUES '
+                              f'({", ".join(["?"] * len(REQUEST_COLUMNS))})')
 
 
 def _add_or_update_request_no_lock(request: Request):
     """Add or update a REST request into the database."""
-    row = request.to_row()
-    key_str = ', '.join(REQUEST_COLUMNS)
-    fill_str = ', '.join(['?'] * len(row))
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(
-            f'INSERT OR REPLACE INTO {REQUEST_TABLE} ({key_str}) '
-            f'VALUES ({fill_str})', row)
+        cursor.execute(_add_or_update_request_sql, request.to_row())
+
+
+async def _add_or_update_request_no_lock_async(request: Request):
+    """Async version of _add_or_update_request_no_lock."""
+    assert _DB is not None
+    await _DB.execute_and_commit_async(_add_or_update_request_sql,
+                                       request.to_row())
 
 
 def set_request_failed(request_id: str, e: BaseException) -> None:
@@ -630,17 +783,16 @@ def set_request_cancelled(request_id: str) -> None:
 
 
 @init_db
-def _delete_requests(requests: List[Request]):
+@metrics_lib.time_me
+async def _delete_requests(requests: List[Request]):
     """Clean up requests by their IDs."""
     id_list_str = ','.join(repr(req.request_id) for req in requests)
     assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(
-            f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+    await _DB.execute_and_commit_async(
+        f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
 
 
-def clean_finished_requests_with_retention(retention_seconds: int):
+async def clean_finished_requests_with_retention(retention_seconds: int):
     """Clean up finished requests older than the retention period.
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
@@ -650,15 +802,19 @@ def clean_finished_requests_with_retention(retention_seconds: int):
         retention_seconds: Requests older than this many seconds will be
             deleted.
     """
-    reqs = get_request_tasks(status=RequestStatus.finished_status(),
-                             finished_before=time.time() - retention_seconds)
+    reqs = await get_request_tasks_async(
+        req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
+                                     finished_before=time.time() -
+                                     retention_seconds))
 
-    subprocess_utils.run_in_parallel(
-        func=lambda req: req.log_path.unlink(missing_ok=True),
-        args=reqs,
-        num_threads=len(reqs))
+    futs = []
+    for req in reqs:
+        futs.append(
+            asyncio.create_task(
+                anyio.Path(req.log_path.absolute()).unlink(missing_ok=True)))
+    await asyncio.gather(*futs)
 
-    _delete_requests(reqs)
+    await _delete_requests(reqs)
 
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.
@@ -678,12 +834,21 @@ async def requests_gc_daemon():
         try:
             # Negative value disables the requests GC
             if retention_seconds >= 0:
-                clean_finished_requests_with_retention(retention_seconds)
+                await clean_finished_requests_with_retention(retention_seconds)
         except asyncio.CancelledError:
             logger.info('Requests GC daemon cancelled')
             break
         except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'Error running requests GC daemon: {e}')
+            logger.error(f'Error running requests GC daemon: {e}'
+                         f'traceback: {traceback.format_exc()}')
         # Run the daemon at most once every hour to avoid too frequent
         # cleanup.
         await asyncio.sleep(max(retention_seconds, 3600))
+
+
+def _cleanup():
+    if _DB is not None:
+        asyncio.run(_DB.close())
+
+
+atexit.register(_cleanup)

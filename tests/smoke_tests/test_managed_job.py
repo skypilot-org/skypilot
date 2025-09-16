@@ -147,6 +147,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
 @pytest.mark.no_vast  # The pipeline.yaml uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_job_pipeline(generic_cloud: str):
     """Test a job pipeline."""
@@ -202,8 +203,10 @@ def test_job_pipeline(generic_cloud: str):
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not support spot instances
+@pytest.mark.no_vast  # Test fails to stay within a single cloud
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_failed_setup(generic_cloud: str):
     """Test managed job with failed setup."""
@@ -236,6 +239,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
 @pytest.mark.no_vast  # Test fails to stay within a single cloud
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
     """Test managed job with failed setup for a pipeline."""
@@ -480,6 +484,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_recovery_default_resources(generic_cloud: str):
     """Test managed job recovery for default resources."""
@@ -830,6 +835,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
@@ -926,6 +932,9 @@ def test_managed_jobs_storage(generic_cloud: str):
             'output.txt',
             storage_account_name=storage_account_name)
         az_output_check_cmd = f'{az_check_file_count} | grep 1'
+        nebius_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
+            storage_lib.StoreType.NEBIUS, output_storage_name, 'output.txt')
+        nebius_output_check_cmd = f'{nebius_check_file_count} | grep 1'
         cloud_dependencies_setup_cmd = ' && '.join(
             controller_utils._get_cloud_dependencies_installation_commands(
                 controller_utils.Controllers.JOBS_CONTROLLER))
@@ -937,7 +946,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name, f'{cloud_dependencies_setup_cmd}; '
             f'{try_activating_gcp_service_account}; '
-            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd} || {az_output_check_cmd}; }}'
+            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd} || {az_output_check_cmd} || {nebius_output_check_cmd}; }}'
         )
         use_spot = ' --no-use-spot'
         storage_removed_check_s3_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
@@ -1150,7 +1159,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
             # Test that logs are still available after the job finishes.
             'unset SKYPILOT_DEBUG; s=$(sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
             # Make sure we skip the unnecessary logs.
-            'echo "$s" | head -n1 | grep "Waiting for"',
+            'echo "$s" | head -n2 | grep "Waiting for"',
         ],
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -1212,15 +1221,32 @@ def test_managed_jobs_logs_sync_down(generic_cloud: str):
 def _get_ha_kill_test(name: str, generic_cloud: str,
                       status: sky.ManagedJobStatus, first_timeout: int,
                       second_timeout: int) -> smoke_tests_utils.Test:
+    skypilot_config_path = 'tests/test_yamls/managed_jobs_ha_config.yaml'
+
+    pytest_config_file_override = smoke_tests_utils.pytest_config_file_override(
+    )
+    if pytest_config_file_override is not None:
+        with open(pytest_config_file_override, 'r') as f:
+            base_config = f.read()
+        with open(skypilot_config_path, 'r') as f:
+            ha_config = f.read()
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                         delete=False) as f:
+            f.write(base_config)
+            f.write(ha_config)
+            f.flush()
+            skypilot_config_path = f.name
+
     return smoke_tests_utils.Test(
         f'test-managed-jobs-ha-kill-{status.value.lower()}',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(generic_cloud, name),
             f'sky jobs launch -n {name} --infra {generic_cloud} '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}', job_status=[status], timeout=first_timeout),
-            smoke_tests_utils.kill_and_wait_controller('jobs'),
+            smoke_tests_utils.kill_and_wait_controller(name, 'jobs'),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}',
@@ -1230,9 +1256,7 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "SUCCEEDED"',
         ],
         f'sky jobs cancel -y -n {name}',
-        env={
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/managed_jobs_ha_config.yaml'
-        },
+        env={skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_path},
         timeout=20 * 60,
     )
 
@@ -1240,6 +1264,11 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 def test_managed_jobs_ha_kill_running(generic_cloud: str):
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
+
     name = smoke_tests_utils.get_cluster_name()
     test = _get_ha_kill_test(
         name,
@@ -1254,6 +1283,10 @@ def test_managed_jobs_ha_kill_running(generic_cloud: str):
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 def test_managed_jobs_ha_kill_starting(generic_cloud: str):
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
     name = smoke_tests_utils.get_cluster_name()
     test = _get_ha_kill_test(
         name,

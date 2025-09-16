@@ -339,6 +339,7 @@ def test_skyserve_oci_http():
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
+@pytest.mark.no_seeweb  # Seeweb  does not support T4
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
@@ -417,6 +418,7 @@ def test_skyserve_spot_recovery():
 @pytest.mark.no_do
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = smoke_tests_utils.Test(
@@ -928,6 +930,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
@@ -1140,11 +1143,11 @@ def test_user_dependencies(generic_cloud: str):
             f'sky status -r {name} | grep UP',
             f'sky exec {name} "echo bye"',
             f'sky logs {name} 3 --status',
-            f'sky launch -c {name} tests/test_yamls/different_default_conda_env.yaml',
+            f'sky launch -y -c {name} tests/test_yamls/different_default_conda_env.yaml',
             f'sky logs {name} 4 --status',
             # Launch again to test the default env does not affect SkyPilot
             # runtime setup
-            f'sky launch -c {name} "python --version 2>&1 | grep \'Python 3.6\' || exit 1"',
+            f'sky launch -y -c {name} "python --version 2>&1 | grep \'Python 3.6\' || exit 1"',
             f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
@@ -1158,10 +1161,15 @@ def test_user_dependencies(generic_cloud: str):
 @pytest.mark.serve
 def test_skyserve_ha_kill_after_ready():
     """Test HA recovery when killing controller after replicas are READY."""
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-after-ready',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for ready
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
@@ -1170,7 +1178,7 @@ def test_skyserve_ha_kill_after_ready():
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl $endpoint | grep "Hi, SkyPilot here"',
             # Kill controller and verify recovery
-            smoke_tests_utils.kill_and_wait_controller('serve'),
+            smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
             # Verify service remains accessible after controller recovery
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1190,10 +1198,15 @@ def test_skyserve_ha_kill_after_ready():
 @pytest.mark.serve
 def test_skyserve_ha_kill_during_provision():
     """Test HA recovery when killing controller during PROVISIONING."""
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-provision',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for provisioning
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             # Wait for service to enter PROVISIONING state
@@ -1204,7 +1217,7 @@ def test_skyserve_ha_kill_during_provision():
             f'  s=$(sky serve status {name}); '
             'done; echo "$s"',
             # Kill controller during provisioning
-            smoke_tests_utils.kill_and_wait_controller('serve'),
+            smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
             # Verify service eventually becomes ready
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1229,18 +1242,23 @@ def test_skyserve_ha_kill_during_provision():
 @pytest.mark.serve
 def test_skyserve_ha_kill_during_pending():
     """Test HA recovery when killing controller during PENDING."""
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
     name = _get_service_name()
     replica_cluster_name = smoke_tests_utils.get_replica_cluster_name_on_gcp(
         name, 1)
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-pending',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for pending
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             f'{_SERVE_STATUS_WAIT.format(name=name)}; ',
             _check_replica_in_status(name, [(1, False, 'PENDING')]),
             # Kill controller during pending
-            smoke_tests_utils.kill_and_wait_controller('serve'),
+            smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
             # Verify service eventually becomes ready and accessible
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1265,12 +1283,17 @@ def test_skyserve_ha_kill_during_pending():
 @pytest.mark.serve
 def test_skyserve_ha_kill_during_shutdown():
     """Test HA recovery when killing controller during replica shutdown."""
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
     name = _get_service_name()
     replica_cluster_name = smoke_tests_utils.get_replica_cluster_name_on_gcp(
         name, 1)
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-shutdown',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch service and wait for ready
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
@@ -1290,7 +1313,7 @@ def test_skyserve_ha_kill_during_shutdown():
             f'  s=$(sky serve status {name}); '
             'done; echo "$s"',
             # Kill controller during shutdown
-            smoke_tests_utils.kill_and_wait_controller('serve'),
+            smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
             # Even after the pod ready, `serve status` may return `Failed to connect to serve controller, please try again later.`
             # So we need to wait for a while before checking the status again.
             'sleep 10',
