@@ -14,6 +14,7 @@ import tempfile
 import time
 from typing import Any, Callable, Dict
 from unittest import mock
+import uuid
 
 import fastapi.exceptions
 import pytest
@@ -25,7 +26,6 @@ from sky import global_user_state
 from sky.data import storage_utils
 from sky.server import server
 from sky.server import stream_utils
-from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.utils import context_utils
@@ -84,12 +84,26 @@ class SSHLatencyMonitor:
 
 
 # ========== FIXTURES ==========
-@pytest.fixture(scope='session', autouse=True)
-def cleanup_db_conn():
-    """Ensure proper cleanup of db conn after tests."""
-    yield
-    if requests_lib._DB is not None:
-        asyncio.run(requests_lib._DB.close())
+@pytest.fixture(scope='function', autouse=True)
+def isolated_database(tmp_path):
+    """Create an isolated database for each test to prevent interference."""
+    # Create temporary paths for database and logs
+    temp_db_path = tmp_path / "requests.db"
+    temp_log_path = tmp_path / "logs"
+    temp_log_path.mkdir()
+
+    # Patch the database path and log path constants
+    with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
+                    str(temp_db_path)):
+        with mock.patch('sky.server.requests.requests.REQUEST_LOG_PATH_PREFIX',
+                        str(temp_log_path)):
+            # Reset the global database variable to force re-initialization
+            requests_lib._DB = None
+            yield
+            # Clean up after the test
+            if requests_lib._DB is not None:
+                asyncio.run(requests_lib._DB.close())
+                requests_lib._DB = None
 
 
 @pytest.fixture(scope='session', autouse=True)
@@ -113,73 +127,15 @@ async def monitor_with_baseline():
     return m
 
 
-@pytest.fixture
 def mock_request():
     """Create mock request object."""
     mock_req = mock.MagicMock()
-    mock_req.state.request_id = 'test_req_0000'
+    mock_req.state.request_id = str(uuid.uuid4())
     mock_req.state.auth_user = None
     mock_req.headers = {}
     mock_req.cookies = {}
     mock_req.query_params = {}
     return mock_req
-
-
-@pytest.fixture
-def mock_request_obj():
-    """Create mock request database object."""
-    obj = mock.MagicMock()
-    obj.request_id = 'test_req_0000'
-    obj.status = requests_lib.RequestStatus.SUCCEEDED
-    obj.should_retry = False
-    obj.get_error = lambda: None
-    obj.encode = lambda: mock.MagicMock(model_dump=lambda: {})
-    obj.readable_encode = lambda: {}
-    return obj
-
-
-@pytest.fixture
-def mock_blocking_operations(mock_request_obj):
-    """Mock common blocking operations with simulated delays."""
-    patches = []
-
-    # Mock requests.get_request (blocking version - still used by some endpoints)
-    get_request_patch = mock.patch('sky.server.requests.requests.get_request',
-                                   side_effect=create_blocking_mock(
-                                       mock_request_obj,
-                                       delay=0.02,
-                                       name='get_request'))
-    patches.append(get_request_patch)
-
-    # Mock requests.get_request_async (async version - should NOT block)
-    async def async_get_request(*args, **kwargs):
-        await asyncio.sleep(0.02)  # Async delay that doesn't block
-        return mock_request_obj
-
-    get_request_async_patch = mock.patch(
-        'sky.server.requests.requests.get_request_async',
-        side_effect=async_get_request)
-    patches.append(get_request_async_patch)
-
-    # Mock requests.get_request_tasks (blocking version - still used by api_status)
-    get_tasks_patch = mock.patch(
-        'sky.server.requests.requests.get_request_tasks',
-        # Mock a significant amount of time to load all requests
-        side_effect=create_blocking_mock([mock_request_obj],
-                                         delay=0.2,
-                                         name='get_request_tasks'))
-    patches.append(get_tasks_patch)
-
-    # Start all patches
-    for patch in patches:
-        patch.start()
-
-    try:
-        yield
-    finally:
-        # Stop all patches
-        for patch in patches:
-            patch.stop()
 
 
 # ========== HELPER FUNCTIONS ==========
@@ -254,53 +210,63 @@ async def run_endpoint_test(
 # ========== CATEGORY 1: API REQUEST ENDPOINTS ==========
 
 
+def dummy():
+    return None
+
+
+def build_request_obj(id: str) -> requests_lib.Request:
+    return requests_lib.Request(request_id=id,
+                                name='test',
+                                entrypoint=dummy,
+                                request_body=payloads.RequestBody(),
+                                created_at=time.time(),
+                                user_id='test',
+                                status=requests_lib.RequestStatus.SUCCEEDED)
+
+
 @pytest.mark.asyncio
-async def test_endpoint_api_get(monitor, mock_blocking_operations):
+async def test_endpoint_api_get(monitor):
     """Test /api/get endpoint for blocking operations."""
     print("\n🔍 Testing: /api/get")
 
+    await requests_lib.create_if_not_exists_async(build_request_obj('test_req'))
+
     async def test_func():
-        try:
-            await server.api_get('test_req')
-        except:
-            pass
+        await server.api_get('test_req')
 
     result = await run_endpoint_test(test_func, monitor)
     assert not result['blocking'], "/api/get should NOT block the event loop"
 
 
 @pytest.mark.asyncio
-async def test_endpoint_api_status(monitor, mock_blocking_operations):
+async def test_endpoint_api_status(monitor):
     """Test /api/status endpoint for blocking operations."""
     print("\n🔍 Testing: /api/status")
 
+    await requests_lib.create_if_not_exists_async(build_request_obj('test1'))
+    await requests_lib.create_if_not_exists_async(build_request_obj('test2'))
+
     async def test_func():
-        try:
-            # This should call get_request_tasks (which should block for 1s)
-            # Must pass None explicitly since we're not going through FastAPI
-            await server.api_status(request_ids=None, all_status=False)
-            # This should call get_request (which should block for 0.02s each)
-            await server.api_status(request_ids=['test1', 'test2'],
-                                    all_status=False)
-        except Exception as e:
-            print(f"      Error in test_func: {e}")
-            pass
+        # This should call get_request_tasks (which should block for 1s)
+        # Must pass None explicitly since we're not going through FastAPI
+        await server.api_status(request_ids=None, all_status=False)
+        # This should call get_request (which should block for 0.02s each)
+        await server.api_status(request_ids=['test1', 'test2'],
+                                all_status=False)
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=20)
     assert not result['blocking'], "/api/status should NOT block the event loop"
 
 
 @pytest.mark.asyncio
-async def test_endpoint_api_cancel(monitor, mock_request):
+async def test_endpoint_api_cancel(monitor):
     """Test /api/cancel endpoint for blocking operations."""
     print("\n🔍 Testing: /api/cancel")
+    await requests_lib.create_if_not_exists_async(build_request_obj('test1'))
 
     async def test_func():
-        try:
-            body = payloads.RequestCancelBody(request_ids=['test1'])
-            await server.api_cancel(mock_request, body)
-        except:
-            pass
+        body = payloads.RequestCancelBody(request_ids=['test1'])
+        await server.api_cancel(mock_request(), body)
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
     assert not result[
@@ -308,27 +274,24 @@ async def test_endpoint_api_cancel(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_api_stream(monitor, mock_blocking_operations):
+async def test_endpoint_api_stream(monitor):
     """Test /api/stream endpoint for blocking operations."""
     print("\n🔍 Testing: /api/stream")
 
+    await requests_lib.create_if_not_exists_async(build_request_obj('test'))
     # Create test log file
     log_file = tempfile.NamedTemporaryFile(suffix='.log', delete=False)
     log_file.write(b'Test log\n' * 10)
     log_file.close()
 
     async def test_func():
-        try:
-            count = 0
-            async for _ in stream_utils.log_streamer('test',
-                                                     pathlib.Path(
-                                                         log_file.name),
-                                                     follow=False):
-                count += 1
-                if count > 3:
-                    break
-        except:
-            pass
+        count = 0
+        async for _ in stream_utils.log_streamer('test',
+                                                 pathlib.Path(log_file.name),
+                                                 follow=False):
+            count += 1
+            if count > 3:
+                break
 
     result = await run_endpoint_test(test_func, monitor)
     os.unlink(log_file.name)
@@ -339,14 +302,14 @@ async def test_endpoint_api_stream(monitor, mock_blocking_operations):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_launch(monitor, mock_request):
+async def test_endpoint_launch(monitor):
     """Test /launch endpoint for blocking operations."""
     print("\n🔍 Testing: /launch")
 
     async def test_func():
         try:
             body = payloads.LaunchBody(dag='test', env_vars={})
-            await server.launch(body, mock_request)
+            await server.launch(body, mock_request())
         except:
             pass
 
@@ -356,7 +319,7 @@ async def test_endpoint_launch(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_exec(monitor, mock_request):
+async def test_endpoint_exec(monitor):
     """Test /exec endpoint for blocking operations."""
     print("\n🔍 Testing: /exec")
 
@@ -365,7 +328,7 @@ async def test_endpoint_exec(monitor, mock_request):
             body = payloads.ExecBody(cluster_name='test',
                                      dag='test',
                                      env_vars={})
-            await server.exec(mock_request, body)
+            await server.exec(mock_request(), body)
         except:
             pass
 
@@ -375,14 +338,14 @@ async def test_endpoint_exec(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_stop(monitor, mock_request):
+async def test_endpoint_stop(monitor):
     """Test /stop endpoint for blocking operations."""
     print("\n🔍 Testing: /stop")
 
     async def test_func():
         try:
             body = payloads.StopOrDownBody(cluster_name='test', env_vars={})
-            await server.stop(mock_request, body)
+            await server.stop(mock_request(), body)
         except:
             pass
 
@@ -392,14 +355,14 @@ async def test_endpoint_stop(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_down(monitor, mock_request):
+async def test_endpoint_down(monitor):
     """Test /down endpoint for blocking operations."""
     print("\n🔍 Testing: /down")
 
     async def test_func():
         try:
             body = payloads.StopOrDownBody(cluster_name='test', env_vars={})
-            await server.down(mock_request, body)
+            await server.down(mock_request(), body)
         except:
             pass
 
@@ -409,14 +372,14 @@ async def test_endpoint_down(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_status(monitor, mock_request):
+async def test_endpoint_status(monitor):
     """Test /status endpoint for blocking operations."""
     print("\n🔍 Testing: /status")
 
     async def test_func():
         try:
             body = payloads.StatusBody()
-            await server.status(mock_request, body)
+            await server.status(mock_request(), body)
         except:
             pass
 
@@ -461,7 +424,7 @@ async def test_endpoint_upload(monitor):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_download(monitor, mock_request):
+async def test_endpoint_download(monitor):
     """Test /download endpoint for blocking operations."""
     print("\n🔍 Testing: /download")
 
@@ -473,14 +436,14 @@ async def test_endpoint_download(monitor, mock_request):
                                                                 delay=0.025)):
             test_dir = tempfile.mkdtemp(prefix='test_')
             try:
-                mock_request.query_params = {'relative': 'home'}
+                mock_request().query_params = {'relative': 'home'}
                 body = payloads.DownloadBody(
                     folder_paths=[test_dir],
                     env_vars={'SKYPILOT_USER_ID': 'test'})
                 with mock.patch(
                         'sky.server.common.api_server_user_logs_dir_prefix',
                         return_value=pathlib.Path(test_dir)):
-                    await server.download(body, mock_request)
+                    await server.download(body, mock_request())
             except:
                 pass
             finally:
@@ -632,14 +595,14 @@ async def test_endpoint_users_service_tokens(monitor):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_workspaces_list(monitor, mock_request):
+async def test_endpoint_workspaces_list(monitor):
     """Test /workspaces endpoint for blocking operations."""
     print("\n🔍 Testing: /workspaces")
 
     async def test_func():
         try:
             from sky.workspaces import server as workspaces_server
-            await workspaces_server.get(mock_request)
+            await workspaces_server.get(mock_request())
         except:
             pass
 
@@ -649,7 +612,7 @@ async def test_endpoint_workspaces_list(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_workspaces_create(monitor, mock_request):
+async def test_endpoint_workspaces_create(monitor):
     """Test /workspaces/create endpoint for blocking operations."""
     print("\n🔍 Testing: /workspaces/create")
 
@@ -657,7 +620,7 @@ async def test_endpoint_workspaces_create(monitor, mock_request):
         try:
             from sky.workspaces import server as workspaces_server
             body = payloads.CreateWorkspaceBody(name='test')
-            await workspaces_server.create(mock_request, body)
+            await workspaces_server.create(mock_request(), body)
         except:
             pass
 
@@ -667,14 +630,14 @@ async def test_endpoint_workspaces_create(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_workspaces_config(monitor, mock_request):
+async def test_endpoint_workspaces_config(monitor):
     """Test /workspaces/config endpoint for blocking operations."""
     print("\n🔍 Testing: /workspaces/config")
 
     async def test_func():
         try:
             from sky.workspaces import server as workspaces_server
-            await workspaces_server.get_config(mock_request)
+            await workspaces_server.get_config(mock_request())
         except:
             pass
 
@@ -705,7 +668,7 @@ async def test_endpoint_ssh_node_pools_list(monitor):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_ssh_node_pools_deploy(monitor, mock_request):
+async def test_endpoint_ssh_node_pools_deploy(monitor):
     """Test /ssh_node_pools/deploy endpoint for blocking operations."""
     print("\n🔍 Testing: /ssh_node_pools/deploy")
 
@@ -714,7 +677,7 @@ async def test_endpoint_ssh_node_pools_deploy(monitor, mock_request):
             from sky.ssh_node_pools import server as ssh_pools_server
             body = payloads.SSHNodePoolDeployBody(pool_names=['test'])
             await ssh_pools_server.deploy_ssh_node_pool_general(
-                mock_request, body)
+                mock_request(), body)
         except:
             pass
 
@@ -727,14 +690,14 @@ async def test_endpoint_ssh_node_pools_deploy(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_volumes_list(monitor, mock_request):
+async def test_endpoint_volumes_list(monitor):
     """Test /volumes endpoint for blocking operations."""
     print("\n🔍 Testing: /volumes")
 
     async def test_func():
         try:
             from sky.volumes.server import server as volumes_server
-            await volumes_server.volume_list(mock_request)
+            await volumes_server.volume_list(mock_request())
         except:
             pass
 
@@ -744,7 +707,7 @@ async def test_endpoint_volumes_list(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_volumes_delete(monitor, mock_request):
+async def test_endpoint_volumes_delete(monitor):
     """Test /volumes/delete endpoint for blocking operations."""
     print("\n🔍 Testing: /volumes/delete")
 
@@ -752,7 +715,7 @@ async def test_endpoint_volumes_delete(monitor, mock_request):
         try:
             from sky.volumes.server import server as volumes_server
             body = payloads.VolumeDeleteBody(volume_names=['test-volume'])
-            await volumes_server.volume_delete(mock_request, body)
+            await volumes_server.volume_delete(mock_request(), body)
         except:
             pass
 
@@ -762,7 +725,7 @@ async def test_endpoint_volumes_delete(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_volumes_apply(monitor, mock_request):
+async def test_endpoint_volumes_apply(monitor):
     """Test /volumes/apply endpoint for blocking operations."""
     print("\n🔍 Testing: /volumes/apply")
 
@@ -775,7 +738,7 @@ async def test_endpoint_volumes_apply(monitor, mock_request):
                 cloud='aws',
                 volume_type=volume.VolumeType.EBS.value,
                 config={})
-            await volumes_server.volume_apply(mock_request, body)
+            await volumes_server.volume_apply(mock_request(), body)
         except:
             pass
 
@@ -788,7 +751,7 @@ async def test_endpoint_volumes_apply(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_jobs_launch(monitor, mock_request):
+async def test_endpoint_jobs_launch(monitor):
     """Test /jobs/launch endpoint for blocking operations."""
     print("\n🔍 Testing: /jobs/launch")
 
@@ -798,7 +761,7 @@ async def test_endpoint_jobs_launch(monitor, mock_request):
             body = payloads.JobsLaunchBody(managed_job_name='test-job',
                                            dag='test',
                                            env_vars={})
-            await jobs_server.launch(mock_request, body)
+            await jobs_server.launch(mock_request(), body)
         except:
             pass
 
@@ -808,7 +771,7 @@ async def test_endpoint_jobs_launch(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_jobs_queue(monitor, mock_request):
+async def test_endpoint_jobs_queue(monitor):
     """Test /jobs/queue endpoint for blocking operations."""
     print("\n🔍 Testing: /jobs/queue")
 
@@ -816,7 +779,7 @@ async def test_endpoint_jobs_queue(monitor, mock_request):
         try:
             from sky.jobs.server import server as jobs_server
             body = payloads.JobsQueueBody(env_vars={})
-            await jobs_server.queue(mock_request, body)
+            await jobs_server.queue(mock_request(), body)
         except:
             pass
 
@@ -826,7 +789,7 @@ async def test_endpoint_jobs_queue(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_jobs_cancel(monitor, mock_request):
+async def test_endpoint_jobs_cancel(monitor):
     """Test /jobs/cancel endpoint for blocking operations."""
     print("\n🔍 Testing: /jobs/cancel")
 
@@ -835,7 +798,7 @@ async def test_endpoint_jobs_cancel(monitor, mock_request):
             from sky.jobs.server import server as jobs_server
             body = payloads.JobsCancelBody(managed_job_name='test-job',
                                            env_vars={})
-            await jobs_server.cancel(mock_request, body)
+            await jobs_server.cancel(mock_request(), body)
         except:
             pass
 
@@ -848,7 +811,7 @@ async def test_endpoint_jobs_cancel(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_serve_up(monitor, mock_request):
+async def test_endpoint_serve_up(monitor):
     """Test /serve/up endpoint for blocking operations."""
     print("\n🔍 Testing: /serve/up")
 
@@ -858,7 +821,7 @@ async def test_endpoint_serve_up(monitor, mock_request):
             body = payloads.ServeUpBody(service_name='test-service',
                                         dag='test',
                                         env_vars={})
-            await serve_server.up(mock_request, body)
+            await serve_server.up(mock_request(), body)
         except:
             pass
 
@@ -868,7 +831,7 @@ async def test_endpoint_serve_up(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_serve_down(monitor, mock_request):
+async def test_endpoint_serve_down(monitor):
     """Test /serve/down endpoint for blocking operations."""
     print("\n🔍 Testing: /serve/down")
 
@@ -877,7 +840,7 @@ async def test_endpoint_serve_down(monitor, mock_request):
             from sky.serve.server import server as serve_server
             body = payloads.ServeDownBody(service_names=['test-service'],
                                           env_vars={})
-            await serve_server.down(mock_request, body)
+            await serve_server.down(mock_request(), body)
         except:
             pass
 
@@ -887,7 +850,7 @@ async def test_endpoint_serve_down(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_serve_status(monitor, mock_request):
+async def test_endpoint_serve_status(monitor):
     """Test /serve/status endpoint for blocking operations."""
     print("\n🔍 Testing: /serve/status")
 
@@ -895,7 +858,7 @@ async def test_endpoint_serve_status(monitor, mock_request):
         try:
             from sky.serve.server import server as serve_server
             body = payloads.ServeStatusBody(env_vars={})
-            await serve_server.status(mock_request, body)
+            await serve_server.status(mock_request(), body)
         except:
             pass
 
@@ -931,14 +894,14 @@ async def test_endpoint_validate(monitor):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_optimize(monitor, mock_request):
+async def test_endpoint_optimize(monitor):
     """Test /optimize endpoint for blocking operations."""
     print("\n🔍 Testing: /optimize")
 
     async def test_func():
         try:
             body = payloads.OptimizeBody(dag='test', env_vars={})
-            await server.optimize(body, mock_request)
+            await server.optimize(body, mock_request())
         except:
             pass
 

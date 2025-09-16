@@ -641,6 +641,7 @@ async def schedule_request(request_id: str,
                           request_cluster_name, schedule_type,
                           is_skypilot_system)
 
+    @metrics_lib.time_me
     def enqueue():
         input_tuple = (request_id, ignore_return_value, retryable)
         logger.info(f'Queuing request: {request_id}')
