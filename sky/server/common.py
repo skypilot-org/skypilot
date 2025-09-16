@@ -515,6 +515,19 @@ def get_request_id(response: 'requests.Response') -> RequestId[T]:
     return RequestId[T](request_id)
 
 
+def get_stream_request_id(
+        response: 'requests.Response') -> Optional[RequestId[T]]:
+    """This is same as the above function, but just for `sdk.stream_and_get.
+    We do this because `/api/stream` may choose the latest request id, and
+    we need to keep track of that information. Request id in this case can
+    be None."""
+    handle_request_error(response)
+    request_id = response.headers.get(server_constants.STREAM_REQUEST_HEADER)
+    if request_id is not None:
+        return RequestId[T](request_id)
+    return None
+
+
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
                       foreground: bool = False,
