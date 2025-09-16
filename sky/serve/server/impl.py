@@ -590,7 +590,7 @@ def update(
                     handle, service_name, current_version, mode, pool)
             except exceptions.SkyletMethodNotImplementedError:
                 use_legacy = True
-        
+
         if use_legacy:
             code = serve_utils.ServeCodeGen.update_service(service_name,
                                                            current_version,
@@ -683,7 +683,7 @@ def down(
                     handle, service_names, purge, pool)
             except exceptions.SkyletMethodNotImplementedError:
                 use_legacy = True
-        
+
         if use_legacy:
             backend = backend_utils.get_backend_from_handle(handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
@@ -745,7 +745,7 @@ def status(
                 handle, service_names, pool)
         except exceptions.SkyletMethodNotImplementedError:
             use_legacy = True
-    
+
     if use_legacy:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
