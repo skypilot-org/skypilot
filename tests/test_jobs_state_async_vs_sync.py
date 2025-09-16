@@ -320,3 +320,97 @@ def test_missing_job_other_helpers(_mock_jobs_db_conn):
     # num tasks and ids list
     assert state.get_num_tasks(missing_id) == 0
     assert state.get_all_task_ids_names_statuses_logs(missing_id) == []
+
+
+@pytest.mark.asyncio
+async def test_set_backoff_pending_async_success(_mock_jobs_db_conn):
+    """Test set_backoff_pending_async correctly updates status and returns rowcount."""
+    # Create a job with a task in STARTING status
+    job_id = state.set_job_info_without_job_id(name='backoff_test',
+                                               workspace='default',
+                                               entrypoint='echo',
+                                               pool=None,
+                                               pool_hash=None)
+    state.set_pending(
+        job_id=job_id,
+        task_id=0,
+        task_name='task0',
+        resources_str='{}',
+        metadata='{}',
+    )
+
+    # Set the task to STARTING status (simulating launch attempt)
+    _set_statuses(job_id, {0: state.ManagedJobStatus.STARTING})
+
+    # Verify the task is in STARTING status
+    task_id, status = await state.get_latest_task_id_status_async(job_id)
+    assert task_id == 0
+    assert status == state.ManagedJobStatus.STARTING
+
+    # Call set_backoff_pending_async - should succeed and update status
+    await state.set_backoff_pending_async(job_id, 0)
+
+    # Verify the task is now in PENDING status
+    task_id, status = await state.get_latest_task_id_status_async(job_id)
+    assert task_id == 0
+    assert status == state.ManagedJobStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_set_backoff_pending_async_from_recovering(_mock_jobs_db_conn):
+    """Test set_backoff_pending_async works when task is in RECOVERING status."""
+    # Create a job with a task in RECOVERING status
+    job_id = state.set_job_info_without_job_id(name='backoff_recovering_test',
+                                               workspace='default',
+                                               entrypoint='echo',
+                                               pool=None,
+                                               pool_hash=None)
+    state.set_pending(
+        job_id=job_id,
+        task_id=0,
+        task_name='task0',
+        resources_str='{}',
+        metadata='{}',
+    )
+
+    # Set the task to RECOVERING status
+    _set_statuses(job_id, {0: state.ManagedJobStatus.RECOVERING})
+
+    # Verify the task is in RECOVERING status
+    task_id, status = await state.get_latest_task_id_status_async(job_id)
+    assert task_id == 0
+    assert status == state.ManagedJobStatus.RECOVERING
+
+    # Call set_backoff_pending_async - should succeed and update status
+    await state.set_backoff_pending_async(job_id, 0)
+
+    # Verify the task is now in PENDING status
+    task_id, status = await state.get_latest_task_id_status_async(job_id)
+    assert task_id == 0
+    assert status == state.ManagedJobStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_set_backoff_pending_async_no_matching_rows(_mock_jobs_db_conn):
+    """Test set_backoff_pending_async raises error when no rows match criteria."""
+    # Create a job with a task in RUNNING status (not STARTING/RECOVERING)
+    job_id = state.set_job_info_without_job_id(name='backoff_no_match_test',
+                                               workspace='default',
+                                               entrypoint='echo',
+                                               pool=None,
+                                               pool_hash=None)
+    state.set_pending(
+        job_id=job_id,
+        task_id=0,
+        task_name='task0',
+        resources_str='{}',
+        metadata='{}',
+    )
+
+    # Set the task to RUNNING status (not eligible for backoff)
+    _set_statuses(job_id, {0: state.ManagedJobStatus.RUNNING})
+
+    # Call set_backoff_pending_async - should raise ManagedJobStatusError
+    with pytest.raises(state.exceptions.ManagedJobStatusError,
+                       match='Failed to set the task back to pending'):
+        await state.set_backoff_pending_async(job_id, 0)
