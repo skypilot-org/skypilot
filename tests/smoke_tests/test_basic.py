@@ -379,10 +379,7 @@ def test_aws_stale_job_manual_restart():
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 cmd=
-                (f'id=`aws ec2 describe-instances --region {region} --filters '
-                 f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
-                 f'--query Reservations[].Instances[].InstanceId '
-                 f'--output text` && '
+                (f'id={smoke_tests_utils.AWS_GET_INSTANCE_ID.format(region=region, name_on_cloud=name_on_cloud)} && '
                  f'aws ec2 stop-instances --region {region} '
                  f'--instance-ids $id')),
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(

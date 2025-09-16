@@ -116,6 +116,12 @@ WAIT_FOR_API = (
 
 SKY_API_RESTART = f'sky api stop || true && sky api start && {WAIT_FOR_API}'
 
+AWS_GET_INSTANCE_ID = (
+    '`aws ec2 describe-instances --region {region} --filters '
+    'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+    '--query Reservations[].Instances[].InstanceId '
+    '--output text`')
+
 # Cluster functions
 _ALL_JOB_STATUSES = "|".join([status.value for status in sky.JobStatus])
 _ALL_CLUSTER_STATUSES = "|".join([status.value for status in sky.ClusterStatus])
