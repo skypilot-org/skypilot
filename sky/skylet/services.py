@@ -61,7 +61,7 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
 
     # NOTE (kyuds): this grpc service will run cluster-side,
     # thus guaranteeing that SERVE_VERSION is above 5.
-    # Therefore, we are checking some SERVE_VERSION checks
+    # Therefore, we removed some SERVE_VERSION checks
     # present in the original codegen.
 
     def GetServiceStatus(  # type: ignore[return]
