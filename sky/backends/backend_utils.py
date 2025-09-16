@@ -2337,8 +2337,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             requested_resources=None,
             ready=True,
             is_launch=False,
-            update_only=True,
-            update_cluster_hash_filter=record['cluster_hash'])
+            existing_cluster_hash=record['cluster_hash'])
         return global_user_state.get_cluster_from_name(cluster_name)
 
     # All cases below are transitioning the cluster to non-UP states.
@@ -2550,8 +2549,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             requested_resources=None,
             ready=False,
             is_launch=False,
-            update_only=True,
-            update_cluster_hash_filter=record['cluster_hash'])
+            existing_cluster_hash=record['cluster_hash'])
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.

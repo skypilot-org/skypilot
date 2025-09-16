@@ -72,7 +72,7 @@ async def test_cluster_event_retention_daemon():
 
 
 def test_add_or_update_cluster_update_only(_mock_db_conn):
-    # if no record exists and update_only is True
+    # if no record exists and existing_cluster_hash is specified
     # should raise ValueError
     with pytest.raises(ValueError):
         global_user_state.add_or_update_cluster(
@@ -81,26 +81,15 @@ def test_add_or_update_cluster_update_only(_mock_db_conn):
             sky.Resources(infra='aws/us-east-1/us-east-1a',
                           instance_type='p4d.24xlarge'),
             ready=True,
-            update_only=True)
+            existing_cluster_hash='01230123')
 
-    # if update_only is False, should insert a new record
+    # if existing_cluster_hash is not specified, should insert a new record
     global_user_state.add_or_update_cluster(
         'test-cluster',
         'test-cluster',
         sky.Resources(infra='aws/us-east-1/us-east-1a',
                       instance_type='p4d.24xlarge'),
-        ready=True,
-        update_only=False)
-
-    with pytest.raises(ValueError):
-        # update_cluster_hash_filter is required when update_only is True
-        global_user_state.add_or_update_cluster(
-            'test-cluster',
-            'test-cluster',
-            sky.Resources(infra='aws/us-east-1/us-east-1a',
-                          instance_type='p4d.24xlarge'),
-            ready=True,
-            update_only=True)
+        ready=True)
 
     with pytest.raises(ValueError):
         # incorrect cluster hash filter
@@ -110,8 +99,7 @@ def test_add_or_update_cluster_update_only(_mock_db_conn):
             sky.Resources(infra='aws/us-east-1/us-east-1a',
                           instance_type='p4d.24xlarge'),
             ready=True,
-            update_only=True,
-            update_cluster_hash_filter='01230123')
+            existing_cluster_hash='01230123')
 
     # correct cluster hash filter
     record = global_user_state.get_cluster_from_name('test-cluster')
@@ -121,5 +109,4 @@ def test_add_or_update_cluster_update_only(_mock_db_conn):
         sky.Resources(infra='aws/us-east-1/us-east-1a',
                       instance_type='p4d.24xlarge'),
         ready=True,
-        update_only=True,
-        update_cluster_hash_filter=record['cluster_hash'])
+        existing_cluster_hash=record['cluster_hash'])
