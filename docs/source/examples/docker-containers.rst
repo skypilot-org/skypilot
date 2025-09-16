@@ -143,7 +143,7 @@ you can provide the registry authentication details using :ref:`task environment
         .. code-block:: yaml
 
           resources:
-            image_id: docker:<your-user-id>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>
+            image_id: docker:<repo>:<tag>
 
           envs:
             # Values used in: docker login -u <user> -p <password> <registry server>
@@ -166,7 +166,7 @@ you can provide the registry authentication details using :ref:`task environment
             .. code-block:: yaml
 
               resources:
-                image_id: docker:<your-user-id>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>
+                image_id: docker:<repo>:<tag>
 
               envs:
                 SKYPILOT_DOCKER_USERNAME: ""

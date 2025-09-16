@@ -32,9 +32,6 @@ DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
 
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
-# Server url format: <your-user-id>.dkr.ecr.<region>.amazonaws.com
-REGION_INDEX_IN_SERVER_URL = 3
-
 INSTALL_AWS_CLI_CMD = (
     'which aws || ((command -v unzip >/dev/null 2>&1 || '
     '(sudo apt-get update && sudo apt-get install -y unzip)) && '
@@ -42,6 +39,19 @@ INSTALL_AWS_CLI_CMD = (
     '-o "/tmp/awscliv2.zip" && '
     'unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install '
     '&& rm -rf /tmp/awscliv2.zip /tmp/aws)')
+
+
+def _extract_region_from_ecr_server(server: str) -> str:
+    """Extract AWS region from ECR server URL.
+
+    ECR server format: <account-id>.dkr.ecr.<region>.amazonaws.com
+    Returns the region part from the URL.
+    """
+    # Split: ['<account-id>', 'dkr', 'ecr', '<region>', 'amazonaws', 'com']
+    parts = server.split('.')
+    if len(parts) >= 6 and parts[1] == 'dkr' and parts[2] == 'ecr':
+        return parts[3]
+    raise ValueError(f'Invalid ECR server format: {server}')
 
 
 @dataclasses.dataclass
@@ -265,9 +275,11 @@ class DockerInitializer:
                 # AWS ECR: Use aws ecr get-login-password for authentication
                 # ECR format: <account-id>.dkr.ecr.<region>.amazonaws.com
                 # This command uses the IAM credentials from the EC2 instance
-                region = docker_login_config.server.split(
-                    '.')[REGION_INDEX_IN_SERVER_URL]
+                region = _extract_region_from_ecr_server(
+                    docker_login_config.server)
 
+                # AWS CLI is not pre-installed on AWS instances, unlike gcloud
+                # on GCP instances, so we need to install it first
                 self._run(INSTALL_AWS_CLI_CMD, wait_for_docker_daemon=False)
 
                 self._run(
