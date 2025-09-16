@@ -341,20 +341,6 @@ def write_ray_up_script_with_patched_launch_hash_fn(
     return f.name
 
 
-def _get_num_gpus(ray_resources_dict: Dict[str, float]) -> int:
-    dict_copy = copy.copy(ray_resources_dict)
-    try:
-        dict_copy.pop('CPU')
-    except KeyError:
-        pass
-    if len(dict_copy) == 0:
-        return 0
-    assert len(dict_copy) == 1, (
-        'There can only be one type of accelerator per instance. '
-        f'Found: {dict_copy}.')
-    return math.ceil(list(dict_copy.values())[0])
-
-
 class RayCodeGen:
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -4088,6 +4074,26 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._set_storage_mounts_metadata(handle.cluster_name,
                                               storage_mounts)
 
+    def _get_num_gpus(self, handle: CloudVmRayResourceHandle,
+                      task: task_lib.Task) -> int:
+        valid_resources = self.check_resources_fit_cluster(handle,
+                                                           task,
+                                                           check_ports=True)
+        task_copy = copy.copy(task)
+        task_copy.set_resources(valid_resources)
+        ray_resources_dict = backend_utils.get_task_demands_dict(task_copy)
+        dict_copy = copy.copy(ray_resources_dict)
+        try:
+            dict_copy.pop('CPU')
+        except KeyError:
+            pass
+        if len(dict_copy) == 0:
+            return 0
+        assert len(dict_copy) == 1, (
+            'There can only be one type of accelerator per instance. '
+            f'Found: {dict_copy}.')
+        return math.ceil(list(dict_copy.values())[0])
+
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
         start = time.time()
@@ -4110,13 +4116,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_envs.update(self._skypilot_predefined_env_vars(handle))
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
-            valid_resources = self.check_resources_fit_cluster(handle,
-                                                               task,
-                                                               check_ports=True)
-            task_copy = copy.copy(task)
-            task_copy.set_resources(valid_resources)
             setup_envs[constants.SKYPILOT_SETUP_NUM_GPUS_PER_NODE] = (str(
-                _get_num_gpus(backend_utils.get_task_demands_dict(task_copy))))
+                self._get_num_gpus(handle, task)))
 
             runner = runners[node_id]
             setup_script = log_lib.make_task_bash_script(setup,
