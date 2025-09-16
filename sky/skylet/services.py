@@ -2,7 +2,9 @@
 
 import io
 import os
-import time
+import queue as queuelib
+import threading
+from typing import Iterable
 
 import grpc
 from sky import exceptions
@@ -20,8 +22,8 @@ from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_LOG_CHUNK_SIZE = 32 * 1024  # 32KB
-DEFAULT_LOG_CHUNK_INTERVAL = 0.01  # 10ms
+DEFAULT_LOG_CHUNK_SIZE = 16 * 1024  # 16KB
+DEFAULT_LOG_CHUNK_FLUSH_INTERVAL = 0.01  # 10ms
 
 
 class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
@@ -58,27 +60,26 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
 
-class LogChunkBuffer:
-    """Buffer for efficiently chunking log lines for streaming."""
+class LogBuffer:
+    """In-memory buffer for chunking log lines for streaming."""
 
-    def __init__(self,
-                 max_size: int = DEFAULT_LOG_CHUNK_SIZE,
-                 flush_interval: float = DEFAULT_LOG_CHUNK_INTERVAL):
-        """Initialize the chunk buffer.
+    def __init__(self, max_chars: int = DEFAULT_LOG_CHUNK_SIZE):
+        """Initialize the log buffer.
 
         Args:
-            max_size: Maximum buffer size in bytes before flushing
-            flush_interval: Maximum time in seconds before flushing
+            max_chars: Maximum buffer size (in characters, not bytes) before
+                       flushing. The actual amount of bytes (UTF-8 encoding)
+                       could be more than this, depending on the characters,
+                       i.e. ASCII characters take 1 byte, while others
+                       may take 2-4 bytes. But this is fine as our default
+                       chunk size is well below the default value of
+                       grpc.max_receive_message_length which is 4MB.
         """
+        self.max_chars = max_chars
         self._buffer = io.StringIO()
-        self.max_size = max_size
-        self.flush_interval = flush_interval
-        self.last_flush = time.time()
 
     def _should_flush(self) -> bool:
-        """Check if the buffer should be flushed."""
-        return (self._buffer.tell() >= self.max_size or
-                time.time() - self.last_flush >= self.flush_interval)
+        return self._buffer.tell() >= self.max_chars
 
     def flush(self) -> str:
         """Get the current buffered content and clear the buffer.
@@ -91,7 +92,6 @@ class LogChunkBuffer:
         chunk = self._buffer.getvalue()
         self._buffer.truncate(0)
         self._buffer.seek(0)
-        self.last_flush = time.time()
         return chunk
 
     def write(self, line: str) -> bool:
@@ -106,8 +106,7 @@ class LogChunkBuffer:
         self._buffer.write(line)
         return self._should_flush()
 
-    def close(self) -> None:
-        """Close the buffer."""
+    def close(self):
         self._buffer.close()
 
 
@@ -232,11 +231,51 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
+    def _buffered_iter_with_timeout(self, buffer: LogBuffer,
+                                    iterable: Iterable[str],
+                                    timeout: float) -> Iterable[str]:
+        """Iterates over an iterable, writing each value to a buffer,
+        and flushing the buffer when it is full or there is no value
+        within the timeout duration."""
+        queue: queuelib.Queue = queuelib.Queue()
+        sentinel = object()
+
+        def producer():
+            try:
+                for item in iterable:
+                    queue.put(item)
+            finally:
+                queue.put(sentinel)
+
+        thread = threading.Thread(target=producer, daemon=True)
+        thread.start()
+
+        while True:
+            try:
+                item = queue.get(timeout=timeout)
+            except queuelib.Empty:
+                out = buffer.flush()
+                if out:
+                    yield out
+                continue
+
+            if item is sentinel:
+                thread.join()
+                out = buffer.flush()
+                if out:
+                    yield out
+                return
+
+            if buffer.write(item):
+                out = buffer.flush()
+                if out:
+                    yield out
+
     def TailLogs(
             self,
             request: jobsv1_pb2.TailLogsRequest,  # type: ignore[return]
             context: grpc.ServicerContext):
-        buffer = LogChunkBuffer()
+        buffer = LogBuffer()
         try:
             job_id = request.job_id if request.HasField(
                 'job_id') else job_lib.get_latest_job_id()
@@ -248,12 +287,12 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 log_dir = None if run_timestamp is None else os.path.join(
                     constants.SKY_LOGS_DIRECTORY, run_timestamp)
 
-            for line in log_lib.tail_logs_iter(job_id, log_dir, managed_job_id,
-                                               request.follow, request.tail):
-                should_flush = buffer.write(line)
-                if should_flush:
-                    yield jobsv1_pb2.TailLogsResponse(log_line=buffer.flush())
-            yield jobsv1_pb2.TailLogsResponse(log_line=buffer.flush())
+            for line in self._buffered_iter_with_timeout(
+                    buffer,
+                    log_lib.tail_logs_iter(job_id, log_dir, managed_job_id,
+                                           request.follow, request.tail),
+                    DEFAULT_LOG_CHUNK_FLUSH_INTERVAL):
+                yield jobsv1_pb2.TailLogsResponse(log_line=line)
 
             job_status = job_lib.get_status(job_id)
             exit_code = exceptions.JobExitCode.from_job_status(job_status)

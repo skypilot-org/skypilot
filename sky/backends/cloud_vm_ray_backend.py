@@ -4664,8 +4664,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                             ).tail_logs(request, timeout=None)):
                     if resp.log_line:
                         sys.stdout.write(resp.log_line)
+                        sys.stdout.flush()
                     last_exit_code = resp.exit_code
-                sys.stdout.flush()
                 return last_exit_code
             except exceptions.SkyletMethodNotImplementedError:
                 pass
