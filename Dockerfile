@@ -34,7 +34,7 @@ ARG INSTALL_FROM_SOURCE=true
 RUN apt-get update -y && \
     apt-get install --no-install-recommends -y \
         git gcc rsync sudo patch openssh-server \
-        pciutils nano fuse socat netcat-openbsd curl tini autossh jq && \
+        pciutils nano fuse socat netcat-openbsd curl tini autossh jq logrotate && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install kubectl based on architecture

@@ -213,7 +213,8 @@ spec:
           {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
-            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
+            mkdir -p /root/.sky/api_server
+            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground  2>&1 | tee -a /root/.sky/api_server/server.log
           else
             # For backward compatibility, run in background if --foreground is not supported.
             # TODO(aylei): this will be dropped in 0.11.0.
@@ -249,10 +250,10 @@ spec:
           periodSeconds: 5
           initialDelaySeconds: 5
         volumeMounts:
-        {{- if .Values.storage.enabled }}
         - name: state-volume
           mountPath: /root/.sky
           subPath: .sky
+        {{- if .Values.storage.enabled }}
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
@@ -320,6 +321,30 @@ spec:
         {{- if .Values.apiService.extraVolumeMounts }}
         {{- toYaml .Values.apiService.extraVolumeMounts | nindent 8 }}
         {{- end }}
+      {{- if .Values.apiService.logs.retention.enabled }}
+      - name: logrotate
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          cat > /etc/logrotate.conf <<EOF
+          /root/.sky/api_server/server.log {
+              size {{ .Values.apiService.logs.retention.size }}
+              rotate 0
+              missingok
+              notifempty
+              copytruncate
+          }
+          EOF
+          while true; do
+            logrotate -f /etc/logrotate.conf;
+            sleep 60;
+          done
+        volumeMounts:
+        - name: state-volume
+          mountPath: /root/.sky
+          subPath: .sky
+      {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
       - name: create-aws-credentials
@@ -369,19 +394,19 @@ spec:
           set -e
           echo "Setting up R2 credentials..."
           mkdir -p /root/.cloudflare
-          
+
           # Direct echo of environment variables (no quotes around EOF)
           cat > /root/.cloudflare/r2.credentials <<EOF
           $R2_CREDENTIALS
           EOF
-          
+
           cat > /root/.cloudflare/accountid <<EOF
           $R2_ACCOUNT_ID
           EOF
-          
+
           chmod 600 /root/.cloudflare/r2.credentials
           chmod 600 /root/.cloudflare/accountid
-          
+
           echo "R2 credentials setup complete:"
           ls -la /root/.cloudflare/
           echo "First line of r2.credentials:"
@@ -571,7 +596,7 @@ spec:
       - name: skypilot-ssh-identity
         secret:
           secretName: {{ .Values.apiService.sshKeySecret }}
-          defaultMode: 0600 
+          defaultMode: 0600
       {{- end }}
       {{- if .Values.apiService.extraVolumes }}
       {{- toYaml .Values.apiService.extraVolumes | nindent 6 }}

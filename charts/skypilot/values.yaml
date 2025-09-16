@@ -150,6 +150,14 @@ apiService:
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 
+  # Configure how to manage API server logs
+  logs:
+    retention:
+      # Whether to enable log retention
+      enabled: true
+      # The size of the log file to retain
+      size: 10M
+
 # Authentication configuration for the API server
 # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
 # @schema type: [object, null]
