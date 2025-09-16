@@ -224,6 +224,7 @@ This will produce a summary like:
     Cudo: enabled
     IBM: enabled
     SCP: enabled
+    Seeweb: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
@@ -640,6 +641,25 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 .. note::
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
+
+
+
+
+Seeweb
+~~~~~~~~~~~~~~~~~~
+
+`Seeweb <https://www.seeweb.it/>`_ is your European GPU Cloud Provider. To access Seeweb:
+
+
+1. Log into your `Seeweb dashboard : <https://cloudcenter.seeweb.it/>`__.
+2. Navigate to *Compute → API Token* in the control panel, and create **New TOKEN**.
+3. Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
+
+.. code-block::
+
+    [DEFAULT]
+    api_key = <your-api-token>
+
 
 
 Request quotas for first time users

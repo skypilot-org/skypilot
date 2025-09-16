@@ -122,12 +122,335 @@ export async function getCloudInfrastructure(forceRefresh = true) {
 }
 
 export async function getGPUs() {
-  const dashboardCache = (await import('@/lib/cache')).default;
-  const { getClusters } = await import('@/data/connectors/clusters');
-  const clustersData = await dashboardCache.get(getClusters);
-  const clusters = clustersData || [];
-  const gpus = await getKubernetesGPUs(clusters);
-  return gpus;
+  // Legacy function - now redirects to workspace-aware infrastructure
+  return await getWorkspaceInfrastructure();
+}
+
+// New workspace-aware infrastructure fetching function
+export async function getWorkspaceInfrastructure() {
+  try {
+    console.log('[DEBUG] Starting workspace-aware infrastructure fetch');
+
+    // Step 1: Get all accessible workspaces for the user
+    const { getWorkspaces } = await import('@/data/connectors/workspaces');
+    console.log('[DEBUG] About to call getWorkspaces()');
+    const workspacesData = await getWorkspaces();
+    console.log('[DEBUG] Workspaces data received:', workspacesData);
+    console.log(
+      '[DEBUG] Number of accessible workspaces:',
+      Object.keys(workspacesData || {}).length
+    );
+    console.log('[DEBUG] Workspace names:', Object.keys(workspacesData || {}));
+
+    if (!workspacesData || Object.keys(workspacesData).length === 0) {
+      console.log(
+        '[DEBUG] No accessible workspaces found - returning empty result'
+      );
+      return {
+        workspaces: {},
+        allContextNames: [],
+        allGPUs: [],
+        perContextGPUs: [],
+        perNodeGPUs: [],
+        contextStats: {},
+        contextWorkspaceMap: {},
+      };
+    }
+
+    // Step 2: For each workspace, fetch enabled clouds with expanded infrastructure
+    const { getEnabledClouds } = await import('@/data/connectors/workspaces');
+    const workspaceInfraData = {};
+    const allContextsAcrossWorkspaces = [];
+    const contextWorkspaceMap = {};
+
+    for (const [workspaceName, workspaceConfig] of Object.entries(
+      workspacesData
+    )) {
+      console.log(`Fetching infrastructure for workspace: ${workspaceName}`);
+
+      try {
+        // Get enabled clouds with expanded infrastructure for this workspace
+        console.log(
+          `[DEBUG] Fetching enabled clouds for workspace: ${workspaceName}`
+        );
+        const expandedClouds = await getEnabledClouds(workspaceName, true);
+        console.log(
+          `[DEBUG] Expanded clouds for ${workspaceName}:`,
+          expandedClouds
+        );
+
+        workspaceInfraData[workspaceName] = {
+          config: workspaceConfig,
+          clouds: expandedClouds,
+          contexts: [],
+        };
+
+        // Extract contexts from expanded cloud data
+        // expandedClouds is an array of strings like ['kubernetes/context1', 'SSH/pool1']
+        console.log(
+          `[DEBUG] Processing expandedClouds for ${workspaceName}:`,
+          expandedClouds
+        );
+        if (expandedClouds && Array.isArray(expandedClouds)) {
+          expandedClouds.forEach((infraItem) => {
+            console.log(`[DEBUG] Processing infraItem: ${infraItem}`);
+            if (infraItem.toLowerCase().startsWith('kubernetes/')) {
+              const context = infraItem.replace(/^kubernetes\//i, '');
+              console.log(`[DEBUG] Extracted kubernetes context: ${context}`);
+              allContextsAcrossWorkspaces.push(context);
+              if (!contextWorkspaceMap[context]) {
+                contextWorkspaceMap[context] = [];
+              }
+              if (!contextWorkspaceMap[context].includes(workspaceName)) {
+                contextWorkspaceMap[context].push(workspaceName);
+              }
+              workspaceInfraData[workspaceName].contexts.push(context);
+            } else if (infraItem.toLowerCase().startsWith('ssh/')) {
+              const poolName = infraItem.replace(/^ssh\//i, '');
+              const sshContextName = `ssh-${poolName}`;
+              console.log(`[DEBUG] Extracted SSH context: ${sshContextName}`);
+              allContextsAcrossWorkspaces.push(sshContextName);
+              if (!contextWorkspaceMap[sshContextName]) {
+                contextWorkspaceMap[sshContextName] = [];
+              }
+              if (
+                !contextWorkspaceMap[sshContextName].includes(workspaceName)
+              ) {
+                contextWorkspaceMap[sshContextName].push(workspaceName);
+              }
+              workspaceInfraData[workspaceName].contexts.push(sshContextName);
+            }
+          });
+        } else {
+          console.log(
+            `[DEBUG] No expanded clouds or not an array for ${workspaceName}`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `Failed to fetch infrastructure for workspace ${workspaceName}:`,
+          error
+        );
+        workspaceInfraData[workspaceName] = {
+          config: workspaceConfig,
+          clouds: [],
+          contexts: [],
+          error: error.message,
+        };
+      }
+    }
+
+    // Step 3: Get detailed GPU information for all contexts
+    const { getClusters } = await import('@/data/connectors/clusters');
+    const dashboardCache = (await import('@/lib/cache')).default;
+    const clustersData = await dashboardCache.get(getClusters);
+    const clusters = clustersData || [];
+
+    // Get context stats (cluster counts)
+    const contextStats = await getContextClusters(clusters);
+
+    // Get GPU data for all contexts (filter out any undefined contexts)
+    const validContexts = allContextsAcrossWorkspaces.filter(
+      (context) => context && typeof context === 'string'
+    );
+    const gpuData = await getKubernetesGPUsFromContexts(validContexts);
+
+    const finalResult = {
+      workspaces: workspaceInfraData,
+      allContextNames: [...new Set(allContextsAcrossWorkspaces)].sort(),
+      allGPUs: gpuData.allGPUs || [],
+      perContextGPUs: gpuData.perContextGPUs || [],
+      perNodeGPUs: gpuData.perNodeGPUs || [],
+      contextStats: contextStats,
+      contextWorkspaceMap: contextWorkspaceMap,
+    };
+
+    console.log('[DEBUG] Final result:', finalResult);
+    console.log('[DEBUG] All contexts found:', allContextsAcrossWorkspaces);
+    console.log('[DEBUG] Context workspace map:', contextWorkspaceMap);
+
+    return finalResult;
+  } catch (error) {
+    console.error('[DEBUG] Failed to fetch workspace infrastructure:', error);
+    console.error('[DEBUG] Error stack:', error.stack);
+    return {
+      workspaces: {},
+      allContextNames: [],
+      allGPUs: [],
+      perContextGPUs: [],
+      perNodeGPUs: [],
+      contextStats: {},
+      contextWorkspaceMap: {},
+      error: error.message,
+    };
+  }
+}
+
+// Helper function to get GPU data for specific contexts
+async function getKubernetesGPUsFromContexts(contextNames) {
+  try {
+    if (!contextNames || contextNames.length === 0) {
+      return {
+        allGPUs: [],
+        perContextGPUs: [],
+        perNodeGPUs: [],
+      };
+    }
+
+    const allGPUsSummary = {};
+    const perContextGPUsData = {};
+    const perNodeGPUs_dict = {};
+
+    // Get all of the node info for all contexts in parallel and put them
+    // in a dictionary keyed by context name.
+    const contextNodeInfoList = await Promise.all(
+      contextNames.map((context) => getKubernetesPerNodeGPUs(context))
+    );
+    const contextToNodeInfo = {};
+    for (let i = 0; i < contextNames.length; i++) {
+      contextToNodeInfo[contextNames[i]] = contextNodeInfoList[i];
+    }
+
+    // Populate the gpuToData map for each context.
+    for (const context of contextNames) {
+      const nodeInfoForContext = contextToNodeInfo[context] || {};
+      if (nodeInfoForContext && Object.keys(nodeInfoForContext).length > 0) {
+        const gpuToData = {};
+        for (const nodeName in nodeInfoForContext) {
+          const nodeData = nodeInfoForContext[nodeName];
+          if (!nodeData) {
+            console.warn(
+              `No node data for node ${nodeName} in context ${context}`
+            );
+            continue;
+          }
+
+          const gpuName = nodeData['accelerator_type'];
+          const totalCount = nodeData['total']?.['accelerator_count'] || 0;
+          const freeCount = nodeData['free']?.['accelerators_available'] || 0;
+
+          if (totalCount > 0) {
+            if (!gpuToData[gpuName]) {
+              gpuToData[gpuName] = {
+                gpu_name: gpuName,
+                gpu_requestable_qty_per_node: 0,
+                gpu_total: 0,
+                gpu_free: 0,
+                context: context,
+              };
+            }
+            gpuToData[gpuName].gpu_total += totalCount;
+            gpuToData[gpuName].gpu_free += freeCount;
+            gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
+          }
+        }
+        perContextGPUsData[context] = Object.values(gpuToData);
+        for (const gpuName in gpuToData) {
+          if (gpuName in allGPUsSummary) {
+            allGPUsSummary[gpuName].gpu_total += gpuToData[gpuName].gpu_total;
+            allGPUsSummary[gpuName].gpu_free += gpuToData[gpuName].gpu_free;
+          } else {
+            allGPUsSummary[gpuName] = {
+              gpu_total: gpuToData[gpuName].gpu_total,
+              gpu_free: gpuToData[gpuName].gpu_free,
+              gpu_name: gpuName,
+            };
+          }
+        }
+      } else {
+        // Initialize empty array for contexts that don't have node info
+        perContextGPUsData[context] = [];
+      }
+    }
+
+    // Populate the perNodeGPUs_dict map for each context.
+    for (const context of contextNames) {
+      const nodeInfoForContext = contextToNodeInfo[context];
+      if (nodeInfoForContext && Object.keys(nodeInfoForContext).length > 0) {
+        for (const nodeName in nodeInfoForContext) {
+          const nodeData = nodeInfoForContext[nodeName];
+          if (!nodeData) {
+            console.warn(
+              `No node data for node ${nodeName} in context ${context}`
+            );
+            continue;
+          }
+
+          // Ensure accelerator_type, total, and free fields exist or provide defaults
+          const acceleratorType = nodeData['accelerator_type'] || '-';
+          const totalAccelerators =
+            nodeData['total']?.['accelerator_count'] ?? 0;
+          const freeAccelerators =
+            nodeData['free']?.['accelerators_available'] ?? 0;
+
+          perNodeGPUs_dict[`${context}/${nodeName}`] = {
+            node_name: nodeData['name'] || nodeName,
+            gpu_name: acceleratorType,
+            gpu_total: totalAccelerators,
+            gpu_free: freeAccelerators,
+            ip_address: nodeData['ip_address'] || null,
+            context: context,
+          };
+
+          // If this node provides a GPU type not found via GPU availability,
+          // add it to perContextGPUsData with 0/0 counts if it's not already there.
+          if (
+            acceleratorType !== '-' &&
+            perContextGPUsData[context] &&
+            !perContextGPUsData[context].some(
+              (gpu) => gpu.gpu_name === acceleratorType
+            )
+          ) {
+            if (!(acceleratorType in allGPUsSummary)) {
+              allGPUsSummary[acceleratorType] = {
+                gpu_total: 0,
+                gpu_free: 0,
+                gpu_name: acceleratorType,
+              };
+            }
+            const existingGpuEntry = perContextGPUsData[context].find(
+              (gpu) => gpu.gpu_name === acceleratorType
+            );
+            if (!existingGpuEntry) {
+              perContextGPUsData[context].push({
+                gpu_name: acceleratorType,
+                gpu_requestable_qty_per_node: '-',
+                gpu_total: 0,
+                gpu_free: 0,
+                context: context,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      allGPUs: Object.values(allGPUsSummary).sort((a, b) =>
+        a.gpu_name.localeCompare(b.gpu_name)
+      ),
+      perContextGPUs: Object.values(perContextGPUsData)
+        .flat()
+        .sort(
+          (a, b) =>
+            a.context.localeCompare(b.context) ||
+            a.gpu_name.localeCompare(b.gpu_name)
+        ),
+      perNodeGPUs: Object.values(perNodeGPUs_dict).sort(
+        (a, b) =>
+          a.context.localeCompare(b.context) ||
+          a.node_name.localeCompare(b.node_name) ||
+          a.gpu_name.localeCompare(b.gpu_name)
+      ),
+    };
+  } catch (error) {
+    console.error('[infra.jsx] Error in getKubernetesGPUsFromContexts:', error);
+    return {
+      allGPUs: [],
+      perContextGPUs: [],
+      perNodeGPUs: [],
+    };
+  }
 }
 
 async function getAllContexts() {
@@ -155,6 +478,31 @@ async function getAllContexts() {
   }
 }
 
+async function getAllContextsForUser() {
+  try {
+    const response = await apiClient.get(`/all_contexts_for_user`);
+    if (!response.ok) {
+      console.error(
+        `Error fetching all contexts for user: ${response.status} ${response.statusText}`
+      );
+      return [];
+    }
+    const id =
+      response.headers.get('X-Skypilot-Request-ID') ||
+      response.headers.get('x-request-id');
+    if (!id) {
+      console.error('No request ID returned for /all_contexts_for_user');
+      return [];
+    }
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    const data = await fetchedData.json();
+    return data.return_value ? JSON.parse(data.return_value) : [];
+  } catch (error) {
+    console.error('[infra.jsx] Error in getAllContextsForUser:', error);
+    return [];
+  }
+}
+
 async function getKubernetesPerNodeGPUs(context) {
   try {
     const response = await apiClient.post(`/kubernetes_node_info`, {
@@ -170,8 +518,8 @@ async function getKubernetesPerNodeGPUs(context) {
         if (data.detail && data.detail.error) {
           try {
             const error = JSON.parse(data.detail.error);
-            console.error(
-              'Error fetching Kubernetes per node GPUs:',
+            console.warn(
+              `[infra.jsx] Context ${context} unavailable:`,
               error.message
             );
           } catch (jsonError) {
@@ -188,11 +536,9 @@ async function getKubernetesPerNodeGPUs(context) {
     const nodeInfoDict = nodeInfo['node_info_dict'] || {};
     return nodeInfoDict;
   } catch (error) {
-    console.error(
-      '[infra.jsx] Error in getKubernetesPerNodeGPUs for context',
-      context,
-      ':',
-      error
+    console.warn(
+      `[infra.jsx] Context ${context} unavailable or timed out:`,
+      error.message
     );
     return {};
   }
@@ -288,19 +634,39 @@ export async function getContextClusters(clusters) {
 
 async function getKubernetesGPUs(clusters) {
   try {
-    // 1. Fetch all context names (Kubernetes + SSH)
-    const allAvailableContextNames = await getAllContexts();
+    // 1. Fetch all context names (Kubernetes + SSH) with workspace information
+    const allAvailableContextsWithWorkspaces = await getAllContextsForUser();
 
-    if (!allAvailableContextNames || allAvailableContextNames.length === 0) {
-      console.log('No contexts found from /all_contexts endpoint.');
+    if (
+      !allAvailableContextsWithWorkspaces ||
+      allAvailableContextsWithWorkspaces.length === 0
+    ) {
+      console.log('No contexts found from /all_contexts_for_user endpoint.');
       return {
         allContextNames: [],
         allGPUs: [],
         perContextGPUs: [],
         perNodeGPUs: [],
         contextStats: {},
+        contextWorkspaceMap: {},
       };
     }
+
+    // Extract unique context names for backward compatibility
+    const allAvailableContextNames = [
+      ...new Set(allAvailableContextsWithWorkspaces.map((ctx) => ctx.context)),
+    ];
+
+    // Create a mapping of context to workspaces
+    const contextWorkspaceMap = {};
+    allAvailableContextsWithWorkspaces.forEach((ctx) => {
+      if (!contextWorkspaceMap[ctx.context]) {
+        contextWorkspaceMap[ctx.context] = [];
+      }
+      if (!contextWorkspaceMap[ctx.context].includes(ctx.workspace)) {
+        contextWorkspaceMap[ctx.context].push(ctx.workspace);
+      }
+    });
 
     // 2. Fetch cluster counts per context
     const contextStats = await getContextClusters(clusters);
@@ -451,6 +817,7 @@ async function getKubernetesGPUs(clusters) {
           a.gpu_name.localeCompare(b.gpu_name)
       ),
       contextStats: contextStats,
+      contextWorkspaceMap: contextWorkspaceMap,
     };
     return result;
   } catch (error) {
@@ -461,6 +828,7 @@ async function getKubernetesGPUs(clusters) {
       perContextGPUs: [],
       perNodeGPUs: [],
       contextStats: {},
+      contextWorkspaceMap: {},
     };
   }
 }

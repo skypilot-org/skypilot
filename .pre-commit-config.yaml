@@ -41,6 +41,8 @@ repos:
             - "sky"
             - "--exclude"
             - "sky/benchmark|sky/callbacks|sky/backends/monkey_patches"
+            - "--cache-dir"
+            - "/dev/null"
         pass_filenames: false
         additional_dependencies:
             - types-aiofiles

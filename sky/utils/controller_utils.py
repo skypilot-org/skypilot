@@ -228,14 +228,20 @@ def get_controller_for_pool(pool: bool) -> Controllers:
 def high_availability_specified(cluster_name: Optional[str]) -> bool:
     """Check if the controller high availability is specified in user config.
     """
-    # pylint: disable=import-outside-toplevel
-    from sky.jobs import utils as managed_job_utils
-    if managed_job_utils.is_consolidation_mode():
-        return True
-
     controller = Controllers.from_name(cluster_name)
     if controller is None:
         return False
+
+    if controller.value.controller_type == 'jobs':
+        # pylint: disable-next=import-outside-toplevel
+        from sky.jobs import utils as managed_job_utils
+        if managed_job_utils.is_consolidation_mode():
+            return True
+    elif controller.value.controller_type == 'serve':
+        # pylint: disable-next=import-outside-toplevel
+        from sky.serve import serve_utils
+        if serve_utils.is_consolidation_mode():
+            return True
 
     if skypilot_config.loaded():
         return skypilot_config.get_nested((controller.value.controller_type,

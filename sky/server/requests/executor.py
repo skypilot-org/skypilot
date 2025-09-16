@@ -31,6 +31,7 @@ import time
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
+import psutil
 import setproctitle
 
 from sky import exceptions
@@ -130,8 +131,9 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
-                     args=(f'worker:{proc_group}',),
+                     args=(f'worker:{proc_group}', threading.Event()),
                      daemon=True).start()
 
 
@@ -280,8 +282,8 @@ def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
 
 @contextlib.contextmanager
 def override_request_env_and_config(
-        request_body: payloads.RequestBody,
-        request_id: str) -> Generator[None, None, None]:
+        request_body: payloads.RequestBody, request_id: str,
+        request_name: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
     try:
@@ -317,9 +319,22 @@ def override_request_env_and_config(
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config,
                 request_body.override_skypilot_config_path):
-            # Rejecting requests to workspaces that the user does not have
-            # permission to access.
-            workspaces_core.reject_request_for_unauthorized_workspace(user)
+            # Skip permission check for sky.workspaces.get request
+            # as it is used to determine which workspaces the user
+            # has access to.
+            if request_name != 'sky.workspaces.get':
+                try:
+                    # Reject requests that the user does not have permission
+                    # to access.
+                    workspaces_core.reject_request_for_unauthorized_workspace(
+                        user)
+                except exceptions.PermissionDeniedError as e:
+                    logger.debug(
+                        f'{request_id} permission denied to workspace: '
+                        f'{skypilot_config.get_active_workspace()}: {e}')
+                    raise e
+            logger.debug(
+                f'{request_id} permission granted to {request_name} request')
             yield
     finally:
         # We need to call the save_timeline() since atexit will not be
@@ -373,11 +388,13 @@ def _request_execution_wrapper(request_id: str,
     4. Handle the SIGTERM signal to abort the request gracefully.
     5. Maintain the lifecycle of the temp dir used by the request.
     """
+    pid = multiprocessing.current_process().pid
+    proc = psutil.Process(pid)
+    rss_begin = proc.memory_info().rss
     db_utils.set_max_connections(num_db_connections_per_worker)
     # Handle the SIGTERM signal to abort the request processing gracefully.
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
-    pid = multiprocessing.current_process().pid
     logger.info(f'Running request {request_id} with pid {pid}')
     with api_requests.update_request(request_id) as request_task:
         assert request_task is not None, request_id
@@ -398,7 +415,8 @@ def _request_execution_wrapper(request_id: str,
         # captured in the log file.
         try:
             with sky_logging.add_debug_log_handler(request_id), \
-                override_request_env_and_config(request_body, request_id), \
+                override_request_env_and_config(
+                    request_body, request_id, request_name), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
@@ -443,8 +461,41 @@ def _request_execution_wrapper(request_id: str,
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
         finally:
-            with metrics_lib.time_it(name='release_memory', group='internal'):
-                common_utils.release_memory()
+            try:
+                # Capture the peak RSS before GC.
+                peak_rss = max(proc.memory_info().rss,
+                               metrics_lib.peak_rss_bytes)
+                with metrics_lib.time_it(name='release_memory',
+                                         group='internal'):
+                    common_utils.release_memory()
+                _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Failed to record memory metrics: '
+                             f'{common_utils.format_exception(e)}')
+
+
+_first_request = True
+
+
+def _record_memory_metrics(request_name: str, proc: psutil.Process,
+                           rss_begin: int, peak_rss: int) -> None:
+    """Record the memory metrics for a request."""
+    # Do not record full memory delta for the first request as it
+    # will loads the sky core modules and make the memory usage
+    # estimation inaccurate.
+    global _first_request
+    if _first_request:
+        _first_request = False
+        return
+    rss_end = proc.memory_info().rss
+
+    # Answer "how much RSS this request contributed?"
+    metrics_lib.SKY_APISERVER_REQUEST_RSS_INCR_BYTES.labels(
+        name=request_name).observe(max(rss_end - rss_begin, 0))
+    # Estimate the memory usage by the request by capturing the
+    # peak memory delta during the request execution.
+    metrics_lib.SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES.labels(
+        name=request_name).observe(max(peak_rss - rss_begin, 0))
 
 
 async def execute_request_coroutine(request: api_requests.Request):

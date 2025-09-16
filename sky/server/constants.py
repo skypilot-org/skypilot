@@ -61,3 +61,6 @@ DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
 
 # The interval (seconds) for the event to be restarted in the background.
 DAEMON_RESTART_INTERVAL_SECONDS = 20
+
+# Cookie header for stream request id.
+STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'
