@@ -633,10 +633,9 @@ def add_or_update_cluster(cluster_name: str,
 
         if update_only:
             count = session.query(cluster_table).filter_by(
-                name=cluster_name).update({
+                name=cluster_name, cluster_hash=cluster_hash).update({
                     **conditional_values, cluster_table.c.handle: handle,
                     cluster_table.c.status: status.value,
-                    cluster_table.c.cluster_hash: cluster_hash,
                     cluster_table.c.status_updated_at: status_updated_at
                 })
             assert count <= 1
