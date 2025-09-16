@@ -1214,6 +1214,7 @@ async def logs(
         request_body=cluster_job_body,
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        request_cluster_name=cluster_job_body.cluster_name,
     )
     task = asyncio.create_task(executor.execute_request_coroutine(request_task))
 
@@ -1570,6 +1571,15 @@ async def stream(
                     detail=f'Log path {log_path!r} does not exist')
 
         log_path_to_stream = resolved_log_path
+
+    headers = {
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no',
+        'Transfer-Encoding': 'chunked'
+    }
+    if request_id is not None:
+        headers[server_constants.STREAM_REQUEST_HEADER] = request_id
+
     return fastapi.responses.StreamingResponse(
         content=stream_utils.log_streamer(request_id,
                                           log_path_to_stream,
@@ -1577,11 +1587,7 @@ async def stream(
                                           tail=tail,
                                           follow=follow),
         media_type='text/plain',
-        headers={
-            'Cache-Control': 'no-cache, no-transform',
-            'X-Accel-Buffering': 'no',
-            'Transfer-Encoding': 'chunked'
-        },
+        headers=headers,
     )
 
 

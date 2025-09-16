@@ -9,21 +9,18 @@ import pytest
 
 from sky import exceptions
 from sky import task as task_lib
-from sky.client.cli import command
-from sky.client.cli import git
-from sky.utils import git as git_utils
+from sky.utils import git
 
 
 class TestUpdateTaskWorkdir:
-    """Test cases for _update_task_workdir function."""
+    """Test cases for task.update_workdir function."""
 
     def test_update_task_workdir_none_workdir_with_git_url(self):
         """Test updating task workdir when workdir is None and git_url is provided."""
         task = task_lib.Task(name='test', run='echo hello')
         task.workdir = None
 
-        command._update_task_workdir(task, None,
-                                     'https://github.com/test/repo.git', 'main')
+        task.update_workdir(None, 'https://github.com/test/repo.git', 'main')
 
         assert task.workdir == {
             'url': 'https://github.com/test/repo.git',
@@ -35,7 +32,7 @@ class TestUpdateTaskWorkdir:
         task = task_lib.Task(name='test', run='echo hello')
         task.workdir = None
 
-        command._update_task_workdir(task, None, None, 'main')
+        task.update_workdir(None, None, 'main')
 
         assert task.workdir is None
 
@@ -44,8 +41,7 @@ class TestUpdateTaskWorkdir:
         task = task_lib.Task(name='test', run='echo hello')
         task.workdir = None
 
-        command._update_task_workdir(task, None,
-                                     'https://github.com/test/repo.git', None)
+        task.update_workdir(None, 'https://github.com/test/repo.git', None)
 
         assert task.workdir == {
             'url': 'https://github.com/test/repo.git',
@@ -59,8 +55,7 @@ class TestUpdateTaskWorkdir:
             'ref': 'old_ref'
         }
 
-        command._update_task_workdir(task, None,
-                                     'https://github.com/new/repo.git', None)
+        task.update_workdir(None, 'https://github.com/new/repo.git', None)
 
         assert task.workdir == {
             'url': 'https://github.com/new/repo.git',
@@ -75,7 +70,7 @@ class TestUpdateTaskWorkdir:
             'ref': 'old_ref'
         }
 
-        command._update_task_workdir(task, None, None, 'new_ref')
+        task.update_workdir(None, None, 'new_ref')
 
         assert task.workdir == {
             'url': 'https://github.com/test/repo.git',
@@ -90,9 +85,7 @@ class TestUpdateTaskWorkdir:
             'ref': 'old_ref'
         }
 
-        command._update_task_workdir(task, None,
-                                     'https://github.com/new/repo.git',
-                                     'new_ref')
+        task.update_workdir(None, 'https://github.com/new/repo.git', 'new_ref')
 
         assert task.workdir == {
             'url': 'https://github.com/new/repo.git',
@@ -104,8 +97,7 @@ class TestUpdateTaskWorkdir:
         task = task_lib.Task(name='test', run='echo hello')
         task.workdir = '/some/local/path'
 
-        command._update_task_workdir(task, None,
-                                     'https://github.com/test/repo.git', 'main')
+        task.update_workdir(None, 'https://github.com/test/repo.git', 'main')
 
         assert task.workdir == {
             'url': 'https://github.com/test/repo.git',
@@ -117,8 +109,7 @@ class TestUpdateTaskWorkdir:
         task = task_lib.Task(name='test', run='echo hello')
         task.workdir = '/some/local/path'
 
-        command._update_task_workdir(task, "abcd",
-                                     'https://github.com/test/repo.git', 'main')
+        task.update_workdir("abcd", 'https://github.com/test/repo.git', 'main')
 
         assert task.workdir == "abcd"
 
@@ -130,7 +121,7 @@ class TestUpdateTaskWorkdir:
             'ref': 'main'
         }
 
-        command._update_task_workdir(task, None, None, None)
+        task.update_workdir(None, None, None)
 
         assert task.workdir == {
             'url': 'https://github.com/test/repo.git',
@@ -139,14 +130,14 @@ class TestUpdateTaskWorkdir:
 
 
 class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
-    """Test cases for _update_task_workdir_and_secrets_from_workdir function."""
+    """Test cases for task.update_envs_and_secrets_from_workdir function."""
 
     def test_update_task_workdir_and_secrets_none_workdir(self):
         """Test updating task secrets when workdir is None."""
         task = task_lib.Task(name='test', run='echo hello')
         task.workdir = None
 
-        command._update_task_workdir_and_secrets_from_workdir(task)
+        task.update_envs_and_secrets_from_workdir()
 
         # Should not raise any exception and task should remain unchanged
         assert task.workdir is None
@@ -156,17 +147,17 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         task = task_lib.Task(name='test', run='echo hello')
         task.workdir = '/some/local/path'
 
-        command._update_task_workdir_and_secrets_from_workdir(task)
+        task.update_envs_and_secrets_from_workdir()
 
         # Should not raise any exception and task should remain unchanged
         assert task.workdir == '/some/local/path'
 
     @patch.dict(os.environ, {}, clear=True)
-    @patch('sky.client.cli.git.GitRepo')
+    @patch('sky.utils.git.GitRepo')
     def test_update_task_workdir_and_secrets_with_token(self, mock_git_repo):
         """Test updating task secrets when git token is available."""
         # Set up environment
-        os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
+        os.environ[git.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
         task = task_lib.Task(name='test', run='echo hello')
@@ -186,7 +177,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
         mock_git_repo.return_value = mock_repo_instance
 
-        command._update_task_workdir_and_secrets_from_workdir(task)
+        task.update_envs_and_secrets_from_workdir()
 
         # Verify GitRepo was called with correct parameters
         mock_git_repo.assert_called_once_with(
@@ -194,17 +185,17 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
 
         # Verify task envs and secrets were updated
         assert task.envs[
-            git_utils.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
-        assert task.secrets[git_utils.GIT_TOKEN_ENV_VAR] == 'test_token'
-        assert task.envs[git_utils.GIT_BRANCH_ENV_VAR] == 'main'
-        assert git_utils.GIT_SSH_KEY_ENV_VAR not in task.secrets
+            git.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
+        assert task.secrets[git.GIT_TOKEN_ENV_VAR] == 'test_token'
+        assert task.envs[git.GIT_BRANCH_ENV_VAR] == 'main'
+        assert git.GIT_SSH_KEY_ENV_VAR not in task.secrets
 
     @patch.dict(os.environ, {}, clear=True)
-    @patch('sky.client.cli.git.GitRepo')
+    @patch('sky.utils.git.GitRepo')
     def test_update_task_workdir_and_secrets_with_ssh_key(self, mock_git_repo):
         """Test updating task secrets when SSH key is available."""
         # Set up environment
-        os.environ[git_utils.GIT_SSH_KEY_PATH_ENV_VAR] = '/path/to/ssh/key'
+        os.environ[git.GIT_SSH_KEY_PATH_ENV_VAR] = '/path/to/ssh/key'
 
         # Set up task
         task = task_lib.Task(name='test', run='echo hello')
@@ -224,7 +215,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
         mock_git_repo.return_value = mock_repo_instance
 
-        command._update_task_workdir_and_secrets_from_workdir(task)
+        task.update_envs_and_secrets_from_workdir()
 
         # Verify GitRepo was called with correct parameters
         mock_git_repo.assert_called_once_with(
@@ -233,18 +224,18 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
 
         # Verify task envs and secrets were updated
         assert task.envs[
-            git_utils.GIT_URL_ENV_VAR] == 'ssh://git@github.com/test/repo.git'
-        assert task.secrets[git_utils.GIT_SSH_KEY_ENV_VAR] == 'ssh_key_content'
-        assert task.envs[git_utils.GIT_BRANCH_ENV_VAR] == 'main'
-        assert git_utils.GIT_TOKEN_ENV_VAR not in task.secrets
+            git.GIT_URL_ENV_VAR] == 'ssh://git@github.com/test/repo.git'
+        assert task.secrets[git.GIT_SSH_KEY_ENV_VAR] == 'ssh_key_content'
+        assert task.envs[git.GIT_BRANCH_ENV_VAR] == 'main'
+        assert git.GIT_TOKEN_ENV_VAR not in task.secrets
 
     @patch.dict(os.environ, {}, clear=True)
-    @patch('sky.client.cli.git.GitRepo')
+    @patch('sky.utils.git.GitRepo')
     def test_update_task_workdir_and_secrets_with_commit_hash(
             self, mock_git_repo):
         """Test updating task secrets when ref is a commit hash."""
         # Set up environment
-        os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
+        os.environ[git.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
         task = task_lib.Task(name='test', run='echo hello')
@@ -264,20 +255,20 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         mock_repo_instance.get_ref_type.return_value = git.GitRefType.COMMIT
         mock_git_repo.return_value = mock_repo_instance
 
-        command._update_task_workdir_and_secrets_from_workdir(task)
+        task.update_envs_and_secrets_from_workdir()
 
         # Verify task envs were updated with commit hash
         assert task.envs[
-            git_utils.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
-        assert task.envs[git_utils.GIT_COMMIT_HASH_ENV_VAR] == 'a1b2c3d4e5f6'
-        assert git_utils.GIT_BRANCH_ENV_VAR not in task.envs
+            git.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
+        assert task.envs[git.GIT_COMMIT_HASH_ENV_VAR] == 'a1b2c3d4e5f6'
+        assert git.GIT_BRANCH_ENV_VAR not in task.envs
 
     @patch.dict(os.environ, {}, clear=True)
-    @patch('sky.client.cli.git.GitRepo')
+    @patch('sky.utils.git.GitRepo')
     def test_update_task_workdir_and_secrets_with_tag(self, mock_git_repo):
         """Test updating task secrets when ref is a tag."""
         # Set up environment
-        os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
+        os.environ[git.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
         task = task_lib.Task(name='test', run='echo hello')
@@ -297,20 +288,20 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         mock_repo_instance.get_ref_type.return_value = git.GitRefType.TAG
         mock_git_repo.return_value = mock_repo_instance
 
-        command._update_task_workdir_and_secrets_from_workdir(task)
+        task.update_envs_and_secrets_from_workdir()
 
         # Verify task envs were updated with tag
         assert task.envs[
-            git_utils.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
-        assert task.envs[git_utils.GIT_TAG_ENV_VAR] == 'v1.0.0'
-        assert git_utils.GIT_BRANCH_ENV_VAR not in task.envs
+            git.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
+        assert task.envs[git.GIT_TAG_ENV_VAR] == 'v1.0.0'
+        assert git.GIT_BRANCH_ENV_VAR not in task.envs
 
     @patch.dict(os.environ, {}, clear=True)
-    @patch('sky.client.cli.git.GitRepo')
+    @patch('sky.utils.git.GitRepo')
     def test_update_task_workdir_and_secrets_empty_ref(self, mock_git_repo):
         """Test updating task secrets when ref is empty."""
         # Set up environment
-        os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
+        os.environ[git.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
         task = task_lib.Task(name='test', run='echo hello')
@@ -327,21 +318,21 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
         mock_git_repo.return_value = mock_repo_instance
 
-        command._update_task_workdir_and_secrets_from_workdir(task)
+        task.update_envs_and_secrets_from_workdir()
 
         # Verify task envs were updated but no branch/commit hash env
         assert task.envs[
-            git_utils.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
-        assert git_utils.GIT_BRANCH_ENV_VAR not in task.envs
-        assert git_utils.GIT_COMMIT_HASH_ENV_VAR not in task.envs
+            git.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
+        assert git.GIT_BRANCH_ENV_VAR not in task.envs
+        assert git.GIT_COMMIT_HASH_ENV_VAR not in task.envs
 
     @patch.dict(os.environ, {}, clear=True)
-    @patch('sky.client.cli.git.GitRepo')
+    @patch('sky.utils.git.GitRepo')
     def test_update_task_workdir_and_secrets_none_clone_info(
             self, mock_git_repo):
         """Test updating task secrets when clone info is None."""
         # Set up environment
-        os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
+        os.environ[git.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
         task = task_lib.Task(name='test', run='echo hello')
@@ -355,15 +346,15 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         mock_repo_instance.get_repo_clone_info.return_value = None
         mock_git_repo.return_value = mock_repo_instance
 
-        command._update_task_workdir_and_secrets_from_workdir(task)
+        task.update_envs_and_secrets_from_workdir()
 
         # Verify task was not modified
-        assert git_utils.GIT_URL_ENV_VAR not in task.envs
-        assert git_utils.GIT_TOKEN_ENV_VAR not in task.secrets
-        assert git_utils.GIT_SSH_KEY_ENV_VAR not in task.secrets
+        assert git.GIT_URL_ENV_VAR not in task.envs
+        assert git.GIT_TOKEN_ENV_VAR not in task.secrets
+        assert git.GIT_SSH_KEY_ENV_VAR not in task.secrets
 
     @patch.dict(os.environ, {}, clear=True)
-    @patch('sky.client.cli.git.GitRepo')
+    @patch('sky.utils.git.GitRepo')
     def test_update_task_workdir_and_secrets_no_auth(self, mock_git_repo):
         """Test updating task secrets when no authentication is available."""
         # Set up task
@@ -386,23 +377,23 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         # Mock get_ref_type to return branch
         mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
 
-        command._update_task_workdir_and_secrets_from_workdir(task)
+        task.update_envs_and_secrets_from_workdir()
 
         # Verify task was not modified (no auth available)
-        assert git_utils.GIT_URL_ENV_VAR in task.envs
-        assert git_utils.GIT_BRANCH_ENV_VAR in task.envs
-        assert git_utils.GIT_TOKEN_ENV_VAR not in task.secrets
-        assert git_utils.GIT_SSH_KEY_ENV_VAR not in task.secrets
+        assert git.GIT_URL_ENV_VAR in task.envs
+        assert git.GIT_BRANCH_ENV_VAR in task.envs
+        assert git.GIT_TOKEN_ENV_VAR not in task.secrets
+        assert git.GIT_SSH_KEY_ENV_VAR not in task.secrets
 
     @patch.dict(os.environ, {}, clear=True)
-    @patch('sky.client.cli.git.GitRepo')
+    @patch('sky.utils.git.GitRepo')
     @patch('sky.utils.ux_utils.print_exception_no_traceback')
     def test_update_task_workdir_and_secrets_git_error(self,
                                                        mock_print_exception,
                                                        mock_git_repo):
         """Test updating task secrets when GitError is raised."""
         # Set up environment
-        os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
+        os.environ[git.GIT_TOKEN_ENV_VAR] = 'test_token'
 
         # Set up task
         task = task_lib.Task(name='test', run='echo hello')
@@ -415,19 +406,19 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         mock_git_repo.side_effect = exceptions.GitError('Test git error')
 
         with pytest.raises(ValueError, match='Test git error'):
-            command._update_task_workdir_and_secrets_from_workdir(task)
+            task.update_envs_and_secrets_from_workdir()
 
         # Verify print_exception_no_traceback was called
         mock_print_exception.assert_called_once()
 
     @patch.dict(os.environ, {}, clear=True)
-    @patch('sky.client.cli.git.GitRepo')
+    @patch('sky.utils.git.GitRepo')
     def test_update_task_workdir_and_secrets_both_auth_types(
             self, mock_git_repo):
         """Test updating task secrets when both token and SSH key are available."""
         # Set up environment
-        os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
-        os.environ[git_utils.GIT_SSH_KEY_PATH_ENV_VAR] = '/path/to/ssh/key'
+        os.environ[git.GIT_TOKEN_ENV_VAR] = 'test_token'
+        os.environ[git.GIT_SSH_KEY_PATH_ENV_VAR] = '/path/to/ssh/key'
 
         # Set up task
         task = task_lib.Task(name='test', run='echo hello')
@@ -447,14 +438,14 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
         mock_git_repo.return_value = mock_repo_instance
 
-        command._update_task_workdir_and_secrets_from_workdir(task)
+        task.update_envs_and_secrets_from_workdir()
 
         # Verify both auth types were set
         assert task.envs[
-            git_utils.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
-        assert task.secrets[git_utils.GIT_TOKEN_ENV_VAR] == 'test_token'
-        assert task.secrets[git_utils.GIT_SSH_KEY_ENV_VAR] == 'ssh_key_content'
-        assert task.envs[git_utils.GIT_BRANCH_ENV_VAR] == 'main'
+            git.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
+        assert task.secrets[git.GIT_TOKEN_ENV_VAR] == 'test_token'
+        assert task.secrets[git.GIT_SSH_KEY_ENV_VAR] == 'ssh_key_content'
+        assert task.envs[git.GIT_BRANCH_ENV_VAR] == 'main'
 
 
 class TestGitUrlInfo:
@@ -621,7 +612,7 @@ class TestGitRepo:
     def test_parse_git_url_invalid_scp_empty_path(self):
         """Test parsing SCP format URL with empty path raises error."""
         # Create a URL that matches SCP pattern but has empty path after processing
-        with patch('sky.client.cli.git.re.match') as mock_match:
+        with patch('sky.utils.git.re.match') as mock_match:
             # Mock the first two matches to return None (https and ssh_full)
             # Mock the third match (scp) to return empty path
             mock_match_obj = MagicMock()
