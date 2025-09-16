@@ -373,8 +373,11 @@ export function Clusters() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getClusterHistory);
     dashboardCache.invalidate(getWorkspaces);
+    // Only invalidate cluster history if we're currently showing history
+    if (showHistory) {
+      dashboardCache.invalidate(getClusterHistory);
+    }
 
     // Reset preloading state so ClusterTable can fetch fresh data immediately
     setPreloadingComplete(false);
@@ -382,11 +385,11 @@ export function Clusters() {
     // Trigger a new preload cycle
     cachePreloader.preloadForPage('clusters', { force: true }).then(() => {
       setPreloadingComplete(true);
+      // Call refresh after preloading is complete
+      if (refreshDataRef.current) {
+        refreshDataRef.current();
+      }
     });
-
-    if (refreshDataRef.current) {
-      refreshDataRef.current();
-    }
   };
 
   return (
@@ -797,7 +800,7 @@ export function ClusterTable({
             </TableHeader>
 
             <TableBody>
-              {loading && isInitialLoad ? (
+              {loading || !preloadingComplete ? (
                 <TableRow>
                   <TableCell
                     colSpan={9}
