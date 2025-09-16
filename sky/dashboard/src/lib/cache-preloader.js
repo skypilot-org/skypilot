@@ -46,6 +46,14 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
       fn: getWorkspaceAwareInfrastructure,
       requiresWorkspaces: true,
     },
+    getWorkspaceClusters: {
+      fn: getWorkspaceClusters,
+      requiresWorkspaces: true,
+    },
+    getWorkspaceManagedJobs: {
+      fn: getWorkspaceManagedJobs,
+      requiresWorkspaces: true,
+    },
   },
 
   // Page-specific function requirements
@@ -59,8 +67,8 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     ],
     workspaces: [
       'getWorkspaces',
-      'getClusters',
-      'getManagedJobs',
+      'getWorkspaceClusters',
+      'getWorkspaceManagedJobs',
       'getEnabledClouds',
     ],
     users: ['getUsers', 'getClusters', 'getManagedJobs'],
@@ -157,6 +165,18 @@ class CachePreloader {
         );
         // Dynamic function that requires workspace data
         promises.push(this._loadWorkspaceAwareInfrastructure(force));
+      } else if (functionName === 'getWorkspaceClusters') {
+        console.log(
+          `[CachePreloader] ${functionName} using dynamic workspace clusters loader`
+        );
+        // Dynamic function that requires workspace data
+        promises.push(this._loadWorkspaceClustersForAllWorkspaces(force));
+      } else if (functionName === 'getWorkspaceManagedJobs') {
+        console.log(
+          `[CachePreloader] ${functionName} using dynamic workspace managed jobs loader`
+        );
+        // Dynamic function that requires workspace data
+        promises.push(this._loadWorkspaceManagedJobsForAllWorkspaces(force));
       } else {
         console.warn(`[CachePreloader] Unknown function: ${functionName}`);
       }
@@ -188,12 +208,16 @@ class CachePreloader {
         workspaceNames
       );
 
-      // Then load enabled clouds for each workspace
-      const promises = workspaceNames.map((wsName) => {
+      // Then load enabled clouds for each workspace (both expanded and non-expanded versions)
+      const promises = workspaceNames.flatMap((wsName) => {
         if (force) {
           dashboardCache.invalidate(getEnabledClouds, [wsName]);
+          dashboardCache.invalidate(getEnabledClouds, [wsName, true]);
         }
-        return dashboardCache.get(getEnabledClouds, [wsName]);
+        return [
+          dashboardCache.get(getEnabledClouds, [wsName]),
+          dashboardCache.get(getEnabledClouds, [wsName, true]),
+        ];
       });
 
       await Promise.allSettled(promises);

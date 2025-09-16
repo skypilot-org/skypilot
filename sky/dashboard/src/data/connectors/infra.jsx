@@ -131,7 +131,10 @@ export async function getWorkspaceAwareInfrastructure(forceRefresh = false) {
   try {
     // Step 1: Get accessible workspaces for the user (cached)
     const { getWorkspaces } = await import('@/data/connectors/workspaces');
-    const workspacesData = await getWorkspaces();
+    const dashboardCache = (await import('@/lib/cache')).default;
+    const workspacesData = forceRefresh
+      ? await getWorkspaces()
+      : await dashboardCache.get(getWorkspaces);
 
     if (!workspacesData || Object.keys(workspacesData).length === 0) {
       console.log(
@@ -155,14 +158,15 @@ export async function getWorkspaceAwareInfrastructure(forceRefresh = false) {
     const { getWorkspaceClusters, getWorkspaceManagedJobs } = await import(
       '@/components/workspaces'
     );
-    const dashboardCache = (await import('@/lib/cache')).default;
 
     const workspaceDataPromises = workspaceNames.map(async (wsName) => {
       console.log(`[DEBUG] Fetching data for workspace: ${wsName}`);
 
       try {
         const [enabledClouds, clusters, managedJobs] = await Promise.all([
-          getEnabledClouds(wsName, true), // expand=true for contexts - call directly to avoid cache key issues
+          forceRefresh
+            ? getEnabledClouds(wsName, true)
+            : dashboardCache.get(getEnabledClouds, [wsName, true]),
           forceRefresh
             ? getWorkspaceClusters(wsName)
             : dashboardCache.get(getWorkspaceClusters, [wsName]),
