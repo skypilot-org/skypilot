@@ -9,6 +9,7 @@ from unittest import mock
 
 import pytest
 import requests
+from requests.structures import CaseInsensitiveDict
 
 import sky
 from sky import exceptions
@@ -148,6 +149,38 @@ def test_client_older(mock_is_local, mock_get_status):
 
     # Correct error message
     assert 'Your SkyPilot client is too old' in str(exc_info.value)
+
+
+@mock.patch('sky.server.common.make_authenticated_request')
+def test_get_api_server_status_redirect_requires_auth(mock_make_request):
+    """Redirects during health check should trigger auth flow."""
+    server_url = 'https://skypilot-dev.elpenguino.net'
+    expected_health_url = f'{server_url}/api/health'
+
+    redirect_response = requests.Response()
+    redirect_response.status_code = 302
+    redirect_response.headers = CaseInsensitiveDict({
+        'Location':
+        ('https://skypilot-dev.elpenguino.net/outpost.goauthentik.io/'
+         'start?rd=https%3A%2F%2Fskypilot-dev.elpenguino.net%2Fapi%2Fhealth')
+    })
+    redirect_response.url = expected_health_url
+
+    final_response = requests.Response()
+    final_response.status_code = 200
+    final_response.headers = CaseInsensitiveDict(
+        {'Content-Type': 'text/html; charset=utf-8'})
+    final_response._content = b'<html>login</html>'
+    final_response.url = (
+        'https://skypilot-dev.elpenguino.net/outpost.goauthentik.io/start'
+        '?rd=https%3A%2F%2Fskypilot-dev.elpenguino.net%2Fapi%2Fhealth')
+    final_response.history = [redirect_response]
+
+    mock_make_request.return_value = final_response
+
+    result = common.get_api_server_status(server_url)
+
+    assert result.status == ApiServerStatus.NEEDS_AUTH
 
 
 @pytest.fixture
