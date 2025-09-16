@@ -120,6 +120,7 @@ class TestTailLogsBuffering(unittest.TestCase):
         # Verify no thread leaks
         self.assertEqual(threading.active_count(), self.initial_thread_count)
 
+
 class TestLogChunkBuffer(unittest.TestCase):
     """Test cases for LogChunkBuffer class."""
 
