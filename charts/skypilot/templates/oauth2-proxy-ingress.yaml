@@ -6,10 +6,10 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ .Release.Name }}-oauth2-proxy
+  name: {{ include "skypilot.fullname" . }}-oauth2-proxy
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-oauth2-proxy
+    app: {{ include "skypilot.fullname" . }}-oauth2-proxy
     skypilot.co/component: oauth2-proxy
   annotations:
     {{- if not $useNewIngressClass }}
@@ -27,7 +27,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: {{ .Release.Name }}-oauth2-proxy
+            name: {{ include "skypilot.fullname" . }}-oauth2-proxy
             port:
               number: 4180
 {{- end }}

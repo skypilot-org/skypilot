@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ .Release.Name }}-basic-auth
+  name: {{ include "skypilot.fullname" . }}-basic-auth
   namespace: {{ .Release.Namespace }}
 type: Opaque
 stringData:

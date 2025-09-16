@@ -2,10 +2,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-api-server-overview-dashboard
+  name: {{ include "skypilot.fullname" . }}-api-server-overview-dashboard
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-api
+    app: {{ include "skypilot.fullname" . }}-api
     grafana_dashboard: "true"
 data:
   api-server-overview.json: |
