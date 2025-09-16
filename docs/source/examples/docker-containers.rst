@@ -146,12 +146,18 @@ you can provide the registry authentication details using :ref:`task environment
             image_id: docker:<your-user-id>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>
 
           envs:
-            # SkyPilot will execute the command and use its output as the password
+            # Values used in: docker login -u <user> -p <password> <registry server>
+            # Password for ECR can be generated with ``aws ecr get-login-password --region <region>``
             SKYPILOT_DOCKER_USERNAME: AWS
-            SKYPILOT_DOCKER_PASSWORD: "$(aws ecr get-login-password --region <region>)"
+            SKYPILOT_DOCKER_PASSWORD: <password>
             SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.<region>.amazonaws.com
 
-        The AWS CLI command will be executed on your local machine when launching the cluster, and the resulting token will be used for authentication.
+        Or, you can use ``sky launch`` with the ``--env`` flag to pass the password:
+
+        .. code-block:: bash
+
+          sky launch sky.yaml \
+            --env SKYPILOT_DOCKER_PASSWORD="$(aws ecr get-login-password --region us-east-1)"
 
         .. note::
 
@@ -168,13 +174,6 @@ you can provide the registry authentication details using :ref:`task environment
                 SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.<region>.amazonaws.com
 
             **Important**: Ensure that the EC2 instance's IAM role has the necessary ECR permissions (``AmazonEC2ContainerRegistryReadOnly`` or appropriate custom policies).
-
-        Alternatively, you can use ``sky launch`` with the ``--env`` flag to pass the password:
-
-        .. code-block:: bash
-
-          sky launch sky.yaml \
-            --env SKYPILOT_DOCKER_PASSWORD="$(aws ecr get-login-password --region us-east-1)"
 
     .. tab-item:: GCP GCR
         :sync: gcp-artifact-registry-tab
