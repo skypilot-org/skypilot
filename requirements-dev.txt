@@ -1,11 +1,8 @@
 # formatting
 yapf==0.32.0
 pylint==3.2.7
-# FIXME: use temporary unofficial version working with pylint>3 (https://github.com/edaniszewski/pylint-quotes/pull/30)
-# pylint>=2.15.4,<3
-# pylint_quotes
-pylint_quotes @ git+https://github.com/marekhanus/pylint-quotes.git@0.3.0a2
 black==22.10.0
+ruff==0.6.9
 toml==0.10.2
 isort==5.12.0
 

@@ -29,3 +29,15 @@ line_length = 80
 multi_line_output = 0
 combine_as_imports = true
 use_parentheses = true
+
+# Ruff: enforce single quotes via flake8-quotes rules; keep docstrings double
+[tool.ruff]
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["Q"]
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "single"
+multiline-quotes = "single"
+docstring-quotes = "double"

@@ -60,15 +60,25 @@ repos:
         args: ['--recursive', '--parallel', '--in-place']  # Only necessary flags
         additional_dependencies: [toml==0.10.2]
 
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9  # Match ruff==0.6.9
+    hooks:
+    -   id: ruff
+        name: ruff (quotes only)
+        args:
+          - "--select=Q"
+          - "--fix"
+          - "--force-exclude"
+          - "--exclude=sky/skylet/providers/ibm/**"  # align with format.sh
+          - "--exclude=build/**"
+        files: \.(py|pyi)$
+
 -   repo: https://github.com/pylint-dev/pylint
-    rev: v2.14.5  # Match the version from requirements
+    rev: v3.2.7  # Match the version from requirements-dev
     hooks:
     -   id: pylint
-        additional_dependencies:
-            - pylint-quotes==0.2.3  # Match the version from requirements
         name: pylint
         args:
-            - --rcfile=.pylintrc  # Use your custom pylint configuration
-            - --load-plugins=pylint_quotes  # Load the pylint-quotes plugin
-        files: ^sky/  # Only include files from the 'sky/' directory
+            - --rcfile=.pylintrc
+        files: ^sky/
         exclude: ^sky/skylet/providers/ibm/
