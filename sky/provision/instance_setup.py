@@ -146,7 +146,7 @@ class SSHThreadPoolExecutor(futures.ThreadPoolExecutor):
         # we need to kill the children processes
         # to avoid leakage.
         subprocess_utils.kill_children_processes()
-        self.shutdown(wait=True, cancel_futures=True)
+        self.shutdown()
         return False
 
 
