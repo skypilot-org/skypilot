@@ -1352,14 +1352,10 @@ def _fill_in_launchable_resources(
     def get_feasible_launchable_resources(
             cloud: clouds.Cloud, resources: resources_lib.Resources,
             num_nodes: int) -> resources_utils.FeasibleResources:
-        if resources.cloud is not None:
-            resources.validate()
-            return cloud.get_feasible_launchable_resources(resources, num_nodes)
-        else:
-            resources_copy = resources.copy(cloud=cloud)
-            resources_copy.validate()
-            return cloud.get_feasible_launchable_resources(
-                resources_copy, num_nodes)
+        if resources.cloud is None:
+            resources = resources.copy(cloud=cloud)
+        resources.validate()
+        return cloud.get_feasible_launchable_resources(resources, num_nodes)
 
     for resources in task.resources:
         # Validate the resources first which may fill in missing fields
