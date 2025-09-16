@@ -1,6 +1,10 @@
 """ Seeweb Adaptor """
 import configparser
 from pathlib import Path
+from typing import Optional
+
+from pydantic import ValidationError
+import requests  # type: ignore
 
 from sky.adaptors import common
 from sky.utils import annotations
@@ -100,4 +104,34 @@ def client():
         raise SeewebApiKeyMissing(
             'Empty api_key in ~/.seeweb_cloud/seeweb_keys')
 
-    return ecsapi.Api(token=api_key)
+    api = ecsapi.Api(token=api_key)
+
+    # Monkey-patch fetch_servers to be tolerant to API schema mismatches.
+    orig_fetch_servers = api.fetch_servers
+
+    def _tolerant_fetch_servers(
+            timeout: Optional[int] = None):  # type: ignore[override]
+        try:
+            return orig_fetch_servers(timeout=timeout)
+        except ValidationError:
+            # Fallback path: fetch raw JSON, drop snapshot fields, then validate
+            # pylint: disable=protected-access
+            base_url = api._Api__generate_base_url()  # type: ignore
+            headers = api._Api__generate_authentication_headers(
+            )  # type: ignore
+            url = f'{base_url}/servers'
+            resp = requests.get(url, headers=headers, timeout=timeout or 15)
+            resp.raise_for_status()
+            data = resp.json()
+            try:
+                servers = data.get('server', [])
+                for s in servers:
+                    s.pop('last_restored_snapshot', None)
+            except (KeyError, TypeError, ValueError):
+                pass
+            server_list_response_cls = ecsapi._server._ServerListResponse
+            servers_response = server_list_response_cls.model_validate(data)
+            return servers_response.server
+
+    api.fetch_servers = _tolerant_fetch_servers  # type: ignore[assignment]
+    return api
