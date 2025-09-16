@@ -433,5 +433,3 @@ overgeneral-exceptions=builtins.Exception,
                        builtins.BaseException
 
 #######
-
-# deprecated plugin-specific quote options removed; quotes are enforced via Ruff

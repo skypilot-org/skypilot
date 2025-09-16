@@ -6,10 +6,6 @@ pylint==3.2.7
 # formatting the node_providers code from upstream ray-project/ray project
 # match the version with .pre-commit-config.yaml
 black==22.10.0
-# https://github.com/edaniszewski/pylint-quotes
-# match the version with .pre-commit-config.yaml
-pylint-quotes==0.0.0  # deprecated, replaced by ruff
-# enforce quotes via ruff
 ruff==0.6.9
 # match the version with .pre-commit-config.yaml
 toml==0.10.2
