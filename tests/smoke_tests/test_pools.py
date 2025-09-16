@@ -288,8 +288,6 @@ def test_pool_preemption(generic_cloud: str):
             pool_name = f'{name}-pool'
             pool_name = common_utils.make_cluster_name_on_cloud(
                 pool_name, sky.AWS.max_cluster_name_length())
-            print(f'pool_name: {pool_name}')
-            # print(f'pool_name_on_cloud: {pool_name_on_cloud}')
 
             test = smoke_tests_utils.Test(
                 'test_pool_preemption',
