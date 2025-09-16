@@ -91,11 +91,35 @@ def test_add_or_update_cluster_update_only(_mock_db_conn):
                       instance_type='p4d.24xlarge'),
         ready=True,
         update_only=False)
-    # now that a record exists, should update the record
+
+    with pytest.raises(ValueError):
+        # update_cluster_hash_filter is required when update_only is True
+        global_user_state.add_or_update_cluster(
+            'test-cluster',
+            'test-cluster',
+            sky.Resources(infra='aws/us-east-1/us-east-1a',
+                          instance_type='p4d.24xlarge'),
+            ready=True,
+            update_only=True)
+
+    with pytest.raises(ValueError):
+        # incorrect cluster hash filter
+        global_user_state.add_or_update_cluster(
+            'test-cluster',
+            'test-cluster',
+            sky.Resources(infra='aws/us-east-1/us-east-1a',
+                          instance_type='p4d.24xlarge'),
+            ready=True,
+            update_only=True,
+            update_cluster_hash_filter='01230123')
+
+    # correct cluster hash filter
+    record = global_user_state.get_cluster_from_name('test-cluster')
     global_user_state.add_or_update_cluster(
         'test-cluster',
         'test-cluster',
         sky.Resources(infra='aws/us-east-1/us-east-1a',
                       instance_type='p4d.24xlarge'),
         ready=True,
-        update_only=True)
+        update_only=True,
+        update_cluster_hash_filter=record['cluster_hash'])

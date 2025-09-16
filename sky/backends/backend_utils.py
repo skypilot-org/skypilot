@@ -2331,12 +2331,14 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             'All nodes up; SkyPilot runtime healthy.',
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                handle,
-                                                requested_resources=None,
-                                                ready=True,
-                                                is_launch=False,
-                                                update_only=True)
+        global_user_state.add_or_update_cluster(
+            cluster_name,
+            handle,
+            requested_resources=None,
+            ready=True,
+            is_launch=False,
+            update_only=True,
+            update_cluster_hash_filter=record['cluster_hash'])
         return global_user_state.get_cluster_from_name(cluster_name)
 
     # All cases below are transitioning the cluster to non-UP states.
@@ -2542,12 +2544,14 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True,
             duplicate_regex=init_reason_regex)
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                handle,
-                                                requested_resources=None,
-                                                ready=False,
-                                                is_launch=False,
-                                                update_only=True)
+        global_user_state.add_or_update_cluster(
+            cluster_name,
+            handle,
+            requested_resources=None,
+            ready=False,
+            is_launch=False,
+            update_only=True,
+            update_cluster_hash_filter=record['cluster_hash'])
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.

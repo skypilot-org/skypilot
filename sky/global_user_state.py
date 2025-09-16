@@ -516,7 +516,8 @@ def add_or_update_cluster(cluster_name: str,
                           task_config: Optional[Dict[str, Any]] = None,
                           is_managed: bool = False,
                           provision_log_path: Optional[str] = None,
-                          update_only: bool = False):
+                          update_only: bool = False,
+                          update_cluster_hash_filter: Optional[str] = None):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -536,6 +537,10 @@ def add_or_update_cluster(cluster_name: str,
             the cluster record will not be inserted if one does not exist.
     """
     assert _SQLALCHEMY_ENGINE is not None
+    if update_only and update_cluster_hash_filter is None:
+        raise ValueError(
+            'update_cluster_hash is required when update_only is True')
+
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
@@ -633,7 +638,8 @@ def add_or_update_cluster(cluster_name: str,
 
         if update_only:
             count = session.query(cluster_table).filter_by(
-                name=cluster_name, cluster_hash=cluster_hash).update({
+                name=cluster_name,
+                cluster_hash=update_cluster_hash_filter).update({
                     **conditional_values, cluster_table.c.handle: handle,
                     cluster_table.c.status: status.value,
                     cluster_table.c.status_updated_at: status_updated_at
