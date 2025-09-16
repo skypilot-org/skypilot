@@ -4394,15 +4394,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             else:
                 raise
         lock_id = backend_utils.cluster_status_lock_id(cluster_name)
-        lock = locks.get_lock(lock_id)
+        lock = locks.get_lock(lock_id, timeout=1)
         # Retry in case new cluster operation comes in and holds the lock
         # right after the lock is removed.
         n_attempts = 2
         while True:
             n_attempts -= 1
-            # In case other running cluster operations are still holding the
-            # lock.
-            lock.force_unlock()
             # We have to kill the cluster requests, because `down` and `stop`
             # should be higher priority than the cluster requests, and we should
             # release the lock from other requests.
@@ -4420,6 +4417,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Failed to kill other launch requests for the '
                     f'cluster {handle.cluster_name}: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
+            # In case other running cluster operations are still holding the
+            # lock.
+            lock.force_unlock()
             try:
                 with lock:
                     self.teardown_no_lock(
