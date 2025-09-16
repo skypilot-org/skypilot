@@ -4394,7 +4394,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             else:
                 raise
         lock_id = backend_utils.cluster_status_lock_id(cluster_name)
-        lock = locks.get_lock(lock_id)
+        lock = locks.get_lock(lock_id, timeout=1)
         # Retry in case new cluster operation comes in and holds the lock
         # right after the lock is removed.
         n_attempts = 2
@@ -4421,7 +4421,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # lock.
             lock.force_unlock()
             try:
-                with lock.acquire(blocking=False):
+                with lock:
                     self.teardown_no_lock(
                         handle,
                         terminate,
