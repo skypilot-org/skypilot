@@ -73,6 +73,9 @@ RUFF_EXCLUDES=(
     '--exclude' 'build/**'
     '--exclude' 'tests/**'
     '--exclude' '*.ipynb'
+    '--exclude' 'examples/**'
+    '--exclude' 'llm/**'
+    '--exclude' 'docs/**'
 )
 
 # Format specified files
