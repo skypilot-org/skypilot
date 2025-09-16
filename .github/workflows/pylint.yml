@@ -41,4 +41,10 @@ jobs:
     - name: Ruff (quotes)
       run: |
         source ~/test-env/bin/activate
-        ruff check --select Q --force-exclude .
+        ruff check --select Q --force-exclude \
+          --exclude 'sky/skylet/providers/ibm/**' \
+          --exclude 'sky/schemas/generated/**' \
+          --exclude 'build/**' \
+          --exclude 'tests/**' \
+          --exclude '*.ipynb' \
+          .

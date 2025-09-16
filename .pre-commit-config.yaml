@@ -92,4 +92,6 @@ repos:
           - "--exclude=sky/skylet/providers/ibm/**"
           - "--exclude=sky/schemas/generated/**"
           - "--exclude=build/**"
+          - "--exclude=tests/**"
+          - "--exclude=*.ipynb"
         files: \.(py|pyi)$

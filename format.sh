@@ -71,6 +71,8 @@ RUFF_EXCLUDES=(
     '--exclude' 'sky/skylet/providers/ibm/**'
     '--exclude' 'sky/schemas/generated/**'
     '--exclude' 'build/**'
+    '--exclude' 'tests/**'
+    '--exclude' '*.ipynb'
 )
 
 # Format specified files
