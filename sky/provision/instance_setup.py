@@ -137,6 +137,8 @@ def _hint_worker_log_path(cluster_name: str, cluster_info: common.ClusterInfo,
 
 
 class SSHThreadPoolExecutor(futures.ThreadPoolExecutor):
+    """ThreadPoolExecutor that kills children processes on exit."""
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         # ssh command runner eventually calls
         # log_lib.run_with_log, which will spawn
