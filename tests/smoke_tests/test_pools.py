@@ -11,6 +11,7 @@ from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import yaml_utils
 
+
 @pytest.mark.gcp
 def test_pools_setup_num_gpus():
     """Test that the number of GPUs is set correctly in the setup script."""
