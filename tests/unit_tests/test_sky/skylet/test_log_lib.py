@@ -6,8 +6,8 @@ import unittest
 from sky.skylet import log_lib
 
 
-class TestLogChunkBuffer(unittest.TestCase):
-    """Test cases for LogChunkBuffer class."""
+class TestLogBuffer(unittest.TestCase):
+    """Test cases for LogBuffer class."""
 
     def test_initialization(self):
         """Test buffer initializes with correct defaults."""
