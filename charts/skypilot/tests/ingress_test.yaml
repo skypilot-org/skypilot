@@ -13,7 +13,7 @@ tests:
           of: Ingress
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-ingress
+          value: RELEASE-NAME-skypilot-ingress
 
   - it: should not create ingress when disabled
     set:
@@ -135,7 +135,7 @@ tests:
           value: "SkyPilot API Server"
       - equal:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-secret"]
-          value: "RELEASE-NAME-basic-auth"
+          value: "RELEASE-NAME-skypilot-basic-auth"
 
   - it: should not add basic auth annotations when user management is enabled
     set:
@@ -254,7 +254,7 @@ tests:
     asserts:
       - equal:
           path: spec.rules[0].http.paths[0].backend.service.name
-          value: "RELEASE-NAME-api-service"
+          value: "RELEASE-NAME-skypilot-api-service"
       - equal:
           path: spec.rules[0].http.paths[0].backend.service.port.number
           value: 80 

@@ -146,7 +146,7 @@ tests:
             name: SKYPILOT_DB_CONNECTION_URI
             valueFrom:
               secretKeyRef:
-                name: RELEASE-NAME-db-connection
+                name: RELEASE-NAME-skypilot-db-connection
                 key: connection_string
 
   - it: should not set database connection environment variables when neither secret nor string is configured
