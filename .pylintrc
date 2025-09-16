@@ -429,13 +429,9 @@ valid-metaclass-classmethod-first-arg=mcs
 
 # Exceptions that will emit a warning when being caught. Defaults to
 # "Exception"
-overgeneral-exceptions=StandardError,
-                       Exception,
-                       BaseException
+overgeneral-exceptions=builtins.Exception,
+                       builtins.BaseException
 
 #######
 
-# https://github.com/edaniszewski/pylint-quotes#configuration
-string-quote=single
-triple-quote=double
-docstring-quote=double
+# deprecated plugin-specific quote options removed; quotes are enforced via Ruff
