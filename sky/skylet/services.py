@@ -1,6 +1,5 @@
 """gRPC service implementations for skylet."""
 
-import io
 import os
 import queue as queuelib
 import threading
@@ -22,8 +21,9 @@ from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_LOG_CHUNK_SIZE = 16 * 1024  # 16KB
-DEFAULT_LOG_CHUNK_FLUSH_INTERVAL = 0.01  # 10ms
+# In the worst case, flush the log buffer every 50ms,
+# to ensure responsiveness.
+DEFAULT_LOG_CHUNK_FLUSH_INTERVAL = 0.05
 
 
 class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
@@ -58,56 +58,6 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
                 is_autostopping=is_autostopping)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
-
-
-class LogBuffer:
-    """In-memory buffer for chunking log lines for streaming."""
-
-    def __init__(self, max_chars: int = DEFAULT_LOG_CHUNK_SIZE):
-        """Initialize the log buffer.
-
-        Args:
-            max_chars: Maximum buffer size (in characters, not bytes) before
-                       flushing. The actual amount of bytes (UTF-8 encoding)
-                       could be more than this, depending on the characters,
-                       i.e. ASCII characters take 1 byte, while others
-                       may take 2-4 bytes. But this is fine as our default
-                       chunk size is well below the default value of
-                       grpc.max_receive_message_length which is 4MB.
-        """
-        self.max_chars = max_chars
-        self._buffer = io.StringIO()
-
-    def _should_flush(self) -> bool:
-        return self._buffer.tell() >= self.max_chars
-
-    def flush(self) -> str:
-        """Get the current buffered content and clear the buffer.
-
-        Returns:
-            The buffered log lines as a single string
-        """
-        if not self._buffer.tell():
-            return ''
-        chunk = self._buffer.getvalue()
-        self._buffer.truncate(0)
-        self._buffer.seek(0)
-        return chunk
-
-    def write(self, line: str) -> bool:
-        """Add a line to the buffer.
-
-        Args:
-            line: The log line to add
-
-        Returns:
-            True if buffer should be flushed after adding the line
-        """
-        self._buffer.write(line)
-        return self._should_flush()
-
-    def close(self):
-        self._buffer.close()
 
 
 class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
@@ -231,7 +181,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def _buffered_iter_with_timeout(self, buffer: LogBuffer,
+    def _buffered_iter_with_timeout(self, buffer: log_lib.LogBuffer,
                                     iterable: Iterable[str],
                                     timeout: float) -> Iterable[str]:
         """Iterates over an iterable, writing each value to a buffer,
@@ -275,7 +225,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             self,
             request: jobsv1_pb2.TailLogsRequest,  # type: ignore[return]
             context: grpc.ServicerContext):
-        buffer = LogBuffer()
+        buffer = log_lib.LogBuffer()
         try:
             job_id = request.job_id if request.HasField(
                 'job_id') else job_lib.get_latest_job_id()

@@ -151,3 +151,19 @@ def tail_logs_iter(job_id: Optional[int],
                    follow: bool = ...,
                    tail: int = ...) -> Iterator[str]:
     ...
+
+
+class LogBuffer:
+    max_chars: int
+
+    def __init__(self, max_chars: int = ...):
+        ...
+
+    def flush(self) -> str:
+        ...
+
+    def write(self, line: str) -> bool:
+        ...
+
+    def close(self):
+        ...

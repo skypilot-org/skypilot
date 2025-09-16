@@ -39,6 +39,11 @@ logger = sky_logging.init_logger(__name__)
 
 LOG_FILE_START_STREAMING_AT = 'Waiting for task resources on '
 
+# 16-64KiB seems to be the sweet spot:
+# https://github.com/grpc/grpc.github.io/issues/371
+# TODO(kevin): Benchmark this ourselves and verify.
+DEFAULT_LOG_CHUNK_SIZE = 16 * 1024  # 16KiB
+
 
 class _ProcessingArgs:
     """Arguments for processing logs."""
@@ -673,3 +678,53 @@ def tail_logs_iter(job_id: Optional[int],
                 f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                 f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
             yield err + '\n'
+
+
+class LogBuffer:
+    """In-memory buffer for chunking log lines for streaming."""
+
+    def __init__(self, max_chars: int = DEFAULT_LOG_CHUNK_SIZE):
+        """Initialize the log buffer.
+
+        Args:
+            max_chars: Maximum buffer size (in characters, not bytes) before
+                       flushing. The actual amount of bytes (UTF-8 encoding)
+                       could be more than this, depending on the characters,
+                       i.e. ASCII characters take 1 byte, while others
+                       may take 2-4 bytes. But this is fine as our default
+                       chunk size is well below the default value of
+                       grpc.max_receive_message_length which is 4MB.
+        """
+        self.max_chars = max_chars
+        self._buffer = io.StringIO()
+
+    def _should_flush(self) -> bool:
+        return self._buffer.tell() >= self.max_chars
+
+    def flush(self) -> str:
+        """Get the current buffered content and clear the buffer.
+
+        Returns:
+            The buffered log lines as a single string
+        """
+        if not self._buffer.tell():
+            return ''
+        chunk = self._buffer.getvalue()
+        self._buffer.truncate(0)
+        self._buffer.seek(0)
+        return chunk
+
+    def write(self, line: str) -> bool:
+        """Add a line to the buffer.
+
+        Args:
+            line: The log line to add
+
+        Returns:
+            True if buffer should be flushed after adding the line
+        """
+        self._buffer.write(line)
+        return self._should_flush()
+
+    def close(self):
+        self._buffer.close()
