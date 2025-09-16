@@ -108,6 +108,7 @@ def client():
 
     # Monkey-patch fetch_servers to be tolerant to API schema mismatches.
     orig_fetch_servers = api.fetch_servers
+    orig_delete_server = api.delete_server
 
     def _tolerant_fetch_servers(
             timeout: Optional[int] = None):  # type: ignore[override]
@@ -134,4 +135,33 @@ def client():
             return servers_response.server
 
     api.fetch_servers = _tolerant_fetch_servers  # type: ignore[assignment]
+
+    def _tolerant_delete_server(server_name: str,
+                                timeout: Optional[int] = None):
+        try:
+            return orig_delete_server(server_name, timeout=timeout)
+        except ValidationError:
+            # Fallback: perform raw DELETE and interpret not_found as success
+            # pylint: disable=protected-access
+            base_url = api._Api__generate_base_url()  # type: ignore
+            headers = api._Api__generate_authentication_headers(
+            )  # type: ignore
+            url = f'{base_url}/servers/{server_name}'
+            resp = requests.delete(url, headers=headers, timeout=timeout or 15)
+            # Treat 404 as idempotent success
+            if resp.status_code == 404:
+                return None
+            # Some APIs return {status: 'not_found', message: ...}
+            try:
+                data = resp.json()
+                if isinstance(data, dict) and data.get('status') == 'not_found':
+                    return None
+            except (ValueError, TypeError):
+                pass
+            # If not clearly not_found, re-raise original behavior
+            resp.raise_for_status()
+            # Best-effort: return None to indicate deletion requested
+            return None
+
+    api.delete_server = _tolerant_delete_server  # type: ignore[assignment]
     return api
