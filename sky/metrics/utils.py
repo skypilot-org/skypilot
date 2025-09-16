@@ -3,6 +3,7 @@ import contextlib
 import functools
 import os
 import re
+import select
 import subprocess
 import time
 from typing import List, Optional, Tuple
@@ -11,6 +12,9 @@ import httpx
 import prometheus_client as prom
 
 from sky.skylet import constants
+
+_SELECT_TIMEOUT = 1
+_SELECT_BUFFER_SIZE = 4096
 
 _KB = 2**10
 _MB = 2**20
@@ -193,6 +197,7 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     local_port = None
     start_time = time.time()
 
+    buffer = ''
     # wait for the port forward to start and extract the local port
     while time.time() - start_time < start_port_forward_timeout:
         if port_forward_process.poll() is not None:
@@ -205,10 +210,16 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
 
         # read output line by line to find the local port
         if port_forward_process.stdout:
-            line = port_forward_process.stdout.readline()
-            if line:
-                # look for 'Forwarding from 127.0.0.1:XXXXX -> service_port'
-                match = re.search(r'Forwarding from 127\.0\.0\.1:(\d+)', line)
+            # Wait up to 1s for data to be available without blocking
+            r, _, _ = select.select([port_forward_process.stdout], [], [],
+                                    _SELECT_TIMEOUT)
+            if r:
+                # Read available bytes from the FD without blocking
+                fd = port_forward_process.stdout.fileno()
+                raw = os.read(fd, _SELECT_BUFFER_SIZE)
+                chunk = raw.decode(errors='ignore')
+                buffer += chunk
+                match = re.search(r'Forwarding from 127\.0\.0\.1:(\d+)', buffer)
                 if match:
                     local_port = int(match.group(1))
                     break
@@ -342,7 +353,11 @@ async def get_metrics_for_context(context: str) -> str:
     """
     # Query both DCGM metrics and kube_pod_labels metrics
     # This ensures the dashboard can perform joins to filter by skypilot cluster
-    match_patterns = ['{__name__=~"DCGM_.*"}', 'kube_pod_labels']
+    match_patterns = [
+        '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
+        'kube_pod_labels',
+        'node_cpu_seconds_total{mode="idle"}'
+    ]
 
     # TODO(rohan): don't hardcode the namespace and service name
     metrics_text = await send_metrics_request_with_port_forward(

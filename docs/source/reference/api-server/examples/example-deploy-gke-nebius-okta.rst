@@ -455,6 +455,12 @@ You can also check the Pod status to verify the installation.
 
   kubectl get pods -n skypilot
 
+By default, the CPU and memory metrics exported by node exporter do not include the ``node`` label, which is required for the SkyPilot dashboard to display the metrics. You can add the ``node`` label to the metrics by applying the following config to the node exporter service monitor resource:
+
+.. code-block:: bash
+
+  kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/metrics/kube_prometheus_node_exporter_service_monitor.yaml -n skypilot
+
 2. Install the Nvidia Device Plugin.
 
 On Nebius console, in the detail page of the Nebius Kubernetes cluster, go to ``Applications`` -> Search for ``Nvidia Device Plugin`` -> ``Deploy`` -> Make sure to check the ``Enable GPU metrics monitoring`` -> ``Deploy application``.
