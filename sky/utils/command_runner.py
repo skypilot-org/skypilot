@@ -3,6 +3,7 @@ import enum
 import hashlib
 import os
 import pathlib
+import re
 import shlex
 import sys
 import time
@@ -21,6 +22,9 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
+
+# Pattern to extract home directory from command output
+_HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 
 # Rsync options
 # TODO(zhwu): This will print a per-file progress bar (with -P),
@@ -183,17 +187,25 @@ class CommandRunner:
         return '-'.join(str(x) for x in self.node)
 
     def _get_remote_home_dir(self) -> str:
-        # Use `echo ~` to get the remote home directory, instead of pwd or
-        # echo $HOME, because pwd can be `/` when the remote user is root
-        # and $HOME is not always set.
-        rc, remote_home_dir, stderr = self.run('echo ~',
-                                               require_outputs=True,
-                                               separate_stderr=True,
-                                               stream_logs=False)
+        # Use pattern matching to extract home directory.
+        # Some container images print MOTD when login shells start, which can
+        # contaminate command output. We use a unique pattern to extract the
+        # actual home directory reliably.
+        rc, output, stderr = self.run('echo "SKYPILOT_HOME_DIR: $(echo ~)"',
+                                      require_outputs=True,
+                                      separate_stderr=True,
+                                      stream_logs=False)
         if rc != 0:
             raise ValueError('Failed to get remote home directory: '
-                             f'{remote_home_dir + stderr}')
-        remote_home_dir = remote_home_dir.strip()
+                             f'{output + stderr}')
+
+        # Extract home directory using pattern matching
+        home_dir_match = _HOME_DIR_PATTERN.search(output)
+        if home_dir_match:
+            remote_home_dir = home_dir_match.group(1)
+        else:
+            raise ValueError('Failed to find remote home directory identifier: '
+                             f'{output + stderr}')
         return remote_home_dir
 
     def _get_command_to_run(
@@ -413,7 +425,6 @@ class CommandRunner:
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
-
 
         Returns:
             returncode
@@ -990,7 +1001,6 @@ class KubernetesCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
-
 
         Returns:
             returncode

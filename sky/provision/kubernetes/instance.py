@@ -35,6 +35,9 @@ _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
 _MAX_RETRIES = 3
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
+# Pattern to extract SSH user from command output, handling MOTD contamination
+_SSH_USER_PATTERN = re.compile(r'SKYPILOT_SSH_USER: ([^\s\n]+)')
+
 logger = sky_logging.init_logger(__name__)
 
 
@@ -1276,7 +1279,11 @@ def get_cluster_info(
     assert cpu_request is not None, 'cpu_request should not be None'
 
     ssh_user = 'sky'
-    get_k8s_ssh_user_cmd = 'echo $(whoami)'
+    # Use pattern matching to extract SSH user, handling MOTD contamination.
+    # Some container images (like CUDA-Q) print MOTD when login shells start,
+    # which can contaminate command output. We use a unique pattern to extract
+    # the actual username reliably.
+    get_k8s_ssh_user_cmd = 'echo "SKYPILOT_SSH_USER: $(whoami)"'
     assert head_pod_name is not None
     runner = command_runner.KubernetesCommandRunner(
         ((namespace, context), head_pod_name))
@@ -1286,7 +1293,14 @@ def get_cluster_info(
                                     stream_logs=False)
     _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
                                  head_pod_name, rc, stdout + stderr)
-    ssh_user = stdout.strip()
+
+    # Extract SSH user using pattern matching
+    ssh_user_match = _SSH_USER_PATTERN.search(stdout)
+    if ssh_user_match:
+        ssh_user = ssh_user_match.group(1)
+    else:
+        raise ValueError('Failed to find SSH user identifier: '
+                         f'{stdout + stderr}')
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
 

@@ -32,6 +32,30 @@ DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
 
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
+# Install AWS CLI v2 (not v1 from pip) as it's required for ECR authentication
+# AWS CLI v2 is installed as a standalone binary, not a Python package. See:
+# https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+INSTALL_AWS_CLI_CMD = (
+    'which aws || ((command -v unzip >/dev/null 2>&1 || '
+    '(sudo apt-get update && sudo apt-get install -y unzip)) && '
+    'curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" '
+    '-o "/tmp/awscliv2.zip" && '
+    'unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install '
+    '&& rm -rf /tmp/awscliv2.zip /tmp/aws)')
+
+
+def _extract_region_from_ecr_server(server: str) -> str:
+    """Extract AWS region from ECR server URL.
+
+    ECR server format: <account-id>.dkr.ecr.<region>.amazonaws.com
+    Returns the region part from the URL.
+    """
+    # Split: ['<account-id>', 'dkr', 'ecr', '<region>', 'amazonaws', 'com']
+    parts = server.split('.')
+    if len(parts) >= 6 and parts[1] == 'dkr' and parts[2] == 'ecr':
+        return parts[3]
+    raise ValueError(f'Invalid ECR server format: {server}')
+
 
 @dataclasses.dataclass
 class DockerLoginConfig:
@@ -236,9 +260,9 @@ class DockerInitializer:
 
         # SkyPilot: Docker login if user specified a private docker registry.
         if 'docker_login_config' in self.docker_config:
-            # TODO(tian): Maybe support a command to get the login password?
             docker_login_config = DockerLoginConfig(
                 **self.docker_config['docker_login_config'])
+
             if docker_login_config.password:
                 # Password is allowed to be empty, in that case, we will not run
                 # the login command, and assume that the image pulling is
@@ -247,6 +271,25 @@ class DockerInitializer:
                     f'{self.docker_cmd} login --username '
                     f'{shlex.quote(docker_login_config.username)} '
                     f'--password {shlex.quote(docker_login_config.password)} '
+                    f'{shlex.quote(docker_login_config.server)}',
+                    wait_for_docker_daemon=True)
+            elif (docker_login_config.server.endswith('.amazonaws.com') and
+                  '.dkr.ecr.' in docker_login_config.server):
+                # AWS ECR: Use aws ecr get-login-password for authentication
+                # ECR format: <account-id>.dkr.ecr.<region>.amazonaws.com
+                # This command uses the IAM credentials from the EC2 instance
+                # Ref: https://docs.aws.amazon.com/AmazonECR/latest/userguide/registry_auth.html # pylint: disable=line-too-long
+                region = _extract_region_from_ecr_server(
+                    docker_login_config.server)
+
+                # AWS CLI is not pre-installed on AWS instances, unlike gcloud
+                # on GCP instances, so we need to install it first
+                self._run(INSTALL_AWS_CLI_CMD, wait_for_docker_daemon=False)
+
+                self._run(
+                    f'aws ecr get-login-password --region {region} | '
+                    f'{self.docker_cmd} login --username AWS '
+                    f'--password-stdin '
                     f'{shlex.quote(docker_login_config.server)}',
                     wait_for_docker_daemon=True)
             elif docker_login_config.server.endswith('-docker.pkg.dev'):
@@ -367,7 +410,7 @@ class DockerInitializer:
         # pylint: disable=anomalous-backslash-in-string
         self._run(
             'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config;'
-            f'sudo echo "Port {port}" >> /etc/ssh/sshd_config;'
+            f'echo "Port {port}" | sudo tee -a /etc/ssh/sshd_config > /dev/null;'
             'mkdir -p ~/.ssh;'
             'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
             'sudo service ssh start;'
