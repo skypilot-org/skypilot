@@ -138,19 +138,22 @@ you can provide the registry authentication details using :ref:`task environment
     .. tab-item:: AWS ECR
         :sync: aws-ecr-tab
 
+        SkyPilot supports automatic AWS ECR authentication using command substitution. You can specify the authentication command directly in your YAML:
+
         .. code-block:: yaml
 
           resources:
-            image_id: docker:<your-ecr-repo>:<tag>
+            image_id: docker:<your-user-id>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>
 
           envs:
-            # Values used in: docker login -u <user> -p <password> <registry server>
-            # Password for ECR can be generated with ``aws ecr get-login-password --region <region>``
+            # SkyPilot will execute the command and use its output as the password
             SKYPILOT_DOCKER_USERNAME: AWS
-            SKYPILOT_DOCKER_PASSWORD: <password>
+            SKYPILOT_DOCKER_PASSWORD: "$(aws ecr get-login-password --region <region>)"
             SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.<region>.amazonaws.com
 
-        Or, you can use ``sky launch`` with the ``--env`` flag to pass the password:
+        The AWS CLI command will be executed on your local machine when launching the cluster, and the resulting token will be used for authentication.
+
+        Alternatively, you can use ``sky launch`` with the ``--env`` flag to pass the password:
 
         .. code-block:: bash
 
@@ -313,165 +316,3 @@ The inputs to the app are copied to SkyPilot using :code:`file_mounts` and mount
 The output of the app produced at :code:`/outputs` path in the container is also volume mounted to :code:`/outputs` on the VM, which gets directly written to a S3 bucket through :ref:`bucket mounting <sky-storage>`.
 
 Our GitHub repository has more examples, including running `Detectron2 in a Docker container <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_ via SkyPilot.
-
-.. _docker-containers-as-runtime-environments:
-
-Using containers as runtime environments
-----------------------------------------
-
-When a container is used as the runtime environment, everything happens inside the container:
-
-- The SkyPilot runtime is automatically installed and launched inside the container;
-- :code:`setup` and :code:`run` commands are executed in the container;
-- Any files created by the task will be stored inside the container.
-
-To use a Docker image as your runtime environment, set the :code:`image_id` field in the :code:`resources` section of your task YAML file to :code:`docker:<image_id>`. Only **Debian-based** images (e.g., Ubuntu) are supported for now.
-
-For example, to use the :code:`ubuntu:20.04` image from Docker Hub:
-
-.. code-block:: yaml
-
-  resources:
-    image_id: docker:ubuntu:20.04
-
-  setup: |
-    # Commands to run inside the container
-
-  run: |
-    # Commands to run inside the container
-
-.. note::
-  For **non-root** docker images on RunPod, you must manually set the :code:`SKYPILOT_RUNPOD_DOCKER_USERNAME` environment variable to match the login user of the docker image (set by the last `USER` instruction in the Dockerfile).
-
-  You can set this environment variable in the :code:`envs` section of your task YAML file:
-
-  .. code-block:: yaml
-
-    envs:
-      SKYPILOT_RUNPOD_DOCKER_USERNAME: <ssh-user>
-
-  It's a workaround for RunPod's limitation that we can't get the login user for the created pods, and even `runpodctl` uses a hardcoded `root` for SSH access.
-  But for other clouds, the login users for the created docker containers are automatically fetched and used.
-
-As another example, here's how to use `NVIDIA's PyTorch NGC Container <https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch>`_:
-
-.. code-block:: yaml
-
-  resources:
-    image_id: docker:nvcr.io/nvidia/pytorch:23.10-py3
-    accelerators: T4
-
-  setup: |
-    # Commands to run inside the container
-
-  run: |
-    # Commands to run inside the container
-
-    # Since SkyPilot tasks are run inside a fresh conda "(base)" environment,
-    # deactivate first to access what the Docker image has already installed.
-    source deactivate
-    nvidia-smi
-    python -c 'import torch; print(torch.__version__)'
-
-Any GPUs assigned to the task will be automatically mapped to your Docker container, and all subsequent tasks within the cluster will also run inside the container. In a multi-node scenario, the container will be launched on all nodes, and the corresponding node's container will be assigned for task execution.
-
-.. tip::
-
-    **When to use this?**
-
-    If you have a preconfigured development environment set up within a Docker
-    image, it can be convenient to use the runtime environment mode.  This is
-    especially useful for launching development environments that are
-    challenging to configure on a new virtual machine, such as dependencies on
-    specific versions of CUDA or cuDNN.
-
-.. note::
-
-    Since we ``pip install skypilot`` inside the user-specified container image
-    as part of a launch, users should ensure dependency conflicts do not occur.
-
-    Currently, the following requirements must be met:
-
-    1. The container image should be based on Debian;
-
-    2. The container image must grant sudo permissions without requiring password authentication for the user. Having a root user is also acceptable.
-
-.. note::
-
-  Using a container with a customized entrypoint as a runtime environment is
-  supported, with the container's entrypoint being overridden by :code:`/bin/bash`.
-  Specific commands can be executed in the :code:`setup` and :code:`run` sections
-  of the task YAML file. However, this approach is not compatible with RunPod due
-  to limitations in the RunPod API, so ensure that you choose a container with a
-  default entrypoint (i.e. :code:`/bin/bash`).
-
-Private registries
-^^^^^^^^^^^^^^^^^^
-
-.. note::
-
-    These instructions do not apply if you use SkyPilot to launch on Kubernetes clusters. Instead, see :ref:`Using Images from Private Repositories in Kubernetes<kubernetes-custom-images-private-repos>` for more.
-
-When using this mode, to access Docker images hosted on private registries,
-you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
-
-.. tab-set::
-
-    .. tab-item:: Docker Hub
-        :sync: docker-hub-tab
-
-        .. code-block:: yaml
-
-          resources:
-            image_id: docker:<user>/<your-docker-hub-repo>:<tag>
-
-          envs:
-            # Values used in: docker login -u <user> -p <password> <registry server>
-            SKYPILOT_DOCKER_USERNAME: <user>
-            SKYPILOT_DOCKER_PASSWORD: <password>
-            SKYPILOT_DOCKER_SERVER: docker.io
-
-    .. tab-item:: Cloud Provider Registry (e.g., ECR)
-        :sync: csp-registry-tab
-
-        .. code-block:: yaml
-
-          resources:
-            image_id: docker:<your-ecr-repo>:<tag>
-
-          envs:
-            # Values used in: docker login -u <user> -p <password> <registry server>
-            SKYPILOT_DOCKER_USERNAME: AWS
-            SKYPILOT_DOCKER_PASSWORD: <password>
-            SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.<region>.amazonaws.com
-
-We suggest setting the :code:`SKYPILOT_DOCKER_PASSWORD` environment variable through the CLI (see :ref:`passing secrets <passing-secrets>`):
-
-.. code-block:: console
-
-  $ # Docker Hub password:
-  $ export SKYPILOT_DOCKER_PASSWORD=...
-  $ # Or cloud registry password:
-  $ export SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1)
-  $ # Pass --env:
-  $ sky launch task.yaml --env SKYPILOT_DOCKER_PASSWORD
-
-You can also directly specify shell commands in any Docker login environment variables in your YAML file, which will be executed to get the actual value:
-
-.. code-block:: yaml
-
-  envs:
-    SKYPILOT_DOCKER_USERNAME: AWS
-    SKYPILOT_DOCKER_PASSWORD: "$(aws ecr get-login-password --region us-west-2)"
-    SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.us-west-2.amazonaws.com
-
-SkyPilot will execute any value enclosed in :code:`$(...)` syntax and use the command's output as the actual value for the environment variable. This is especially useful for cloud provider registries where authentication tokens might need to be fetched dynamically.
-
-If you need to use a literal string that starts with :code:`$(` and ends with :code:`)` as your password or other Docker login value, you can escape it with a backslash:
-
-.. code-block:: yaml
-
-  envs:
-    SKYPILOT_DOCKER_PASSWORD: "\\$(not-a-real-command)"
-
-This will be interpreted as the literal string :code:`$(not-a-real-command)` without attempting to execute it as a command.
