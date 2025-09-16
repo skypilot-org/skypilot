@@ -107,7 +107,6 @@ class TestTailLogsBuffering(unittest.TestCase):
             responses = list(self.service.TailLogs(req, object()))
 
         chunks = [r.log_line for r in responses if r.log_line]
-        # Expect two time-triggered chunks combining lines around delays.
         self.assertEqual(len(chunks), 3)
         self.assertEqual(chunks[0], 'a\n')
         self.assertEqual(chunks[1], 'b\nc\n')
