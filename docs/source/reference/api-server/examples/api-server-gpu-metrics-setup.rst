@@ -18,8 +18,7 @@ Before you begin, make sure your Kubernetes cluster meets the following
 requirements:
 
 * **NVIDIA GPUs** are available on your worker nodes.
-* The `NVIDIA device plugin <https://github.com/NVIDIA/k8s-device-plugin>`_
-  is installed.
+* The `NVIDIA device plugin <https://github.com/NVIDIA/k8s-device-plugin>`_ or the NVIDIA **GPU Operator** is installed.
 * **DCGM-Exporter** is running on the cluster and exposes metrics on
   port ``9400``.  Most GPU Operator installations already deploy DCGM-Exporter for you.
 * `Node Exporter <https://prometheus.io/docs/guides/node-exporter/>`_ is running on the cluster and exposes metrics on port ``9100``. This is required only if you want to monitor the CPU and Memory metrics.
