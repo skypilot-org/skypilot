@@ -9,6 +9,7 @@ Each endpoint has its own test function for better pytest integration:
 import asyncio
 import os
 import pathlib
+import queue
 import sys
 import tempfile
 import time
@@ -16,7 +17,7 @@ from typing import Any, Callable, Dict
 from unittest import mock
 import uuid
 
-import fastapi.exceptions
+import fastapi
 import pytest
 
 # Add parent directory to path
@@ -104,6 +105,14 @@ def isolated_database(tmp_path):
             if requests_lib._DB is not None:
                 asyncio.run(requests_lib._DB.close())
                 requests_lib._DB = None
+
+
+@pytest.fixture(scope='function', autouse=True)
+def mock_get_queue():
+    with mock.patch(
+            'sky.server.requests.executor._get_queue') as mock_get_queue:
+        mock_get_queue.return_value = queue.Queue()
+        yield
 
 
 @pytest.fixture(scope='session', autouse=True)
