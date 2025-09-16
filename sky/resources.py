@@ -705,12 +705,6 @@ class Resources:
     def docker_username_for_runpod(self) -> Optional[str]:
         return self._docker_username_for_runpod
 
-    def set_cloud(self, cloud: clouds.Cloud) -> None:
-        if self._cloud is None:
-            self._cloud = cloud
-        else:
-            logger.debug(f'Cloud already set, skipping set_cloud: {cloud}')
-
     def _set_cpus(
         self,
         cpus: Union[None, int, float, str],
