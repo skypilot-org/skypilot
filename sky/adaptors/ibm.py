@@ -28,6 +28,9 @@ requests = common.LazyImport('requests',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
 yaml = common.LazyImport('yaml', import_error_message=_IMPORT_ERROR_MESSAGE)
 
+# Global process lock for thread-safe operations
+global_process_lock = None
+
 
 def read_credential_file():
     try:

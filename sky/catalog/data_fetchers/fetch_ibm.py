@@ -40,7 +40,10 @@ def _fetch_token(api_key: Optional[str] = None,
             'grant_type': 'urn:ibm:params:oauth:grant-type:apikey',
             'apikey': api_key,
         }
-        response = requests.post(url=TOKEN_ENDPOINT, data=data, headers=headers, timeout=30)
+        response = requests.post(url=TOKEN_ENDPOINT,
+                                 data=data,
+                                 headers=headers,
+                                 timeout=30)
         return response.json()['access_token']
     else:
         return ibm_token
@@ -85,7 +88,8 @@ def _fetch_instance_profiles(regions: List[str],
         print(f'Fetching instance profiles for region {r}, zones {zones}')
 
         instances_endpoint = f'https://{r}.iaas.cloud.ibm.com/v1/instance/profiles?version={d}&generation=2'  # pylint: disable=line-too-long
-        instance_response = requests.get(url=instances_endpoint, timeout=30,
+        instance_response = requests.get(url=instances_endpoint,
+                                         timeout=30,
                                          headers=headers)
         instance_response_json = instance_response.json()
         instance_profiles = instance_response_json['profiles']
@@ -113,6 +117,8 @@ def create_catalog(region_profile: Dict[str, Tuple[List, List]],
                 gpu_cnt: Optional[int] = None
                 gpu_manufacturer: Optional[str] = None
                 gpu_memory: Optional[int] = None
+                vcpus = 0
+                mem = 0
                 if 'gpu_model' in profile:
                     gpu = profile['gpu_model']['values'][0]
                 if 'gpu_count' in profile:

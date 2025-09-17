@@ -455,7 +455,7 @@ class Optimizer:
             # FIXME: Account for egress costs for multi-node clusters
             for resources, execution_cost in node_to_cost_map[node].items():
                 min_pred_cost_plus_egress = np.inf
-                best_parent_hardware = None
+                best_parent_hardware: Optional[resources_lib.Resources] = None
                 for parent_resources, parent_cost in \
                     dp_best_objective[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(
@@ -465,7 +465,7 @@ class Optimizer:
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
                         min_pred_cost_plus_egress = parent_cost + egress_cost
                         best_parent_hardware = parent_resources
-
+                assert best_parent_hardware is not None
                 dp_point_backs[node][resources] = best_parent_hardware
                 dp_best_objective[node][resources] = \
                     execution_cost + min_pred_cost_plus_egress

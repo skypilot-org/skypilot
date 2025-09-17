@@ -88,6 +88,7 @@ def _get_service_record(
 
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     use_legacy = not handle.is_grpc_enabled_with_flag
+    service_statuses: Optional[List[Dict[str, Any]]] = None
 
     if handle.is_grpc_enabled_with_flag:
         try:
@@ -116,6 +117,7 @@ def _get_service_record(
 
         service_statuses = serve_utils.load_service_status(serve_status_payload)
 
+    assert service_statuses is not None
     assert len(service_statuses) <= 1, service_statuses
     if not service_statuses:
         return None
@@ -319,6 +321,7 @@ def up(
                 # and return the endpoint if the job id matches. Otherwise it
                 # will return None.
                 use_legacy = not controller_handle.is_grpc_enabled_with_flag
+                lb_port: Optional[int] = None
 
                 if controller_handle.is_grpc_enabled_with_flag:
                     try:
@@ -378,6 +381,7 @@ def up(
                         'check the logs above for more details.') from None
         else:
             if not serve_utils.is_consolidation_mode(pool) and not pool:
+                assert lb_port is not None
                 socket_endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     lb_port,
@@ -536,6 +540,7 @@ def update(
             task, task_type='serve')
 
     use_legacy = not handle.is_grpc_enabled_with_flag
+    current_version: Optional[int] = None
 
     if handle.is_grpc_enabled_with_flag:
         try:
@@ -574,6 +579,7 @@ def update(
             mode='w') as service_file:
         task_config = task.to_yaml_config()
         yaml_utils.dump_yaml(service_file.name, task_config)
+        assert current_version is not None
         remote_task_yaml_path = serve_utils.generate_task_yaml_file_name(
             service_name, current_version, expand_user=False)
 
@@ -738,6 +744,7 @@ def status(
 
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     use_legacy = not handle.is_grpc_enabled_with_flag
+    service_records = []
 
     if handle.is_grpc_enabled_with_flag:
         try:
@@ -874,6 +881,7 @@ def _get_all_replica_targets(
     """Helper function to get targets for all live replicas."""
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     use_legacy = not handle.is_grpc_enabled_with_flag
+    service_records = []
 
     if handle.is_grpc_enabled_with_flag:
         try:

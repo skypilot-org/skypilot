@@ -363,6 +363,7 @@ def decode_rich_status(
                 is_payload, line = message_utils.decode_payload(
                     line, raise_for_mismatch=False)
                 control = None
+                encoded_status: Optional[str] = None
                 if is_payload:
                     control, encoded_status = Control.decode(line)
                 if control is None:
@@ -377,6 +378,7 @@ def decode_rich_status(
                     yield None
                     continue
                 if control == Control.INIT:
+                    assert encoded_status is not None
                     decoding_status = client_status(encoded_status)
                 else:
                     if decoding_status is None:
@@ -484,6 +486,7 @@ async def decode_rich_status_async(
                 if line is None:
                     continue
                 control = None
+                encoded_status: Optional[str] = None
                 if is_payload:
                     control, encoded_status = Control.decode(line)
                 if control is None:
@@ -497,6 +500,7 @@ async def decode_rich_status_async(
                 # In async context, we'll handle rich status controls normally
                 # since async typically runs in main thread
                 if control == Control.INIT:
+                    assert encoded_status is not None
                     decoding_status = client_status(encoded_status)
                 else:
                     if decoding_status is None:

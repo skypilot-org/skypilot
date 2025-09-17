@@ -2438,6 +2438,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             init_reason = f'ray cluster is unhealthy ({ray_status_details})'
         elif some_nodes_not_stopped:
             init_reason = 'some but not all nodes are stopped'
+        else:
+            init_reason = 'cluster is in an unknown abnormal state'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
         if record['autostop'] >= 0:

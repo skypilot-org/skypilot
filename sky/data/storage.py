@@ -3649,16 +3649,16 @@ class IBMCosStore(AbstractStore):
                     pass
                 elif self.source.startswith('s3://'):
                     raise RuntimeError('IBM COS currently not supporting'
-                                    'data transfers between COS and S3')
+                                       'data transfers between COS and S3')
                 elif self.source.startswith('nebius://'):
                     raise RuntimeError('IBM COS currently not supporting'
-                                    'data transfers between COS and Nebius')
+                                       'data transfers between COS and Nebius')
                 elif self.source.startswith('gs://'):
                     raise RuntimeError('IBM COS currently not supporting'
-                                    'data transfers between COS and GS')
+                                       'data transfers between COS and GS')
                 elif self.source.startswith('r2://'):
                     raise RuntimeError('IBM COS currently not supporting'
-                                    'data transfers between COS and r2')
+                                       'data transfers between COS and r2')
                 else:
                     self.batch_ibm_rsync([self.source])
 

@@ -298,6 +298,7 @@ def _execute_dag(
     # autostop config from the launched resources. Before provisioning,
     # we aren't sure which resources will be launched, and different
     # resources may have different autostop configs.
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     if isinstance(backend, backends.CloudVmRayBackend):
         # No autostop config specified on command line, use the
         # config from resources.
@@ -317,7 +318,6 @@ def _execute_dag(
 
         idle_minutes_to_autostop: Optional[int] = None
         down = False
-        wait_for: Optional[autostop_lib.AutostopWaitFor] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (

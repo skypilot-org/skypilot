@@ -2923,6 +2923,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             state.pop('cluster_region', None)
         if version < 2:
             state['_cluster_yaml'] = state.pop('cluster_yaml')
+        head_ip = None
         if version < 3:
             head_ip = state.pop('head_ip', None)
             state['stable_internal_external_ips'] = None
@@ -4544,6 +4545,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         See `skylet.job_lib.cancel_jobs_encoded_results` for more details.
         """
         use_legacy = not handle.is_grpc_enabled_with_flag
+        cancelled_ids = None
 
         if handle.is_grpc_enabled_with_flag:
             try:
@@ -4968,6 +4970,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'cluster {handle.cluster_name}: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
         cluster_status_fetched = False
+        prev_cluster_status = None
         if refresh_cluster_status:
             try:
                 prev_cluster_status, _ = (

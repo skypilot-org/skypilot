@@ -183,7 +183,8 @@ def _create_instances(
             image_instance_mapping_df['InstanceType'] == instance_type]
 
         if not image_instance_mapping_df:
-            raise RuntimeError(f"""There is no image can match instance type named
+            raise RuntimeError(
+                f"""There is no image can match instance type named
                 {instance_type}
                 If you are using CPU-only instance, assign an image with tag
                 'SKYPILOT-CPU'
@@ -318,9 +319,10 @@ def _create_instances(
                      f'{vsphere_cluster_name} with instance type:'
                      f'{vms_item["InstanceType"]}.')
         instance_type = vms_item['InstanceType']
-        raise RuntimeError(f'Failed to create the instance on host {host_mobid} '
-                        f'in {vsphere_cluster_name} with instance type:'
-                        f'{instance_type}.')
+        raise RuntimeError(
+            f'Failed to create the instance on host {host_mobid} '
+            f'in {vsphere_cluster_name} with instance type:'
+            f'{instance_type}.')
 
     # Store instance uuid in local file
     cluster_info = metadata_utils.Metadata()

@@ -131,11 +131,12 @@ def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
 def encode_jobs_queue_v2(
         jobs_or_tuple) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     # Support returning either a plain jobs list or a (jobs, total) tuple
-    status_counts: Dict[str, int] = {}
+    status_counts: Optional[Dict[str, int]] = None
     if isinstance(jobs_or_tuple, tuple):
         if len(jobs_or_tuple) == 2:
             jobs, total = jobs_or_tuple
             total_no_filter = total
+            status_counts = None
         elif len(jobs_or_tuple) == 4:
             jobs, total, status_counts, total_no_filter = jobs_or_tuple
         else:
@@ -143,6 +144,8 @@ def encode_jobs_queue_v2(
     else:
         jobs = jobs_or_tuple
         total = None
+        total_no_filter = None
+        status_counts = None
     for job in jobs:
         job['status'] = job['status'].value
     if total is None:

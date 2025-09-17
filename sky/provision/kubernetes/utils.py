@@ -2710,7 +2710,8 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
 
     Also checks if the
     """
-    port_mode = network_utils.get_port_mode(None, context)
+    port_mode: kubernetes_enums.KubernetesPortMode = (
+        network_utils.get_port_mode(None, context))
     if port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
         endpoint_type = 'Ingress'
         debug_cmd = 'kubectl describe ingress && kubectl describe ingressclass'
@@ -2720,6 +2721,8 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
     elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
         endpoint_type = 'PodIP'
         debug_cmd = 'kubectl describe pod'
+    else:
+        assert False, f'Invalid port mode: {port_mode}'
     return ENDPOINTS_DEBUG_MESSAGE.format(endpoint_type=endpoint_type,
                                           debug_cmd=debug_cmd)
 
