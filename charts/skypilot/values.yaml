@@ -154,7 +154,7 @@ apiService:
   logs:
     retention:
       # Whether to enable log retention
-      enabled: true
+      enabled: false
       # The size of the log file to retain
       size: 10M
 

@@ -73,7 +73,11 @@ Below is the available helm value keys and the default value of each key:
     :ref:`extraEnvs <helm-values-apiService-extraEnvs>`: null
     :ref:`extraVolumes <helm-values-apiService-extraVolumes>`: null
     :ref:`extraVolumeMounts <helm-values-apiService-extraVolumeMounts>`: null
-  
+    :ref:`logs <helm-values-apiService-logs>`:
+      :ref:`retention <helm-values-apiService-logs-retention>`:
+        :ref:`enabled <helm-values-apiService-logs-retention-enabled>`: false
+        :ref:`size <helm-values-apiService-logs-retention-size>`: 10M
+
   :ref:`auth <helm-values-auth>`:
     :ref:`oauth <helm-values-auth-oauth>`:
       :ref:`enabled <helm-values-auth-oauth-enabled>`: false
@@ -376,7 +380,7 @@ Default: ``null``
 ``apiService.authUserHeaderName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Custom header name for user authentication with auth proxies. This overrides the default ``X-Auth-Request-Email`` header. 
+Custom header name for user authentication with auth proxies. This overrides the default ``X-Auth-Request-Email`` header.
 
 This setting is useful when integrating with auth proxies that use different header names for user identification, such as ``X-Remote-User``, ``X-Auth-User``, or custom headers specific to your organization's auth infrastructure.
 
@@ -430,7 +434,7 @@ Default: ``null``
 ``apiService.dbConnectionSecretName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Name of the secret containing the database connection string for the API server. This is used to configure an external database for the API server. 
+Name of the secret containing the database connection string for the API server. This is used to configure an external database for the API server.
 
 If either this field or :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` is set, :ref:`apiService.config <helm-values-apiService-config>` must be ``null``. Refer to the :ref:`API server deployment guide <sky-api-server-helm-deploy-command>` for more details on configuring an external database.
 Name of the secret containing the database connection string for the API server. If this field is set, ``config`` must be null.
@@ -690,6 +694,62 @@ Default: ``null``
       - name: my-volume
         mountPath: /my-path
         subPath: my-file
+
+.. _helm-values-apiService-logs:
+
+``apiService.logs``
+^^^^^^^^^^^^^^^^^^^
+
+Configuration for managing API server logs.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  apiService:
+    logs:
+      retention:
+        enabled: false
+        size: 10M
+
+.. _helm-values-apiService-logs-retention:
+
+``apiService.logs.retention``
+'''''''''''''''''''''''''''''
+
+Configuration for log retention settings.
+
+.. _helm-values-apiService-logs-retention-enabled:
+
+``apiService.logs.retention.enabled``
+''''''''''''''''''''''''''''''''''''''
+
+Whether to enable log retention for the API server. When enabled, logs will be automatically rotated and managed according to the specified size limit.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  apiService:
+    logs:
+      retention:
+        enabled: true
+
+.. _helm-values-apiService-logs-retention-size:
+
+``apiService.logs.retention.size``
+'''''''''''''''''''''''''''''''''''
+
+The maximum size of the log file before rotation. When the log file reaches this size, it will be rotated to preserve disk space. Only used when ``enabled`` is ``true``.
+
+Default: ``10M``
+
+.. code-block:: yaml
+
+  apiService:
+    logs:
+      retention:
+        size: 50M
 
 
 .. _helm-values-auth:
