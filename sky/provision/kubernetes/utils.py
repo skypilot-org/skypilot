@@ -1142,20 +1142,87 @@ def detect_accelerator_resource(
     return has_accelerator, cluster_resources
 
 
-import copy
+import random
+import string
+from kubernetes.client import (
+    V1Pod, V1ObjectMeta, V1PodSpec, V1Container, V1EnvVar,
+    V1Node, V1NodeStatus, V1NodeCondition
+)
 
-from kubernetes.client import ApiClient
-from kubernetes.client import V1Node
-from kubernetes.client import V1Pod
-
-api_client = ApiClient()
+def random_string(n=8):
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
 
-def k8s_copy(obj):
-    """Fast copy via serialization + deserialization."""
-    data = api_client.sanitize_for_serialization(obj)  # obj -> dict
-    return api_client._ApiClient__deserialize(data,
-                                              obj.__class__)  # dict -> obj
+def mock_pod(
+    name_prefix="pod",
+    namespace="default",
+    container_count=5,
+    env_per_container=50,
+    label_count=20,
+) -> V1Pod:
+
+    containers = []
+    for i in range(container_count):
+        env_vars = [
+            V1EnvVar(name=f"ENV_{j}", value=random_string(16))
+            for j in range(env_per_container)
+        ]
+        containers.append(
+            V1Container(
+                name=f"c{i}-{random_string(4)}",
+                image=f"busybox:{random.randint(1, 30)}",
+                env=env_vars,
+                args=["sleep", "3600"],
+            )
+        )
+
+    labels = {f"key{j}": random_string(8) for j in range(label_count)}
+
+    return V1Pod(
+        api_version="v1",
+        kind="Pod",
+        metadata=V1ObjectMeta(
+            name=f"{name_prefix}-{random_string(6)}",
+            namespace=namespace,
+            labels=labels,
+        ),
+        spec=V1PodSpec(containers=containers),
+    )
+
+
+def mock_node(
+    name_prefix="node",
+    label_count=10,
+    capacity_size=2000,
+) -> V1Node:
+
+    labels = {f"zone{j}": random_string(8) for j in range(label_count)}
+
+    conditions = [
+        V1NodeCondition(type="Ready", status="True"),
+        V1NodeCondition(type="MemoryPressure", status="False"),
+    ]
+
+    status = V1NodeStatus(
+        capacity={
+            "cpu": str(capacity_size),
+            "memory": f"{capacity_size * 512}Mi",
+            "pods": str(capacity_size),
+        },
+        conditions=conditions,
+    )
+
+    return V1Node(
+        api_version="v1",
+        kind="Node",
+        metadata=V1ObjectMeta(
+            name=f"{name_prefix}-{random_string(6)}",
+            labels=labels,
+        ),
+        status=status,
+    )
+
+
 
 
 @annotations.lru_cache(scope='request', maxsize=10)
@@ -1170,12 +1237,11 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
 
     nodes = kubernetes.core_api(context).list_node(
         _request_timeout=kubernetes.API_TIMEOUT).items
-    count = 500
     nodelist = []
-    for i in range(count):
-        node = k8s_copy(nodes[i % len(nodes)])
-        node.metadata.name = f'node-{i}'
+    for node in nodes:
         nodelist.append(node)
+    for _ in range(500):
+        nodelist.append(mock_node())
     return nodelist
 
 
@@ -1193,12 +1259,11 @@ def get_all_pods_in_kubernetes_cluster(*,
     pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
         _request_timeout=kubernetes.API_TIMEOUT).items
 
-    count = 2000
     podlist = []
-    for i in range(count):
-        pod = k8s_copy(pods[i % len(pods)])
-        pod.metadata.name = f'pod-{i}'
+    for pod in pods:
         podlist.append(pod)
+    for _ in range(2000):
+        podlist.append(mock_pod())
     return podlist
 
 
@@ -3449,6 +3514,8 @@ def get_node_accelerator_count(context: Optional[str],
             resource is found, it returns 0.
     """
     gpu_resource_name = get_gpu_resource_key(context)
+    if attribute_dict is None:
+        return 0
     assert not (gpu_resource_name in attribute_dict and
                 TPU_RESOURCE_KEY in attribute_dict)
     if gpu_resource_name in attribute_dict:

@@ -21,8 +21,8 @@ def run(fn, *args, **kwargs):
     print(f'RSS after {fn.__name__} clear cache: {proc.memory_info().rss / 1024 / 1024} MB')
 
 for i in range(10):
-    run(utils.get_kubernetes_node_info, 'in-cluster')
-    run(utils.get_kubernetes_node_info, 'nebius-mk8s-nebius-shopify-k8s-cluster')
+    run(utils.get_kubernetes_node_info)
+    # run(utils.get_kubernetes_node_info, 'nebius-mk8s-nebius-shopify-k8s-cluster')
     # run(core.realtime_kubernetes_gpu_availability)
     # run(core.cost_report, days=30)
     # run(check.check)
