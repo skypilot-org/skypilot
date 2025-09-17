@@ -1181,6 +1181,7 @@ def enabled_clouds(workspace: Optional[str] = None,
 
 import memory_profiler
 
+
 @usage_lib.entrypoint
 @memory_profiler.profile
 def realtime_kubernetes_gpu_availability(
