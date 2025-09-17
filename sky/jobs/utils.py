@@ -6,7 +6,6 @@ ManagedJobCodeGen.
 """
 import asyncio
 import collections
-import datetime
 import enum
 import logging
 import os
@@ -38,7 +37,6 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
-from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import controller_utils
@@ -206,56 +204,6 @@ def is_consolidation_mode() -> bool:
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         _validate_consolidation_mode_config(consolidation_mode)
     return consolidation_mode
-
-
-def ha_recovery_for_consolidation_mode():
-    """Recovery logic for HA mode."""
-    # No setup recovery is needed in consolidation mode, as the API server
-    # already has all runtime installed. Directly start jobs recovery here.
-    # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
-    runner = command_runner.LocalProcessCommandRunner()
-    scheduler.maybe_start_controllers()
-    with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('jobs_'),
-              'w',
-              encoding='utf-8') as f:
-        start = time.time()
-        f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
-        for job in managed_job_state.get_managed_jobs():
-            job_id = job['job_id']
-            controller_pid = job['controller_pid']
-
-            # In consolidation mode, it is possible that only the API server
-            # process is restarted, and the controller process is not. In such
-            # case, we don't need to do anything and the controller process will
-            # just keep running.
-            if controller_pid is not None:
-                try:
-                    if controller_process_alive(controller_pid, job_id):
-                        f.write(f'Controller pid {controller_pid} for '
-                                f'job {job_id} is still running. '
-                                'Skipping recovery.\n')
-                        continue
-                except Exception:  # pylint: disable=broad-except
-                    # _controller_process_alive may raise if psutil fails; we
-                    # should not crash the recovery logic because of this.
-                    f.write('Error checking controller pid '
-                            f'{controller_pid} for job {job_id}\n')
-
-            if job['schedule_state'] not in [
-                    managed_job_state.ManagedJobScheduleState.DONE,
-                    managed_job_state.ManagedJobScheduleState.WAITING,
-            ]:
-                script = managed_job_state.get_ha_recovery_script(job_id)
-                if script is None:
-                    f.write(f'Job {job_id}\'s recovery script does not exist. '
-                            'Skipping recovery. Job schedule state: '
-                            f'{job["schedule_state"]}\n')
-                    continue
-                runner.run(script)
-                f.write(f'Job {job_id} completed recovery at '
-                        f'{datetime.datetime.now()}\n')
-        f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
-        f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
 async def get_job_status(

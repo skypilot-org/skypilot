@@ -36,6 +36,9 @@ setup: |
   grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
   {% endif %}
 
+  # This is used by the skylet events to check if we are a jobs controller.
+  touch {{job_controller_indicator_file}}
+
 run: |
   {%- if consolidation_mode_job_id is none %}
   {{ sky_activate_python_env }}

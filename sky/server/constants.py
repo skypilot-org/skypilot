@@ -48,6 +48,16 @@ CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS = 60
 # background.
 VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS = 60
 
+# The interval (seconds) for the managed job status to be refreshed in the
+# background. This should match the interval for the managed job event in
+# sky/skylet/events.py::ManagedJobEvent::EVENT_INTERVAL_SECONDS.
+MANAGED_JOB_REFRESH_DAEMON_INTERVAL_SECONDS = 300
+
+# The interval (seconds) for the sky serve status to be refreshed in the
+# background. This should match the interval for the sky serve event in
+# sky/skylet/events.py::ServiceUpdateEvent::EVENT_INTERVAL_SECONDS.
+SKY_SERVE_REFRESH_DAEMON_INTERVAL_SECONDS = 300
+
 # Environment variable for a file path to the API cookie file.
 # Keep in sync with websocket_proxy.py
 API_COOKIE_FILE_ENV_VAR = f'{constants.SKYPILOT_ENV_VAR_PREFIX}API_COOKIE_FILE'

@@ -11,6 +11,7 @@ import psutil
 from sky import clouds
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -74,9 +75,25 @@ class ManagedJobEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
+        if not os.path.exists(
+                os.path.expanduser(
+                    managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE)):
+            # Note: since the skylet is started before the user setup (in
+            # jobs-controller.yaml.j2) runs, it's possible that we hit this
+            # before the indicator file is written. However, since we will wait
+            # EVENT_INTERVAL_SECONDS before the first run, this should be very
+            # unlikely.
+            logger.info('No jobs controller indicator file found.')
+            all_job_ids = managed_job_state.get_all_job_ids_by_name(None)
+            if not all_job_ids:
+                logger.info('No jobs running. Stopping controllers.')
+                scheduler.stop_controllers()
+            logger.info(f'{len(all_job_ids)} jobs running. Assuming the '
+                        'indicator file hasn\'t been written yet.')
+            return
+
         logger.info('=== Updating managed job status ===')
         managed_job_utils.update_managed_jobs_statuses()
-        scheduler.maybe_start_controllers()
 
 
 class ServiceUpdateEvent(SkyletEvent):
