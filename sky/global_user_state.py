@@ -1237,32 +1237,6 @@ def _get_cluster_usage_intervals(
     return pickle.loads(row.usage_intervals)
 
 
-@_init_db
-def _get_cluster_usage_intervals_multiple(
-        cluster_hashes: Set[str]) -> Dict[str, List[Tuple[int, Optional[int]]]]:
-    """Get usage intervals for multiple clusters in a single query.
-
-    Args:
-        cluster_hashes: Set of cluster hashes to query.
-
-    Returns:
-        Dictionary mapping cluster_hash to usage intervals. Only includes
-        clusters that have non-None usage intervals.
-    """
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(cluster_history_table).filter(
-            cluster_history_table.c.cluster_hash.in_(cluster_hashes)).all()
-
-    # Only include clusters with non-None usage intervals
-    result = {}
-    for row in rows:
-        if row.usage_intervals is not None:
-            result[row.cluster_hash] = pickle.loads(row.usage_intervals)
-
-    return result
-
-
 def _get_cluster_launch_time(
         usage_intervals: List[Tuple[int, Optional[int]]]) -> Optional[int]:
     if usage_intervals is None:
@@ -1568,19 +1542,20 @@ def get_clusters_from_history(
     current_user_hash = common_utils.get_user_hash()
 
     row_to_user_hash = {}
+    usage_intervals_dict = {}
     for row in rows:
         user_hash = (row.user_hash
                      if row.user_hash is not None else current_user_hash)
         row_to_user_hash[row.cluster_hash] = user_hash
-
+        if row.usage_intervals is not None:
+            usage_intervals_dict[row.cluster_hash] = pickle.loads(
+                row.usage_intervals)
     user_hashes = set(row_to_user_hash.values())
     user_hash_to_user = _get_users(user_hashes)
 
     cluster_hashes = set(row_to_user_hash.keys())
     last_cluster_event_dict = _get_last_cluster_event_multiple(
         cluster_hashes, ClusterEventType.STATUS_CHANGE)
-
-    usage_intervals_dict = _get_cluster_usage_intervals_multiple(cluster_hashes)
 
     records = []
     for row in rows:
