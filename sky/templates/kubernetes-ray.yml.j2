@@ -931,11 +931,14 @@ available_node_types:
                   set +e
                   {{ ray_worker_start_command }}
                 fi
-                ) > /tmp/${STEPS[1]}.log 2>&1 || {
-                  echo "Error: ${STEPS[1]} failed. Continuing anyway..." > /tmp/${STEPS[1]}.failed
+                ) > /tmp/${STEPS[1]}.log 2>&1
+                if [ "$?" -ne "0" ]; then
+                  {
+                  echo "Error: ${STEPS[1]} failed. Continuing anyway..." > /tmp/${STEPS[1]}.failed 2>&1
                   cat /tmp/${STEPS[1]}.log
                   exit 1
-                }
+                  }
+                fi
               ) &
 
 
