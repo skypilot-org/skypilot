@@ -200,7 +200,9 @@ def is_consolidation_mode() -> bool:
     # mode. Check #6611 for more details.
     # But, on an API server running inside the remote job controller VM, we
     # should not do this check, since the local jobs database will be available.
-    if (os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None and os.environ.get(constants.ENV_VAR_IS_SKYPILOT_JOB_CONTROLLER) is None):
+    if (os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None and
+            os.environ.get(
+                constants.ENV_VAR_IS_SKYPILOT_JOB_CONTROLLER) is None):
         _validate_consolidation_mode_config(consolidation_mode)
     return consolidation_mode
 

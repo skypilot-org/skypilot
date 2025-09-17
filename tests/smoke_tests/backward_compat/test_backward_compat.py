@@ -385,7 +385,8 @@ class TestBackwardCompatibility:
         current_version = skylet_constants.SKYLET_VERSION
         # After SKYLET_VERSION 17, we should gracefully handle the version
         # mismatch.
-        expect_version_mismatch = int(base_version) <= 17 and base_version != current_version
+        expect_version_mismatch = int(
+            base_version) <= 17 and base_version != current_version
 
         # Build the current environment commands with version mismatch handling
         # Common initial commands
