@@ -15,6 +15,7 @@ import uuid
 import zipfile
 
 import colorama
+import filelock
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -409,13 +410,26 @@ def local_api_server_running(kill: bool = False) -> bool:
 
 
 def kill_api_server() -> None:
-    found = local_api_server_running(kill=True)
+    # We hold the lock to prevent a new API server from starting up while we
+    # are killing the old one.
+    lock = os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)
 
-    # Remove the database for requests.
-    server_common.clear_local_api_server_database()
+    try:
+        # Force unlock.
+        os.remove(lock)
+    except FileNotFoundError:
+        # This is preferred over `if os.path.exists(lock)` as it is more atomic.
+        pass
 
-    if found:
+    with filelock.FileLock(lock):
+        found = local_api_server_running(kill=True)
+
+        if not found:
+            logger.info('SkyPilot API server is not running.')
+            return
+
+        # Remove the database for requests.
+        server_common.clear_local_api_server_database()
+
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'
                     f'{colorama.Style.RESET_ALL}')
-    else:
-        logger.info('SkyPilot API server is not running.')

@@ -140,19 +140,21 @@ def get_number_of_controllers() -> int:
 def start_controller() -> None:
     """Start the job controller process.
 
-    This requires that the env file is already set up.
+    The caller must hold the JOB_CONTROLLER_PID_LOCK.
     """
-    os.environ[constants.OVERRIDE_CONSOLIDATION_MODE] = 'true'
     logs_dir = os.path.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
     log_path = os.path.join(logs_dir, f'controller_{uuid.uuid4()}.log')
 
+    set_job_controller_env_cmd = (
+        f'export {constants.ENV_VAR_IS_SKYPILOT_JOB_CONTROLLER}=true;')
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
     run_controller_cmd = (f'{sys.executable} -u -m'
                           'sky.jobs.controller')
 
-    run_cmd = (f'{activate_python_env_cmd}'
+    run_cmd = (f'{set_job_controller_env_cmd}'
+               f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')
 
     logger.info(f'Running controller with command: {run_cmd}')

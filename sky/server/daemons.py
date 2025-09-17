@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
+from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
@@ -152,11 +153,16 @@ def managed_job_status_start_event():
     # On start, we should make sure all the controllers are fresh. If there are
     # existing controllers lingering from a manually terminated API server, they
     # should be stopped.
+    logger.debug('Restarting controllers...')
     scheduler.maybe_start_controllers(stop_existing_controllers=True)
 
 
 def should_skip_managed_job_status_refresh():
     """Check if the managed job status refresh event should be skipped."""
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_JOB_CONTROLLER) is not None:
+        # Inside the job controller, this is managed by the skylet instead of
+        # the API server.
+        return True
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
     return not managed_job_utils.is_consolidation_mode()

@@ -193,15 +193,14 @@ def _validate_consolidation_mode_config(
 # Use LRU Cache so that the check is only done once.
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
-    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
-        return True
-
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
     # We should only do this check on API server, as the controller will not
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+    # But, on an API server running inside the remote job controller VM, we
+    # should not do this check, since the local jobs database will be available.
+    if (os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None and os.environ.get(constants.ENV_VAR_IS_SKYPILOT_JOB_CONTROLLER) is None):
         _validate_consolidation_mode_config(consolidation_mode)
     return consolidation_mode
 
