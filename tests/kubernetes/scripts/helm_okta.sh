@@ -164,12 +164,18 @@ echo "Loading image $DOCKER_IMAGE into kind cluster..."
 kind load docker-image $DOCKER_IMAGE --name skypilot
 echo "✅ Docker image loaded into kind cluster"
 
-# Verify the image is loaded in the cluster
-echo "Verifying image is loaded in Kind cluster..."
-if docker exec skypilot-control-plane crictl images | grep -q "$DOCKER_IMAGE"; then
-    echo "✅ Image $DOCKER_IMAGE confirmed in Kind cluster"
+# Get the image ID of the image we just built
+LATEST_IMAGE_ID=$(docker images --format "{{.ID}}" $DOCKER_IMAGE | head -1)
+echo "Latest built image ID: $LATEST_IMAGE_ID"
+
+# Verify the specific image ID is loaded in the cluster
+echo "Verifying latest image ID is loaded in Kind cluster..."
+if docker exec skypilot-control-plane crictl images | grep -q "$LATEST_IMAGE_ID"; then
+    echo "✅ Latest image ID $LATEST_IMAGE_ID confirmed in Kind cluster"
 else
-    echo "❌ Image $DOCKER_IMAGE not found in Kind cluster"
+    echo "❌ Latest image ID $LATEST_IMAGE_ID not found in Kind cluster"
+    echo "Available skypilot images in cluster:"
+    docker exec skypilot-control-plane crictl images | grep skypilot
     exit 1
 fi
 
