@@ -3256,7 +3256,8 @@ def _down_or_stop_clusters(
     with progress:
         for name in clusters:
             try:
-                sky_logging.print(f'→ {operation.split()[0]} {name} ...', flush=True)
+                action = operation.split()[0]
+                sky_logging.print(f'→ {action} {name} ...', flush=True)
                 _do_down_stop_autostop(
                     name,
                     do_down=down,
@@ -3266,7 +3267,7 @@ def _down_or_stop_clusters(
                 )
                 sky_logging.print(f'✓ {name}', flush=True)
                 successes.append(name)
-            except BaseException as e:
+            except Exception as e:
                 e = exceptions.wrap_exception(e)
                 sky_logging.print(f'✗ {name}: {e}', flush=True)
                 failures.append((name, e))
@@ -3278,7 +3279,6 @@ def _down_or_stop_clusters(
         click.echo('  ✓ Succeeded: ' + ', '.join(successes))
     if failures:
         click.echo('  ✗ Failed: ' + ', '.join(n for (n, _) in failures))
-
     if failures:
         raise click.ClickException('Some clusters failed. See summary above.')
 
