@@ -50,6 +50,7 @@ def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
         else:
             cached_func = functools.lru_cache(*lru_cache_args,
                                               **lru_cache_kwargs)(func)
+            cached_func.cache_clear()
             _FUNCTIONS_NEED_RELOAD_CACHE.append(cached_func)
             return cached_func
 

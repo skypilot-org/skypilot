@@ -1141,7 +1141,6 @@ def detect_accelerator_resource(
 
     return has_accelerator, cluster_resources
 
-@annotations.lru_cache(scope='request', maxsize=10)
 @_retry_on_error(resource_type='node')
 def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes nodes in the context.
