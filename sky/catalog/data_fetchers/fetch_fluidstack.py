@@ -207,7 +207,7 @@ def create_catalog(output_dir: str) -> None:
         api_key = f.read().strip()
     response = requests.get(ENDPOINT, headers={'api-key': api_key}, timeout=30)
     if not response.ok:
-        raise Exception(response.text)
+        raise RuntimeError(response.text)
     plans = response.json()
 
     with open(os.path.join(output_dir, 'vms.csv'), mode='w',

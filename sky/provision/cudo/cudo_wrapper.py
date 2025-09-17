@@ -60,7 +60,7 @@ def remove(instance_id: str):
         retry_count += 1
         time.sleep(retry_interval)
     else:
-        raise Exception(
+        raise RuntimeError(
             'Timeout error, could not terminate due to VM state: {}'.format(
                 state))
 
@@ -140,6 +140,6 @@ def vm_available(to_start_count, gpu_count, gpu_model, data_center_id, mem,
 
     total_count = sum(matching_types)
     if total_count < to_start_count:
-        raise Exception(
+        raise RuntimeError(
             'Too many VMs requested, try another gpu type or region')
     return total_count

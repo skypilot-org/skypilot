@@ -44,7 +44,7 @@ def wait_for_crm_operation(operation, crm):
     for _ in range(constants.MAX_POLLS):
         result = crm.operations().get(name=operation['name']).execute()
         if 'error' in result:
-            raise Exception(result['error'])
+            raise RuntimeError(result['error'])
 
         if 'done' in result and result['done']:
             logger.info('wait_for_crm_operation: Operation done.')
@@ -67,7 +67,7 @@ def wait_for_compute_global_operation(project_name, operation, compute):
             operation=operation['name'],
         ).execute())
         if 'error' in result:
-            raise Exception(result['error'])
+            raise RuntimeError(result['error'])
 
         if result['status'] == 'DONE':
             logger.info('wait_for_compute_global_operation: Operation done.')
@@ -91,7 +91,7 @@ def wait_for_compute_region_operation(project_name, region, operation, compute):
             operation=operation['name'],
         ).execute())
         if 'error' in result:
-            raise Exception(result['error'])
+            raise RuntimeError(result['error'])
 
         if result['status'] == 'DONE':
             logger.info('wait_for_compute_region_operation: Operation done.')

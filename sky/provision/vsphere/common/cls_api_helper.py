@@ -262,7 +262,7 @@ class ClsApiHelper(object):
                 return file_info
             else:
                 time.sleep(sleep_interval)
-        raise Exception(
+        raise RuntimeError(
             'timed out after waiting {0} seconds for file {1} to reach'
             ' a terminal state'.format(timeout, file_name))
 

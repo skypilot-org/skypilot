@@ -126,7 +126,7 @@ def download_logs_from_api_server(
 
         return remote2local_path_dict
     else:
-        raise Exception(
+        raise RuntimeError(
             f'Failed to download logs: {response.status_code} {response.text}')
 
 

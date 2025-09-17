@@ -76,7 +76,7 @@ def _open_ports_using_ingress(
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     # Check if an ingress controller exists
     if not network_utils.ingress_controller_exists(context):
-        raise Exception(
+        raise RuntimeError(
             'Ingress controller not found. '
             'Install Nginx ingress controller first: '
             'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long

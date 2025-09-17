@@ -260,6 +260,7 @@ def get_cluster_info(
         cluster_name_on_cloud, [utils.HyperbolicInstanceStatus.ONLINE.value])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
+    ssh_user = 'root'  # Default SSH user
 
     for instance_id, instance_info in running_instances.items():
         # Extract hostname and port from sshCommand

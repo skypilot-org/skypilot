@@ -242,7 +242,7 @@ def fetch_seeweb_data(api_key: str) -> List[Dict]:
         return plans
 
     except Exception as e:  # pylint: disable=broad-except
-        raise Exception(f'Error fetching data from Seeweb API: {e}') from e
+        raise RuntimeError(f'Error fetching data from Seeweb API: {e}') from e
 
 
 def create_catalog(api_key: str, output_path: str) -> None:

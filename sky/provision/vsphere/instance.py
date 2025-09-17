@@ -162,7 +162,7 @@ def _create_instances(
         if not images_df:
             logger.error(
                 f'Can not find an image for instance type: {instance_type}.')
-            raise Exception(
+            raise RuntimeError(
                 f'Can not find an image for instance type: {instance_type}.')
         elif len(images_df) > 1:
             logger.warning(
@@ -183,7 +183,7 @@ def _create_instances(
             image_instance_mapping_df['InstanceType'] == instance_type]
 
         if not image_instance_mapping_df:
-            raise Exception(f"""There is no image can match instance type named
+            raise RuntimeError(f"""There is no image can match instance type named
                 {instance_type}
                 If you are using CPU-only instance, assign an image with tag
                 'SKYPILOT-CPU'
@@ -257,7 +257,7 @@ def _create_instances(
                                         f'the instance type.')
         host_mobid = hosts_item['MobID']
     else:
-        raise Exception(f'Instance type {instance_type} is not supported.')
+        raise RuntimeError(f'Instance type {instance_type} is not supported.')
     spec = vsphere_adaptor.get_vim().vm.ConfigSpec()
     spec.memoryMB = memory_needed
     spec.numCPUs = cpus_needed
@@ -318,7 +318,7 @@ def _create_instances(
                      f'{vsphere_cluster_name} with instance type:'
                      f'{vms_item["InstanceType"]}.')
         instance_type = vms_item['InstanceType']
-        raise Exception(f'Failed to create the instance on host {host_mobid} '
+        raise RuntimeError(f'Failed to create the instance on host {host_mobid} '
                         f'in {vsphere_cluster_name} with instance type:'
                         f'{instance_type}.')
 
