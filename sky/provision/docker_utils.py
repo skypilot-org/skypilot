@@ -15,6 +15,10 @@ logger = sky_logging.init_logger(__name__)
 # Configure environment variables. A docker image can have environment variables
 # set in the Dockerfile with `ENV``. We need to export these variables to the
 # shell environment, so that our ssh session can access them.
+# Filter out RAY_RUNTIME_ENV_HOOK to prevent Ray version conflicts.
+# Docker images with Ray 2.48.0+ set this for UV package manager support,
+# but it causes FAILED_DRIVER errors with SkyPilot's Ray 2.9.3.
+# See: https://github.com/skypilot-org/skypilot/pull/7181
 SETUP_ENV_VARS_CMD = (
     'prefix_cmd() '
     '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
