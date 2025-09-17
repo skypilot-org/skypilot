@@ -1547,9 +1547,12 @@ def get_clusters_from_history(
         user_hash = (row.user_hash
                      if row.user_hash is not None else current_user_hash)
         row_to_user_hash[row.cluster_hash] = user_hash
-        if row.usage_intervals is not None:
-            usage_intervals_dict[row.cluster_hash] = pickle.loads(
-                row.usage_intervals)
+        if row.usage_intervals:
+            try:
+                usage_intervals_dict[row.cluster_hash] = pickle.loads(
+                    row.usage_intervals)
+            except (pickle.PickleError, AttributeError):
+                usage_intervals_dict[row.cluster_hash] = []
     user_hashes = set(row_to_user_hash.values())
     user_hash_to_user = _get_users(user_hashes)
 
@@ -1578,13 +1581,6 @@ def get_clusters_from_history(
             # For historical clusters, check if they were used recently
             # Use the most recent activity from usage_intervals to determine
             # last use
-            usage_intervals = []
-            if row.usage_intervals:
-                try:
-                    usage_intervals = pickle.loads(row.usage_intervals)
-                except (pickle.PickleError, AttributeError):
-                    usage_intervals = []
-
             # Find the most recent activity time from usage_intervals
             last_activity_time = None
             if usage_intervals:
@@ -1605,14 +1601,6 @@ def get_clusters_from_history(
                 launched_resources = pickle.loads(row.launched_resources)
             except (pickle.PickleError, AttributeError):
                 launched_resources = None
-
-        # Parse usage intervals safely
-        usage_intervals = []
-        if row.usage_intervals:
-            try:
-                usage_intervals = pickle.loads(row.usage_intervals)
-            except (pickle.PickleError, AttributeError):
-                usage_intervals = []
 
         workspace = (row.history_workspace
                      if row.history_workspace else row.workspace)
