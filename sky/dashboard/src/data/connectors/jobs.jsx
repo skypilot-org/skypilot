@@ -288,7 +288,10 @@ export async function getPoolStatus() {
     // Also fetch managed jobs to get job counts by pool
     let jobsData = { jobs: [] };
     try {
-      const jobsResponse = await getManagedJobs({ allUsers: true, skipFinished: true });
+      const jobsResponse = await getManagedJobs({
+        allUsers: true,
+        skipFinished: true,
+      });
       if (!jobsResponse.controllerStopped) {
         jobsData = jobsResponse;
       }
