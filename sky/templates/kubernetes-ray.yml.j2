@@ -956,11 +956,14 @@ available_node_types:
                   fi;
                 fi;
                 export -p > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
-                ) > /tmp/${STEPS[2]}.log 2>&1 || {
-                  echo "Error: ${STEPS[2]} failed. Continuing anyway..." > /tmp/${STEPS[2]}.failed
+                ) > /tmp/${STEPS[2]}.log 2>&1
+                if [ "$?" -ne "0" ]; then
+                  {
+                  echo "Error: ${STEPS[2]} failed. Continuing anyway..." > /tmp/${STEPS[2]}.failed 2>&1
                   cat /tmp/${STEPS[2]}.log
                   exit 1
-                }
+                  }
+                fi
               ) &
 
               function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
