@@ -256,7 +256,7 @@ Example:
 
   api_server:
     cluster_event_retention_hours: -1 # Disable all cluster event GC
-  
+
 .. _config-yaml-api-server-cluster-debug-event-retention-hours:
 
 ``api_server.cluster_debug_event_retention_hours``
@@ -1164,8 +1164,12 @@ Can be one of:
 
 - ``gke``: Google Kubernetes Engine
 - ``karpenter``: Karpenter
+- ``nebius``: Nebius Kubernetes cluster
 - ``coreweave``: `CoreWeave autoscaler <https://docs.coreweave.com/docs/products/cks/nodes/autoscaling>`_
 - ``generic``: Generic autoscaler, assumes nodes are labelled with ``skypilot.co/accelerator``.
+
+If you want to use the autoscaler, set :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>` to at least 600.
+
 
 .. _config-yaml-kubernetes-pod-config:
 

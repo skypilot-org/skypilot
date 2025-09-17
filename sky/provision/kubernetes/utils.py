@@ -617,7 +617,8 @@ class GFDLabelFormatter(GPULabelFormatter):
         # TODO implement get_label_values for GFDLabelFormatter
         # TODO: We need a mapping from SkyPilot accelerator names (e.g., l40s)
         # to GFD label values (e.g., NVIDIA-L40S).
-        return ['NVIDIA-L40S'] # HACK TO MANUALLY TEST AUTOSCALING ON A L40S POOL
+        return ['NVIDIA-L40S'
+               ]  # HACK TO MANUALLY TEST AUTOSCALING ON A L40S POOL
 
     @classmethod
     def match_label_key(cls, label_key: str) -> bool:
@@ -661,13 +662,58 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
     LABEL_KEY = 'karpenter.k8s.aws/instance-gpu-name'
 
 
+class NebiusLabelFormatter(GPULabelFormatter):
+    """Nebius label formatter
+
+        Uses node.kubernetes.io/instance-type as the key, and the uppercase SkyPilot
+        accelerator str as the value.
+        """
+
+    LABEL_KEY = 'node.kubernetes.io/instance-type'
+    # From https://docs.nebius.com/compute/virtual-machines/types
+    NEBIUS_ACCELERATOR_TO_PLATFORM = {
+        'B200': ['gpu-b200-sxm'],
+        'H200': ['gpu-h200-sxm'],
+        'H100': ['gpu-h100-sxm'],
+        'L40S': ['gpu-l40s-a', 'gpu-l40s-d']
+    }
+
+    @classmethod
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_keys(cls) -> List[str]:
+        return [cls.LABEL_KEY]
+
+    @classmethod
+    def get_label_values(cls, accelerator: str) -> List[str]:
+        return cls.NEBIUS_ACCELERATOR_TO_PLATFORM.get(accelerator, [])
+
+    @classmethod
+    def match_label_key(cls, label_key: str) -> bool:
+        return label_key == cls.LABEL_KEY
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        if value.startswith('gpu-'):
+            # All Gpu platforms have fromat like 'gpu-h200-sxm'
+            # https://docs.nebius.com/compute/virtual-machines/types
+            return value.split('-')[1].upper()
+        elif value.startswith('cpu-'):
+            return ''
+        else:
+            raise ValueError(
+                f'Invalid accelerator name in Nebius cluster: {value}')
+
+
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats when
 # auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
     SkyPilotLabelFormatter, GKELabelFormatter, KarpenterLabelFormatter,
-    GFDLabelFormatter, CoreWeaveLabelFormatter
+    GFDLabelFormatter, CoreWeaveLabelFormatter, NebiusLabelFormatter
 ]
 
 
@@ -1091,6 +1137,7 @@ class CoreweaveAutoscaler(Autoscaler):
     label_formatter: Any = CoreWeaveLabelFormatter
     can_query_backend: bool = False
 
+
 class NvidiaAutoscaler(Autoscaler):
     """Generic autoscaler for clusters using Nvidia GFD
     """
@@ -1098,9 +1145,14 @@ class NvidiaAutoscaler(Autoscaler):
     label_formatter: Any = GFDLabelFormatter
     can_query_backend: bool = False
 
-class NebiusAutoscaler(NvidiaAutoscaler):
-    """Nebius autoscaler. Reuses NvidiaAutoscaler.
+
+class NebiusAutoscaler(Autoscaler):
+    """Nebius autoscaler.
     """
+
+    label_formatter: Any = NebiusLabelFormatter
+    can_query_backend: bool = False
+
 
 class GenericAutoscaler(Autoscaler):
     """Generic autoscaler
