@@ -12,6 +12,7 @@ def strip_ansi(s: str) -> str:
 
 
 class DummyCloudError(exceptions.CloudError):
+
     def __init__(self):
         super().__init__(
             message="Request error UNAUTHENTICATED: Invalid token",
@@ -43,7 +44,8 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
     monkeypatch.setattr(cli_mod.core, "stop", fake_stop, raising=True)
     monkeypatch.setattr(cli_mod.core, "autostop", fake_autostop, raising=True)
 
-    def fake_get_cluster_records_and_set_ssh_config(clusters=None, all_users=False):
+    def fake_get_cluster_records_and_set_ssh_config(clusters=None, 
+                                                    all_users=False):
         clusters = clusters or names
         return [{"name": n, "status": None} for n in clusters]
 
@@ -55,6 +57,7 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
     )
 
     class FakeControllers:
+        
         @staticmethod
         def from_name(name):
             return None
