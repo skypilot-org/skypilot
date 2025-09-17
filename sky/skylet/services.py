@@ -10,7 +10,11 @@ from sky.schemas.generated import autostopv1_pb2
 from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.schemas.generated import jobsv1_pb2
 from sky.schemas.generated import jobsv1_pb2_grpc
+from sky.schemas.generated import servev1_pb2
+from sky.schemas.generated import servev1_pb2_grpc
+from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
+from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -48,6 +52,100 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
             is_autostopping = autostop_lib.get_is_autostopping()
             return autostopv1_pb2.IsAutostoppingResponse(
                 is_autostopping=is_autostopping)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+
+class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
+    """Implementation of the ServeService gRPC service."""
+
+    # NOTE (kyuds): this grpc service will run cluster-side,
+    # thus guaranteeing that SERVE_VERSION is above 5.
+    # Therefore, we removed some SERVE_VERSION checks
+    # present in the original codegen.
+
+    def GetServiceStatus(  # type: ignore[return]
+            self, request: servev1_pb2.GetServiceStatusRequest,
+            context: grpc.ServicerContext
+    ) -> servev1_pb2.GetServiceStatusResponse:
+        """Gets serve status."""
+        try:
+            service_names, pool = (
+                serve_rpc_utils.GetServiceStatusRequestConverter.from_proto(request))  # pylint: disable=line-too-long
+            statuses = serve_utils.get_service_status_pickled(
+                service_names, pool)
+            return serve_rpc_utils.GetServiceStatusResponseConverter.to_proto(
+                statuses)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def AddVersion(  # type: ignore[return]
+            self, request: servev1_pb2.AddVersionRequest,
+            context: grpc.ServicerContext) -> servev1_pb2.AddVersionResponse:
+        """Adds serve version"""
+        try:
+            service_name = request.service_name
+            version = serve_state.add_version(service_name)
+            return servev1_pb2.AddVersionResponse(version=version)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def TerminateServices(  # type: ignore[return]
+            self, request: servev1_pb2.TerminateServicesRequest,
+            context: grpc.ServicerContext
+    ) -> servev1_pb2.TerminateServicesResponse:
+        """Terminates serve"""
+        try:
+            service_names, purge, pool = (
+                serve_rpc_utils.TerminateServicesRequestConverter.from_proto(request))  # pylint: disable=line-too-long
+            message = serve_utils.terminate_services(service_names, purge, pool)
+            return servev1_pb2.TerminateServicesResponse(message=message)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def TerminateReplica(  # type: ignore[return]
+            self, request: servev1_pb2.TerminateReplicaRequest,
+            context: grpc.ServicerContext
+    ) -> servev1_pb2.TerminateReplicaResponse:
+        """Terminate replica"""
+        try:
+            service_name = request.service_name
+            replica_id = request.replica_id
+            purge = request.purge
+            message = serve_utils.terminate_replica(service_name, replica_id,
+                                                    purge)
+            return servev1_pb2.TerminateReplicaResponse(message=message)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def WaitServiceRegistration(  # type: ignore[return]
+        self, request: servev1_pb2.WaitServiceRegistrationRequest,
+        context: grpc.ServicerContext
+    ) -> servev1_pb2.WaitServiceRegistrationResponse:
+        """Wait for service to be registered"""
+        try:
+            service_name = request.service_name
+            job_id = request.job_id
+            pool = request.pool
+            encoded = serve_utils.wait_service_registration(
+                service_name, job_id, pool)
+            lb_port = serve_utils.load_service_initialization_result(encoded)
+            return servev1_pb2.WaitServiceRegistrationResponse(lb_port=lb_port)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def UpdateService(  # type: ignore[return]
+            self, request: servev1_pb2.UpdateServiceRequest,
+            context: grpc.ServicerContext) -> servev1_pb2.UpdateServiceResponse:
+        """Update service"""
+        try:
+            service_name = request.service_name
+            version = request.version
+            mode = request.mode
+            pool = request.pool
+            serve_utils.update_service_encoded(service_name, version, mode,
+                                               pool)
+            return servev1_pb2.UpdateServiceResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 

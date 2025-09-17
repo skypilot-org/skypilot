@@ -745,8 +745,8 @@ def _get_service_status(
     return record
 
 
-def get_service_status_encoded(service_names: Optional[List[str]],
-                               pool: bool) -> str:
+def get_service_status_pickled(service_names: Optional[List[str]],
+                               pool: bool) -> List[Dict[str, str]]:
     service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
@@ -759,14 +759,34 @@ def get_service_status_encoded(service_names: Optional[List[str]],
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
-    service_statuses = sorted(service_statuses, key=lambda x: x['name'])
+    return sorted(service_statuses, key=lambda x: x['name'])
+
+
+# TODO (kyuds): remove when serve codegen is removed
+def get_service_status_encoded(service_names: Optional[List[str]],
+                               pool: bool) -> str:
     # We have to use payload_type here to avoid the issue of
     # message_utils.decode_payload() not being able to correctly decode the
     # message with <sky-payload> tags.
+    service_statuses = get_service_status_pickled(service_names, pool)
     return message_utils.encode_payload(service_statuses,
                                         payload_type='service_status')
 
 
+def unpickle_service_status(
+        payload: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    service_statuses: List[Dict[str, Any]] = []
+    for service_status in payload:
+        if not isinstance(service_status, dict):
+            raise ValueError(f'Invalid service status: {service_status}')
+        service_statuses.append({
+            k: pickle.loads(base64.b64decode(v))
+            for k, v in service_status.items()
+        })
+    return service_statuses
+
+
+# TODO (kyuds): remove when serve codegen is removed
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
     try:
         service_statuses_encoded = message_utils.decode_payload(
@@ -778,22 +798,16 @@ def load_service_status(payload: str) -> List[Dict[str, Any]]:
             service_statuses_encoded = message_utils.decode_payload(payload)
         else:
             raise
-    service_statuses: List[Dict[str, Any]] = []
-    for service_status in service_statuses_encoded:
-        if not isinstance(service_status, dict):
-            raise ValueError(f'Invalid service status: {service_status}')
-        service_statuses.append({
-            k: pickle.loads(base64.b64decode(v))
-            for k, v in service_status.items()
-        })
-    return service_statuses
+    return unpickle_service_status(service_statuses_encoded)
 
 
+# TODO (kyuds): remove when serve codegen is removed
 def add_version_encoded(service_name: str) -> str:
     new_version = serve_state.add_version(service_name)
     return message_utils.encode_payload(new_version)
 
 
+# TODO (kyuds): remove when serve codegen is removed
 def load_version_string(payload: str) -> str:
     return message_utils.decode_payload(payload)
 
@@ -999,6 +1013,8 @@ def wait_service_registration(service_name: str, job_id: int,
     Returns:
         Encoded load balancer port assigned to the service.
     """
+    # TODO (kyuds): when codegen is fully deprecated, return the lb port
+    # as an int directly instead of encoding it.
     start_time = time.time()
     setup_completed = False
     noun = 'pool' if pool else 'service'
@@ -1546,6 +1562,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
 
 
 # =========================== CodeGen for Sky Serve ===========================
+# TODO (kyuds): deprecate and remove serve codegen entirely.
 
 
 # TODO(tian): Use REST API instead of SSH in the future. This codegen pattern
