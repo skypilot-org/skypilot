@@ -1116,6 +1116,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_fluidstack_authentication(config)
     elif isinstance(cloud, clouds.Hyperbolic):
         config = auth.setup_hyperbolic_authentication(config)
+    elif isinstance(cloud, clouds.PrimeIntellect):
+        config = auth.setup_primeintellect_authentication(config)
     elif isinstance(cloud, clouds.Seeweb):
         config = auth.setup_seeweb_authentication(config)
     else:
