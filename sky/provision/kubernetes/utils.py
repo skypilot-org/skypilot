@@ -1141,7 +1141,6 @@ def detect_accelerator_resource(
 
     return has_accelerator, cluster_resources
 
-
 @annotations.lru_cache(scope='request', maxsize=10)
 @_retry_on_error(resource_type='node')
 def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
@@ -3094,7 +3093,9 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
 
     return unlabeled_nodes
 
+import memory_profiler
 
+@memory_profiler.profile
 def get_kubernetes_node_info(
         context: Optional[str] = None) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
