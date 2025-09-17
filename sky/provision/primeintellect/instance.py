@@ -62,7 +62,7 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-"""Helper is available as utils.parse_ssh_connection."""
+# Helper is available as utils.parse_ssh_connection.
 
 
 def run_instances(region: str, cluster_name_on_cloud: str,

@@ -611,12 +611,19 @@ def setup_primeintellect_authentication(
     - Generates a new SSH key pair if one does not exist.
     - Adds the public SSH key to the user's Prime Intellect account.
     """
-    
-    # Add the public key to Prime Intellect account
+    # Ensure local SSH keypair exists and fetch public key content
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    # Register the public key with Prime Intellect (no-op if already exists)
     client = primeintellect_utils.PrimeIntellectAPIClient()
     client.get_or_add_ssh_key(public_key)
 
+    # Set up auth section for Ray template
     config.setdefault('auth', {})
+    # Default username for Prime Intellect images
+    config['auth']['ssh_user'] = 'ubuntu'
     config['auth']['ssh_public_key'] = public_key_path
 
     return configure_ssh_info(config)
