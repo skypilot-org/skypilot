@@ -17,7 +17,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
-                    TypeVar, Union)
+                    Type, TypeVar, Union)
 import uuid
 
 import aiohttp
@@ -3465,7 +3465,7 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
 def get_endpoints(cluster: str,
                   port: Optional[Union[int, str]] = None,
                   skip_status_check: bool = False,
-                  protocol: str = 'http') -> Dict[int, str]:
+                  preferred_protocol: Optional[str] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -3478,6 +3478,9 @@ def get_endpoints(cluster: str,
             controller to query endpoints during cluster launch when multiple
             services may be getting launched in parallel (and as a result,
             the controller may be in INIT status due to a concurrent launch).
+        preferred_protocol: Optional hint ('http' or 'https') to pick an
+            endpoint matching the desired scheme when multiple endpoints are
+            available for the same port.
 
     Returns: A dictionary of port numbers to endpoints. If endpoint is None,
         the dictionary will contain all ports:endpoints exposed on the cluster.
@@ -3523,8 +3526,6 @@ def get_endpoints(cluster: str,
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
-    assert isinstance(cloud, clouds.Cloud)
-    assert launched_resources.ports is not None
     try:
         cloud.check_features_are_supported(
             launched_resources, {clouds.CloudImplementationFeatures.OPEN_PORTS})
@@ -3540,28 +3541,53 @@ def get_endpoints(cluster: str,
                                              head_ip=handle.head_ip,
                                              provider_config=config['provider'])
 
-    def filter_endpoints_by_protocol(
+    def _select_endpoint_string(
+        endpoints: List['provision_common.Endpoint']) -> Optional[str]:
+        if not endpoints:
+            return None
+
+        normalized_protocol = (preferred_protocol.lower()
+                               if preferred_protocol else None)
+
+        if normalized_protocol is not None:
+            scheme_prefix = f'{normalized_protocol}://'
+            for endpoint in endpoints:
+                url = endpoint.url()
+                if url.lower().startswith(scheme_prefix):
+                    return url
+
+            preferred_cls: Optional[Type['provision_common.Endpoint']] = None
+            if normalized_protocol == 'https':
+                preferred_cls = provision_common.HTTPSEndpoint
+            elif normalized_protocol == 'http':
+                preferred_cls = provision_common.HTTPEndpoint
+
+            if preferred_cls is not None:
+                for endpoint in endpoints:
+                    if isinstance(endpoint, preferred_cls):
+                        return endpoint.url()
+
+        return endpoints[0].url()
+
+    def _format_endpoint(url: Optional[str]) -> Optional[str]:
+        if url is None:
+            return None
+        if '://' in url:
+            return url
+        if preferred_protocol:
+            return f'{preferred_protocol.lower()}://{url}'
+        return url
+
+    def _filter_endpoints(
         port_details: Dict[int, List['provision_common.Endpoint']]
     ) -> Dict[int, str]:
-        if protocol == 'https':
-            port_details = {
-                port: [
-                    endpoint for endpoint in endpoints
-                    if isinstance(endpoint, provision_common.HTTPSEndpoint)
-                ] for port, endpoints in port_details.items()
-            }
-
-        def add_prefix(endpoint: 'provision_common.Endpoint') -> str:
-            url = endpoint.url()
-            if url.startswith(protocol):
-                return url
-            return f'{protocol}://{url}'
-
-        return {
-            port:
-            add_prefix(endpoints[0])  # TODO(andyl): handle multiple endpoints
-            for port, endpoints in port_details.items()
-        }
+        result: Dict[int, str] = {}
+        for port_num, endpoints in port_details.items():
+            endpoint_str = _select_endpoint_string(endpoints)
+            formatted = _format_endpoint(endpoint_str)
+            if formatted is not None:
+                result[port_num] = formatted
+        return result
 
     launched_resources = handle.launched_resources.assert_launchable()
     # Validation before returning the endpoints
@@ -3582,7 +3608,7 @@ def get_endpoints(cluster: str,
                     launched_resources.region)
             logger.warning(error_msg)
             return {}
-        return filter_endpoints_by_protocol({port: port_details[port]})
+        return _filter_endpoints({port: port_details[port]})
     else:
         if not port_details:
             # If cluster had no ports to be exposed
@@ -3601,7 +3627,7 @@ def get_endpoints(cluster: str,
                         launched_resources.region)
                 logger.warning(error_msg)
                 return {}
-        return filter_endpoints_by_protocol(port_details)
+        return _filter_endpoints(port_details)
 
 
 def cluster_status_lock_id(cluster_name: str) -> str:
