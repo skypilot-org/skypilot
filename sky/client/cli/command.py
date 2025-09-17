@@ -47,6 +47,7 @@ import sky
 from sky import backends
 from sky import catalog
 from sky import clouds
+from sky import core
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import jobs as managed_jobs
@@ -3061,6 +3062,28 @@ def _controller_to_hint_or_raise(
     return _hint_or_raise_for_down_sky_serve_controller
 
 
+def _do_down_stop_autostop(
+    name: str,
+    *,
+    do_down: bool,
+    purge: bool,
+    idle_minutes_to_autostop: Optional[int],
+    wait_for: Optional[autostop_lib.AutostopWaitFor],
+) -> None:
+    """Executes down/stop/autostop for a single cluster."""
+    if do_down:
+        core.down(name, purge=purge)
+    elif idle_minutes_to_autostop is not None:
+        core.autostop(
+            name,
+            idle_minutes=idle_minutes_to_autostop,
+            wait_for=wait_for or autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+            down=do_down,
+        )
+    else:
+        core.stop(name, purge=purge)
+
+
 def _down_or_stop_clusters(
         names: List[str],
         apply_to_all: bool = False,
@@ -3226,6 +3249,39 @@ def _down_or_stop_clusters(
         total=len(clusters))
 
     request_ids = []
+
+    successes: List[str] = []
+    failures: List[Tuple[str, BaseException]] = []
+
+    with progress:
+        for name in clusters:
+            try:
+                sky_logging.print(f'→ {operation.split()[0]} {name} ...', flush=True)
+                _do_down_stop_autostop(
+                    name,
+                    do_down=down,
+                    purge=purge,
+                    idle_minutes_to_autostop=idle_minutes_to_autostop,
+                    wait_for=wait_for,
+                )
+                sky_logging.print(f'✓ {name}', flush=True)
+                successes.append(name)
+            except BaseException as e:
+                e = exceptions.wrap_exception(e)
+                sky_logging.print(f'✗ {name}: {e}', flush=True)
+                failures.append((name, e))
+            finally:
+                progress.update(task, advance=1)
+
+    click.echo('\nSummary:')
+    if successes:
+        click.echo('  ✓ Succeeded: ' + ', '.join(successes))
+    if failures:
+        click.echo('  ✗ Failed: ' + ', '.join(n for (n, _) in failures))
+
+    if failures:
+        raise click.ClickException('Some clusters failed. See summary above.')
+
 
     def _down_or_stop(name: str):
         success_progress = False
