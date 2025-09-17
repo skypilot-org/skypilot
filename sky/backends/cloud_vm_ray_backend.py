@@ -4675,16 +4675,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return dict(zip(job_ids, local_log_dirs))
 
     @context_utils.cancellation_guard
-    def tail_logs(
-            self,
-            handle: CloudVmRayResourceHandle,
-            job_id: Optional[int],
-            managed_job_id: Optional[int] = None,
-            follow: bool = True,
-            tail: int = 0,
-            require_outputs: bool = False,
-            stream_logs: bool = True,
-            process_stream: bool = False) -> Union[int, Tuple[int, str, str]]:
+    def tail_logs(self,
+                  handle: CloudVmRayResourceHandle,
+                  job_id: Optional[int],
+                  managed_job_id: Optional[int] = None,
+                  follow: bool = True,
+                  tail: int = 0,
+                  require_outputs: bool = False,
+                  stream_logs: bool = True,
+                  process_stream: bool = False,
+                  pool: bool = False) -> Union[int, Tuple[int, str, str]]:
         """Tail the logs of a job.
 
         Args:
@@ -4705,7 +4705,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
                                                follow=follow,
-                                               tail=tail)
+                                               tail=tail,
+                                               pool=pool)
         if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
