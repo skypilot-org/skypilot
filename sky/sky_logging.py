@@ -184,8 +184,8 @@ def set_sky_logging_levels(level: int):
             logger = logging.getLogger(logger_name)
             previous_levels[logger_name] = logger.level
             logger.setLevel(level)
+    previous_show_debug_info = env_options.Options.SHOW_DEBUG_INFO.get()
     if level == logging.DEBUG:
-        previous_show_debug_info = env_options.Options.SHOW_DEBUG_INFO.get()
         os.environ[env_options.Options.SHOW_DEBUG_INFO.env_key] = '1'
     try:
         yield

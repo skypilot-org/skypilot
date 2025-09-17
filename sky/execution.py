@@ -330,6 +330,7 @@ def _execute_dag(
                 assert not resource_autostop_config.enabled
                 idle_minutes_to_autostop = -1
                 down = False
+                wait_for = None
         if idle_minutes_to_autostop is not None:
             if idle_minutes_to_autostop == 0:
                 # idle_minutes_to_autostop=0 can cause the following problem:
@@ -412,6 +413,7 @@ def _execute_dag(
         # Optimizer should eventually choose where to store bucket
         task.sync_storage_mounts()
 
+    job_id = None
     try:
         provisioning_skipped = False
         if Stage.PROVISION in stages:

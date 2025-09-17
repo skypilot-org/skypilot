@@ -455,6 +455,7 @@ class Optimizer:
             # FIXME: Account for egress costs for multi-node clusters
             for resources, execution_cost in node_to_cost_map[node].items():
                 min_pred_cost_plus_egress = np.inf
+                best_parent_hardware = None
                 for parent_resources, parent_cost in \
                     dp_best_objective[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(
