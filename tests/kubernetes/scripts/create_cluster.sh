@@ -3,7 +3,7 @@ set -e
 
 # Usage:
 #   create_cluster.sh gcp <CLUSTER_NAME> <PROJECT_ID> <ZONE> <NODE_COUNT> <MACHINE_TYPE>
-#   create_cluster.sh eks <CLUSTER_NAME> <REGION> <NODE_COUNT> <INSTANCE_TYPE>
+#   create_cluster.sh aws <CLUSTER_NAME> <REGION> <NODE_COUNT> <INSTANCE_TYPE>
 
 # If EKS_VPC_CONFIG is set, it will be injected verbatim into the eksctl config
 
@@ -41,13 +41,13 @@ case "$PROVIDER" in
     echo "GKE cluster '$CLUSTER_NAME' created successfully!"
     echo "Cluster credentials configured for kubectl"
     ;;
-  eks|EKS)
+  aws|AWS)
     CLUSTER_NAME=${1:-"$CLUSTER_NAME_DEFAULT"}
     REGION=${2:-"us-east-2"}
     NODE_COUNT=${3:-1}
     INSTANCE_TYPE=${4:-"m5.2xlarge"}
 
-    echo "Creating EKS cluster..."
+    echo "Creating AWS EKS cluster..."
     echo "Cluster Name: $CLUSTER_NAME"
     echo "Region: $REGION"
     echo "Node Count: $NODE_COUNT"
@@ -116,12 +116,12 @@ allowVolumeExpansion: true
 SCYAML
     kubectl apply -f /tmp/eks-gp3-sc.yaml
 
-    echo "EKS cluster '$CLUSTER_NAME' created successfully!"
+    echo "AWS EKS cluster '$CLUSTER_NAME' created successfully!"
     echo "Cluster credentials configured for kubectl"
     ;;
   *)
     echo "Unsupported provider: $PROVIDER"
-    echo "Usage: $0 <gcp|eks> ..."
+    echo "Usage: $0 <gcp|aws> ..."
     exit 1
     ;;
 esac

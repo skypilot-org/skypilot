@@ -5,7 +5,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Configuration
-# Provider can be gcp or eks (default: gcp). Usage: helm_upgrade.sh [PACKAGE_NAME] CURRENT_VERSION [PROVIDER]
+# Provider can be gcp or aws (default: gcp). Usage: helm_upgrade.sh [PACKAGE_NAME] CURRENT_VERSION [PROVIDER]
 PROVIDER=${3:-"gcp"}
 CLUSTER_NAME="skypilot-helm-test-cluster"
 PROJECT_ID=$(gcloud config get-value project)
@@ -195,9 +195,9 @@ cleanup() {
     fi
 
     # Delete cluster based on provider
-    if [ "$PROVIDER" = "eks" ]; then
-        echo "Deleting EKS cluster: $CLUSTER_NAME"
-        "$SCRIPT_DIR/delete_cluster.sh" eks "$CLUSTER_NAME" "$EKS_REGION"
+    if [ "$PROVIDER" = "aws" ]; then
+        echo "Deleting AWS EKS cluster: $CLUSTER_NAME"
+        "$SCRIPT_DIR/delete_cluster.sh" aws "$CLUSTER_NAME" "$EKS_REGION"
     else
         echo "Deleting GKE cluster: $CLUSTER_NAME"
         "$SCRIPT_DIR/delete_cluster.sh" gcp "$CLUSTER_NAME" "$PROJECT_ID" "$ZONE"
@@ -215,8 +215,8 @@ echo "Previous version: $PREVIOUS_VERSION"
 
 
 # Create cluster based on provider
-if [ "$PROVIDER" = "eks" ]; then
-    "$SCRIPT_DIR/create_cluster.sh" eks "$CLUSTER_NAME" "$EKS_REGION" "$NODE_COUNT" "m5.2xlarge"
+if [ "$PROVIDER" = "aws" ]; then
+    "$SCRIPT_DIR/create_cluster.sh" aws "$CLUSTER_NAME" "$EKS_REGION" "$NODE_COUNT" "m5.2xlarge"
 else
     "$SCRIPT_DIR/create_cluster.sh" gcp "$CLUSTER_NAME" "$PROJECT_ID" "$ZONE" "$NODE_COUNT" "$MACHINE_TYPE"
 fi

@@ -4,7 +4,7 @@ set -e
 # Usage: delete_cluster.sh <provider> [args...]
 # Providers:
 #  - gcp: args => <CLUSTER_NAME> <PROJECT_ID> <ZONE>
-#  - eks: args => <CLUSTER_NAME> <REGION>
+#  - aws: args => <CLUSTER_NAME> <REGION>
 
 PROVIDER=${1:-"gcp"}
 shift || true
@@ -24,7 +24,7 @@ case "$PROVIDER" in
         --quiet || true
     echo "GKE cluster '$CLUSTER_NAME' deleted (or did not exist)."
     ;;
-  eks|EKS)
+  aws|AWS)
     CLUSTER_NAME=${1:-"$CLUSTER_NAME_DEFAULT"}
     REGION=${2:-"us-east-2"}
     echo "Deleting EKS cluster '$CLUSTER_NAME' in region '$REGION'..."
@@ -33,7 +33,7 @@ case "$PROVIDER" in
     ;;
   *)
     echo "Unsupported provider: $PROVIDER"
-    echo "Usage: $0 <gcp|eks> [args...]"
+    echo "Usage: $0 <gcp|aws> [args...]"
     exit 1
     ;;
 esac
