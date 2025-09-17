@@ -707,7 +707,7 @@ def test_helm_deploy_eks(request):
     test = smoke_tests_utils.Test(
         'helm_deploy_eks',
         [
-            f'bash tests/kubernetes/scripts/helm_upgrade.sh {package_name} {helm_version} eks',
+            f'bash tests/kubernetes/scripts/helm_upgrade.sh {package_name} {helm_version} aws',
         ],
         # EKS termination requires longer timeout.
         timeout=50 * 60)
