@@ -37,6 +37,33 @@ def wait_until_pool_ready(pool_name: str,
         'done')
 
 
+def wait_until_worker_status(pool_name: str,
+                             status: str,
+                             timeout: int = 30,
+                             time_between_checks: int = 5):
+    status_str = f'sky status | grep -A999 "^Pool Workers" | grep "^{pool_name}"'
+    return (
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for worker status \'{status}\'"; exit 1; '
+        'fi; '
+        f's=$({status_str}); '
+        'echo "$s"; '
+        f'if echo "$s" | grep "{status}"; then '
+        '  break; '
+        'fi; '
+        'if echo "$s" | grep "FAILED"; then '
+        '  exit 1; '
+        'fi; '
+        'if echo "$s" | grep "SHUTTING_DOWN"; then '
+        '  exit 1; '
+        'fi; '
+        f'echo "Waiting for worker status to be {status}..."; '
+        f'sleep {time_between_checks}; '
+        'done')
+
+
 def test_vllm_pool(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_config = textwrap.dedent(f"""
@@ -167,3 +194,88 @@ def test_vllm_pool(generic_cloud: str):
             )
 
             smoke_tests_utils.run_one_test(test)
+
+
+def test_setup_logs_in_starting_pool(generic_cloud: str):
+    """Test that setup logs are streamed."""
+    pool_config = textwrap.dedent(f"""
+    pool:
+        workers: 1
+
+    resources:
+        cpus: 2+
+        memory: 4GB+
+
+    setup: |
+        echo "setup message"
+        # Do a very long setup so we know the setup logs are streamed in 
+        # the starting state.
+        for i in {{1..10000}}; do
+            echo "Noisy setup $i"
+            sleep 1
+        done
+    """)
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        pool_yaml.write(pool_config.encode())
+        pool_yaml.flush()
+
+        name = smoke_tests_utils.get_cluster_name()
+        pool_name = f'{name}-pool'
+
+        test = smoke_tests_utils.Test(
+            'test_setup_logs_in_starting_pool',
+            [
+                f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully created pool"',
+                wait_until_worker_status(
+                    pool_name,
+                    'STARTING',
+                    timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                # Sleep so we give the worker time to write message.
+                'sleep 1',
+                f's=$(sky jobs pool logs {pool_name} 1 --no-follow); echo "$s"; echo; echo; echo "$s" | grep "setup message"',
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=(f'sky jobs pool down {pool_name} -y'))
+
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_setup_logs_in_pool_exits(generic_cloud: str):
+    """Test that setup logs are streamed and exit once the setup is complete."""
+    """We omit --no-follow to test that we exit."""
+    pool_config = textwrap.dedent(f"""
+    pool:
+        workers: 1
+
+    resources:
+        cpus: 2+
+        memory: 4GB+
+
+    setup: |
+        echo "setup message"
+    """)
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        pool_yaml.write(pool_config.encode())
+        pool_yaml.flush()
+
+        name = smoke_tests_utils.get_cluster_name()
+        pool_name = f'{name}-pool'
+
+        test = smoke_tests_utils.Test(
+            'test_setup_logs_in_starting_pool',
+            [
+                f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully created pool"',
+                wait_until_worker_status(
+                    pool_name,
+                    'READY',
+                    timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                # Sleep so we give the worker time to write message.
+                'sleep 1',
+                f's=$(sky jobs pool logs {pool_name} 1); echo "$s"; echo; echo; echo "$s" | grep "setup message"',
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=(f'sky jobs pool down {pool_name} -y'))
+
+        smoke_tests_utils.run_one_test(test)

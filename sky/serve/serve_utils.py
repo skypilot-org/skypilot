@@ -1329,10 +1329,6 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
                 print(line, end='', flush=True)
         return ''
 
-    # For pools, we don't stream the job logs as the run section is ignored.
-    if pool:
-        return ''
-
     backend = backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
@@ -1351,7 +1347,10 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
 
     # Always tail the latest logs, which represent user setup & run.
     if tail is None:
-        returncode = backend.tail_logs(handle, job_id=None, follow=follow)
+        returncode = backend.tail_logs(handle,
+                                       job_id=None,
+                                       follow=follow,
+                                       pool=pool)
         if returncode != 0:
             return (f'{colorama.Fore.RED}Failed to stream logs for {repnoun} '
                     f'{replica_id}.{colorama.Style.RESET_ALL}')
@@ -1362,7 +1361,8 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
                                   tail=tail,
                                   stream_logs=False,
                                   require_outputs=True,
-                                  process_stream=True)
+                                  process_stream=True,
+                                  pool=pool)
         if isinstance(final, int) or (final[0] != 0 and final[0] != 101):
             if tail is not None:
                 for line in final_lines_to_print:
