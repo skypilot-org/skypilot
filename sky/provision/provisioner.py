@@ -495,6 +495,12 @@ def _post_provision_setup(
         # cluster. See provision/{cloud}/instance.py:get_cluster_info for more
         # details.
         if docker_config:
+            # Re-validate SSH on all nodes right before parallel Docker init.
+            # Some clouds assign external IPs late or restart sshd during
+            # first-boot; a second wait here prevents 255 errors mid-setup.
+            if cloud_name.lower() != 'kubernetes':
+                logger.debug('Re-checking SSH connectivity before docker init')
+                wait_for_ssh(cluster_info, ssh_credentials)
             status.update(
                 ux_utils.spinner_message(
                     'Launching - Initializing docker container',
@@ -558,6 +564,12 @@ def _post_provision_setup(
 
         status.update(
             runtime_preparation_str.format(step=2, step_name='dependencies'))
+        # Some environments may restart sshd after docker init (group usermod
+        # or cloud-init finalization). Ensure SSH is healthy again before
+        # running runtime setup on all nodes.
+        if cloud_name.lower() != 'kubernetes':
+            logger.debug('Re-checking SSH connectivity before runtime setup')
+            wait_for_ssh(cluster_info, ssh_credentials)
         instance_setup.setup_runtime_on_cluster(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_info, ssh_credentials)

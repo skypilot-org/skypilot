@@ -727,44 +727,52 @@ class Storage(object):
         # Logic to rebuild Storage if it is in global user state
         handle = global_user_state.get_handle_from_storage_name(self.name)
         if handle is not None:
-            self.handle = handle
-            # Reconstruct the Storage object from the global_user_state
-            logger.debug('Detected existing storage object, '
-                         f'loading Storage: {self.name}')
-            self._add_store_from_metadata(self.handle.sky_stores)
+            try:
+                self.handle = handle
+                # Reconstruct the Storage object from the global_user_state
+                logger.debug('Detected existing storage object, '
+                             f'loading Storage: {self.name}')
+                self._add_store_from_metadata(self.handle.sky_stores)
 
-            # When a storage object is reconstructed from global_user_state,
-            # the user may have specified a new store type in the yaml file that
-            # was not used with the storage object. We should error out in this
-            # case, as we don't support having multiple stores for the same
-            # storage object.
-            if any(s is None for s in self.stores.values()):
-                new_store_type = None
-                previous_store_type = None
-                for store_type, store in self.stores.items():
-                    if store is not None:
-                        previous_store_type = store_type
-                    else:
-                        new_store_type = store_type
+                # Raise error if the local record and requested store type are not consistent
+                if any(s is None for s in self.stores.values()):
+                    new_store_type = None
+                    previous_store_type = None
+                    for store_type, store in self.stores.items():
+                        if store is not None:
+                            previous_store_type = store_type
+                        else:
+                            new_store_type = store_type
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketCreateError(
+                            f'Bucket {self.name} was previously created for '
+                            f'{previous_store_type.value.lower()!r}, but a new '
+                            f'store type {new_store_type.value.lower()!r} is '
+                            'requested. This is not supported yet. Please '
+                            'specify the same store type: '
+                            f'{previous_store_type.value.lower()!r}.')
+
+                # TODO(romilb): This logic should likely be in add_store to move
+                # syncing to file_mount stage..
+                logger.debug(
+                    f'storage.construct(): sync_on_reconstruction='
+                    f'{self.sync_on_reconstruction}, name={self.name}')
+                if self.sync_on_reconstruction:
+                    msg = ''
+                    if (self.source and
+                        (isinstance(self.source, list) or
+                         not data_utils.is_cloud_store_url(self.source))):
+                        msg = ' and uploading from source'
+                    logger.info(f'Verifying bucket{msg} for storage {self.name}')
+                    self.sync_all_stores()
+            except AssertionError as e:
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageBucketCreateError(
-                        f'Bucket {self.name} was previously created for '
-                        f'{previous_store_type.value.lower()!r}, but a new '
-                        f'store type {new_store_type.value.lower()!r} is '
-                        'requested. This is not supported yet. Please specify '
-                        'the same store type: '
-                        f'{previous_store_type.value.lower()!r}.')
-
-            # TODO(romilb): This logic should likely be in add_store to move
-            # syncing to file_mount stage..
-            if self.sync_on_reconstruction:
-                msg = ''
-                if (self.source and
-                    (isinstance(self.source, list) or
-                     not data_utils.is_cloud_store_url(self.source))):
-                    msg = ' and uploading from source'
-                logger.info(f'Verifying bucket{msg} for storage {self.name}')
-                self.sync_all_stores()
+                    raise exceptions.StorageExternalDeletionError(
+                        f'Storage {self.name!r} reconstruction failed due to an '
+                        f'assertion (likely missing or inaccessible bucket). '
+                        'Consider recreating the bucket or removing the local '
+                        f'storage record via `sky storage delete {self.name}`. '
+                        f'Underlying error: {e}')
 
         else:
             # Storage does not exist in global_user_state, create new stores
@@ -1266,9 +1274,22 @@ class Storage(object):
                 global_user_state.remove_storage(self.name)
 
     def sync_all_stores(self):
-        """Syncs the source and destinations of all stores in the Storage"""
-        for _, store in self.stores.items():
-            assert store is not None, self
+        """Syncs the source and destinations of all stores in the Storage.
+
+        On reconstruction, if a store entry is missing (e.g., bucket was
+        externally deleted), raise a clear, typed error instead of asserting.
+        """
+        for s_type, store in list(self.stores.items()):
+            if store is None:
+                # Previously this path would hit an assert and surface as a bare
+                # AssertionError. Raise a descriptive error so callers can act.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageExternalDeletionError(
+                        f"Storage {self.name!r} has missing store of type "
+                        f"{s_type.value}; the underlying bucket may have been "
+                        "deleted or become inaccessible. Consider recreating "
+                        "the bucket or removing the local storage record via "
+                        f"`sky storage delete {self.name}`.")
             self._sync_store(store)
 
     def _sync_store(self, store: AbstractStore):

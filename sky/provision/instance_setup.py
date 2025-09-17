@@ -439,15 +439,28 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         # use the external IP of the head node.
         use_external_ip = cluster_info.custom_ray_options.pop(
             'use_external_ip', False)
-    head_ip = (head_instance.internal_ip
-               if not use_external_ip else head_instance.external_ip)
+    # Prefer internal IP; if worker cannot reach head via internal IP (rare in
+    # some cross-zone/VPC setups), fall back to external IP automatically.
+    head_ip_internal = head_instance.internal_ip
+    head_ip_external = head_instance.external_ip
+    # Respect explicit custom option if provided.
+    head_ip = (head_ip_external if use_external_ip else head_ip_internal)
 
     ray_cmd = ray_worker_start_command(custom_resource,
                                        cluster_info.custom_ray_options,
                                        no_restart)
 
-    cmd = (f'export SKYPILOT_RAY_HEAD_IP="{head_ip}"; '
-           f'export SKYPILOT_RAY_PORT={ray_port}; ' + ray_cmd)
+    # Build primary (internal) and fallback (external) commands.
+    primary_cmd = (f'export SKYPILOT_RAY_HEAD_IP="{head_ip}"; '
+                   f'export SKYPILOT_RAY_PORT={ray_port}; ' + ray_cmd)
+    fallback_cmd = ''
+    if not use_external_ip and head_ip_external:
+        fallback_cmd = (
+            f'export SKYPILOT_RAY_HEAD_IP="{head_ip_external}"; '
+            f'export SKYPILOT_RAY_PORT={ray_port}; ' + ray_cmd)
+
+    # Try internal first; on failure, try external IP.
+    cmd = primary_cmd if not fallback_cmd else f'( {primary_cmd} ) || ( {fallback_cmd} )'
 
     logger.info(f'Running command on worker nodes: {cmd}')
 

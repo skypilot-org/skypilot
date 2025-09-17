@@ -78,12 +78,18 @@ def query_instances(
     if use_tpu_vms:
         handler = instance_utils.GCPTPUVMInstance
 
-    instances = handler.filter(
-        project_id,
-        zone,
-        label_filters,
-        status_filters=None,
-    )
+    # Cross-zone: aggregate instances across all zones for this cluster
+    cross_zone_zones = provider_config.get('cross_zone_zones', [])
+    zones_to_scan = cross_zone_zones if len(cross_zone_zones) > 1 else [zone]
+    instances = {}
+    for z in zones_to_scan:
+        z_instances = handler.filter(
+            project_id,
+            z,
+            label_filters,
+            status_filters=None,
+        )
+        instances.update(z_instances)
 
     raw_statuses = {}
     statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
@@ -157,6 +163,10 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     project_id = config.provider_config['project_id']
     availability_zone = config.provider_config['availability_zone']
 
+    # Handle cross-zone placement
+    cross_zone_zones = config.provider_config.get('cross_zone_zones', [])
+    is_cross_zone = len(cross_zone_zones) > 1
+
     # SKY: 'TERMINATED' for compute VM, 'STOPPED' for TPU VM
     # 'STOPPING' means the VM is being stopped, which needs
     # to be included to avoid creating a new VM.
@@ -175,26 +185,43 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     }
 
     # wait until all stopping instances are stopped/terminated
+    # Cross-zone: check all specified zones instead of a single zone
+    zones_to_scan = cross_zone_zones if is_cross_zone else [availability_zone]
     while True:
-        instances = resource.filter(
+        total_stopping = 0
+        for z in zones_to_scan:
+            instances = resource.filter(
+                project_id=project_id,
+                zone=z,
+                label_filters=filter_labels,
+                status_filters=resource.STOPPING_STATES,
+            )
+            total_stopping += len(instances)
+        if total_stopping == 0:
+            break
+        logger.info('run_instances: Waiting for '
+                    f'{total_stopping} instances in STOPPING status')
+        time.sleep(constants.POLL_INTERVAL)
+
+    # Discover existing instances. For cross-zone, aggregate across zones.
+    exist_instances = []
+    if is_cross_zone:
+        for z in cross_zone_zones:
+            result = resource.filter(
+                project_id=project_id,
+                zone=z,
+                label_filters=filter_labels,
+                status_filters=None,
+            )
+            exist_instances.extend(result.values())
+    else:
+        result = resource.filter(
             project_id=project_id,
             zone=availability_zone,
             label_filters=filter_labels,
-            status_filters=resource.STOPPING_STATES,
+            status_filters=None,
         )
-        if not instances:
-            break
-        logger.info(f'run_instances: Waiting for {len(instances)} instances in '
-                    'STOPPING status')
-        time.sleep(constants.POLL_INTERVAL)
-
-    exist_instances = resource.filter(
-        project_id=project_id,
-        zone=availability_zone,
-        label_filters=filter_labels,
-        status_filters=None,
-    )
-    exist_instances = list(exist_instances.values())
+        exist_instances = list(result.values())
     head_instance_id = _get_head_instance_id(exist_instances)
 
     # NOTE: We are not handling REPAIRING, SUSPENDING, SUSPENDED status.
@@ -241,18 +268,26 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             'Please wait a while and retry.')
 
     if head_instance_id is None:
+        # When selecting an existing head in cross-zone mode, use the instance's zone
+        def _inst_zone(inst):
+            # GCP returns a selfLink for zone, e.g., projects/.../zones/us-xxx
+            zone_link = inst.get('zone') or ''
+            return zone_link.rsplit('/', 1)[-1] if '/' in zone_link else availability_zone
+
         if running_instances:
+            inst = running_instances[0]
             head_instance_id = resource.create_node_tag(
                 project_id,
-                availability_zone,
-                running_instances[0]['name'],
+                _inst_zone(inst),
+                inst['name'],
                 is_head=True,
             )
         elif pending_instances:
+            inst = pending_instances[0]
             head_instance_id = resource.create_node_tag(
                 project_id,
-                availability_zone,
-                pending_instances[0]['name'],
+                _inst_zone(inst),
+                inst['name'],
                 is_head=True,
             )
     # TODO(suquark): Maybe in the future, users could adjust the number
@@ -271,11 +306,25 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 
     # Try to reuse previously stopped nodes with compatible configs
     if config.resume_stopped_nodes and to_start_count > 0 and stopped_instances:
-        resumed_instance_ids = [n['name'] for n in stopped_instances]
-        if resumed_instance_ids:
-            resumed_instance_ids = resource.start_instances(
-                cluster_name_on_cloud, project_id, availability_zone,
-                resumed_instance_ids, labels)
+        # Start per-zone to support cross-zone
+        resumed_instance_ids = []
+        if is_cross_zone:
+            # Group stopped instances by their zone
+            zone_to_instances = {}
+            for n in stopped_instances:
+                zone_link = n.get('zone') or ''
+                z = zone_link.rsplit('/', 1)[-1] if '/' in zone_link else availability_zone
+                zone_to_instances.setdefault(z, []).append(n['name'])
+            for z, names in zone_to_instances.items():
+                resumed_instance_ids.extend(
+                    resource.start_instances(cluster_name_on_cloud,
+                                             project_id, z, names, labels))
+        else:
+            resumed_instance_ids = [n['name'] for n in stopped_instances]
+            if resumed_instance_ids:
+                resumed_instance_ids = resource.start_instances(
+                    cluster_name_on_cloud, project_id, availability_zone,
+                    resumed_instance_ids, labels)
         # In MIG case, the resumed_instance_ids will include the previously
         # PENDING and RUNNING instances. To avoid double counting, we need to
         # remove them from the resumed_instance_ids.
@@ -293,48 +342,99 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             )
 
     if to_start_count > 0:
-        errors, created_instance_ids = resource.create_instances(
-            cluster_name_on_cloud,
-            project_id,
-            availability_zone,
-            config.node_config,
-            labels,
-            to_start_count,
-            total_count=config.count,
-            include_head_node=head_instance_id is None)
-        if errors:
-            error = common.ProvisionerError('Failed to launch instances.')
-            error.errors = errors
-            raise error
-        if head_instance_id is None:
-            head_instance_id = created_instance_ids[0]
+        if is_cross_zone:
+            # For cross-zone, create instances in different zones
+            all_errors = []
+            for i in range(to_start_count):
+                # Calculate which zone to use for this instance
+                instance_index = len(resumed_instance_ids) + len(
+                    created_instance_ids)
+                zone_index = instance_index % len(cross_zone_zones)
+                instance_zone = cross_zone_zones[zone_index]
+
+                logger.info(
+                    f'Cross-zone: Creating instance {instance_index} in zone {instance_zone}'
+                )
+
+                # Create one instance at a time in the appropriate zone
+                errors, instance_ids = resource.create_instances(
+                    cluster_name_on_cloud,
+                    project_id,
+                    instance_zone,
+                    config.node_config,
+                    labels,
+                    1,  # Create one instance at a time
+                    total_count=config.count,
+                    include_head_node=(head_instance_id is None and i == 0))
+
+                if errors:
+                    all_errors.extend(errors)
+                else:
+                    created_instance_ids.extend(instance_ids)
+                    if head_instance_id is None and i == 0:
+                        head_instance_id = instance_ids[0]
+
+            if all_errors:
+                error = common.ProvisionerError('Failed to launch instances.')
+                error.errors = all_errors
+                raise error
+        else:
+            # Original single-zone logic
+            errors, created_instance_ids = resource.create_instances(
+                cluster_name_on_cloud,
+                project_id,
+                availability_zone,
+                config.node_config,
+                labels,
+                to_start_count,
+                total_count=config.count,
+                include_head_node=head_instance_id is None)
+            if errors:
+                error = common.ProvisionerError('Failed to launch instances.')
+                error.errors = errors
+                raise error
+            if head_instance_id is None:
+                head_instance_id = created_instance_ids[0]
+
+    # Wait for all instances to be running
+    zones_to_check = cross_zone_zones if is_cross_zone else [availability_zone]
 
     while True:
         # wait until all instances are running
-        instances = resource.filter(
-            project_id=project_id,
-            zone=availability_zone,
-            label_filters=filter_labels,
-            status_filters=resource.PENDING_STATES,
-        )
-        if not instances:
+        all_pending_instances = {}
+        for zone in zones_to_check:
+            instances = resource.filter(
+                project_id=project_id,
+                zone=zone,
+                label_filters=filter_labels,
+                status_filters=resource.PENDING_STATES,
+            )
+            if instances:
+                all_pending_instances.update(instances)
+
+        if not all_pending_instances:
             break
-        logger.debug(f'run_instances: Waiting for {len(instances)} instances '
-                     'in PENDING status.')
+        logger.debug(
+            f'run_instances: Waiting for {len(all_pending_instances)} instances '
+            'in PENDING status.')
         time.sleep(constants.POLL_INTERVAL)
 
     # Check if the number of running instances is the same as the requested.
-    instances = resource.filter(
-        project_id=project_id,
-        zone=availability_zone,
-        label_filters=filter_labels,
-        status_filters=[resource.RUNNING_STATE],
-    )
-    if len(instances) != config.count:
+    all_running_instances = {}
+    for zone in zones_to_check:
+        instances = resource.filter(
+            project_id=project_id,
+            zone=zone,
+            label_filters=filter_labels,
+            status_filters=[resource.RUNNING_STATE],
+        )
+        all_running_instances.update(instances)
+
+    if len(all_running_instances) != config.count:
         logger.warning('The number of running instances is different from '
                        'the requested number after provisioning '
                        f'(requested: {config.count}, '
-                       f'observed: {len(instances)}). '
+                       f'observed: {len(all_running_instances)}). '
                        'This could be some instances failed to start '
                        'or some resource leak.')
 
@@ -351,9 +451,15 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             tpu_node,
             vpc_name,
         )
+    # For cross-zone, return the zone of the head node
+    head_zone = availability_zone
+    if is_cross_zone and head_instance_id:
+        # The head node is always the first instance, which uses the first zone
+        head_zone = cross_zone_zones[0]
+
     return common.ProvisionRecord(provider_name='gcp',
                                   region=region,
-                                  zone=availability_zone,
+                                  zone=head_zone,
                                   cluster_name=cluster_name_on_cloud,
                                   head_instance_id=head_instance_id,
                                   resumed_instance_ids=resumed_instance_ids,
@@ -416,33 +522,47 @@ def get_cluster_info(
     if use_tpu_vms:
         handlers.append(instance_utils.GCPTPUVMInstance)
 
-    handler_to_instances = _filter_instances(
-        handlers,
-        project_id,
-        zone,
-        label_filters,
-        lambda h: [h.RUNNING_STATE],
-    )
-    instances: Dict[str, List[common.InstanceInfo]] = {}
-    for res, insts in handler_to_instances.items():
-        with pool.ThreadPool() as p:
-            inst_info = p.starmap(res.get_instance_info,
-                                  [(project_id, zone, inst) for inst in insts])
-        instances.update(zip(insts, inst_info))
+    # Cross-zone awareness: aggregate instances across all cross_zone_zones if provided.
+    cross_zone_zones = provider_config.get('cross_zone_zones', [])
+    zones_to_scan = cross_zone_zones if len(cross_zone_zones) > 1 else [zone]
 
-    head_instances = _filter_instances(
-        handlers,
-        project_id,
-        zone,
-        {
-            **label_filters, provision_constants.TAG_RAY_NODE_KIND: 'head'
-        },
-        lambda h: [h.RUNNING_STATE],
-    )
+    instances: Dict[str, List[common.InstanceInfo]] = {}
+    for z in zones_to_scan:
+        # Important: include PENDING states here so that ClusterInfo reflects
+        # all nodes that are coming up (not only RUNNING). Otherwise, when the
+        # head is up but workers are still provisioning, num_instances would be
+        # 1 and post-provision skips worker setup/start entirely.
+        handler_to_instances = _filter_instances(
+            handlers,
+            project_id,
+            z,
+            label_filters,
+            lambda h: h.NEED_TO_STOP_STATES,
+        )
+        for res, insts in handler_to_instances.items():
+            if not insts:
+                continue
+            with pool.ThreadPool() as p:
+                inst_info = p.starmap(res.get_instance_info,
+                                      [(project_id, z, inst) for inst in insts])
+            instances.update(zip(insts, inst_info))
+
     head_instance_id = None
-    for insts in head_instances.values():
-        if insts and insts[0]:
-            head_instance_id = insts[0]
+    for z in zones_to_scan:
+        head_instances = _filter_instances(
+            handlers,
+            project_id,
+            z,
+            {
+                **label_filters, provision_constants.TAG_RAY_NODE_KIND: 'head'
+            },
+            lambda h: [h.RUNNING_STATE],
+        )
+        for insts in head_instances.values():
+            if insts and insts[0]:
+                head_instance_id = insts[0]
+                break
+        if head_instance_id is not None:
             break
 
     return common.ClusterInfo(
@@ -606,6 +726,9 @@ def open_ports(
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
     firewall_rule_name = provider_config['firewall_rule']
+    # Cross-zone awareness: gather instances from all zones if configured.
+    cross_zone_zones = provider_config.get('cross_zone_zones', [])
+    zones_to_scan = cross_zone_zones if len(cross_zone_zones) > 1 else [zone]
 
     label_filters = {
         provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
@@ -617,8 +740,16 @@ def open_ports(
     if use_tpu_vms:
         handlers.append(instance_utils.GCPTPUVMInstance)
 
-    handler_to_instances = _filter_instances(handlers, project_id, zone,
-                                             label_filters, lambda _: None)
+    # Aggregate instances across zones and remember each instance's zone
+    handler_to_instances = collections.defaultdict(list)
+    instance_to_zone: Dict[str, str] = {}
+    for z in zones_to_scan:
+        per_zone = _filter_instances(handlers, project_id, z,
+                                     label_filters, lambda _: None)
+        for handler, instances in per_zone.items():
+            handler_to_instances[handler].extend(instances)
+            for inst in instances:
+                instance_to_zone[inst] = z
     operations = collections.defaultdict(list)
     compute_handler: Type[instance_utils.GCPInstance] = (
         instance_utils.GCPComputeInstance)
@@ -628,18 +759,20 @@ def open_ports(
                            f'{cluster_name_on_cloud}.')
             continue
         else:
+            # Add tags for all nodes across zones, so firewall applies to all.
             for instance in instances:
-                # Add tags for all nodes in the cluster, so the firewall rule
-                # could correctly apply to all instance in the cluster.
+                inst_zone = instance_to_zone.get(instance, zone)
                 handler.add_network_tag_if_not_exist(
                     project_id,
-                    zone,
+                    inst_zone,
                     instance,
                     tag=cluster_name_on_cloud,
                 )
             # If we have multiple instances, they are in the same cluster,
             # i.e. the same VPC. So we can just pick any one of them.
-            vpc_name = handler.get_vpc_name(project_id, zone, instances[0])
+            # Determine VPC via the first instance's known zone.
+            first_zone = instance_to_zone.get(instances[0], zone)
+            vpc_name = handler.get_vpc_name(project_id, first_zone, instances[0])
             # Use compute handler here for both Compute VM and TPU VM,
             # as firewall rules is a compute resource.
             op = compute_handler.create_or_update_firewall_rule(

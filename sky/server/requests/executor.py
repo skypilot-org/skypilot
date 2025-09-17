@@ -396,8 +396,28 @@ def _request_execution_wrapper(request_id: str,
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
     logger.info(f'Running request {request_id} with pid {pid}')
-    with api_requests.update_request(request_id) as request_task:
-        assert request_task is not None, request_id
+    # Robustly fetch the request record; avoid crashing on transient races
+    # between creation and worker fetch.
+    retries = 5
+    request_task = None
+    for i in range(retries):
+        with api_requests.update_request(request_id) as req:
+            request_task = req
+        if request_task is not None:
+            break
+        time.sleep(0.05 * (i + 1))
+    if request_task is None:
+        # Instead of a bare assert, raise a descriptive error so the client
+        # sees a meaningful message.
+        raise exceptions.ClientError(
+            f'Request {request_id!r} not found in API server database. '
+            'This can be caused by a transient race or a recent reset of the '
+            'server DB. Please retry the operation.')
+    # Re-enter the context to persist state updates.
+    with api_requests.update_request(request_id) as req2:
+        assert req2 is not None, request_id
+        # Keep the same object reference for subsequent reads.
+        request_task = req2
         log_path = request_task.log_path
         request_task.pid = pid
         request_task.status = api_requests.RequestStatus.RUNNING
@@ -450,6 +470,8 @@ def _request_execution_wrapper(request_id: str,
             _restore_output(original_stdout, original_stderr)
             raise
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+            # Log full traceback for diagnosis
+            logger.exception('Request %s failed with exception:', request_id)
             api_requests.set_request_failed(request_id, e)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} failed due to '

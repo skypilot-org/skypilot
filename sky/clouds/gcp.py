@@ -315,18 +315,67 @@ class GCP(clouds.Cloud):
         instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
+        nodes_placement: Optional[str] = None,
     ) -> Iterator[List[clouds.Zone]]:
-        del num_nodes  # Unused.
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
                                             region=region,
                                             zone=None)
-        # GCP provisioner currently takes 1 zone per request.
+
         for r in regions:
             assert r.zones is not None, r
-            for zone in r.zones:
-                yield [zone]
+
+            # Handle cross-zone placement for multi-node clusters
+            if nodes_placement == 'cross-zone' and num_nodes > 1:
+                # Cross-zone placement with region-stickiness:
+                # generate multiple zone combinations within the same region
+                # so that if one zone lacks capacity, we retry other zones
+                # in this region before failing over to other regions.
+                zones_list = list(r.zones)
+                if len(zones_list) < 2:
+                    # Need at least 2 zones for cross-zone placement
+                    continue
+
+                # Limit k to available zones
+                k = min(num_nodes, len(zones_list))
+
+                # Strategy:
+                # 1) First, a simple round-robin selection of the first k zones
+                #    to preserve previous behavior.
+                # 2) Then, yield additional combinations by rotating the start
+                #    index to cover alternatives within this region.
+                # This keeps us in the same region while exploring other zones.
+                # Example: zones=[a,b,c], num_nodes=2 -> [a,b], [a,c], [b,c]
+
+                # Helper to build a k-sized selection from a start index
+                def pick_from(start: int):
+                    sel = []
+                    for i in range(k):
+                        idx = (start + i) % len(zones_list)
+                        sel.append(zones_list[idx])
+                    return sel
+
+                yielded: set[tuple[str, ...]] = set()
+
+                # 1) Initial selection
+                initial = pick_from(0)
+                key = tuple(z.name for z in initial)
+                if key not in yielded:
+                    yielded.add(key)
+                    yield initial
+
+                # 2) Rotations: try different starting zones within the region
+                for start in range(1, len(zones_list)):
+                    combo = pick_from(start)
+                    key = tuple(z.name for z in combo)
+                    if key not in yielded:
+                        yielded.add(key)
+                        yield combo
+            else:
+                # Default behavior: GCP provisioner currently takes 1 zone per request
+                for zone in r.zones:
+                    yield [zone]
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -493,21 +542,50 @@ class GCP(clouds.Cloud):
 
         r = resources
         # Find GPU spec, if any.
-        resources_vars = {
-            'instance_type': r.instance_type,
-            'region': region_name,
-            'zones': zone_name,
-            'gpu': None,
-            'gpu_count': None,
-            'tpu': None,
-            'tpu_vm': False,
-            'custom_resources': None,
-            'use_spot': r.use_spot,
-            'gcp_project_id': self.get_project_id(dryrun),
-            **GCP._get_disk_specs(
-                r.instance_type,
-                GCP.failover_disk_tier(r.instance_type, r.disk_tier)),
-        }
+        # Handle cross-zone placement
+        if r.nodes_placement == 'cross-zone' and len(
+                zones) > 1 and num_nodes > 1:
+            # For cross-zone, we pass different zones for head and workers
+            all_zone_names = [z.name for z in zones[:num_nodes]]
+            resources_vars = {
+                'instance_type': r.instance_type,
+                'region': region_name,
+                'zones': zone_name,  # Default for compatibility
+                'cross_zone_zones': all_zone_names,  # List of zones for cross-zone
+                'is_cross_zone': True,
+                'gpu': None,
+                'gpu_count': None,
+                'tpu': None,
+                'tpu_vm': False,
+                'custom_resources': None,
+                'use_spot': r.use_spot,
+                'gcp_project_id': self.get_project_id(dryrun),
+                **GCP._get_disk_specs(
+                    r.instance_type,
+                    GCP.failover_disk_tier(r.instance_type, r.disk_tier)),
+            }
+            # Debug logging to verify cross-zone variables
+            logger.debug(
+                'GCP.make_deploy_resources_variables: nodes_placement=%s, num_nodes=%s, zones=%s, is_cross_zone=%s, cross_zone_zones=%s',
+                r.nodes_placement, num_nodes, [z.name for z in zones], resources_vars.get('is_cross_zone'), resources_vars.get('cross_zone_zones', None))
+        else:
+            # Single zone case
+            resources_vars = {
+                'instance_type': r.instance_type,
+                'region': region_name,
+                'zones': zone_name,
+                'is_cross_zone': False,
+                'gpu': None,
+                'gpu_count': None,
+                'tpu': None,
+                'tpu_vm': False,
+                'custom_resources': None,
+                'use_spot': r.use_spot,
+                'gcp_project_id': self.get_project_id(dryrun),
+                **GCP._get_disk_specs(
+                    r.instance_type,
+                    GCP.failover_disk_tier(r.instance_type, r.disk_tier)),
+            }
         enable_gpu_direct = skypilot_config.get_effective_region_config(
             cloud='gcp',
             region=region_name,
@@ -700,6 +778,7 @@ class GCP(clouds.Cloud):
                 accelerators=None,
                 cpus=None,
                 memory=None,
+                nodes_placement=resources.nodes_placement,
             )
             return resources_utils.FeasibleResources([r], [], None)
 
@@ -775,6 +854,7 @@ class GCP(clouds.Cloud):
             accelerators=acc_dict,
             cpus=None,
             memory=None,
+            nodes_placement=resources.nodes_placement,
         )
         return resources_utils.FeasibleResources([r], fuzzy_candidate_list,
                                                  None)

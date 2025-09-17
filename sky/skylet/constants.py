@@ -175,7 +175,13 @@ CONDA_INSTALLATION_COMMANDS = (
     'fi;'
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
-    # Create a separate conda environment for SkyPilot dependencies.
+    # If an existing venv uses Python>=3.12, remove it to recreate with 3.10.
+    f'if [ -x {SKY_REMOTE_PYTHON_ENV}/bin/python ]; then '
+    f'PV=$({SKY_REMOTE_PYTHON_ENV}/bin/python -V 2>/dev/null | awk "{ '{' } print $2 { '}' }"); '
+    'MAJOR=$(echo $PV | cut -d. -f1); MINOR=$(echo $PV | cut -d. -f2); '
+    f'if [ "$MAJOR" -ge 3 ] && [ "$MINOR" -ge 12 ]; then rm -rf {SKY_REMOTE_PYTHON_ENV}; fi; '
+    'fi; '
+    # Create a separate venv for SkyPilot dependencies if missing.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
     # Do NOT use --system-site-packages here, because if users upgrade any
     # packages in the base env, they interfere with skypilot dependencies.
@@ -220,7 +226,10 @@ RAY_INSTALLATION_COMMANDS = (
     f'{SKY_UV_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
-    f'{SKY_UV_PIP_CMD} install -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    # Prefer pinned ray; if wheel is unavailable for this Python (e.g., cp312),
+    # fall back to latest compatible ray to avoid setup hard-fail.
+    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" '
+    f'|| {SKY_UV_PIP_CMD} install -U "ray[default]"; '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:

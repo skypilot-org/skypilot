@@ -34,6 +34,10 @@ provider:
   module: sky.provision.gcp
   region: {{region}}
   availability_zone: {{zones}}
+{%- if cross_zone_zones is defined and cross_zone_zones %}
+  # For cross-zone placement
+  cross_zone_zones: {{cross_zone_zones}}
+{%- endif %}
   # Keep (otherwise cannot reuse when re-provisioning).
   # teardown(terminate=True) will override this.
   cache_stopped_nodes: True
