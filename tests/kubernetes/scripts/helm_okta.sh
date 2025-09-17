@@ -151,8 +151,8 @@ echo "nginx ingress controller configured for NodePort $NODEPORT ✓"
 
 # Build the Docker image locally
 echo "Building Docker image locally..."
-echo "docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS -f Dockerfile ."
-docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS -f Dockerfile .
+echo "docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS --load -f Dockerfile ."
+docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS --load -f Dockerfile .
 if [ $? -ne 0 ]; then
     echo "❌ Failed to build Docker image"
     exit 1
@@ -163,6 +163,15 @@ echo "✅ Docker image built successfully"
 echo "Loading image $DOCKER_IMAGE into kind cluster..."
 kind load docker-image $DOCKER_IMAGE --name skypilot
 echo "✅ Docker image loaded into kind cluster"
+
+# Verify the image is loaded in the cluster
+echo "Verifying image is loaded in Kind cluster..."
+if docker exec skypilot-control-plane crictl images | grep -q "$DOCKER_IMAGE"; then
+    echo "✅ Image $DOCKER_IMAGE confirmed in Kind cluster"
+else
+    echo "❌ Image $DOCKER_IMAGE not found in Kind cluster"
+    exit 1
+fi
 
 # Add required Helm repositories for dependencies
 echo "Adding required Helm repositories..."
@@ -401,4 +410,11 @@ deploy_and_login() {
 
 # Run tests for both legacy ingress.oauth2-proxy route and new auth.oauth route
 deploy_and_login "legacy"
+
+# Clean up SkyPilot resources between tests
+echo ""
+echo "🧹 Cleaning up SkyPilot resources between tests..."
+kubectl delete namespace $NAMESPACE --ignore-not-found=true
+echo "✅ Namespace $NAMESPACE deleted"
+
 deploy_and_login "new"
