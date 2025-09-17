@@ -38,6 +38,7 @@ def wait_until_pool_ready(pool_name: str,
 
 
 def test_vllm_pool(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
     pool_config = textwrap.dedent(f"""
     envs:
         MODEL_NAME: NousResearch/Meta-Llama-3-8B-Instruct
@@ -77,7 +78,7 @@ def test_vllm_pool(generic_cloud: str):
         workers: 1
     """)
 
-    bucket_name = f'sky-test-vllm-pool-{generic_cloud}'
+    bucket_name = f'sky-test-vllm-pool-{name}'
 
     job_config = textwrap.dedent(f"""
     name: t-test-vllm-pool
@@ -149,7 +150,6 @@ def test_vllm_pool(generic_cloud: str):
             job_yaml.write(job_config.encode())
             job_yaml.flush()
 
-            name = smoke_tests_utils.get_cluster_name()
             pool_name = f'{name}-pool'
 
             test = smoke_tests_utils.Test(
