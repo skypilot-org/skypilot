@@ -91,15 +91,15 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def TerminateServices(  # type: ignore[return]
-            self, request: servev1_pb2.TerminateServiceRequest,
+            self, request: servev1_pb2.TerminateServicesRequest,
             context: grpc.ServicerContext
-    ) -> servev1_pb2.TerminateServiceResponse:
+    ) -> servev1_pb2.TerminateServicesResponse:
         """Terminates serve"""
         try:
             service_names, purge, pool = (
-                serve_rpc_utils.TerminateServiceRequestConverter.from_proto(request))  # pylint: disable=line-too-long
+                serve_rpc_utils.TerminateServicesRequestConverter.from_proto(request))  # pylint: disable=line-too-long
             message = serve_utils.terminate_services(service_names, purge, pool)
-            return servev1_pb2.TerminateServiceResponse(message=message)
+            return servev1_pb2.TerminateServicesResponse(message=message)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
@@ -119,22 +119,18 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def WaitServiceRegistration(  # type: ignore[return]
-            self, request: servev1_pb2.WaitRegistrationRequest,
-            context: grpc.ServicerContext
-    ) -> servev1_pb2.WaitRegistrationResponse:
+        self, request: servev1_pb2.WaitServiceRegistrationRequest,
+        context: grpc.ServicerContext
+    ) -> servev1_pb2.WaitServiceRegistrationResponse:
         """Wait for service to be registered"""
         try:
             service_name = request.service_name
             job_id = request.job_id
             pool = request.pool
-            # TODO (kyuds): to maintain backwards compatibility, we currently
-            # encode the load balancer port with message_utils. This is why
-            # we need a "unnecessary" decoding step. When codegen is fully
-            # deprecated, return the lb port int directly.
             encoded = serve_utils.wait_service_registration(
                 service_name, job_id, pool)
             lb_port = serve_utils.load_service_initialization_result(encoded)
-            return servev1_pb2.WaitRegistrationResponse(lb_port=lb_port)
+            return servev1_pb2.WaitServiceRegistrationResponse(lb_port=lb_port)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
@@ -147,10 +143,9 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
             version = request.version
             mode = request.mode
             pool = request.pool
-            encoded_message = serve_utils.update_service_encoded(
-                service_name, version, mode, pool)
-            return servev1_pb2.UpdateServiceResponse(
-                encoded_message=encoded_message)
+            serve_utils.update_service_encoded(service_name, version, mode,
+                                               pool)
+            return servev1_pb2.UpdateServiceResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 

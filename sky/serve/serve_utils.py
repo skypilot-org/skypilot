@@ -1013,6 +1013,8 @@ def wait_service_registration(service_name: str, job_id: int,
     Returns:
         Encoded load balancer port assigned to the service.
     """
+    # TODO (kyuds): when codegen is fully deprecated, return the lb port
+    # as an int directly instead of encoding it.
     start_time = time.time()
     setup_completed = False
     noun = 'pool' if pool else 'service'

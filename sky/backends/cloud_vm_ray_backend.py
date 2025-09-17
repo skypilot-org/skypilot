@@ -3155,9 +3155,9 @@ class SkyletClient:
 
     def terminate_services(
         self,
-        request: 'servev1_pb2.TerminateServiceRequest',
+        request: 'servev1_pb2.TerminateServicesRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> 'servev1_pb2.TerminateServiceResponse':
+    ) -> 'servev1_pb2.TerminateServicesResponse':
         return self._serve_stub.TerminateServices(request, timeout=timeout)
 
     def terminate_replica(
@@ -3169,9 +3169,9 @@ class SkyletClient:
 
     def wait_service_registration(
         self,
-        request: 'servev1_pb2.WaitRegistrationRequest',
+        request: 'servev1_pb2.WaitServiceRegistrationRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> 'servev1_pb2.WaitRegistrationResponse':
+    ) -> 'servev1_pb2.WaitServiceRegistrationResponse':
         # set timeout to at least 10 seconds more than service register
         # constant to make sure that timeouts will not occur.
         if timeout is not None:

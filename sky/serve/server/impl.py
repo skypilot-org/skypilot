@@ -586,7 +586,7 @@ def update(
 
         if handle.is_grpc_enabled_with_flag:
             try:
-                _ = serve_rpc_utils.RpcRunner.update_service(
+                serve_rpc_utils.RpcRunner.update_service(
                     handle, service_name, current_version, mode, pool)
             except exceptions.SkyletMethodNotImplementedError:
                 use_legacy = True

@@ -50,7 +50,7 @@ class AddVersionResponse(_message.Message):
     version: int
     def __init__(self, version: _Optional[int] = ...) -> None: ...
 
-class TerminateServiceRequest(_message.Message):
+class TerminateServicesRequest(_message.Message):
     __slots__ = ("service_names", "purge", "pool")
     SERVICE_NAMES_FIELD_NUMBER: _ClassVar[int]
     PURGE_FIELD_NUMBER: _ClassVar[int]
@@ -60,7 +60,7 @@ class TerminateServiceRequest(_message.Message):
     pool: bool
     def __init__(self, service_names: _Optional[_Union[ServiceNames, _Mapping]] = ..., purge: bool = ..., pool: bool = ...) -> None: ...
 
-class TerminateServiceResponse(_message.Message):
+class TerminateServicesResponse(_message.Message):
     __slots__ = ("message",)
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     message: str
@@ -82,7 +82,7 @@ class TerminateReplicaResponse(_message.Message):
     message: str
     def __init__(self, message: _Optional[str] = ...) -> None: ...
 
-class WaitRegistrationRequest(_message.Message):
+class WaitServiceRegistrationRequest(_message.Message):
     __slots__ = ("service_name", "job_id", "pool")
     SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
@@ -92,7 +92,7 @@ class WaitRegistrationRequest(_message.Message):
     pool: bool
     def __init__(self, service_name: _Optional[str] = ..., job_id: _Optional[int] = ..., pool: bool = ...) -> None: ...
 
-class WaitRegistrationResponse(_message.Message):
+class WaitServiceRegistrationResponse(_message.Message):
     __slots__ = ("lb_port",)
     LB_PORT_FIELD_NUMBER: _ClassVar[int]
     lb_port: int
@@ -111,7 +111,5 @@ class UpdateServiceRequest(_message.Message):
     def __init__(self, service_name: _Optional[str] = ..., version: _Optional[int] = ..., mode: _Optional[str] = ..., pool: bool = ...) -> None: ...
 
 class UpdateServiceResponse(_message.Message):
-    __slots__ = ("encoded_message",)
-    ENCODED_MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    encoded_message: str
-    def __init__(self, encoded_message: _Optional[str] = ...) -> None: ...
+    __slots__ = ()
+    def __init__(self) -> None: ...

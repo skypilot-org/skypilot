@@ -63,13 +63,13 @@ class GetServiceStatusResponseConverter:
         return pickled
 
 
-class TerminateServiceRequestConverter:
-    """Converter for TerminateServiceRequest"""
+class TerminateServicesRequestConverter:
+    """Converter for TerminateServicesRequest"""
 
     @classmethod
     def to_proto(cls, service_names: Optional[List[str]], purge: bool,
-                 pool: bool) -> 'servev1_pb2.TerminateServiceRequest':
-        request = servev1_pb2.TerminateServiceRequest()
+                 pool: bool) -> 'servev1_pb2.TerminateServicesRequest':
+        request = servev1_pb2.TerminateServicesRequest()
         request.purge = purge
         request.pool = pool
         if service_names is not None:
@@ -78,7 +78,7 @@ class TerminateServiceRequestConverter:
 
     @classmethod
     def from_proto(
-        cls, proto: 'servev1_pb2.TerminateServiceRequest'
+        cls, proto: 'servev1_pb2.TerminateServicesRequest'
     ) -> Tuple[Optional[List[str]], bool, bool]:
         purge = proto.purge
         pool = proto.pool
@@ -133,7 +133,7 @@ class RpcRunner:
                            service_names: Optional[List[str]], purge: bool,
                            pool: bool) -> str:
         assert handle.is_grpc_enabled_with_flag
-        request = TerminateServiceRequestConverter.to_proto(
+        request = TerminateServicesRequestConverter.to_proto(
             service_names, purge, pool)
         response = backend_utils.invoke_skylet_with_retries(
             lambda: backends.SkyletClient(handle.get_grpc_channel()
@@ -159,9 +159,8 @@ class RpcRunner:
                                   service_name: str, job_id: int,
                                   pool: bool) -> int:
         assert handle.is_grpc_enabled_with_flag
-        request = servev1_pb2.WaitRegistrationRequest(service_name=service_name,
-                                                      job_id=job_id,
-                                                      pool=pool)
+        request = servev1_pb2.WaitServiceRegistrationRequest(
+            service_name=service_name, job_id=job_id, pool=pool)
         response = backend_utils.invoke_skylet_with_retries(
             lambda: backends.SkyletClient(handle.get_grpc_channel()
                                          ).wait_service_registration(request))
@@ -170,13 +169,11 @@ class RpcRunner:
     @classmethod
     def update_service(cls, handle: backends.CloudVmRayResourceHandle,
                        service_name: str, version: int,
-                       mode: serve_utils.UpdateMode, pool: bool) -> str:
+                       mode: serve_utils.UpdateMode, pool: bool) -> None:
         assert handle.is_grpc_enabled_with_flag
         request = servev1_pb2.UpdateServiceRequest(service_name=service_name,
                                                    version=version,
                                                    mode=mode.value,
                                                    pool=pool)
-        response = backend_utils.invoke_skylet_with_retries(
-            lambda: backends.SkyletClient(handle.get_grpc_channel()
-                                         ).update_service(request))
-        return response.encoded_message
+        backend_utils.invoke_skylet_with_retries(lambda: backends.SkyletClient(
+            handle.get_grpc_channel()).update_service(request))

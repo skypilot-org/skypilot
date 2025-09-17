@@ -8,11 +8,11 @@ service ServeService {
     // Add version to service.
     rpc AddVersion(AddVersionRequest) returns (AddVersionResponse);
     // Terminate services.
-    rpc TerminateServices(TerminateServiceRequest) returns (TerminateServiceResponse);
+    rpc TerminateServices(TerminateServicesRequest) returns (TerminateServicesResponse);
     // Terminate replica.
     rpc TerminateReplica(TerminateReplicaRequest) returns (TerminateReplicaResponse);
     // Wait for service registration.
-    rpc WaitServiceRegistration(WaitRegistrationRequest) returns (WaitRegistrationResponse);
+    rpc WaitServiceRegistration(WaitServiceRegistrationRequest) returns (WaitServiceRegistrationResponse);
     // Update service.
     rpc UpdateService(UpdateServiceRequest) returns (UpdateServiceResponse);
 }
@@ -42,13 +42,13 @@ message AddVersionResponse {
     int64 version = 1;
 }
 
-message TerminateServiceRequest {
+message TerminateServicesRequest {
     optional ServiceNames service_names = 1;
     bool purge = 2;
     bool pool = 3;
 }
 
-message TerminateServiceResponse {
+message TerminateServicesResponse {
     string message = 1;
 }
 
@@ -62,13 +62,13 @@ message TerminateReplicaResponse {
     string message = 1;
 }
 
-message WaitRegistrationRequest {
+message WaitServiceRegistrationRequest {
     string service_name = 1;
     int64 job_id = 2;
     bool pool = 3;
 }
 
-message WaitRegistrationResponse {
+message WaitServiceRegistrationResponse {
     int64 lb_port = 1;
 }
 
@@ -80,9 +80,7 @@ message UpdateServiceRequest {
 }
 
 message UpdateServiceResponse {
-    // TODO (kyuds): leaving this as encoded because we don't actually
-    // use the output encoded message in the code, so it is difficult
-    // to infer the type. We should send the decoded version once
-    // we actually start using the message contents.
-    string encoded_message = 1;
+    // TODO (kyuds): the return value of UpdateService is not
+    // used in the current codepath. We should add it in this
+    // protobuf message after it starts getting used.
 }
