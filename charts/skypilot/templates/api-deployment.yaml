@@ -327,17 +327,18 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
         - |
+          set -x
           cat > /etc/logrotate.conf <<EOF
           /root/.sky/api_server/server.log {
               size {{ .Values.apiService.logs.retention.size }}
-              rotate 0
+              rotate 1
               missingok
               notifempty
               copytruncate
           }
           EOF
           while true; do
-            logrotate -f /etc/logrotate.conf;
+            logrotate -s /var/lib/logrotate/status /etc/logrotate.conf
             sleep 60;
           done
         volumeMounts:
