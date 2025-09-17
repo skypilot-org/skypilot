@@ -70,7 +70,7 @@ def test_vllm_pool(generic_cloud: str):
         echo "Still waiting for vLLM service..."
         done
         echo "vLLM service is ready!"
-    
+
 
 
     pool:
@@ -84,7 +84,7 @@ def test_vllm_pool(generic_cloud: str):
 
     resources:
         cpus: 4
-        accelerators: 
+        accelerators:
             L4: 1
         any_of:
             - use_spot: true
@@ -104,6 +104,7 @@ def test_vllm_pool(generic_cloud: str):
         /output:
             name: ${{EMBEDDINGS_BUCKET_NAME}}
             mode: MOUNT
+            store: s3
 
 
     run: |
@@ -111,19 +112,19 @@ def test_vllm_pool(generic_cloud: str):
 
         # Initialize and download the model
         HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/model $MODEL_NAME
-    
+
         # Create metrics directory for monitoring service
         mkdir -p /output/metrics
-    
+
         # Set worker ID for metrics tracking
         if [ -z "$WORKER_ID" ]; then
             export WORKER_ID="worker_$(date +%s)_$(hostname)"
             echo "Generated worker ID: $WORKER_ID"
         fi
-    
+
         # Process the assigned range of documents
         echo "Processing documents from $START_IDX to $END_IDX"
-    
+
         # Process text documents and track token metrics
         python scripts/text_vector_processor.py \
             --output-path "/output/embeddings_${{START_IDX}}_${{END_IDX}}.parquet" \
