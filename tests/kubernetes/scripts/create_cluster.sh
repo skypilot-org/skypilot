@@ -5,7 +5,7 @@ set -e
 #   create_cluster.sh gcp <CLUSTER_NAME> <PROJECT_ID> <ZONE> <NODE_COUNT> <MACHINE_TYPE>
 #   create_cluster.sh aws <CLUSTER_NAME> <REGION> <NODE_COUNT> <INSTANCE_TYPE>
 
-# If EKS_VPC_CONFIG is set, it will be injected verbatim into the eksctl config
+# If EKS_VPC_CONFIG_PUBLIC is set, it will be injected verbatim into the eksctl config
 
 PROVIDER=${1:-"gcp"}
 shift || true
@@ -61,7 +61,7 @@ kind: ClusterConfig
 metadata:
   name: ${CLUSTER_NAME}
   region: ${REGION}
-${EKS_VPC_CONFIG}
+${EKS_VPC_CONFIG_PUBLIC}
 iam:
   withOIDC: true
 managedNodeGroups:
@@ -78,19 +78,27 @@ EOF
 
     aws eks --region "$REGION" update-kubeconfig --name "$CLUSTER_NAME"
 
-    # If user provided VPC/subnets via EKS_VPC_CONFIG, tag those subnets so
+    # If user provided VPC/subnets via EKS_VPC_CONFIG_PUBLIC, tag those subnets so
     # Service type LoadBalancer can provision internet-facing ELB/NLB.
-    if [ -n "$EKS_VPC_CONFIG" ]; then
+    if [ -n "$EKS_VPC_CONFIG_PUBLIC" ]; then
         echo "Tagging provided public subnets for internet-facing LoadBalancers..."
         # Extract all subnet IDs from the config (deduplicated)
-        mapfile -t SUBNET_IDS < <(echo "$EKS_VPC_CONFIG" | grep -E 'id:\s*subnet-' | awk '{print $2}' | tr -d '"' | sort -u)
+        mapfile -t SUBNET_IDS < <(echo "$EKS_VPC_CONFIG_PUBLIC" | grep -E 'id:\s*subnet-' | awk '{print $2}' | tr -d '"' | sort -u)
         for subnet_id in "${SUBNET_IDS[@]}"; do
             if [ -n "$subnet_id" ]; then
                 echo "Tagging subnet $subnet_id"
-                aws ec2 create-tags --region "$REGION" \
-                  --resources "$subnet_id" \
-                  --tags Key=kubernetes.io/cluster/${CLUSTER_NAME},Value=shared \
-                        Key=kubernetes.io/role/elb,Value=1 || true
+                # Check if subnet already has cluster tags to avoid conflicts
+                EXISTING_TAGS=$(aws ec2 describe-tags --region "$REGION" --filters "Name=resource-id,Values=$subnet_id" "Name=key,Values=kubernetes.io/cluster/*" --query 'Tags[*].Key' --output text)
+                if [ -z "$EXISTING_TAGS" ]; then
+                    # No existing cluster tags, safe to add
+                    aws ec2 create-tags --region "$REGION" \
+                      --resources "$subnet_id" \
+                      --tags Key=kubernetes.io/cluster/${CLUSTER_NAME},Value=shared \
+                            Key=kubernetes.io/role/elb,Value=1 || true
+                else
+                    echo "Subnet $subnet_id already has cluster tags: $EXISTING_TAGS"
+                    echo "Skipping tagging to avoid conflicts with existing clusters"
+                fi
                 # Ensure instances launched in these subnets can get public IPs
                 aws ec2 modify-subnet-attribute --region "$REGION" \
                   --subnet-id "$subnet_id" --map-public-ip-on-launch || true
