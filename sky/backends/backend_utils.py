@@ -17,7 +17,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
-                    Type, TypeVar, Union)
+                    TypeVar, Union)
 import uuid
 
 import aiohttp
@@ -3464,8 +3464,7 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
 
 def get_endpoints(cluster: str,
                   port: Optional[Union[int, str]] = None,
-                  skip_status_check: bool = False,
-                  preferred_protocol: Optional[str] = None) -> Dict[int, str]:
+                  skip_status_check: bool = False) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -3478,9 +3477,13 @@ def get_endpoints(cluster: str,
             controller to query endpoints during cluster launch when multiple
             services may be getting launched in parallel (and as a result,
             the controller may be in INIT status due to a concurrent launch).
-        preferred_protocol: Optional hint ('http' or 'https') to pick an
-            endpoint matching the desired scheme when multiple endpoints are
-            available for the same port.
+        Note on selection when multiple endpoints exist for the same port:
+            This function makes a deterministic choice based on endpoint type,
+            preferring HTTPS endpoints over HTTP endpoints, and HTTP over other
+            generic endpoint types (e.g., raw sockets). This avoids relying on
+            provider-specific ordering and prevents regressions related to
+            ambiguous scheme handling. Callers remain responsible for adding a
+            scheme if the chosen endpoint string does not include one.
 
     Returns: A dictionary of port numbers to endpoints. If endpoint is None,
         the dictionary will contain all ports:endpoints exposed on the cluster.
@@ -3546,37 +3549,21 @@ def get_endpoints(cluster: str,
         if not endpoints:
             return None
 
-        normalized_protocol = (preferred_protocol.lower()
-                               if preferred_protocol else None)
+        # Deterministic selection rule (see docstring above):
+        # HTTPS > HTTP > others. Do not add or strip schemes here; just pick.
+        https_candidate = None
+        http_candidate = None
+        other_candidate = None
+        for e in endpoints:
+            if isinstance(e, provision_common.HTTPSEndpoint):
+                https_candidate = https_candidate or e
+            elif isinstance(e, provision_common.HTTPEndpoint):
+                http_candidate = http_candidate or e
+            else:
+                other_candidate = other_candidate or e
 
-        if normalized_protocol is not None:
-            scheme_prefix = f'{normalized_protocol}://'
-            for endpoint in endpoints:
-                url = endpoint.url()
-                if url.lower().startswith(scheme_prefix):
-                    return url
-
-            preferred_cls: Optional[Type['provision_common.Endpoint']] = None
-            if normalized_protocol == 'https':
-                preferred_cls = provision_common.HTTPSEndpoint
-            elif normalized_protocol == 'http':
-                preferred_cls = provision_common.HTTPEndpoint
-
-            if preferred_cls is not None:
-                for endpoint in endpoints:
-                    if isinstance(endpoint, preferred_cls):
-                        return endpoint.url()
-
-        return endpoints[0].url()
-
-    def _format_endpoint(url: Optional[str]) -> Optional[str]:
-        if url is None:
-            return None
-        if '://' in url:
-            return url
-        if preferred_protocol:
-            return f'{preferred_protocol.lower()}://{url}'
-        return url
+        chosen = https_candidate or http_candidate or other_candidate
+        return None if chosen is None else chosen.url()
 
     def _filter_endpoints(
         port_details: Dict[int, List['provision_common.Endpoint']]
@@ -3584,9 +3571,8 @@ def get_endpoints(cluster: str,
         result: Dict[int, str] = {}
         for port_num, endpoints in port_details.items():
             endpoint_str = _select_endpoint_string(endpoints)
-            formatted = _format_endpoint(endpoint_str)
-            if formatted is not None:
-                result[port_num] = formatted
+            if endpoint_str is not None:
+                result[port_num] = endpoint_str
         return result
 
     launched_resources = handle.launched_resources.assert_launchable()

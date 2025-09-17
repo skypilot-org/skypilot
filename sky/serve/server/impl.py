@@ -353,8 +353,7 @@ def up(
                 endpoint_mapping = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     lb_port,
-                    skip_status_check=True,
-                    preferred_protocol=protocol)
+                    skip_status_check=True)
                 socket_endpoint = endpoint_mapping.get(lb_port)
             else:
                 protocol = 'http'
@@ -705,8 +704,7 @@ def status(
                                 if service_record['tls_encrypted'] else 'http')
                     endpoint = backend_utils.get_endpoints(
                         cluster=common.SKY_SERVE_CONTROLLER_NAME,
-                        port=lb_port,
-                        preferred_protocol=protocol).get(lb_port, None)
+                        port=lb_port).get(lb_port, None)
                 else:
                     protocol = 'http'
                     endpoint = f'localhost:{lb_port}'
