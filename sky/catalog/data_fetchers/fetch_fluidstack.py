@@ -205,7 +205,7 @@ def get_regions(plans: List) -> dict:
 def create_catalog(output_dir: str) -> None:
     with open(DEFAULT_FLUIDSTACK_API_KEY_PATH, 'r', encoding='UTF-8') as f:
         api_key = f.read().strip()
-    response = requests.get(ENDPOINT, headers={'api-key': api_key})
+    response = requests.get(ENDPOINT, headers={'api-key': api_key}, timeout=30)
     if not response.ok:
         raise Exception(response.text)
     plans = response.json()

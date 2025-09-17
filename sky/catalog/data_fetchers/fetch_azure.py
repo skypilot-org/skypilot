@@ -129,7 +129,7 @@ def get_pricing_df(region: Optional[str] = None) -> 'pd.DataFrame':
         page += 1
         if page % 10 == 0:
             print(f'Fetched pricing pages {page}')
-        r = requests.get(url)
+        r = requests.get(url, timeout=30)
         r.raise_for_status()
         content_str = r.content.decode('ascii')
         content = json.loads(content_str)

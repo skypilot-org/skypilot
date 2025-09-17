@@ -72,7 +72,7 @@ def name_to_gpu_and_cnt(name: str) -> Optional[Tuple[str, int]]:
 
 def create_catalog(api_key: str, output_path: str) -> None:
     headers = {'Authorization': f'Bearer {api_key}'}
-    response = requests.get(ENDPOINT, headers=headers)
+    response = requests.get(ENDPOINT, headers=headers, timeout=30)
     info = response.json()['data']
 
     with open(output_path, mode='w', encoding='utf-8') as f:
