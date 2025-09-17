@@ -68,7 +68,7 @@ def make_image_public(image_id, region):
     subprocess.run(unblock_command, shell=True, check=True)
     public_command = (
         f'aws ec2 modify-image-attribute --image-id {image_id} '
-        '--launch-permission "{\\\"Add\\\": [{\\\"Group\\\":\\\"all\\\"}]}" '
+        '--launch-permission "{\\"Add\\": [{\\"Group\\":\\"all\\"}]}" '
         f'--region {region}')
     subprocess.run(public_command, shell=True, check=True)
     print(f'Made {image_id} public')

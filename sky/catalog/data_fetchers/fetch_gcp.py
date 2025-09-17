@@ -587,7 +587,7 @@ def _get_tpu_response_for_zone(zone: str) -> list:
                 return tpus_response['acceleratorTypes']
         except gcp.http_error_exception() as error:
             if error.resp.status == 403:
-                print('  TPU API is not enabled or you don\'t have TPU access '
+                print("  TPU API is not enabled or you don't have TPU access "
                       f'to zone: {zone!r}.')
             else:
                 print(f'  An error occurred: {error}')

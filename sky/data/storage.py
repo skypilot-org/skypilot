@@ -1278,7 +1278,7 @@ class Storage(object):
 
         def warn_for_git_dir(source: str):
             if os.path.isdir(os.path.join(source, '.git')):
-                logger.warning(f'\'.git\' directory under \'{self.source}\' '
+                logger.warning(f"'.git' directory under '{self.source}' "
                                'is excluded during sync.')
 
         try:
@@ -2163,7 +2163,7 @@ class GcsStore(AbstractStore):
         if not _is_storage_cloud_enabled(str(clouds.GCP())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: gcs\' specified, but '
+                    "Storage 'store: gcs' specified, but "
                     'GCP access is disabled. To fix, enable '
                     'GCP by running `sky check`. '
                     'More info: https://docs.skypilot.co/en/latest/getting-started/installation.html.')  # pylint: disable=line-too-long
@@ -2381,7 +2381,7 @@ class GcsStore(AbstractStore):
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             base_dir_path = shlex.quote(base_dir_path)
             sync_command = (f'{alias_gen}; {gsutil_alias} '
-                            f'rsync -e -x \'^(?!{sync_format}$).*\' '
+                            f"rsync -e -x '^(?!{sync_format}$).*' "
                             f'{base_dir_path} gs://{self.name}{sub_path}')
             return sync_command
 
@@ -2393,7 +2393,7 @@ class GcsStore(AbstractStore):
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'{alias_gen}; {gsutil_alias} '
-                            f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
+                            f"rsync -e -r -x '({excludes})' {src_dir_path} "
                             f'gs://{self.name}{sub_path}/{dest_dir_name}')
             return sync_command
 
@@ -2992,7 +2992,7 @@ class AzureBlobStore(AbstractStore):
                         raise exceptions.NonExistentStorageAccountError(
                             'The storage account '
                             f'{storage_account_name!r} specified in '
-                            'config.yaml does not exist under the user\'s '
+                            "config.yaml does not exist under the user's "
                             'subscription ID. Provide a storage account '
                             'through config.yaml only when creating a '
                             'container under an already existing storage '
@@ -3944,7 +3944,7 @@ class IBMCosStore(AbstractStore):
                 res = list(bucket.objects.filter(Prefix=prefix).delete())
             else:
                 res = list(bucket.objects.delete())
-        logger.debug(f'Deleted bucket\'s content:\n{res}, prefix: {prefix}')
+        logger.debug(f"Deleted bucket's content:\n{res}, prefix: {prefix}")
 
     def _delete_cos_bucket(self) -> None:
         bucket = self.s3_resource.Bucket(self.name)
@@ -4046,7 +4046,7 @@ class OciStore(AbstractStore):
         if not _is_storage_cloud_enabled(str(clouds.OCI())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: oci\' specified, but ' \
+                    "Storage 'store: oci' specified, but " \
                     'OCI access is disabled. To fix, enable '\
                     'OCI by running `sky check`. '\
                     'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long

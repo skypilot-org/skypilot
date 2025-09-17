@@ -111,11 +111,11 @@ USEFUL_COLUMNS = [
 
 def get_pricing_url(region: Optional[str] = None) -> str:
     filters = [
-        'serviceName eq \'Virtual Machines\'',
-        'priceType eq \'Consumption\'',
+        "serviceName eq 'Virtual Machines'",
+        "priceType eq 'Consumption'",
     ]
     if region is not None:
-        filters.append(f'armRegionName eq \'{region}\'')
+        filters.append(f"armRegionName eq '{region}'")
     filters_str = urllib.parse.quote(' and '.join(filters))
     return f'https://prices.azure.com/api/retail/prices?$filter={filters_str}'
 

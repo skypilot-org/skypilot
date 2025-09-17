@@ -821,10 +821,10 @@ def write_cluster_config(
                                  'Name=ip-address,Values=%h')
             get_instance_id_command = 'aws ec2 describe-instances ' + \
                 f'--region {region_name} --filters {ip_address_filter} ' + \
-                '--query \"Reservations[].Instances[].InstanceId\" ' + \
+                '--query "Reservations[].Instances[].InstanceId" ' + \
                 f'{profile_str} --output text'
             ssm_proxy_command = 'aws ssm start-session --target ' + \
-                f'\"$({get_instance_id_command})\" ' + \
+                f'"$({get_instance_id_command})" ' + \
                 f'--region {region_name} {profile_str} ' + \
                 '--document-name AWS-StartSSHSession ' + \
                 '--parameters portNumber=%p'
@@ -848,7 +848,7 @@ def write_cluster_config(
 
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
-        f'{constants.SKY_PYTHON_CMD} -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
+        f"{constants.SKY_PYTHON_CMD} -c 'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, "
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
@@ -2201,7 +2201,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         if rc:
             raise exceptions.CommandError(
                 rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                f'Failed to check ray cluster\'s healthiness.\n'
+                f"Failed to check ray cluster's healthiness.\n"
                 '-- stdout --\n'
                 f'{output}\n', stderr)
         return (*_count_healthy_nodes_from_ray(output), output, stderr)

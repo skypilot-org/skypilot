@@ -77,9 +77,9 @@ This option works in conjunction with ``--{pair}``. Options:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unsupported autostop wait mode: '
                                  f'{mode}. The mode must be either '
-                                 f'\'{cls.JOBS_AND_SSH.value}\', '
-                                 f'\'{cls.JOBS.value}\', or '
-                                 f'\'{cls.NONE.value}\'. ')
+                                 f"'{cls.JOBS_AND_SSH.value}', "
+                                 f"'{cls.JOBS.value}', or "
+                                 f"'{cls.NONE.value}'. ")
 
     @classmethod
     def from_protobuf(

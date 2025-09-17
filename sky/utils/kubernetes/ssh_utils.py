@@ -186,7 +186,7 @@ def prepare_hosts_info(
         else:
             # It's a dict with potential overrides
             if 'ip' not in host:
-                print(f'{RED}Warning: Host missing \'ip\' field, '
+                print(f"{RED}Warning: Host missing 'ip' field, "
                       f'skipping: {host}{NC}')
                 continue
 

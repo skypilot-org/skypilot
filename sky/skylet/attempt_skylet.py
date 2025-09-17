@@ -18,7 +18,7 @@ def restart_skylet():
         # because need to handle the backward compatibility of the old skylet
         # started before #3326, which does not use the full path to python.
         'ps aux | grep "sky.skylet.skylet" | grep " -m "'
-        '| awk \'{print $2}\' | xargs kill >> ~/.sky/skylet.log 2>&1',
+        "| awk '{print $2}' | xargs kill >> ~/.sky/skylet.log 2>&1",
         shell=True,
         check=False)
     subprocess.run(

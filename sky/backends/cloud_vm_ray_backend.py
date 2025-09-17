@@ -997,7 +997,7 @@ class FailoverCloudErrorHandlerV2:
             message = e['message']
 
             if code in ('QUOTA_EXCEEDED', 'quotaExceeded'):
-                if '\'GPUS_ALL_REGIONS\' exceeded' in message:
+                if "'GPUS_ALL_REGIONS' exceeded" in message:
                     # Global quota.  All regions in GCP will fail.  Ex:
                     # Quota 'GPUS_ALL_REGIONS' exceeded.  Limit: 1.0
                     # globally.
@@ -2632,7 +2632,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # all clouds moved to new provisioner.
             if force_cached and self.cached_external_ips is None:
                 raise RuntimeError(
-                    'Tried to use cached cluster info, but it\'s missing for '
+                    "Tried to use cached cluster info, but it's missing for "
                     f'cluster "{self.cluster_name}"')
             self._update_cluster_info()
         # For Kubernetes, `KubernetesCommandRunner` want to get the pod names
@@ -3483,7 +3483,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{colorama.Fore.RED}Failed to provision all '
                         f'possible launchable resources.'
                         f'{colorama.Style.RESET_ALL}'
-                        ' Relax the task\'s resource requirements: '
+                        " Relax the task's resource requirements: "
                         f'{task.num_nodes}x {list(task.resources)[0]}')
                     if e.no_failover:
                         error_message = str(e)
@@ -4445,7 +4445,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{yellow}Purge (-p/--purge) is set, ignoring the '
                     f'identity mismatch error and removing '
                     f'the cluster record from cluster table.{reset}\n{yellow}It'
-                    ' is the user\'s responsibility to ensure that this '
+                    " is the user's responsibility to ensure that this "
                     f'cluster is actually {verbed} on the cloud.{reset}')
                 is_identity_mismatch_and_purge = True
             else:
@@ -5047,7 +5047,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if prev_cluster_status == status_lib.ClusterStatus.UP:
                     logger.warning(
                         'Failed to take down Ray autoscaler on the head node. '
-                        'It might be because the cluster\'s head node has '
+                        "It might be because the cluster's head node has "
                         'already been terminated. It is fine to skip this.')
 
             try:
@@ -5685,7 +5685,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{colorama.Fore.YELLOW}WARNING: Kubernetes pod config mismatch detected. Task requires different '
                         f'pod config than the existing cluster. The existing '
                         f'cluster will be used with its current pod config.'
-                        f'To apply use your task\'s new pod config:\n'
+                        f"To apply use your task's new pod config:\n"
                         f'  • Use a new cluster'
                         f'  • Or restart this cluster: sky down {cluster_name}; sky launch -c {cluster_name} ...'
                         f'{colorama.Style.RESET_ALL}')

@@ -1088,7 +1088,7 @@ class Kubernetes(clouds.Cloud):
         value_valid = bool(value_regex.match(label_value))
         error_msg = None
         condition_msg = ('Value must consist of alphanumeric characters or '
-                         '\'-\', \'_\', \'.\', and must be no more than 63 '
+                         "'-', '_', '.', and must be no more than 63 "
                          'characters in length.')
         if not key_valid:
             error_msg = (f'Invalid label key {label_key} for Kubernetes. '

@@ -122,7 +122,7 @@ if __name__ == '__main__':
                 }
             }],
             'TotalGpuMemoryInMiB': offer['gpu_total_ram']
-        }).replace('"', '\'')
+        }).replace('"', "'")
 
         priceMap[instance_type].append(entry)
 

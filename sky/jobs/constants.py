@@ -65,11 +65,11 @@ DASHBOARD_SETUP_CMD = (
     'manually."; '
     # Kill any old dashboard processes;
     '  ps aux | grep -v nohup | grep -v grep | '
-    '  grep -- \'-m sky.jobs.dashboard.dashboard\' | awk \'{print $2}\' | '
+    "  grep -- '-m sky.jobs.dashboard.dashboard' | awk '{print $2}' | "
     '  xargs kill > /dev/null 2>&1 || true;'
     # Launch the dashboard in the background if not already running
     '  (ps aux | grep -v nohup | grep -v grep | '
-    '  grep -q -- \'-m sky.jobs.dashboard.dashboard\') || '
+    "  grep -q -- '-m sky.jobs.dashboard.dashboard') || "
     f'(nohup {skylet_constants.SKY_PYTHON_CMD} -m sky.jobs.dashboard.dashboard '
     '>> ~/.sky/job-dashboard.log 2>&1 &); '
     'fi')

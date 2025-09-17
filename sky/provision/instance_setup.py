@@ -39,7 +39,7 @@ _RAY_PRLIMIT = (
     'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
 
 _DUMP_RAY_PORTS = (
-    f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
+    f"{constants.SKY_PYTHON_CMD} -c 'import json, os; "
     f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
     f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
     'encoding="utf-8"))\';')
@@ -304,7 +304,7 @@ def ray_head_start_command(custom_resource: Optional[str],
         f'--object-manager-port=8076 '
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
-        ray_options += f' --resources=\'{custom_resource}\''
+        ray_options += f" --resources='{custom_resource}'"
         ray_options += _ray_gpu_options(custom_resource)
     if custom_ray_options:
         if 'use_external_ip' in custom_ray_options:
@@ -345,7 +345,7 @@ def ray_worker_start_command(custom_resource: Optional[str],
                    '--object-manager-port=8076')
 
     if custom_resource:
-        ray_options += f' --resources=\'{custom_resource}\''
+        ray_options += f" --resources='{custom_resource}'"
         ray_options += _ray_gpu_options(custom_resource)
 
     if custom_ray_options:

@@ -111,25 +111,25 @@ def _parse_args(args: Optional[str] = None):
     else:
         args_list = []
     parser = argparse.ArgumentParser(
-        description="Process cloud arguments for tests")
+        description='Process cloud arguments for tests')
 
     # Flags for recognized clouds
     for cloud in PYTEST_TO_CLOUD_KEYWORD.keys():
-        parser.add_argument(f"--{cloud}", action="store_true")
+        parser.add_argument(f'--{cloud}', action='store_true')
 
     # Generic cloud argument, which takes a value (e.g., --generic-cloud aws)
-    parser.add_argument("--generic-cloud")
+    parser.add_argument('--generic-cloud')
 
     # -k argument for a test selection pattern
-    parser.add_argument("-k")
-    parser.add_argument("--remote-server", action="store_true")
+    parser.add_argument('-k')
+    parser.add_argument('--remote-server', action='store_true')
     parser.add_argument('--base-branch')
     parser.add_argument('--controller-cloud')
-    parser.add_argument('--postgres', action="store_true")
+    parser.add_argument('--postgres', action='store_true')
     parser.add_argument('--helm-version')
     parser.add_argument('--helm-package')
-    parser.add_argument('--jobs-consolidation', action="store_true")
-    parser.add_argument('--grpc', action="store_true")
+    parser.add_argument('--jobs-consolidation', action='store_true')
+    parser.add_argument('--grpc', action='store_true')
     parser.add_argument('--env-file')
 
     parsed_args, _ = parser.parse_known_args(args_list)
@@ -215,7 +215,7 @@ def _extract_marked_tests(
             # TODO(zpoint): support and/or in k_value
             continue
 
-        marks = marks.replace('\'', '').split(',')
+        marks = marks.replace("'", '').split(',')
         marks = [i.strip() for i in marks]
 
         function_name_marks_map[clean_function_name].update(marks)
@@ -488,7 +488,7 @@ def main(args: str, file_pattern: str):
     release_files = []
     quick_tests_core_files = []
     for test_file in test_files:
-        if "test_quick_tests_core" in test_file or "test_backward_compat" in test_file:
+        if 'test_quick_tests_core' in test_file or 'test_backward_compat' in test_file:
             quick_tests_core_files.append(test_file)
         else:
             release_files.append(test_file)

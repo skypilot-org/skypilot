@@ -174,10 +174,10 @@ class VsphereClient:
             # Find out the storage profile id
             profile_id = self.get_skypilot_profile_id()
             if profile_id is None:
-                logger.error('The VM storage policy \'skypilot_policy\''
+                logger.error("The VM storage policy 'skypilot_policy'"
                              ' is not available.')
                 raise exceptions.ResourcesUnavailableError(
-                    'The VM storage policy \'skypilot_policy\''
+                    "The VM storage policy 'skypilot_policy'"
                     ' is not available.')
             # Deploy the ovf template
             vm_obj = self.helper.deploy_ovf_template(
@@ -269,7 +269,7 @@ class VsphereClient:
 
     # we should not call this method directly
     def _create_pbm_connection(self, vpxd_stub):
-        session_cookie = vpxd_stub.cookie.split('\"')[1]
+        session_cookie = vpxd_stub.cookie.split('"')[1]
         http_context = vsphere_adaptor.get_vmomi_support().GetHttpContext()
         cookie = http_cookies.SimpleCookie()
         cookie['vmware_soap_session'] = session_cookie

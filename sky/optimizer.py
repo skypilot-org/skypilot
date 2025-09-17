@@ -319,7 +319,7 @@ class Optimizer:
             for orig_resources, launchable_list in launchable_resources.items():
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
-                        'Defaulting the task\'s estimated time to 1 hour.')
+                        "Defaulting the task's estimated time to 1 hour.")
                     estimated_runtime = 1 * 3600
                 else:
                     # We assume the time estimator takes in a partial resource
@@ -1129,9 +1129,9 @@ class Optimizer:
         if local_best_plan is None:
             error_msg = (f'No launchable resource found for task {task}. '
                          'To fix: relax its resource requirements.\n'
-                         'Hint: \'sky show-gpus --all\' '
+                         "Hint: 'sky show-gpus --all' "
                          'to list available accelerators.\n'
-                         '      \'sky check\' to check the enabled clouds.')
+                         "      'sky check' to check the enabled clouds.")
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(error_msg)
 

@@ -601,7 +601,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ResourcesMismatchError(
                 f'{acc_name} is not available in GCP. '
-                'See \'sky show-gpus --cloud gcp\'')
+                "See 'sky show-gpus --cloud gcp'")
 
     if acc_name.startswith('tpu-'):
         if instance_type != 'TPU-VM' and not instance_type.startswith('n1-'):

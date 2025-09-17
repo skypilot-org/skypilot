@@ -33,7 +33,7 @@ def get_objs_by_names(content, vimtype: type, names: List[str]):
     # If there are any names left in the names_set, those were not found
     if names_set:
         for name in names_set:
-            logger.error(f'Object \'{name}\' not found')
+            logger.error(f"Object '{name}' not found")
         raise RuntimeError(f'Only {len(objs)} out of {len(names)} '
                            f'objects found')
 
@@ -56,7 +56,7 @@ def get_hosts_by_cluster_names(content, vcenter_name, cluster_name_dicts=None):
         } for cluster in cluster_view.view]
         cluster_view.Destroy()
         if not cluster_name_dicts:
-            logger.warning(f'vCenter \'{vcenter_name}\' has no clusters')
+            logger.warning(f"vCenter '{vcenter_name}' has no clusters")
 
     # Retrieve all cluster names from the cluster_name_dicts
     cluster_names = [
@@ -79,7 +79,7 @@ def get_hosts_by_cluster_names(content, vcenter_name, cluster_name_dicts=None):
                                                       cluster_name, gpu_list)
             hosts.extend(hosts_info)
         else:
-            logger.warning(f'Cluster \'{cluster_name}\' not found')
+            logger.warning(f"Cluster '{cluster_name}' not found")
     return hosts
 
 

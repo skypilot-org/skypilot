@@ -215,7 +215,7 @@ EXTRA_RESOURCES_OPTIONS = [
          '(fractional counts are supported by the scheduling framework). '
          'If a new cluster is being launched by this command, this is the '
          'resources to provision. If an existing cluster is being reused, this'
-         ' is seen as the task demand, which must fit the cluster\'s total '
+         " is seen as the task demand, which must fit the cluster's total "
          'resources and is used for scheduling the task. '
          'Overrides the "accelerators" '
          'config in the YAML if both are supplied. '

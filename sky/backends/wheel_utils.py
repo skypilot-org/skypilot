@@ -106,8 +106,7 @@ def _build_sky_wheel() -> pathlib.Path:
         # Replace the package name with skypilot. This is important as the
         # package could be installed with pip install skypilot-nightly.
         setup_content = re.sub(r'\bname=[\'"](.*?)[\'"],',
-                               f'name=\'{_PACKAGE_WHEEL_NAME}\',',
-                               setup_content)
+                               f"name='{_PACKAGE_WHEEL_NAME}',", setup_content)
         (tmp_dir / 'setup.py').write_text(setup_content)
 
         for f in setup_files_dir.iterdir():
@@ -128,7 +127,7 @@ def _build_sky_wheel() -> pathlib.Path:
         # Replace the commit hash with the current commit hash.
         init_file_content = re.sub(
             r'_SKYPILOT_COMMIT_SHA = [\'"](.*?)[\'"]',
-            f'_SKYPILOT_COMMIT_SHA = \'{sky.__commit__}\'', init_file_content)
+            f"_SKYPILOT_COMMIT_SHA = '{sky.__commit__}'", init_file_content)
         (tmp_dir / 'sky' / '__init__.py').write_text(init_file_content)
 
         # It is important to normalize the path, otherwise 'pip wheel' would

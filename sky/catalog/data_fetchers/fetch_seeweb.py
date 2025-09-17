@@ -195,7 +195,7 @@ def get_gpu_info(gpu_count: int, gpu_name: str, gpu_vram_mb: int = 0) -> str:
         'TotalGpuMemoryInMiB': gpu_vram_mb * gpu_count if gpu_vram_mb else 0
     }
 
-    return json.dumps(gpu_info).replace('"', '\'')
+    return json.dumps(gpu_info).replace('"', "'")
 
 
 def fetch_seeweb_data(api_key: str) -> List[Dict]:

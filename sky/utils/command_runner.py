@@ -40,8 +40,8 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # do_not_exclude" doesn't work, even though git allows it.
 # TODO(cooperc): Avoid using this, and prefer utils in storage_utils instead for
 # consistency between bucket upload and rsync.
-RSYNC_FILTER_SKYIGNORE = f'--filter=\'dir-merge,- {constants.SKY_IGNORE_FILE}\''
-RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
+RSYNC_FILTER_SKYIGNORE = f"--filter='dir-merge,- {constants.SKY_IGNORE_FILE}'"
+RSYNC_FILTER_GITIGNORE = f"--filter='dir-merge,- {constants.GIT_IGNORE_FILE}'"
 # The git exclude file to support.
 GIT_EXCLUDE = '.git/info/exclude'
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'

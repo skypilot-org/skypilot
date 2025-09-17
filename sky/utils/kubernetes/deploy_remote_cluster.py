@@ -315,7 +315,7 @@ def get_used_localhost_ports() -> Set[int]:
     try:
         result = subprocess.run([
             'kubectl', 'config', 'view', '-o',
-            'jsonpath=\'{.clusters[*].cluster.server}\''
+            "jsonpath='{.clusters[*].cluster.server}'"
         ],
                                 capture_output=True,
                                 text=True,
@@ -694,7 +694,7 @@ def deploy_cluster(head_node,
     print(f'{YELLOW}Checking SSH connection to head node...{NC}')
     result = run_remote(
         head_node,
-        f'echo \'SSH connection successful ({head_node})\'',
+        f"echo 'SSH connection successful ({head_node})'",
         ssh_user,
         ssh_key,
         use_ssh_config=head_use_ssh_config,
@@ -795,7 +795,7 @@ def deploy_cluster(head_node,
             # Update the current context to the first available context
             contexts = run_command([
                 'kubectl', 'config', 'view', '-o',
-                'jsonpath=\'{.contexts[0].name}\''
+                "jsonpath='{.contexts[0].name}'"
             ],
                                    shell=False)
             if contexts:
@@ -829,7 +829,7 @@ def deploy_cluster(head_node,
         'if [ "$(sudo sshd -T | grep allowtcpforwarding)" = "allowtcpforwarding yes" ]; then '
         f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
         'else '
-        'sudo sed -i \'s/^#\?\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '  # pylint: disable=anomalous-backslash-in-string
+        "sudo sed -i 's/^#\?\s*AllowTcpForwarding.*/AllowTcpForwarding yes/' "  # pylint: disable=anomalous-backslash-in-string
         '/etc/ssh/sshd_config && sudo systemctl restart sshd && '
         f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
         'fi')
@@ -902,7 +902,7 @@ def deploy_cluster(head_node,
 
     # Fetch the head node's internal IP (this will be passed to worker nodes)
     master_addr = run_remote(head_node,
-                             'hostname -I | awk \'{print $1}\'',
+                             "hostname -I | awk '{print $1}'",
                              ssh_user,
                              ssh_key,
                              use_ssh_config=head_use_ssh_config)
@@ -1210,11 +1210,11 @@ def deploy_cluster(head_node,
                              context_name,
                              use_ssh_config=head_use_ssh_config)
 
-    success_message(f'kubectl configured with new context \'{context_name}\'.')
+    success_message(f"kubectl configured with new context '{context_name}'.")
 
     print(
         f'Cluster deployment completed. Kubeconfig saved to {kubeconfig_path}')
-    print('You can now run \'kubectl get nodes\' to verify the setup.')
+    print("You can now run 'kubectl get nodes' to verify the setup.")
 
     # Install GPU operator if a GPU was detected on any node
     if install_gpu:

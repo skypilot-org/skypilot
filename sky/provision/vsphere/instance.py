@@ -158,7 +158,7 @@ def _create_instances(
     # Check if the user want to create a cpu instance
     if not gpu_instance:
         # Find an image for CPU
-        images_df = images_df[images_df['GpuTags'] == '\'[]\'']
+        images_df = images_df[images_df['GpuTags'] == "'[]'"]
         if not images_df:
             logger.error(
                 f'Can not find an image for instance type: {instance_type}.')
@@ -240,7 +240,7 @@ def _create_instances(
             if gpus != '[]':
                 # TODO: improve the csv initialization logic, for now,
                 #  we need to replace the single quote with double quote
-                gpus = json.loads(gpus.replace('\'', '\"'))
+                gpus = json.loads(gpus.replace("'", '"'))
                 for gpu in gpus:
                     if gpu.get('Status') == 'Available':
                         if (vms_item['AcceleratorName'].lower()

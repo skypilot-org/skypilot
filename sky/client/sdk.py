@@ -2122,7 +2122,7 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
 
     body = payloads.RequestCancelBody(request_ids=request_ids, user_id=user_id)
     if all_users:
-        echo('Cancelling all users\' requests...')
+        echo("Cancelling all users' requests...")
     elif request_ids is None:
         echo(f'Cancelling all requests for user {user_id!r}...')
     else:

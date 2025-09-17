@@ -947,7 +947,7 @@ def cancel(
         user_hash = None
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
-            f'Cancelling all users\' jobs on cluster {cluster_name!r}...'
+            f"Cancelling all users' jobs on cluster {cluster_name!r}..."
             f'{colorama.Style.RESET_ALL}')
     elif all:
         sky_logging.print(

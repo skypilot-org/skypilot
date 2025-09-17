@@ -92,7 +92,7 @@ def _insert_test_tracers(content):
         # Build the lines to insert
         lines = []
         # Keep original definition line + colon
-        lines.append(f"{base_indent}{signature}:")
+        lines.append(f'{base_indent}{signature}:')
         # 1) Print function name
         lines.append(
             f"{deeper_indent}print('\\n{func_name}\\n', file=sys.stderr, flush=True)"
@@ -103,9 +103,9 @@ def _insert_test_tracers(content):
                 f"{deeper_indent}print(f'generic_cloud: {{generic_cloud}}', file=sys.stderr, flush=True)"
             )
         # 3) Return
-        lines.append(f"{deeper_indent}return\n")
+        lines.append(f'{deeper_indent}return\n')
 
-        return "\n".join(lines)
+        return '\n'.join(lines)
 
     updated_content = pattern.sub(replacer, content)
     return 'import sys\n' + updated_content
@@ -161,11 +161,11 @@ def test_generate_same_as_pytest(args):
 
         # Get all test functions from pytest for all files
         pytest_output = subprocess.check_output(
-            f"pytest ./tests/test_smoke.py {args}",
+            f'pytest ./tests/test_smoke.py {args}',
             stderr=subprocess.STDOUT,
             text=True,
             shell=True)
-        pytest_tests = set(re.findall(r"test_\w+", pytest_output))
+        pytest_tests = set(re.findall(r'test_\w+', pytest_output))
 
         # Generate pipeline and extract test functions using YAML parsing
         env = dict(os.environ)

@@ -269,7 +269,7 @@ class PrimeIntellect(clouds.Cloud):
                     'Please check that your API key has the correct '
                     'permissions, generate a new one at '
                     'https://app.primeintellect.ai/dashboard/tokens, '
-                    'or run \'prime login\' to configure a new API key.')
+                    "or run 'prime login' to configure a new API key.")
         return True, None
 
     @classmethod

@@ -247,7 +247,7 @@ def ha_recovery_for_consolidation_mode():
             ]:
                 script = managed_job_state.get_ha_recovery_script(job_id)
                 if script is None:
-                    f.write(f'Job {job_id}\'s recovery script does not exist. '
+                    f.write(f"Job {job_id}'s recovery script does not exist. "
                             'Skipping recovery. Job schedule state: '
                             f'{job["schedule_state"]}\n')
                     continue
@@ -499,7 +499,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 # TODO(cooperc): Find a way to detect if we get stuck in this
                 # state.
                 logger.info(f'Job {job_id} is in {schedule_state.value} state, '
-                            'but controller process hasn\'t started yet.')
+                            "but controller process hasn't started yet.")
                 continue
 
             logger.error(f'Expected to find a controller pid for state '
@@ -1018,10 +1018,9 @@ def stream_logs_by_id(job_id: int,
 
                     # The log for the current job is finished. We need to
                     # wait until next job to be started.
-                    logger.debug(
-                        f'INFO: Log for the current task ({task_id}) '
-                        'is finished. Waiting for the next task\'s log '
-                        'to be started.')
+                    logger.debug(f'INFO: Log for the current task ({task_id}) '
+                                 "is finished. Waiting for the next task's log "
+                                 'to be started.')
                     # Add a newline to avoid the status display below
                     # removing the last line of the task output.
                     print()

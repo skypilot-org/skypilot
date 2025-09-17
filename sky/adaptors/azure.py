@@ -43,7 +43,7 @@ def get_subscription_id() -> str:
         try:
             return credentials.get_cli_profile().get_subscription_id()
         except Exception as e:
-            if ('Please run \'az login\' to setup account.' in str(e) and
+            if ("Please run 'az login' to setup account." in str(e) and
                     retry < _MAX_RETRY_FOR_GET_SUBSCRIPTION_ID):
                 # When there are multiple processes trying to get the
                 # subscription id, it may fail with the above error message.

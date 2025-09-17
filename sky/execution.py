@@ -88,7 +88,7 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
         f'{colorama.Fore.GREEN}'
         f'Successfully created image {image_id!r} for {clone_disk_from!r} '
         f'on {original_cloud}.{colorama.Style.RESET_ALL}\n'
-        'Overriding task\'s image_id.')
+        "Overriding task's image_id.")
     task_resources = task_resources.copy(image_id=image_id,
                                          _is_image_managed=True)
     task.set_resources(task_resources)

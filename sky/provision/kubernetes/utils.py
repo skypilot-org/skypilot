@@ -164,7 +164,7 @@ NO_ACCELERATOR_HELP_MESSAGE = (
 KUBERNETES_AUTOSCALER_NOTE = (
     'Note: Kubernetes cluster autoscaling is enabled. '
     'All GPUs that can be provisioned may not be listed '
-    'here. Refer to your autoscaler\'s node pool '
+    "here. Refer to your autoscaler's node pool "
     'configuration to see the list of supported GPUs.')
 
 # TODO(romilb): Add links to docs for configuration instructions when ready.
@@ -1518,7 +1518,7 @@ def get_accelerator_label_key_values(
             if is_ssh_node_pool:
                 msg = (
                     f'Could not detect GPUs in SSH Node Pool '
-                    f'\'{context_display_name}\'. If this cluster contains '
+                    f"'{context_display_name}'. If this cluster contains "
                     'GPUs, please ensure GPU drivers are installed on the node '
                     'and re-run '
                     f'`sky ssh up --infra {context_display_name}`. {suffix}')
@@ -2279,10 +2279,10 @@ def construct_ssh_jump_command(
             current_kube_context is not None) else ''
         kube_namespace_flag = f'-n {current_kube_namespace} ' if (
             current_kube_namespace is not None) else ''
-        ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
+        ssh_jump_proxy_command += (f" -o ProxyCommand='{proxy_cmd_path} "
                                    f'{kube_context_flag}'
                                    f'{kube_namespace_flag}'
-                                   f'{proxy_cmd_target_pod}\'')
+                                   f"{proxy_cmd_target_pod}'")
     return ssh_jump_proxy_command
 
 
@@ -2453,10 +2453,10 @@ def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
                     if curr_svc_type == clusterip_svc else clusterip_svc
                 logger.info(
                     f'Switching the networking mode from '
-                    f'\'{curr_network_mode}\' to \'{new_network_mode}\' '
+                    f"'{curr_network_mode}' to '{new_network_mode}' "
                     f'following networking configuration. Deleting existing '
-                    f'\'{curr_svc_type}\' service and recreating as '
-                    f'\'{new_svc_type}\' service.')
+                    f"'{curr_svc_type}' service and recreating as "
+                    f"'{new_svc_type}' service.")
         else:
             raise
     else:

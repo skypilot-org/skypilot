@@ -51,7 +51,7 @@ class Nebius(clouds.Cloud):
     _REPR = 'Nebius'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTODOWN:
-            ('Autodown not supported. Can\'t delete OS disk.'),
+            ("Autodown not supported. Can't delete OS disk."),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
@@ -364,7 +364,7 @@ class Nebius(clouds.Cloud):
         tenant_msg = (f'{_INDENT_PREFIX} Copy your tenant ID from the web console and save it to file \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
-                      f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long
+                      f"{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > {nebius.tenant_id_path()} \n")  # pylint: disable=line-too-long
         if not nebius.is_token_or_cred_file_exist():
             return False, f'{token_cred_msg}'
         tenant_id = nebius.get_tenant_id()

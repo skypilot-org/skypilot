@@ -1290,7 +1290,7 @@ class GCPTPUVMInstance(GCPInstance):
             # Return empty dict instead of raising exception to not break.
             if 'is not found or access is unauthorized.' in str(e):
                 return {}
-            if 'Permission \'tpu.nodes.list\' denied on' in str(e):
+            if "Permission 'tpu.nodes.list' denied on" in str(e):
                 return {}
             logger.debug(f'filter: googleapiclient.errors.HttpError: {e}')
             raise

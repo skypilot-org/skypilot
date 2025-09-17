@@ -329,7 +329,7 @@ def deploy_local_cluster(gpus: bool):
         # Prepare completion message which shows CPU and GPU count
         # Get number of CPUs
         p = subprocess_utils.run(
-            'kubectl get nodes -o jsonpath=\'{.items[0].status.capacity.cpu}\'',
+            "kubectl get nodes -o jsonpath='{.items[0].status.capacity.cpu}'",
             capture_output=True)
         num_cpus = int(p.stdout.decode('utf-8'))
 
@@ -339,7 +339,7 @@ def deploy_local_cluster(gpus: bool):
         if gpus:
             # Get GPU model by querying the node labels
             label_name_escaped = 'skypilot.co/accelerator'.replace('.', '\\.')
-            gpu_type_cmd = f'kubectl get node skypilot-control-plane -o jsonpath=\"{{.metadata.labels[\'{label_name_escaped}\']}}\"'  # pylint: disable=line-too-long
+            gpu_type_cmd = f'kubectl get node skypilot-control-plane -o jsonpath="{{.metadata.labels[\'{label_name_escaped}\']}}"'  # pylint: disable=line-too-long
             try:
                 # Run the command and capture the output
                 gpu_count_output = subprocess.check_output(gpu_type_cmd,
@@ -352,7 +352,7 @@ def deploy_local_cluster(gpus: bool):
                 gpu_type_str = ''
 
             # Get number of GPUs (sum of nvidia.com/gpu resources)
-            gpu_count_command = 'kubectl get nodes -o=jsonpath=\'{range .items[*]}{.status.allocatable.nvidia\\.com/gpu}{\"\\n\"}{end}\' | awk \'{sum += $1} END {print sum}\''  # pylint: disable=line-too-long
+            gpu_count_command = 'kubectl get nodes -o=jsonpath=\'{range .items[*]}{.status.allocatable.nvidia\\.com/gpu}{"\\n"}{end}\' | awk \'{sum += $1} END {print sum}\''  # pylint: disable=line-too-long
             try:
                 # Run the command and capture the output
                 gpu_count_output = subprocess.check_output(gpu_count_command,
@@ -368,7 +368,7 @@ def deploy_local_cluster(gpus: bool):
 
             gpu_hint = (
                 '\nHint: To see the list of GPUs in the cluster, '
-                'run \'sky show-gpus --cloud kubernetes\'') if gpus else ''
+                "run 'sky show-gpus --cloud kubernetes'") if gpus else ''
 
         if num_cpus < 2:
             logger.info('Warning: Local cluster has less than 2 CPUs. '
