@@ -303,8 +303,8 @@ def maybe_start_controllers(check_skylet_hash: bool = False,
 
                 # Don't use shutil.copyfile in case the file was updated during
                 # restart.
-                new_hash_file.write_text(new_hash, encoding='utf-8')
-                logger.debug(f'Wrote new hash {new_hash} to {new_hash_file}.')
+                prev_hash_file.write_text(new_hash, encoding='utf-8')
+                logger.debug(f'Wrote new hash {new_hash} to {prev_hash_file}.')
 
             if stop_existing_controllers:
                 logger.debug('Stopping existing controllers.')
