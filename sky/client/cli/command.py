@@ -240,9 +240,10 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
         try:
             return sdk.stream_and_get(request_id)
         except KeyboardInterrupt:
+            start_message = ux_utils.starting_message(
+                'Request will continue running asynchronously.')
             logger.info(
-                ux_utils.starting_message('Request will continue running '
-                                          'asynchronously.') +
+                f'{start_message}'
                 f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}View logs: '
                 f'{ux_utils.BOLD}sky api logs {short_request_id}'
                 f'{colorama.Style.RESET_ALL}'
