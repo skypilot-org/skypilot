@@ -4,7 +4,7 @@ resources:
   accelerators:
     T4: 1     # Cheapest option that works
     L4: 1     # Backup if T4 unavailable  
-    V100: 1   # Last resort
+    A100: 1   # Last resort
   any_of:
     - use_spot: true   # Try spot first
     - use_spot: false  # Fallback to on-demand

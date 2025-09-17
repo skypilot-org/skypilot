@@ -1,6 +1,11 @@
 # RedisVL + SkyPilot: Vector Search at Scale
 
+![Banner](assets/banner.png)
+
 Distributed vector search over [1M research papers](https://www.kaggle.com/datasets/nechbamohammed/research-papers-dataset) using [RedisVL](https://docs.redisvl.com/en/latest/) and [SkyPilot](https://skypilot.readthedocs.io/en/latest/).
+
+📖 [Read the full blog post](https://blog.skypilot.co/redisvl-skypilot/).
+
 
 ## Features
 
@@ -8,7 +13,7 @@ Distributed vector search over [1M research papers](https://www.kaggle.com/datas
 - Vector search with RedisVL over 1M research papers
 - Automatic failover and retry with SkyPilot managed jobs
 - Direct streaming to Redis (no intermediate storage)
-- Cost-effective: ~$0.09 to embed entire 1M paper dataset (5 parallel T4 spot instances on GCP @ 8 mins)
+- Cost-effective: ~$0.85 to embed entire 1M paper dataset (5 parallel T4 spot instances on GCP @ 80 mins)
 
 ## Setup
 
@@ -57,7 +62,7 @@ sky launch -c redisvl-search-api search_api.yaml --env-file .env
 
 Access the services:
 
-- FastAPI: 
+- FastAPI:
 ```
 export API_ENDPOINT=$(sky status --endpoint 8001 redisvl-search-api)
 echo $API_ENDPOINT
@@ -66,11 +71,24 @@ curl -X POST "http://$API_ENDPOINT/search" \
   -H "Content-Type: application/json" \
   -d '{"query": "neural networks", "k": 5}'
 ```
+
+API in action:
+
+<div align="center">
+  <video src="assets/api_service.mp4" width="700" controls></video>
+</div>
+
 - Streamlit UI:
 ```
 export STREAMLIT_ENDPOINT=$(sky status --endpoint 8501 redisvl-search-api)
 echo $STREAMLIT_ENDPOINT
 ```
+
+Streamlit app interface:
+
+<div align="center">
+  <video src="assets/streamlit_app.mp4" width="700" controls></video>
+</div>
 
 
 Tear down when done:
