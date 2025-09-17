@@ -822,7 +822,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     # We should not use int(time.time()) as there can be multiple requests at
     # the same second.
     task_id = str(uuid.uuid4().hex)
-    client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash)
+    client_dir = API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash
     client_task_dir = client_dir / 'tasks'
     client_task_dir.mkdir(parents=True, exist_ok=True)
 

@@ -38,7 +38,7 @@ def check_ssh_cluster_dependencies(
     Returns: the reasons list if there are missing dependencies.
     """
     # error message
-    jq_message = ('`jq` is required to setup ssh cluster.')
+    jq_message = '`jq` is required to setup ssh cluster.'
 
     # save
     reasons = []

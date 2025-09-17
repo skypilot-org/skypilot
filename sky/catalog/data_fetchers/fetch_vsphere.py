@@ -459,7 +459,7 @@ def initialize_vms_csv(csv_saving_path: str,
                     for instance_type in CPU_INSTANCE_TYPES:
                         if instance_type.get('vCPUs') <= minimal_cpu_cores:
                             vcpus = instance_type.get('vCPUs')
-                            memory_mb = (instance_type.get('MemoryMB', 0))
+                            memory_mb = instance_type.get('MemoryMB', 0)
                             # Make sure that memoryMB is a number before
                             # proceeding
                             if isinstance(memory_mb, (int, float)):

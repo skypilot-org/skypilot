@@ -3519,7 +3519,7 @@ def show_gpus(
                         if is_ssh else 'any allowed Kubernetes cluster')
             cloud_name = 'ssh' if is_ssh else 'kubernetes'
             err_msg = f'No GPUs found in {identity}. '
-            debug_msg = (f'To further debug, run: sky check {cloud_name}')
+            debug_msg = f'To further debug, run: sky check {cloud_name}'
             if name_filter is not None:
                 gpu_info_msg = f' {name_filter!r}'
                 if quantity_filter is not None:
@@ -3621,7 +3621,7 @@ def show_gpus(
                     'free'
                 ])
 
-        k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
+        k8s_per_node_acc_message = f'{cloud_str} per-node GPU availability'
         if hints:
             k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
 
@@ -4324,7 +4324,7 @@ def jobs():
               default=None,
               type=str,
               hidden=True,
-              help=('Alias for --name, the name of the managed job.'))
+              help='Alias for --name, the name of the managed job.')
 @click.option('--job-recovery',
               default=None,
               type=str,

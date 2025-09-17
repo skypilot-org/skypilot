@@ -1413,7 +1413,7 @@ def get_accelerator_label_key_values(
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     suffix = f' Found node labels: {node_labels}'
-                msg = (f'Could not detect GPU labels in {cloud_name}.')
+                msg = f'Could not detect GPU labels in {cloud_name}.'
                 if not is_ssh_node_pool:
                     msg += (' Run `sky check ssh` to debug.')
                 else:
@@ -3544,7 +3544,7 @@ def process_skypilot_pods(
                     get_gpu_resource_key(context), '0'))
             gpu_name = None
             if gpu_count > 0:
-                label_formatter, _ = (detect_gpu_label_formatter(context))
+                label_formatter, _ = detect_gpu_label_formatter(context)
                 assert label_formatter is not None, (
                     'GPU label formatter cannot be None if there are pods '
                     f'requesting GPUs: {pod.metadata.name}')

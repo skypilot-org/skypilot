@@ -38,7 +38,7 @@ proc = subprocess.run(
     shell=True,
     check=False)
 
-running = (proc.returncode == 0)
+running = proc.returncode == 0
 
 version_match = False
 found_version = None

@@ -561,7 +561,7 @@ class ReplicaInfo:
                 logger.info(f'Error when probing {replica_identity}: '
                             'Cannot get the endpoint.')
                 return self, False, probe_time
-            readiness_path = (f'{url}{readiness_path}')
+            readiness_path = f'{url}{readiness_path}'
             logger.info(f'Probing {replica_identity} with {readiness_path}.')
             if post_data is not None:
                 msg += 'POST'

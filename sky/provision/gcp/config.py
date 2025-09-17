@@ -344,7 +344,7 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
     if config.provider_config.get(constants.HAS_TPU_PROVIDER_FIELD, False):
         roles = (constants.DEFAULT_SERVICE_ACCOUNT_ROLES +
                  constants.TPU_SERVICE_ACCOUNT_ROLES)
-        permissions = (permissions + constants.TPU_MINIMAL_PERMISSIONS)
+        permissions = permissions + constants.TPU_MINIMAL_PERMISSIONS
 
     satisfied, policy = _is_permission_satisfied(service_account, crm, iam,
                                                  permissions, roles)

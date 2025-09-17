@@ -472,7 +472,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.error(f'Job {job_id} has DONE schedule state, but some '
                          f'tasks are not terminal. Task statuses: '
                          f'{", ".join(task["status"].value for task in tasks)}')
-            failure_reason = ('Inconsistent internal job state. This is a bug.')
+            failure_reason = 'Inconsistent internal job state. This is a bug.'
         elif pid is None:
             # Non-legacy job and controller process has not yet started.
             controller_status = job_lib.get_status(job_id)
@@ -646,7 +646,7 @@ def event_callback_func(
         event_callback = event_callback.strip()
         pool = managed_job_state.get_pool_from_job_id(job_id)
         if pool is not None:
-            cluster_name, _ = (managed_job_state.get_pool_submit_info(job_id))
+            cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
         else:
             cluster_name = generate_managed_job_cluster_name(
                 task.name, job_id) if task.name else None

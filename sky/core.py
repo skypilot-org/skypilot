@@ -361,7 +361,7 @@ def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
             launched_nodes = cluster_report['num_nodes']
             launched_resources = cluster_report['resources']
 
-            cost = (launched_resources.get_cost(duration) * launched_nodes)
+            cost = launched_resources.get_cost(duration) * launched_nodes
             return cost
 
         def _update_record_with_resources(record: Dict[str, Any]) -> None:

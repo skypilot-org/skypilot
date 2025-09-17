@@ -28,7 +28,7 @@ SETUP_ENV_VARS_CMD = (
 DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
                                 'the Docker daemon socket')
 
-DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
+DOCKER_SOCKET_NOT_READY_STR = 'Is the docker daemon running?'
 
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 

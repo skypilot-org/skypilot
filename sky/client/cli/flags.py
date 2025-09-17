@@ -49,7 +49,7 @@ COMMON_OPTIONS = [
                  required=False,
                  is_flag=True,
                  default=False,
-                 help=('Run the command asynchronously.'))
+                 help='Run the command asynchronously.')
 ]
 
 TASK_OPTIONS = [
@@ -122,7 +122,7 @@ TASK_OPTIONS = [
                  default=None,
                  type=int,
                  required=False,
-                 help=('OS disk size in GBs.')),
+                 help='OS disk size in GBs.'),
     click.option('--disk-tier',
                  default=None,
                  type=click.Choice(resources_utils.DiskTier.supported_tiers(),
