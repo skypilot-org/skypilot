@@ -348,9 +348,8 @@ def up(
                 lb_port_payload)
             if not serve_utils.is_consolidation_mode(pool) and not pool:
                 assert task.service is not None
-                protocol = ('https'
-                            if task.service.tls_credential is not None else
-                            'http')
+                protocol = ('https' if task.service.tls_credential is not None
+                            else 'http')
                 endpoint_mapping = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     lb_port,

@@ -3542,7 +3542,7 @@ def get_endpoints(cluster: str,
                                              provider_config=config['provider'])
 
     def _select_endpoint_string(
-        endpoints: List['provision_common.Endpoint']) -> Optional[str]:
+            endpoints: List['provision_common.Endpoint']) -> Optional[str]:
         if not endpoints:
             return None
 
