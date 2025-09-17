@@ -1179,8 +1179,10 @@ def enabled_clouds(workspace: Optional[str] = None,
             enabled_k8s_infras) + sorted(enabled_cloud_infras)
         return all_infras
 
+import memory_profiler
 
 @usage_lib.entrypoint
+@memory_profiler.profile
 def realtime_kubernetes_gpu_availability(
     context: Optional[str] = None,
     name_filter: Optional[str] = None,
