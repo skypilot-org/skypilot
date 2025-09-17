@@ -411,6 +411,9 @@ def up(
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}To terminate the pool:\t'
                 f'{ux_utils.BOLD}sky jobs pool down {service_name}'
                 f'{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To update the number of workers:\t'
+                f'{ux_utils.BOLD}sky jobs pool apply --pool {service_name} '
+                f'--workers 5{ux_utils.RESET_BOLD}'
                 '\n\n' + ux_utils.finishing_message('Successfully created pool '
                                                     f'{service_name!r}.'))
         else:
