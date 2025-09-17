@@ -27,6 +27,7 @@ from sky.provision import oci
 from sky.provision import runpod
 from sky.provision import scp
 from sky.provision import seeweb
+from sky.provision import shadeform
 from sky.provision import ssh
 from sky.provision import vast
 from sky.provision import vsphere
