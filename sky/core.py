@@ -298,8 +298,10 @@ def endpoints(cluster: str,
         result = backend_utils.get_endpoints(cluster=cluster, port=port)
         return result
 
+import memory_profiler
 
 @usage_lib.entrypoint
+@memory_profiler.profile
 def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
