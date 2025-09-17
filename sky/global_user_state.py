@@ -1237,16 +1237,16 @@ def _get_cluster_usage_intervals(
     return pickle.loads(row.usage_intervals)
 
 
-def _get_cluster_launch_time(cluster_hash: str) -> Optional[int]:
-    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+def _get_cluster_launch_time(
+        usage_intervals: List[Tuple[int, Optional[int]]]) -> Optional[int]:
     if usage_intervals is None:
         return None
     return usage_intervals[0][0]
 
 
-def _get_cluster_duration(cluster_hash: str) -> int:
+def _get_cluster_duration(
+        usage_intervals: List[Tuple[int, Optional[int]]]) -> int:
     total_duration = 0
-    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     if usage_intervals is None:
         return total_duration
@@ -1539,11 +1539,36 @@ def get_clusters_from_history(
     if days is not None:
         cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
 
+    current_user_hash = common_utils.get_user_hash()
+
+    row_to_user_hash = {}
+    usage_intervals_dict = {}
+    for row in rows:
+        user_hash = (row.user_hash
+                     if row.user_hash is not None else current_user_hash)
+        row_to_user_hash[row.cluster_hash] = user_hash
+        if row.usage_intervals:
+            try:
+                usage_intervals_dict[row.cluster_hash] = pickle.loads(
+                    row.usage_intervals)
+            except (pickle.PickleError, AttributeError):
+                usage_intervals_dict[row.cluster_hash] = []
+    user_hashes = set(row_to_user_hash.values())
+    user_hash_to_user = _get_users(user_hashes)
+
+    cluster_hashes = set(row_to_user_hash.keys())
+    last_cluster_event_dict = _get_last_cluster_event_multiple(
+        cluster_hashes, ClusterEventType.STATUS_CHANGE)
+
     records = []
     for row in rows:
-        user_hash = _get_user_hash_or_current_user(row.user_hash)
-        launched_at = _get_cluster_launch_time(row.cluster_hash)
-        duration = _get_cluster_duration(row.cluster_hash)
+        user_hash = row_to_user_hash[row.cluster_hash]
+        user = user_hash_to_user.get(user_hash, None)
+        user_name = user.name if user is not None else None
+        last_event = last_cluster_event_dict.get(row.cluster_hash, None)
+        usage_intervals = usage_intervals_dict.get(row.cluster_hash, None)
+        launched_at = _get_cluster_launch_time(usage_intervals)
+        duration = _get_cluster_duration(usage_intervals)
 
         # Parse status
         status = None
@@ -1556,13 +1581,6 @@ def get_clusters_from_history(
             # For historical clusters, check if they were used recently
             # Use the most recent activity from usage_intervals to determine
             # last use
-            usage_intervals = []
-            if row.usage_intervals:
-                try:
-                    usage_intervals = pickle.loads(row.usage_intervals)
-                except (pickle.PickleError, AttributeError):
-                    usage_intervals = []
-
             # Find the most recent activity time from usage_intervals
             last_activity_time = None
             if usage_intervals:
@@ -1584,17 +1602,6 @@ def get_clusters_from_history(
             except (pickle.PickleError, AttributeError):
                 launched_resources = None
 
-        # Parse usage intervals safely
-        usage_intervals = []
-        if row.usage_intervals:
-            try:
-                usage_intervals = pickle.loads(row.usage_intervals)
-            except (pickle.PickleError, AttributeError):
-                usage_intervals = []
-
-        # Get user name from user hash
-        user = get_user(user_hash)
-        user_name = user.name if user is not None else None
         workspace = (row.history_workspace
                      if row.history_workspace else row.workspace)
 
@@ -1612,8 +1619,7 @@ def get_clusters_from_history(
             'workspace': workspace,
             'last_creation_yaml': row.last_creation_yaml,
             'last_creation_command': row.last_creation_command,
-            'last_event': get_last_cluster_event(
-                row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE),
+            'last_event': last_event,
         }
 
         records.append(record)
