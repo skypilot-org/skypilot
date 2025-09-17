@@ -3251,7 +3251,7 @@ def _down_or_stop_clusters(
     request_ids = []
 
     successes: List[str] = []
-    failures: List[Tuple[str, BaseException]] = []
+    failures: List[Tuple[str, Exception]] = []
 
     with progress:
         for name in clusters:
