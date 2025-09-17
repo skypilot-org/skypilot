@@ -308,6 +308,66 @@ async def test_missing_job_pool_submit_info_same(_mock_jobs_db_conn):
     assert await state.get_pool_submit_info_async(missing_id) == (None, None)
 
 
+@pytest.mark.asyncio
+async def test_override_terminal_failure_reason_prepend(_mock_jobs_db_conn):
+    """Test that when override_terminal=True, new failure reasons are prepended to existing ones."""
+    # Create two identical jobs - one for sync, one for async testing
+    sync_job_id = state.set_job_info_without_job_id(name='sync_job',
+                                                    workspace='default',
+                                                    entrypoint='echo',
+                                                    pool=None,
+                                                    pool_hash=None)
+    async_job_id = state.set_job_info_without_job_id(name='async_job',
+                                                     workspace='default',
+                                                     entrypoint='echo',
+                                                     pool=None,
+                                                     pool_hash=None)
+
+    # Set up initial pending task for both jobs
+    state.set_pending(sync_job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+    state.set_pending(async_job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+
+    failure_reasons = [
+        "Initial failure: out of memory", "Secondary failure: disk full",
+        "Final failure: network timeout", "Ultimate failure: system crash"
+    ]
+
+    # Apply the same sequence to both jobs: sync to first job, async to second job
+    for reason in failure_reasons:
+        # All failures use override_terminal=True to test prepending behavior
+        state.set_failed(sync_job_id,
+                         task_id=0,
+                         failure_type=state.ManagedJobStatus.FAILED,
+                         failure_reason=reason,
+                         override_terminal=True)
+        await state.set_failed_async(async_job_id,
+                                     task_id=0,
+                                     failure_type=state.ManagedJobStatus.FAILED,
+                                     failure_reason=reason,
+                                     override_terminal=True)
+
+    # Verify both jobs have identical failure reasons
+    sync_failure_reason = state.get_failure_reason(sync_job_id)
+    async_failure_reason = state.get_failure_reason(async_job_id)
+
+    assert sync_failure_reason == async_failure_reason
+    assert sync_failure_reason is not None
+
+    # Verify the structure contains all failure reasons in the correct order
+    assert "Ultimate failure: system crash" in sync_failure_reason
+    assert "Final failure: network timeout" in sync_failure_reason
+    assert "Secondary failure: disk full" in sync_failure_reason
+    assert "Initial failure: out of memory" in sync_failure_reason
+
+
 def test_missing_job_other_helpers(_mock_jobs_db_conn):
     missing_id = 9999
     # workspace defaults to SKY default for non-existent job
@@ -320,3 +380,97 @@ def test_missing_job_other_helpers(_mock_jobs_db_conn):
     # num tasks and ids list
     assert state.get_num_tasks(missing_id) == 0
     assert state.get_all_task_ids_names_statuses_logs(missing_id) == []
+
+
+@pytest.mark.asyncio
+async def test_set_backoff_pending_async_success(_mock_jobs_db_conn):
+    """Test set_backoff_pending_async correctly updates status and returns rowcount."""
+    # Create a job with a task in STARTING status
+    job_id = state.set_job_info_without_job_id(name='backoff_test',
+                                               workspace='default',
+                                               entrypoint='echo',
+                                               pool=None,
+                                               pool_hash=None)
+    state.set_pending(
+        job_id=job_id,
+        task_id=0,
+        task_name='task0',
+        resources_str='{}',
+        metadata='{}',
+    )
+
+    # Set the task to STARTING status (simulating launch attempt)
+    _set_statuses(job_id, {0: state.ManagedJobStatus.STARTING})
+
+    # Verify the task is in STARTING status
+    task_id, status = await state.get_latest_task_id_status_async(job_id)
+    assert task_id == 0
+    assert status == state.ManagedJobStatus.STARTING
+
+    # Call set_backoff_pending_async - should succeed and update status
+    await state.set_backoff_pending_async(job_id, 0)
+
+    # Verify the task is now in PENDING status
+    task_id, status = await state.get_latest_task_id_status_async(job_id)
+    assert task_id == 0
+    assert status == state.ManagedJobStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_set_backoff_pending_async_from_recovering(_mock_jobs_db_conn):
+    """Test set_backoff_pending_async works when task is in RECOVERING status."""
+    # Create a job with a task in RECOVERING status
+    job_id = state.set_job_info_without_job_id(name='backoff_recovering_test',
+                                               workspace='default',
+                                               entrypoint='echo',
+                                               pool=None,
+                                               pool_hash=None)
+    state.set_pending(
+        job_id=job_id,
+        task_id=0,
+        task_name='task0',
+        resources_str='{}',
+        metadata='{}',
+    )
+
+    # Set the task to RECOVERING status
+    _set_statuses(job_id, {0: state.ManagedJobStatus.RECOVERING})
+
+    # Verify the task is in RECOVERING status
+    task_id, status = await state.get_latest_task_id_status_async(job_id)
+    assert task_id == 0
+    assert status == state.ManagedJobStatus.RECOVERING
+
+    # Call set_backoff_pending_async - should succeed and update status
+    await state.set_backoff_pending_async(job_id, 0)
+
+    # Verify the task is now in PENDING status
+    task_id, status = await state.get_latest_task_id_status_async(job_id)
+    assert task_id == 0
+    assert status == state.ManagedJobStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_set_backoff_pending_async_no_matching_rows(_mock_jobs_db_conn):
+    """Test set_backoff_pending_async raises error when no rows match criteria."""
+    # Create a job with a task in RUNNING status (not STARTING/RECOVERING)
+    job_id = state.set_job_info_without_job_id(name='backoff_no_match_test',
+                                               workspace='default',
+                                               entrypoint='echo',
+                                               pool=None,
+                                               pool_hash=None)
+    state.set_pending(
+        job_id=job_id,
+        task_id=0,
+        task_name='task0',
+        resources_str='{}',
+        metadata='{}',
+    )
+
+    # Set the task to RUNNING status (not eligible for backoff)
+    _set_statuses(job_id, {0: state.ManagedJobStatus.RUNNING})
+
+    # Call set_backoff_pending_async - should raise ManagedJobStatusError
+    with pytest.raises(state.exceptions.ManagedJobStatusError,
+                       match='Failed to set the task back to pending'):
+        await state.set_backoff_pending_async(job_id, 0)

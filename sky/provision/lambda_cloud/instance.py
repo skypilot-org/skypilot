@@ -107,34 +107,35 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     created_instance_ids = []
     remote_ssh_key_name = config.authentication_config['remote_key_name']
 
-    def launch_nodes(node_type: str, quantity: int) -> List[str]:
+    def launch_node(node_type: str) -> str:
         try:
             instance_ids = lambda_client.create_instances(
                 instance_type=config.node_config['InstanceType'],
                 region=region,
                 name=f'{cluster_name_on_cloud}-{node_type}',
-                quantity=quantity,
+                # Quantity cannot actually be greater than 1; see:
+                # https://github.com/skypilot-org/skypilot/issues/7084
+                quantity=1,
                 ssh_key_name=remote_ssh_key_name,
             )
-            logger.info(f'Launched {len(instance_ids)} {node_type} node(s), '
-                        f'instance_ids: {instance_ids}')
-            return instance_ids
+            logger.info(f'Launched {node_type} node, '
+                        f'instance_id: {instance_ids[0]}')
+            return instance_ids[0]
         except Exception as e:
             logger.warning(f'run_instances error: {e}')
             raise
 
     if head_instance_id is None:
-        instance_ids = launch_nodes('head', 1)
-        assert len(instance_ids) == 1
-        created_instance_ids.append(instance_ids[0])
-        head_instance_id = instance_ids[0]
+        head_instance_id = launch_node('head')
+        created_instance_ids.append(head_instance_id)
 
     assert head_instance_id is not None, 'head_instance_id should not be None'
 
     worker_node_count = to_start_count - 1
     if worker_node_count > 0:
-        instance_ids = launch_nodes('worker', worker_node_count)
-        created_instance_ids.extend(instance_ids)
+        for _ in range(worker_node_count):
+            worker_instance_id = launch_node('worker')
+            created_instance_ids.append(worker_instance_id)
 
     while True:
         instances = _filter_instances(cluster_name_on_cloud, ['active'])

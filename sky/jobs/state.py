@@ -613,7 +613,7 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
     """
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        count = await session.execute(
+        result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
@@ -625,6 +625,7 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
                     spot_table.c.end_at.is_(None),
                 )).values({spot_table.c.status: ManagedJobStatus.PENDING.value})
         )
+        count = result.rowcount
         await session.commit()
         if count != 1:
             raise exceptions.ManagedJobStatusError(
@@ -712,7 +713,19 @@ def set_failed(
         where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
             where_conditions.append(spot_table.c.task_id == task_id)
+
+        # Handle failure_reason prepending when override_terminal is True
         if override_terminal:
+            # Get existing failure_reason with row lock to prevent race
+            # conditions
+            existing_reason_result = session.execute(
+                sqlalchemy.select(spot_table.c.failure_reason).where(
+                    sqlalchemy.and_(*where_conditions)).with_for_update())
+            existing_reason_row = existing_reason_result.fetchone()
+            if existing_reason_row and existing_reason_row[0]:
+                # Prepend new failure reason to existing one
+                fields_to_set[spot_table.c.failure_reason] = (
+                    failure_reason + '. Previously: ' + existing_reason_row[0])
             # Use COALESCE for end_at to avoid overriding the existing end_at if
             # it's already set.
             fields_to_set[spot_table.c.end_at] = sqlalchemy.func.coalesce(
@@ -1651,7 +1664,19 @@ async def set_failed_async(
         where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
             where_conditions.append(spot_table.c.task_id == task_id)
+
+        # Handle failure_reason prepending when override_terminal is True
         if override_terminal:
+            # Get existing failure_reason with row lock to prevent race
+            # conditions
+            existing_reason_result = await session.execute(
+                sqlalchemy.select(spot_table.c.failure_reason).where(
+                    sqlalchemy.and_(*where_conditions)).with_for_update())
+            existing_reason_row = existing_reason_result.fetchone()
+            if existing_reason_row and existing_reason_row[0]:
+                # Prepend new failure reason to existing one
+                fields_to_set[spot_table.c.failure_reason] = (
+                    failure_reason + '. Previously: ' + existing_reason_row[0])
             fields_to_set[spot_table.c.end_at] = sqlalchemy.func.coalesce(
                 spot_table.c.end_at, end_time)
         else:

@@ -516,7 +516,7 @@ def add_or_update_cluster(cluster_name: str,
                           task_config: Optional[Dict[str, Any]] = None,
                           is_managed: bool = False,
                           provision_log_path: Optional[str] = None,
-                          update_only: bool = False):
+                          existing_cluster_hash: Optional[str] = None):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -532,10 +532,12 @@ def add_or_update_cluster(cluster_name: str,
         is_managed: Whether the cluster is launched by the
             controller.
         provision_log_path: Absolute path to provision.log, if available.
-        update_only: Whether to update the cluster only. If True,
-            the cluster record will not be inserted if one does not exist.
+        existing_cluster_hash: If specified, the cluster will be updated
+            only if the cluster_hash matches. If a cluster does not exist,
+            it will not be inserted and an error will be raised.
     """
     assert _SQLALCHEMY_ENGINE is not None
+
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
@@ -631,17 +633,17 @@ def add_or_update_cluster(cluster_name: str,
             session.rollback()
             raise ValueError('Unsupported database dialect')
 
-        if update_only:
+        if existing_cluster_hash is not None:
             count = session.query(cluster_table).filter_by(
-                name=cluster_name).update({
+                name=cluster_name, cluster_hash=existing_cluster_hash).update({
                     **conditional_values, cluster_table.c.handle: handle,
                     cluster_table.c.status: status.value,
-                    cluster_table.c.cluster_hash: cluster_hash,
                     cluster_table.c.status_updated_at: status_updated_at
                 })
             assert count <= 1
             if count == 0:
-                raise ValueError(f'Cluster {cluster_name} not found.')
+                raise ValueError(f'Cluster {cluster_name} with hash '
+                                 f'{existing_cluster_hash} not found.')
         else:
             insert_stmnt = insert_func(cluster_table).values(
                 name=cluster_name,
