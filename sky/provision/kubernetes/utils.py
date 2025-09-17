@@ -1142,7 +1142,10 @@ def detect_accelerator_resource(
     return has_accelerator, cluster_resources
 
 import copy
-from kubernetes.client import V1Node, V1Pod
+
+from kubernetes.client import V1Node
+from kubernetes.client import V1Pod
+
 
 @_retry_on_error(resource_type='node')
 def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:

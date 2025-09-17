@@ -1,9 +1,10 @@
-from sky import core
 import psutil
+
+from sky import check
+from sky import core
 from sky.provision.kubernetes import utils
 from sky.utils import annotations
 from sky.utils import common_utils
-from sky import check
 
 proc = psutil.Process()
 
