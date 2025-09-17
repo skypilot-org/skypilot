@@ -1192,11 +1192,12 @@ def mock_pod(
 
 def mock_node(
     name_prefix="node",
-    label_count=10,
+    label_count=30,
     capacity_size=2000,
 ) -> V1Node:
 
     labels = {f"zone{j}": random_string(8) for j in range(label_count)}
+    annotations = {f"annotation{j}": random_string(8) for j in range(label_count)}
 
     conditions = [
         V1NodeCondition(type="Ready", status="True"),
@@ -1205,6 +1206,11 @@ def mock_node(
 
     status = V1NodeStatus(
         capacity={
+            "cpu": str(capacity_size),
+            "memory": f"{capacity_size * 512}Mi",
+            "pods": str(capacity_size),
+        },
+        allocatable={
             "cpu": str(capacity_size),
             "memory": f"{capacity_size * 512}Mi",
             "pods": str(capacity_size),
@@ -1218,6 +1224,7 @@ def mock_node(
         metadata=V1ObjectMeta(
             name=f"{name_prefix}-{random_string(6)}",
             labels=labels,
+            annotations=annotations,
         ),
         status=status,
     )
@@ -1262,7 +1269,7 @@ def get_all_pods_in_kubernetes_cluster(*,
     podlist = []
     for pod in pods:
         podlist.append(pod)
-    for _ in range(2000):
+    for _ in range(1000):
         podlist.append(mock_pod())
     return podlist
 
