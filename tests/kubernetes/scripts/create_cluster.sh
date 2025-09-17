@@ -10,9 +10,12 @@ set -e
 PROVIDER=${1:-"gcp"}
 shift || true
 
+# Global defaults
+CLUSTER_NAME_DEFAULT="skypilot-helm-test-cluster"
+
 case "$PROVIDER" in
   gcp|GCP)
-    CLUSTER_NAME=${1:-"skypilot-helm-test-cluster"}
+    CLUSTER_NAME=${1:-"$CLUSTER_NAME_DEFAULT"}
     PROJECT_ID=${2:-$(gcloud config get-value project)}
     ZONE=${3:-"us-central1-a"}
     NODE_COUNT=${4:-1}
@@ -39,7 +42,7 @@ case "$PROVIDER" in
     echo "Cluster credentials configured for kubectl"
     ;;
   eks|EKS)
-    CLUSTER_NAME=${1:-"skypilot-helm-test-eks"}
+    CLUSTER_NAME=${1:-"$CLUSTER_NAME_DEFAULT"}
     REGION=${2:-"us-east-2"}
     NODE_COUNT=${3:-1}
     INSTANCE_TYPE=${4:-"m5.2xlarge"}
@@ -59,11 +62,15 @@ metadata:
   name: ${CLUSTER_NAME}
   region: ${REGION}
 ${EKS_VPC_CONFIG}
+iam:
+  withOIDC: true
 managedNodeGroups:
   - name: ng-default
     instanceType: ${INSTANCE_TYPE}
     desiredCapacity: ${NODE_COUNT}
     amiFamily: AmazonLinux2
+addons:
+  - name: aws-ebs-csi-driver
 EOF
 
     echo "Using generated config at $RESOLVED_CONFIG"
@@ -90,6 +97,24 @@ EOF
             fi
         done
     fi
+
+    # Set default gp3 StorageClass (EBS CSI)
+    echo "Applying default gp3 StorageClass (EBS CSI)..."
+    cat > /tmp/eks-gp3-sc.yaml <<'SCYAML'
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+SCYAML
+    kubectl apply -f /tmp/eks-gp3-sc.yaml
 
     echo "EKS cluster '$CLUSTER_NAME' created successfully!"
     echo "Cluster credentials configured for kubectl"

@@ -9,9 +9,12 @@ set -e
 PROVIDER=${1:-"gcp"}
 shift || true
 
+# Global defaults
+CLUSTER_NAME_DEFAULT="skypilot-helm-test-cluster"
+
 case "$PROVIDER" in
   gcp|GCP)
-    CLUSTER_NAME=${1:-"skypilot-helm-test-cluster"}
+    CLUSTER_NAME=${1:-"$CLUSTER_NAME_DEFAULT"}
     PROJECT_ID=${2:-$(gcloud config get-value project)}
     ZONE=${3:-"us-central1-a"}
     echo "Deleting GKE cluster '$CLUSTER_NAME' in project '$PROJECT_ID', zone '$ZONE'..."
@@ -22,7 +25,7 @@ case "$PROVIDER" in
     echo "GKE cluster '$CLUSTER_NAME' deleted (or did not exist)."
     ;;
   eks|EKS)
-    CLUSTER_NAME=${1:-"skypilot-helm-test-eks"}
+    CLUSTER_NAME=${1:-"$CLUSTER_NAME_DEFAULT"}
     REGION=${2:-"us-east-2"}
     echo "Deleting EKS cluster '$CLUSTER_NAME' in region '$REGION'..."
     eksctl delete cluster --name "$CLUSTER_NAME" --region "$REGION" || true

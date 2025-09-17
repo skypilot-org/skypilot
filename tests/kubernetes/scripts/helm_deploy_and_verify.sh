@@ -22,8 +22,8 @@ helm repo update
 # Generate a random 16-character password using /dev/urandom (macOS compatible)
 WEB_PASSWORD=$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
 
-# Create auth string
-AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
+# Create auth string (Apache MD5 apr1); pass raw via --set-string (no escaping)
+AUTH_STRING=$(htpasswd -nb "$WEB_USERNAME" "$WEB_PASSWORD")
 
 # Create namespace first if it doesn't exist
 echo "Creating namespace $NAMESPACE if it doesn't exist..."
@@ -77,7 +77,7 @@ fi
 HELM_ARGS=(
     --namespace $NAMESPACE
     --create-namespace
-    --set ingress.authCredentials=$AUTH_STRING
+    --set-string ingress.authCredentials="$AUTH_STRING"
 )
 
 # Add AWS credentials settings if enabled
@@ -110,21 +110,45 @@ fi
 
 # Get the API server URL
 echo "Getting API server URL..."
-HOST=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller --namespace $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+# Wait for LoadBalancer to have an ingress address
+echo "Waiting for LoadBalancer external address..."
+for i in {1..40}; do
+    ingress_obj=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller --namespace $NAMESPACE -o json | jq -r '.status.loadBalancer.ingress[0] // empty') || true
+    if [ -n "$ingress_obj" ] && [ "$ingress_obj" != "null" ]; then
+        break
+    fi
+    echo "... still waiting for external address (attempt $i)"
+    sleep 15
+done
+
+# Prefer hostname (EKS) and fallback to IP
+HOST=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller --namespace $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+if [ -z "$HOST" ]; then
+    HOST=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller --namespace $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+fi
+
+if [ -z "$HOST" ]; then
+    echo "Error: LoadBalancer external address not assigned"
+    kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller -n $NAMESPACE -o wide | cat
+    kubectl describe svc ${RELEASE_NAME}-ingress-nginx-controller -n $NAMESPACE | cat
+    exit 1
+fi
+
 ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
 
 echo "API server endpoint: $ENDPOINT"
 
 # Test the API server with retry logic
 echo "Testing API server health endpoint..."
-echo "Endpoint: $ENDPOINT/api/health"
+echo "Endpoint: http://$HOST/api/health"
 MAX_RETRIES=10  # 5 minutes with 30 second intervals
 RETRY_INTERVAL=30
 RETRY_COUNT=0
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: Testing health endpoint..."
-    HEALTH_RESPONSE=$(curl -s ${ENDPOINT}/api/health)
+    HEALTH_RESPONSE=$(curl -s -u "$WEB_USERNAME:$WEB_PASSWORD" "http://$HOST/api/health")
     echo "Health response: $HEALTH_RESPONSE"
 
     # Check if response is valid JSON (not HTML error page)
