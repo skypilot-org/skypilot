@@ -63,6 +63,8 @@ from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
+from sky.serve import serve_state
+from sky.serve import serve_utils as serve_utils_module
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import requests
@@ -4780,7 +4782,7 @@ def pool():
 @pool.command('apply', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('pool_yaml',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
@@ -4799,13 +4801,18 @@ def pool():
                     'with rolling update. If "blue_green", cluster pool will '
                     'be updated with blue-green update. This option is only '
                     'valid when the pool is already running.'))
+@click.option('--workers',
+              default=None,
+              type=int,
+              required=False,
+              help='Can be used to update the number of workers in the pool.')
 @_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS +
                     flags.COMMON_OPTIONS)
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
 def jobs_pool_apply(
-    pool_yaml: Tuple[str, ...],
+    pool_yaml: Optional[Tuple[str, ...]],
     pool: Optional[str],  # pylint: disable=redefined-outer-name
     workdir: Optional[str],
     infra: Optional[str],
@@ -4827,20 +4834,76 @@ def jobs_pool_apply(
     disk_tier: Optional[str],
     network_tier: Optional[str],
     mode: str,
+    workers: Optional[int],
     yes: bool,
     async_call: bool,
 ):
-    """Apply a config to a cluster pool for managed jobs submission.
+    """Either apply a config to a cluster pool for managed jobs submission 
+    or update the number of workers in the pool. One of POOL_YAML or --workers
+    must be provided.
 
-    If the pool is already running, the config will be applied to the pool.
-    Otherwise, a new pool will be created.
+    Config:
+        If the pool is already running, the config will be applied to the pool.
+        Otherwise, a new pool will be created.
 
-    POOL_YAML must point to a valid YAML file.
+    Workers:
+        The --workers option can be used to override the number of workers
+        specified in the YAML file, or to update workers without a YAML file.
+
+        Examples:
+            sky jobs pool apply pool.yaml -p my-pool --workers 5
+            sky jobs pool apply pool.yaml --workers 3
+            sky jobs pool apply -p my-pool --workers 5  # Update workers only
     """
+    # Validate that either YAML file or --workers is provided
+    if not pool_yaml and workers is None:
+        raise click.UsageError(
+            'Either POOL_YAML file or --workers option must be provided.')
+    
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
     if pool is None:
         pool = serve_lib.generate_service_name(pool=True)
+
+    # If no YAML file is provided, we load the existing pool configuration
+    if not pool_yaml:
+        if workers is None:
+            raise click.UsageError(
+                'Either POOL_YAML file or --workers option must be provided.')
+        
+        existing_record = serve_state.get_service_from_name(pool)
+        if existing_record is None:
+            raise click.UsageError(
+                f'Pool {pool} does not exist. Please provide a '
+                'YAML file to create a new pool.')
+        
+        if not existing_record['pool']:
+            raise click.UsageError(
+                f'{pool} is not a pool. Please provide a YAML file.')
+        
+        # Load the existing YAML configuration
+        latest_yaml_path = serve_utils_module.generate_task_yaml_file_name(
+            pool, existing_record['version'])
+        raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
+        original_config = raw_yaml_config.get('_user_specified_yaml')
+        if original_config is None:
+            # Fall back to old display format
+            original_config = raw_yaml_config
+            original_config.pop('run', None)
+            svc = original_config.pop('service')
+            if svc is not None:
+                svc.pop('pool', None)
+                original_config['pool'] = svc
+        else:
+            original_config = yaml_utils.safe_load(original_config)
+        
+        # Create a temporary YAML file with the existing configuration
+        import tempfile
+        import os
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as tmp_file:
+            yaml_utils.dump_yaml(tmp_file.name, original_config)
+            pool_yaml = (tmp_file.name,)
+            tmp_yaml_path = tmp_file.name
 
     task = _generate_task_with_service(
         service_name=pool,
@@ -4865,6 +4928,7 @@ def jobs_pool_apply(
         ports=ports,
         not_supported_cmd='sky jobs pool up',
         pool=True,
+        workers=workers,
     )
     assert task.service is not None
     if not task.service.pool:
@@ -4883,6 +4947,14 @@ def jobs_pool_apply(
                                          pool,
                                          mode=serve_lib.UpdateMode(mode),
                                          _need_confirmation=not yes)
+    
+    # Clean up temporary YAML file if it was created
+    if 'tmp_yaml_path' in locals():
+        try:
+            os.unlink(tmp_yaml_path)
+        except OSError:
+            pass  # Ignore cleanup errors
+    
     _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
 
 
@@ -5200,6 +5272,7 @@ def _generate_task_with_service(
         network_tier: Optional[str],
         not_supported_cmd: str,
         pool: bool,  # pylint: disable=redefined-outer-name
+        workers: Optional[int] = None,
 ) -> task_lib.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
@@ -5245,6 +5318,9 @@ def _generate_task_with_service(
         if task.service.ports is not None or ports:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cannot specify ports in a cluster pool.')
+        # Override workers if provided via command line.
+        if workers is not None:
+            task.service.min_replicas = workers
         return task
 
     # NOTE(yi): we only allow one service port now.
