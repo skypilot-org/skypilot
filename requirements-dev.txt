@@ -2,7 +2,7 @@
 # match the version with .pre-commit-config.yaml
 yapf==0.32.0
 # match the version with .pre-commit-config.yaml
-pylint==3.2.7
+pylint==3.3.8
 # formatting the node_providers code from upstream ray-project/ray project
 # match the version with .pre-commit-config.yaml
 black==22.10.0

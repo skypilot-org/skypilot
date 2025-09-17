@@ -32,7 +32,7 @@ jobs:
         source ~/test-env/bin/activate
         uv pip install --prerelease=allow "azure-cli>=2.65.0"
         uv pip install ".[all]"
-        uv pip install pylint==3.2.7
+        uv pip install pylint==3.3.8
     - name: Analysing the code with pylint
       run: |
         source ~/test-env/bin/activate

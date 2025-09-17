@@ -65,7 +65,7 @@ repos:
         additional_dependencies: [toml==0.10.2] # Match the version from requirements
 
 -   repo: https://github.com/pylint-dev/pylint
-    rev: v3.2.7  # Match the version from requirements
+    rev: v3.3.8  # Match the version from requirements
     hooks:
     -   id: pylint
         language_version: python3.11 # pinned per repo note
