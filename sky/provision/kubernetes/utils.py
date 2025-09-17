@@ -1141,10 +1141,21 @@ def detect_accelerator_resource(
 
     return has_accelerator, cluster_resources
 
+
 import copy
 
+from kubernetes.client import ApiClient
 from kubernetes.client import V1Node
 from kubernetes.client import V1Pod
+
+api_client = ApiClient()
+
+
+def k8s_copy(obj):
+    """Fast copy via serialization + deserialization."""
+    data = api_client.sanitize_for_serialization(obj)  # obj -> dict
+    return api_client._ApiClient__deserialize(data,
+                                              obj.__class__)  # dict -> obj
 
 
 @_retry_on_error(resource_type='node')
@@ -1161,7 +1172,7 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
     count = 500
     nodelist = []
     for i in range(count):
-        node = copy.deepcopy(nodes[i % len(nodes)])
+        node = k8s_copy(nodes[i % len(nodes)])
         node.metadata.name = f'node-{i}'
         nodelist.append(node)
     return nodelist
@@ -1184,7 +1195,7 @@ def get_all_pods_in_kubernetes_cluster(*,
     count = 2000
     podlist = []
     for i in range(count):
-        pod = copy.deepcopy(pods[i % len(pods)])
+        pod = k8s_copy(pods[i % len(pods)])
         pod.metadata.name = f'pod-{i}'
         podlist.append(pod)
     return podlist
@@ -3110,6 +3121,7 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
             unlabeled_nodes.append(node)
 
     return unlabeled_nodes
+
 
 import memory_profiler
 
