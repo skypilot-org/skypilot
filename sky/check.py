@@ -321,7 +321,9 @@ def check_capability(
                 clouds_with_capability[workspace].append(cloud)
     return clouds_with_capability
 
+import memory_profiler
 
+@memory_profiler.profile
 def check(
     quiet: bool = False,
     verbose: bool = False,
