@@ -162,7 +162,8 @@ def test_vllm_pool(generic_cloud: str):
                     f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."',
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=f'sky jobs pool down {pool_name} -y',
+                teardown=(f'sky jobs pool down {pool_name} -y && '
+                          f'sky storage delete -y {bucket_name} || true'),
             )
 
             smoke_tests_utils.run_one_test(test)
