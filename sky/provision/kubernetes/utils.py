@@ -1141,6 +1141,9 @@ def detect_accelerator_resource(
 
     return has_accelerator, cluster_resources
 
+import copy
+from kubernetes.client import V1Node, V1Pod
+
 @_retry_on_error(resource_type='node')
 def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes nodes in the context.
@@ -1152,7 +1155,13 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
 
     nodes = kubernetes.core_api(context).list_node(
         _request_timeout=kubernetes.API_TIMEOUT).items
-    return nodes
+    count = 500
+    nodelist = []
+    for i in range(count):
+        node = copy.deepcopy(nodes[i % len(nodes)])
+        node.metadata.name = f'node-{i}'
+        nodelist.append(node)
+    return nodelist
 
 
 @_retry_on_error(resource_type='pod')
@@ -1168,7 +1177,14 @@ def get_all_pods_in_kubernetes_cluster(*,
 
     pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
         _request_timeout=kubernetes.API_TIMEOUT).items
-    return pods
+
+    count = 2000
+    podlist = []
+    for i in range(count):
+        pod = copy.deepcopy(pods[i % len(pods)])
+        pod.metadata.name = f'pod-{i}'
+        podlist.append(pod)
+    return podlist
 
 
 def check_instance_fits(context: Optional[str],
