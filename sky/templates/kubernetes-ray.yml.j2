@@ -823,7 +823,8 @@ available_node_types:
                 fi
                 $(prefix_cmd) cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
                 $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
-                FUSERMOUNT3_PATH=$(which fusermount3)
+                # "|| true" because fusermount3 is not always available
+                FUSERMOUNT3_PATH=$(which fusermount3) || true
                 if [ -z "$FUSERMOUNT3_PATH" ]; then
                     FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
                 fi
