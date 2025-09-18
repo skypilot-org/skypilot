@@ -2031,7 +2031,8 @@ def test_long_setup_run_script(generic_cloud: str):
     'examples/distributed-pytorch/train-rdzv.yaml'
 ])
 def test_min_gpt(generic_cloud: str, train_file: str):
-    accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    if generic_cloud == 'kubernetes':
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     name = smoke_tests_utils.get_cluster_name()
 
     def read_and_modify(file_path: str) -> str:
