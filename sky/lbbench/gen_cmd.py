@@ -38,6 +38,13 @@ enabled_systems = [
 describes = [raw_describes[i] for i in enabled_systems]
 presents = [raw_presents[i] for i in enabled_systems]
 
+# Only systems backed by Sky Serve require service names.
+# Systems with indices < len(utils.single_lb_clusters) are single-LB clusters
+# that are addressed directly via cluster IP:port and do not need names.
+serve_systems = [
+    i for i in enabled_systems if i >= len(utils.single_lb_clusters)
+]
+
 ct = None
 sn2st = None
 
@@ -61,7 +68,8 @@ def _get_endpoint_for_traffic(index: int, sns: List[str]) -> str:
     global sn2st
     if sn2st is None:
         sn2st = {s['name']: s for s in utils.sky_serve_status()}
-    idx_in_sns = enabled_systems.index(index)
+    # Map to the position among serve-backed systems only.
+    idx_in_sns = serve_systems.index(index)
     if sns[idx_in_sns] not in sn2st:
         raise ValueError(f'Service {sns[idx_in_sns]} not found')
     return sn2st[sns[idx_in_sns]]['endpoint']
@@ -82,9 +90,13 @@ def main():
     parser.add_argument('--reload-client', action='store_true')
     args = parser.parse_args()
     sns = args.service_names
-    if len(sns) != len(describes):
-        raise ValueError(f'Expected {len(describes)} service names for '
-                         f'{", ".join(describes)}')
+    # Validate only against serve-backed systems.
+    if len(sns) != len(serve_systems):
+        expected = [raw_describes[i] for i in serve_systems]
+        raise ValueError(
+            f'Expected {len(serve_systems)} service names for '
+            f'{", ".join(expected)}'
+        )
 
     endpoints = [_get_endpoint_for_traffic(i, sns) for i in enabled_systems]
     print(endpoints)
