@@ -3028,6 +3028,7 @@ def get_clusters(
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
     include_credentials: bool = False,
+    summary_response: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -3081,7 +3082,7 @@ def get_clusters(
         user_hashes_filter=user_hashes_filter,
         workspaces_filter=accessible_workspaces,
         cluster_names=cluster_names,
-    )
+        summary_response=summary_response)
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
@@ -3152,8 +3153,8 @@ def get_clusters(
                         'ssh_private_key_content']
             record['credentials'] = credential
 
-    def _update_records_with_resources(
-            records: List[Optional[Dict[str, Any]]]) -> None:
+    def _update_records_with_resources(records: List[Optional[Dict[str, Any]]],
+                                       summary_response: bool = False) -> None:
         """Add the resources to the record."""
         for record in _get_records_with_handle(records):
             handle = record['handle']
@@ -3171,6 +3172,8 @@ def get_clusters(
             record['accelerators'] = (
                 f'{handle.launched_resources.accelerators}'
                 if handle.launched_resources.accelerators else None)
+            if summary_response:
+                record.pop('handle')
 
     # Add auth_config to the records
     _update_records_with_resources_str(records)
@@ -3178,7 +3181,7 @@ def get_clusters(
         _update_records_with_credentials(records)
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
-        _update_records_with_resources(records)
+        _update_records_with_resources(records, summary_response)
         return records
 
     plural = 's' if len(records) > 1 else ''
@@ -3273,7 +3276,7 @@ def get_clusters(
             logger.warning(f'  {bright}{cluster_name}{reset}: {e}')
 
     # Add resources to the records
-    _update_records_with_resources(kept_records)
+    _update_records_with_resources(kept_records, summary_response)
     return kept_records
 
 
