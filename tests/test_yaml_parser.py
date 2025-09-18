@@ -185,3 +185,25 @@ def test_replace_envs_in_workdir(tmpdir, tmp_path):
             """), tmp_path)
     task = Task.from_yaml(config_path)
     assert task.workdir == tmpdir
+
+
+def test_list_of_dicts_accelerators(tmp_path):
+    config_path = _create_config_file(
+        textwrap.dedent("""\
+            resources:
+                accelerators:
+                  - T4: 1
+                  - L4: 2
+            """), tmp_path)
+    task = Task.from_yaml(config_path)
+
+    resources_set = task.resources
+    assert isinstance(resources_set, set)
+    assert len(resources_set) == 2
+
+    # Extract all accelerators
+    all_accels = {}
+    for r in resources_set:
+        if r.accelerators:
+            all_accels.update(r.accelerators)
+    assert all_accels == {'T4': 1, 'L4': 2}

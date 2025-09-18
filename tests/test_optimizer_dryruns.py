@@ -867,3 +867,164 @@ def test_candidate_logging(enable_all_clouds, capfd):
         'L4:1' in line and '✔' in line for line in stdout.splitlines())
     assert l4_section, 'Expected L4:1 to be chosen.'
     assert f'Multiple {sky.AWS()} instances satisfy L4:1. The cheapest [spot](gpus=L4:1' in stdout, 'Expected L4:1 to be marked as cheapest.'
+
+
+def test_parse_accelerators_list_of_dicts_from_yaml():
+    """Test parsing accelerators specified as list of dicts from YAML."""
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators:
+          - T4: 1
+          - V100: 2""")
+
+    def test_fn(task):
+        resources_set = task.resources
+        assert isinstance(resources_set, set)
+        assert len(resources_set) == 2
+
+        # Extract all accelerators from the set
+        all_accels = {}
+        for r in resources_set:
+            if r.accelerators:
+                all_accels.update(r.accelerators)
+        assert all_accels == {'T4': 1, 'V100': 2}
+
+    _test_parse_task_yaml(spec, test_fn)
+
+
+def test_parse_accelerators_mixed_list_from_yaml():
+    """Test parsing accelerators with mixed list format from YAML."""
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators:
+          - T4: 1
+          - "V100:2"
+          - A100: 1""")
+
+    def test_fn(task):
+        resources_set = task.resources
+        assert isinstance(resources_set, set)
+        assert len(resources_set) == 3
+
+        all_accels = {}
+        for r in resources_set:
+            if r.accelerators:
+                all_accels.update(r.accelerators)
+        assert all_accels == {'T4': 1, 'V100': 2, 'A100': 1}
+
+    _test_parse_task_yaml(spec, test_fn)
+
+
+def test_parse_accelerators_fractional_from_yaml():
+    """Test parsing fractional accelerators from YAML."""
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators:
+          - V100: 0.5
+          - T4: 1.5""")
+
+    def test_fn(task):
+        resources_set = task.resources
+        assert isinstance(resources_set, set)
+        assert len(resources_set) == 2
+
+        all_accels = {}
+        for r in resources_set:
+            if r.accelerators:
+                all_accels.update(r.accelerators)
+        assert all_accels == {'V100': 0.5, 'T4': 1.5}
+
+    _test_parse_task_yaml(spec, test_fn)
+
+
+def test_parse_accelerators_validation_errors_from_yaml():
+    """Test that validation errors are properly raised when parsing invalid YAML."""
+
+    # Test null values in YAML
+    spec_null = textwrap.dedent("""\
+      resources:
+        accelerators:
+          - T4: 1
+          - V100: null""")
+
+    def test_null_fn(task):
+        pass  # Should not reach this point
+
+    with pytest.raises(AssertionError) as exc_info:
+        _test_parse_task_yaml(spec_null, test_null_fn)
+    assert 'Accelerator count cannot be null' in str(exc_info.value)
+
+    # Test negative values in YAML
+    spec_negative = textwrap.dedent("""\
+      resources:
+        accelerators:
+          - T4: -1""")
+
+    def test_negative_fn(task):
+        pass  # Should not reach this point
+
+    with pytest.raises(AssertionError) as exc_info:
+        _test_parse_task_yaml(spec_negative, test_negative_fn)
+    assert 'must be a positive number' in str(exc_info.value)
+
+    # Test zero values in YAML
+    spec_zero = textwrap.dedent("""\
+      resources:
+        accelerators:
+          - T4: 0""")
+
+    def test_zero_fn(task):
+        pass  # Should not reach this point
+
+    with pytest.raises(AssertionError) as exc_info:
+        _test_parse_task_yaml(spec_zero, test_zero_fn)
+    assert 'must be a positive number' in str(exc_info.value)
+
+
+def test_parse_accelerators_equivalence_from_yaml():
+    """Test that different accelerator formats produce equivalent results when parsed from YAML."""
+
+    # Dict format
+    spec_dict = textwrap.dedent("""\
+      resources:
+        accelerators:
+          T4: 1
+          V100: 2""")
+
+    # List of strings format
+    spec_list_str = textwrap.dedent("""\
+      resources:
+        accelerators:
+          - "T4:1"
+          - "V100:2" """)
+
+    # List of dicts format
+    spec_list_dict = textwrap.dedent("""\
+      resources:
+        accelerators:
+          - T4: 1
+          - V100: 2""")
+
+    # Mixed format
+    spec_mixed = textwrap.dedent("""\
+      resources:
+        accelerators:
+          - T4: 1
+          - "V100:2" """)
+
+    def test_fn(task):
+        resources_set = task.resources
+        assert isinstance(resources_set, set)
+        assert len(resources_set) == 2
+
+        all_accels = {}
+        for r in resources_set:
+            if r.accelerators:
+                all_accels.update(r.accelerators)
+        assert all_accels == {'T4': 1, 'V100': 2}
+
+    # Test all formats produce the same result
+    _test_parse_task_yaml(spec_dict, test_fn)
+    _test_parse_task_yaml(spec_list_str, test_fn)
+    _test_parse_task_yaml(spec_list_dict, test_fn)
+    _test_parse_task_yaml(spec_mixed, test_fn)

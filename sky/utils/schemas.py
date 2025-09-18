@@ -392,26 +392,81 @@ def get_resources_schema():
             # We redefine the 'accelerators' field to allow one line list or
             # a set of accelerators.
             'accelerators': {
-                # {'V100:1', 'A100:1'} will be
-                # read as a string and converted to dict.
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': {
-                        'anyOf': [{
-                            'type': 'null',
-                        }, {
-                            'type': 'number',
-                        }]
-                    }
-                }, {
-                    'type': 'array',
-                    'items': {
+                # {'V100:1', 'A100:1'} will be read as a
+                # string and converted to dict.
+                'anyOf': [
+                    {
                         'type': 'string',
-                    }
-                }]
+                    },
+                    {
+                        # dict-of-dicts case, e.g. {T4: 1, L4: 2}
+                        'type': 'object',
+                        'required': [],
+                        'minProperties': 1,
+                        'additionalProperties': {
+                            # Allow any value type for custom validation
+                            # (int, float, null, etc.)
+                            'anyOf': [
+                                {
+                                    'type': 'number',
+                                    'minimum': 0
+                                },  # Allow both int and float
+                                {
+                                    'type': 'null'
+                                },
+                                {
+                                    'type': 'boolean'
+                                },
+                                {
+                                    'type': 'string'
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        # list case, where each item is either
+                        # "T4:1" or {"T4":1}
+                        'type': 'array',
+                        'items': {
+                            'anyOf': [
+                                {
+                                    'type': 'string'
+                                },
+                                {
+                                    'type': 'object',
+                                    'additionalProperties': {
+                                        'anyOf': [
+                                            {
+                                                'type': 'number',
+                                                'minimum': 0
+                                            },  # Allow both int and float
+                                            {
+                                                'type': 'null'
+                                            },
+                                            {
+                                                'type': 'boolean'
+                                            },
+                                            {
+                                                'type': 'string'
+                                            }
+                                        ]
+                                    },
+                                },
+                                # Allow other types so custom validation
+                                # can catch them
+                                {
+                                    'type': 'integer'
+                                },
+                                {
+                                    'type': 'boolean'
+                                },
+                                {
+                                    'type': 'null'
+                                }
+                            ],
+                        },
+                    },
+                ],
             },
             'any_of': {
                 'type': 'array',
@@ -420,7 +475,7 @@ def get_resources_schema():
             'ordered': {
                 'type': 'array',
                 'items': multi_resources_schema,
-            }
+            },
         },
     }
 

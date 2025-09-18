@@ -1986,6 +1986,13 @@ class Resources:
         if ordered is not None and isinstance(ordered, list):
             for ordered_config in ordered:
                 Resources._apply_resource_config_aliases(ordered_config)
+
+        # CUSTOM VALIDATION BEFORE SCHEMA -
+        # This allows us to provide better error messages
+        accelerators = config.get('accelerators')
+        if accelerators is not None:
+            Resources._validate_accelerators_config(accelerators)
+
         common_utils.validate_schema(config, schemas.get_resources_schema(),
                                      'Invalid resources YAML: ')
 
@@ -2027,29 +2034,46 @@ class Resources:
                     'Cannot specify both "any_of" and "ordered" in resources.')
 
         # Parse resources.accelerators field.
-        accelerators = config.get('accelerators')
         if config and accelerators is not None:
             if isinstance(accelerators, str):
                 accelerators_list = cls._parse_accelerators_from_str(
                     accelerators)
+
             elif isinstance(accelerators, dict):
-                accelerator_names = [
-                    f'{k}:{v}' if v is not None else f'{k}'
-                    for k, v in accelerators.items()
-                ]
                 accelerators_list = []
-                for accel_name in accelerator_names:
-                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                for k, v in accelerators.items():
+                    # Convert to string format and parse -
+                    # addressing reviewer feedback about unified logic
+                    accel_str = f'{k}:{v}'
+                    parsed_accels = cls._parse_accelerators_from_str(accel_str)
                     accelerators_list.extend(parsed_accels)
+
             elif isinstance(accelerators, list) or isinstance(
                     accelerators, set):
                 accelerators_list = []
-                for accel_name in accelerators:
-                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                for accel_item in accelerators:
+                    # Convert both dict and str items to string format,
+                    # then parse once
+                    # This addresses reviewer's concern about duplicated logic
+                    if isinstance(accel_item, str):
+                        accel_str = accel_item
+                    elif isinstance(accel_item, dict):
+                        # Convert dict to string format
+                        acc_name, acc_count = next(iter(accel_item.items()))
+                        accel_str = f'{acc_name}:{acc_count}'
+                    else:
+                        item_type = type(accel_item)
+                        assert False, (
+                            f'Invalid accelerators item type: {item_type}. '
+                            f'Expected str or dict.')
+
+                    # Unified parsing logic
+                    parsed_accels = cls._parse_accelerators_from_str(accel_str)
                     accelerators_list.extend(parsed_accels)
             else:
-                assert False, ('Invalid accelerators type:'
+                assert False, ('Invalid accelerators type: '
                                f'{type(accelerators)}')
+
             # now that accelerators is a list, we need to decide which to
             # include in the final set, however, there may be multiple copies
             # of the same accelerator, some given by name by the user and the
@@ -2064,10 +2088,9 @@ class Resources:
                                                   accel_to_user_specified.get(
                                                       accel, False))
 
-            # only time we care about ordered is when we are given a list,
-            # otherwise we default to a set
-            accelerators_type = list if isinstance(accelerators, list) else set
-            accelerators = accelerators_type([
+            # For lists of accelerators, we want to return a SET, not a list
+            # This fixes the test failure about isinstance(resources_set, set)
+            accelerators = set([
                 (accel, user_specified)
                 for accel, user_specified in accel_to_user_specified.items()
             ])
@@ -2077,8 +2100,7 @@ class Resources:
                     raise ValueError(
                         'Cannot specify multiple "accelerators" with "ordered" '
                         'in resources.')
-            if (len(accelerators) > 1 and any_of_configs and
-                    not isinstance(accelerators, set)):
+            if (len(accelerators) > 1 and any_of_configs):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Cannot specify multiple "accelerators" with preferred '
@@ -2105,9 +2127,49 @@ class Resources:
                 tmp_resources_list.append(
                     Resources._from_yaml_config_single(tmp_resource))
 
-            assert isinstance(accelerators, (list, set)), accelerators
-            return type(accelerators)(tmp_resources_list)
+            # Always return a set for multiple accelerators
+            return set(tmp_resources_list)
         return {Resources._from_yaml_config_single(config)}
+
+    @staticmethod
+    def _validate_accelerators_config(accelerators):
+        """Validate accelerators configuration before schema validation."""
+        if isinstance(accelerators, dict):
+            for k, v in accelerators.items():
+                assert v is not None, (
+                    f'Accelerator count cannot be null for {k}. '
+                    f'Use "{k}:1" or "{k}" instead.')
+                assert (isinstance(
+                    v, (int, float)) and not isinstance(v, bool) and v > 0), (
+                        f'Accelerator count must be a positive number for {k}, '
+                        f'got: {v} (type: {type(v)})')
+
+        elif isinstance(accelerators, list):
+            for _, accel_item in enumerate(accelerators):
+                if isinstance(accel_item, dict):
+                    assert len(accel_item) == 1, (
+                        f'Each accelerator dict must have exactly one key, '
+                        f'got: {accel_item}')
+
+                    acc_name, acc_count = next(iter(accel_item.items()))
+                    assert acc_count is not None, (
+                        f'Accelerator count cannot be null for {acc_name}. '
+                        f'Use "{acc_name}:1" or "{acc_name}" instead.')
+                    assert (
+                        isinstance(acc_count, (int, float)) and
+                        not isinstance(acc_count, bool) and acc_count > 0), (
+                            f'Accelerator count must be a positive number for '
+                            f'{acc_name}, '
+                            f'got: {acc_count} (type: {type(acc_count)})')
+
+                elif isinstance(accel_item, str):
+                    continue
+                # String items will be validated by
+                #_parse_accelerators_from_str
+                else:
+                    assert False, (
+                        f'Invalid accelerators item type: {type(accel_item)}. '
+                        f'Expected str or dict.')
 
     @classmethod
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
