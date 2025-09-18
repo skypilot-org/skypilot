@@ -149,7 +149,7 @@ HEALTH_RESPONSE=""
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: Testing health endpoint..."
-    HEALTH_RESPONSE=$(curl -s -u "$WEB_USERNAME:$WEB_PASSWORD" "http://$HOST/api/health" 2>&1)
+    HEALTH_RESPONSE=$(curl -s -u "$WEB_USERNAME:$WEB_PASSWORD" "http://$HOST/api/health" 2>&1) || true
     echo "Health response: '$HEALTH_RESPONSE'"
     echo "Response length: ${#HEALTH_RESPONSE} characters"
 
