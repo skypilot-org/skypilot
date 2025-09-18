@@ -3229,7 +3229,7 @@ def _down_or_stop_clusters(
     request_ids = []
 
     successes: List[str] = []
-    failures: List[Tuple[str, Exception]] = []
+    failures: List[Tuple[str, str]] = []
 
 
     def _down_or_stop(name: str):
