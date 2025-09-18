@@ -24,6 +24,7 @@ Install SkyPilot using pip:
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
           pip install "skypilot[oci]"
+          # Nebius is only supported for Python >= 3.10
           pip install "skypilot[nebius]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
@@ -35,9 +36,8 @@ Install SkyPilot using pip:
           # SCP is only supported for Python <= 3.11
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
-          # Nebius is only supported for Python >= 3.10
-          pip install "skypilot[seeweb]"
           # Seeweb is only supported for Python >= 3.10
+          pip install "skypilot[seeweb]"
 
           pip install "skypilot[all]"
 
@@ -662,13 +662,6 @@ Seeweb
 
     [DEFAULT]
     api_key = <your-api-token>
-
-4. install Seeweb Library:
-
-.. code-block:: bash
-
-   pip install ecsapi
-
 
 
 Request quotas for first time users

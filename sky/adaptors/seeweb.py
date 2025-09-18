@@ -1,9 +1,9 @@
 """ Seeweb Adaptor """
 import configparser
-from pathlib import Path
+import pathlib
 from typing import Optional
 
-from pydantic import ValidationError
+import pydantic
 import requests  # type: ignore
 
 from sky.adaptors import common
@@ -47,7 +47,7 @@ def check_compute_credentials() -> bool:
     Returns True if credentials are valid; otherwise raises a SeewebError.
     """
     # Read API key from standard Seeweb configuration file
-    key_path = Path('~/.seeweb_cloud/seeweb_keys').expanduser()
+    key_path = pathlib.Path('~/.seeweb_cloud/seeweb_keys').expanduser()
     if not key_path.exists():
         raise SeewebCredentialsFileNotFound(
             'Missing Seeweb API key file ~/.seeweb_cloud/seeweb_keys')
@@ -88,7 +88,7 @@ def check_storage_credentials() -> bool:
 def client():
     """Returns an authenticated ecsapi.Api object."""
     # Create authenticated client using the same credential pattern
-    key_path = Path('~/.seeweb_cloud/seeweb_keys').expanduser()
+    key_path = pathlib.Path('~/.seeweb_cloud/seeweb_keys').expanduser()
     if not key_path.exists():
         raise SeewebCredentialsFileNotFound(
             'Missing Seeweb API key file ~/.seeweb_cloud/seeweb_keys')
@@ -114,7 +114,7 @@ def client():
             timeout: Optional[int] = None):  # type: ignore[override]
         try:
             return orig_fetch_servers(timeout=timeout)
-        except ValidationError:
+        except pydantic.ValidationError:
             # Fallback path: fetch raw JSON, drop snapshot fields, then validate
             # pylint: disable=protected-access
             base_url = api._Api__generate_base_url()  # type: ignore
@@ -140,7 +140,7 @@ def client():
                                 timeout: Optional[int] = None):
         try:
             return orig_delete_server(server_name, timeout=timeout)
-        except ValidationError:
+        except pydantic.ValidationError:
             # Fallback: perform raw DELETE and interpret not_found as success
             # pylint: disable=protected-access
             base_url = api._Api__generate_base_url()  # type: ignore
