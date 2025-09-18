@@ -197,7 +197,16 @@ class DockerInitializer:
              run_env='host',
              wait_for_docker_daemon: bool = False,
              separate_stderr: bool = False,
-             log_err_when_fail: bool = True) -> str:
+             log_err_when_fail: bool = True,
+             flock_name: str = None,
+             flock_args: str = None,
+             ) -> str:
+
+        if flock_name:
+            cmd = (
+                f'flock {flock_args} /tmp/{flock_name} '
+                f'-c {shlex.quote(cmd)}'
+            )
 
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
@@ -259,15 +268,11 @@ class DockerInitializer:
         if self._check_container_exited():
             self.initialized = True
             self._run(f'{self.docker_cmd} start {self.container_name}')
-            inner = (
+            cmd = (
                 f"{self.docker_cmd} exec {self.container_name} "
                 f"/bin/bash -lc {shlex.quote('sudo service ssh start')}"
             )
-            cmd = (
-                f"flock -s -w 1 /tmp/{self.container_name}.lifecycle.lock "
-                f"-c {shlex.quote(inner)}"
-            )
-            self._run(cmd)
+            self._run(cmd, flock_name=f'{self.container_name}.sky.lifecycle.lock', flock_args='-s -w 1')
             return self._run('whoami', run_env='docker')
 
         # SkyPilot: Docker login if user specified a private docker registry.
@@ -367,8 +372,9 @@ class DockerInitializer:
                 self.docker_cmd,
             )
             self._run(
-                f"flock -x -w 10 /tmp/{self.container_name}.lifecycle.lock "
-                f"-c {shlex.quote(f'{remove_container_cmd} && {start_command}')}"
+                f'{remove_container_cmd} && {start_command}',
+                flock_name=f'{self.container_name}.sky.lifecycle.lock', 
+                flock_args='-x -w 10'
             )
 
         # SkyPilot: Setup Commands.
@@ -387,18 +393,19 @@ class DockerInitializer:
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;',
             run_env='docker')
         # Install dependencies.
-        self._run(
-            "bash -lc '"
-            "exec 200>/var/tmp/sky_apt.lock; "
-            "flock -x -w 120 200 || exit 1; "
-            "export DEBIAN_FRONTEND=noninteractive; "
-            "sudo apt-get -yq update && "
+        cmd = (
+            'bash -lc \''
+            'exec 200>/var/tmp/sky_apt.lock; '
+            'flock -x -w 120 200 || exit 1; '
+            'export DEBIAN_FRONTEND=noninteractive; '
+            'sudo apt-get -yq update && '
             # Our mount script will install gcsfuse without fuse package.
             # We need to install fuse package first to enable storage mount.
             # The dpkg option is to suppress the prompt for fuse installation.
-            "sudo apt-get -o DPkg::Options::=--force-confnew install -y "
-            "rsync curl wget patch openssh-server python3-pip fuse'",
-            run_env='docker')
+            'sudo apt-get -o DPkg::Options::=--force-confnew install -y '
+            'rsync curl wget patch openssh-server python3-pip fuse\''
+        )
+        self._run(cmd, run_env='docker')
 
         # Copy local authorized_keys to docker container.
         # Stop and disable jupyter service. This is to avoid port conflict on
@@ -475,10 +482,13 @@ class DockerInitializer:
         if user_pos > -1:
             if self.home_dir is None:
                 cmd = (
-                    f"flock -s -w 1 /tmp/{self.container_name}.lifecycle.lock "
-                    f"-c {shlex.quote(f'{self.docker_cmd} exec {self.container_name} printenv HOME')}"
+                    f'{self.docker_cmd} exec {self.container_name} printenv HOME'
                 )
-                self.home_dir = self._run(cmd, separate_stderr=True)
+                self.home_dir = self._run(
+                    cmd, separate_stderr=True,
+                    flock_name=f'{self.container_name}.sky.lifecycle.lock',
+                    flock_args='-s -w 1'
+                )
                 # Check for unexpected newline in home directory, which can be
                 # a common issue when the output is mixed with stderr.
                 assert '\n' not in self.home_dir, (
