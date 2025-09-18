@@ -663,13 +663,13 @@ class ListAcceleratorCountsBody(RequestBody):
 
 class LocalUpBody(RequestBody):
     """The request body for the local up endpoint."""
+    name: Optional[str] = None
     gpus: bool = True
-    ips: Optional[List[str]] = None
-    ssh_user: Optional[str] = None
-    ssh_key: Optional[str] = None
-    cleanup: bool = False
-    context_name: Optional[str] = None
-    password: Optional[str] = None
+
+
+class LocalDownBody(RequestBody):
+    """The request body for the local down endpoint."""
+    name: Optional[str] = None
 
 
 class SSHUpBody(RequestBody):

@@ -1,6 +1,4 @@
 """SDK functions for cluster/job management."""
-import os
-import shlex
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -9,7 +7,6 @@ import colorama
 from sky import admin_policy
 from sky import backends
 from sky import catalog
-from sky import check as sky_check
 from sky import clouds
 from sky import dag as dag_lib
 from sky import data
@@ -31,7 +28,6 @@ from sky.schemas.api import responses
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
@@ -1273,93 +1269,14 @@ def realtime_kubernetes_gpu_availability(
 # = Local Cluster =
 # =================
 @usage_lib.entrypoint
-def local_up(gpus: bool,
-             ips: Optional[List[str]],
-             ssh_user: Optional[str],
-             ssh_key: Optional[str],
-             cleanup: bool,
-             context_name: Optional[str] = None,
-             password: Optional[str] = None) -> None:
-    """Creates a local or remote cluster."""
-
-    def _validate_args(ips, ssh_user, ssh_key, cleanup):
-        # If any of --ips, --ssh-user, or --ssh-key-path is specified,
-        # all must be specified
-        if bool(ips) or bool(ssh_user) or bool(ssh_key):
-            if not (ips and ssh_user and ssh_key):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'All ips, ssh_user, and ssh_key must be specified '
-                        'together.')
-
-        # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
-        # are all provided
-        if cleanup and not (ips and ssh_user and ssh_key):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'cleanup can only be used with ips, ssh_user and ssh_key.')
-
-    _validate_args(ips, ssh_user, ssh_key, cleanup)
-
-    # If remote deployment arguments are specified, run remote up script
-    if ips:
-        assert ssh_user is not None and ssh_key is not None
-        kubernetes_deploy_utils.deploy_remote_cluster(ips, ssh_user, ssh_key,
-                                                      cleanup, context_name,
-                                                      password)
-    else:
-        # Run local deployment (kind) if no remote args are specified
-        kubernetes_deploy_utils.deploy_local_cluster(gpus)
+def local_up(gpus: bool, name: Optional[str] = None) -> None:
+    """Creates a local cluster."""
+    kubernetes_deploy_utils.deploy_local_cluster(name, gpus)
 
 
-def local_down() -> None:
+def local_down(name: Optional[str] = None) -> None:
     """Tears down the Kubernetes cluster started by local_up."""
-    cluster_removed = False
-
-    path_to_package = os.path.dirname(__file__)
-    down_script_path = os.path.join(path_to_package, 'utils/kubernetes',
-                                    'delete_cluster.sh')
-
-    cwd = os.path.dirname(os.path.abspath(down_script_path))
-    run_command = shlex.split(down_script_path)
-
-    # Setup logging paths
-    run_timestamp = sky_logging.get_run_timestamp()
-    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
-                            'local_down.log')
-
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Removing local cluster',
-                                     log_path=log_path,
-                                     is_local=True)):
-
-        returncode, stdout, stderr = log_lib.run_with_log(cmd=run_command,
-                                                          log_path=log_path,
-                                                          require_outputs=True,
-                                                          stream_logs=False,
-                                                          cwd=cwd)
-        stderr = stderr.replace('No kind clusters found.\n', '')
-
-        if returncode == 0:
-            cluster_removed = True
-        elif returncode == 100:
-            logger.info(ux_utils.error_message('Local cluster does not exist.'))
-        else:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Failed to create local cluster. '
-                                   f'Stdout: {stdout}'
-                                   f'\nError: {stderr}')
-    if cluster_removed:
-        # Run sky check
-        with rich_utils.safe_status(
-                ux_utils.spinner_message('Running sky check...')):
-            sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
-                                       clouds=['kubernetes'],
-                                       quiet=True)
-        logger.info(
-            ux_utils.finishing_message('Local cluster removed.',
-                                       log_path=log_path,
-                                       is_local=True))
+    kubernetes_deploy_utils.teardown_local_cluster(name)
 
 
 @usage_lib.entrypoint
