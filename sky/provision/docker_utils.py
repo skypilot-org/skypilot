@@ -478,9 +478,8 @@ class DockerInitializer:
         user_pos = string.find('~')
         if user_pos > -1:
             if self.home_dir is None:
-                cmd = (
-                    f'{self.docker_cmd} exec {self.container_name} printenv HOME'
-                )
+                cmd = (f'{self.docker_cmd} exec {self.container_name}'
+                       ' printenv HOME')
                 self.home_dir = self._run(
                     cmd,
                     separate_stderr=True,
