@@ -579,6 +579,7 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
 app.add_middleware(APIVersionMiddleware)
+app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
 app.add_middleware(PathCleanMiddleware)
