@@ -726,10 +726,15 @@ def set_failed(
                 # Prepend new failure reason to existing one
                 fields_to_set[spot_table.c.failure_reason] = (
                     failure_reason + '. Previously: ' + existing_reason_row[0])
-            # Use COALESCE for end_at to avoid overriding the existing end_at if
-            # it's already set.
-            fields_to_set[spot_table.c.end_at] = sqlalchemy.func.coalesce(
+            # Use COALESCE for end_at to avoid overriding the existing end_at
+            # if it's already set.
+            # TODO(andy): Pylint complains about the sqlalchemy.func.coalesce
+            # type with E1111 assignment-from-no-return. Python >= 3.11 does not
+            # have this issue. Once we drop support for Python < 3.11, we can
+            # remove this comment.
+            end_at_expr: Any = sqlalchemy.func.coalesce(
                 spot_table.c.end_at, end_time)
+            fields_to_set[spot_table.c.end_at] = end_at_expr
         else:
             fields_to_set[spot_table.c.end_at] = end_time
             where_conditions.append(spot_table.c.end_at.is_(None))
@@ -1677,8 +1682,13 @@ async def set_failed_async(
                 # Prepend new failure reason to existing one
                 fields_to_set[spot_table.c.failure_reason] = (
                     failure_reason + '. Previously: ' + existing_reason_row[0])
-            fields_to_set[spot_table.c.end_at] = sqlalchemy.func.coalesce(
+            # TODO(andy): Pylint complains about the sqlalchemy.func.coalesce
+            # type with E1111 assignment-from-no-return. Python >= 3.11 does not
+            # have this issue. Once we drop support for Python < 3.11, we can
+            # remove this comment.
+            end_at_expr: Any = sqlalchemy.func.coalesce(
                 spot_table.c.end_at, end_time)
+            fields_to_set[spot_table.c.end_at] = end_at_expr
         else:
             fields_to_set[spot_table.c.end_at] = end_time
             where_conditions.append(spot_table.c.end_at.is_(None))
