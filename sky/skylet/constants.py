@@ -56,14 +56,15 @@ SKY_REMOTE_PYTHON_ENV: str = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
-SKY_UV_CMD = f'UV_SYSTEM_PYTHON=false UV_NO_SYNC=1 {SKY_UV_INSTALL_DIR}/uv'
+SKY_UV_CMD = f'UV_SYSTEM_PYTHON=false {SKY_UV_INSTALL_DIR}/uv'
 # This won't reinstall uv if it's already installed, so it's safe to re-run.
 SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
                       'curl -LsSf https://astral.sh/uv/install.sh '
                       f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh')
 SKY_UV_PIP_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip')
 SKY_UV_RUN_CMD: str = (
-    f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run --active')
+    f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run --active --no-project --no-config'
+)
 # Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH and unsetting relevant
 # VIRTUAL_ENV envvars to deactivate the environment. `deactivate` command does
 # not work when conda is used.
@@ -190,7 +191,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # uv to use the python version specified in the `.python_version` file.
     # TODO(zhwu): consider adding --python-preference only-managed to avoid
     # using the system python, if a user report such issue.
-    f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
+    f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10 --no-project --no-config;'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 
