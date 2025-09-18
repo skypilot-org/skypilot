@@ -118,14 +118,14 @@ def apply(
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
+    noun = 'pool' if pool else 'service'
     # Handle the case where task is None and workers is specified
     if task is None:
         if workers is None:
             raise ValueError(f'Cannot create a new {noun} without specifying '
-                           f'task or workers. Please provide either a task '
-                           f'or specify the number of workers.')
+                             f'task or workers. Please provide either a task '
+                             f'or specify the number of workers.')
 
-        print(f'workers: {workers}')
         body = payloads.JobsPoolApplyBody(
             workers=workers,
             pool_name=service_name,
@@ -138,36 +138,35 @@ def apply(
             json=json.loads(body.model_dump_json()),
             timeout=(5, None))
         return server_common.get_request_id(response)
+    else:
+        dag = dag_utils.convert_entrypoint_to_dag(task)
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                dag, at_client_side=True) as dag:
+            sdk.validate(dag)
+            request_id = sdk.optimize(dag)
+            sdk.stream_and_get(request_id)
+            if _need_confirmation:
+                prompt = f'Applying config to {noun} {service_name!r}. Proceed?'
+                if prompt is not None:
+                    click.confirm(prompt,
+                                  default=True,
+                                  abort=True,
+                                  show_default=True)
 
-    dag = dag_utils.convert_entrypoint_to_dag(task)
-    with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, at_client_side=True) as dag:
-        sdk.validate(dag)
-        request_id = sdk.optimize(dag)
-        sdk.stream_and_get(request_id)
-        if _need_confirmation:
-            noun = 'pool' if pool else 'service'
-            prompt = f'Applying config to {noun} {service_name!r}. Proceed?'
-            if prompt is not None:
-                click.confirm(prompt,
-                              default=True,
-                              abort=True,
-                              show_default=True)
+            dag = client_common.upload_mounts_to_api_server(dag)
+            dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
-        dag = client_common.upload_mounts_to_api_server(dag)
-        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-
-        body = payloads.JobsPoolApplyBody(
-            task=dag_str,
-            pool_name=service_name,
-            mode=mode,
-        )
-        response = server_common.make_authenticated_request(
-            'POST',
-            '/jobs/pool_apply',
-            json=json.loads(body.model_dump_json()),
-            timeout=(5, None))
-        return server_common.get_request_id(response)
+            body = payloads.JobsPoolApplyBody(
+                task=dag_str,
+                pool_name=service_name,
+                mode=mode,
+            )
+            response = server_common.make_authenticated_request(
+                'POST',
+                '/jobs/pool_apply',
+                json=json.loads(body.model_dump_json()),
+                timeout=(5, None))
+            return server_common.get_request_id(response)
 
 
 def down(

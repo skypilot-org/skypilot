@@ -443,6 +443,9 @@ class ReplicaInfo:
         handle = self.handle()
         if handle is None:
             return None
+        if self.replica_port == '-':
+            # This is a pool replica.
+            return None
         replica_port_int = int(self.replica_port)
         try:
             endpoint_dict = backend_utils.get_endpoints(handle.cluster_name,

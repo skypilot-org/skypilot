@@ -193,14 +193,18 @@ def up(
     # Persist the service file to the local filesystem for easy updates.
     service_file_name = serve_utils.get_local_service_file_name(service_name, 1)
 
-    logger.debug(f'Persisting service file to {service_file_name}')
+    # Make sure folder exists.
+    if not os.path.exists(os.path.dirname(service_file_name)):
+        raise RuntimeError(f'Directory {os.path.dirname(service_file_name)}'
+                           'does not exist, can\'t persist service yaml.')
 
-    with open(
-        service_file_name, 'w'
-    )as service_file, tempfile.NamedTemporaryFile(
-            prefix=f'controller-task-{service_name}-',
-            mode='w',
-    ) as controller_file:
+    logger.debug(f'Persisting service yaml to {service_file_name}')
+
+    with open(service_file_name, 'w',
+              encoding='utf-8') as service_file, tempfile.NamedTemporaryFile(
+                  prefix=f'controller-task-{service_name}-',
+                  mode='w',
+              ) as controller_file:
         controller = controller_utils.get_controller_for_pool(pool)
         controller_name = controller.value.cluster_name
         task_config = task.to_yaml_config()
@@ -221,6 +225,7 @@ def up(
             # make sure it is a 32-bit integer to avoid overflow on sqlalchemy.
             rid = common_utils.get_current_request_id()
             controller_job_id = hash(uuid.UUID(rid).int) & 0x7FFFFFFF
+
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
             'local_task_yaml_path': service_file.name,
@@ -417,7 +422,7 @@ def up(
                 f'{ux_utils.RESET_BOLD}'
                 f'\n{ux_utils.INDENT_SYMBOL}To update the number of workers:\t'
                 f'{ux_utils.BOLD}sky jobs pool apply --pool {service_name} '
-                f'--workers 5{ux_utils.RESET_BOLD} <yaml_file>'
+                f'--workers 5{ux_utils.RESET_BOLD}'
                 '\n\n' + ux_utils.finishing_message('Successfully created pool '
                                                     f'{service_name!r}.'))
         else:
@@ -465,7 +470,6 @@ def update(
     noun = 'pool' if pool else 'service'
     capnoun = noun.capitalize()
 
-    # Get the controller and service record first
     controller_type = controller_utils.get_controller_for_pool(pool)
     handle = backend_utils.is_controller_accessible(
         controller=controller_type,
@@ -491,14 +495,16 @@ def update(
                                f'To spin up a {noun}, use {ux_utils.BOLD}'
                                f'{cmd}{ux_utils.RESET_BOLD}')
 
-    # If task is None and workers is specified, load existing configuration and update replica count
+    # If task is None and workers is specified, load existing configuration
+    # and update replica count.
     if task is None:
         if workers is None:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Cannot update {noun} without specifying '
-                               f'task or workers. Please provide either a task '
-                               f'or specify the number of workers.')
-            
+                raise ValueError(
+                    f'Cannot update {noun} without specifying '
+                    f'task or workers. Please provide either a task '
+                    f'or specify the number of workers.')
+
         if not pool:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -506,31 +512,22 @@ def update(
                     f'{workers} is not supported. Ignoring the update.')
 
         # Load the existing task configuration from the service's YAML file
-        from sky import task as task_lib
         latest_yaml_path = serve_utils.get_local_service_file_name(
             service_name, service_record['version'])
-        
+
         logger.debug('Loading existing task configuration from '
-                f'{latest_yaml_path} to create a new modified task.')
-        
-        try:
-            # Load the existing task configuration
-            existing_config = yaml_utils.read_yaml(latest_yaml_path)
-            task = task_lib.Task.from_yaml_config(existing_config)
+                     f'{latest_yaml_path} to create a new modified task.')
 
-            if task.service is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError('No service configuration found in '
-                                       f'existing {noun} {service_name!r}')
-            task.set_service(task.service.copy(min_replicas=workers))
-                    
-        except Exception as e:
+        # Load the existing task configuration
+        existing_config = yaml_utils.read_yaml(latest_yaml_path)
+        task = task_lib.Task.from_yaml_config(existing_config)
+
+        if task.service is None:
             with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(f'Failed to load existing {noun} '
-                                   f'{service_name!r} configuration: '
-                                 f'{str(e)}')
+                raise RuntimeError('No service configuration found in '
+                                   f'existing {noun} {service_name!r}')
+        task.set_service(task.service.copy(min_replicas=workers))
 
-    assert task is not None
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
 
@@ -620,11 +617,10 @@ def update(
                 raise ValueError(f'Failed to parse version: {version_string}; '
                                  f'Returncode: {returncode}') from e
 
-    with open(
-            serve_utils.get_local_service_file_name(
-                service_name, current_version),
-            'w'
-    ) as service_file:
+    with open(serve_utils.get_local_service_file_name(service_name,
+                                                      current_version),
+              'w',
+              encoding='utf-8') as service_file:
         task_config = task.to_yaml_config()
         yaml_utils.dump_yaml(service_file.name, task_config)
         remote_task_yaml_path = serve_utils.generate_task_yaml_file_name(
@@ -663,10 +659,15 @@ def update(
             except exceptions.CommandError as e:
                 raise RuntimeError(e.error_msg) from e
 
-    # Remove the old service file.
-    os.remove(
-        serve_utils.get_local_service_file_name(
-            service_name, current_version - 1))
+    # Remove the old service file so we only maintain one at a time.
+    try:
+        os.remove(
+            serve_utils.get_local_service_file_name(service_name,
+                                                    current_version - 1))
+    except FileNotFoundError:
+        logger.debug(
+            f'Tried to remove {service_name} '
+            f'version {current_version - 1} but failed to find it. Skip.')
 
     cmd = 'sky jobs pool status' if pool else 'sky serve status'
     logger.info(
