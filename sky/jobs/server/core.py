@@ -19,7 +19,9 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
@@ -44,8 +46,15 @@ from sky.utils import ux_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
+    from google.protobuf import json_format
+
     import sky
-    from sky.backends import cloud_vm_ray_backend
+    from sky.schemas.generated import managed_jobsv1_pb2
+else:
+    json_format = adaptors_common.LazyImport('google.protobuf.json_format')
+
+    managed_jobsv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -700,11 +709,13 @@ def queue_v2(
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     user_hashes: Optional[List[Optional[str]]] = None
+    show_jobs_without_user_hash = False
     if not all_users:
         user_hashes = [common_utils.get_user_hash()]
         # For backwards compatibility, we show jobs that do not have a
         # user_hash. TODO(cooperc): Remove before 0.12.0.
         user_hashes.append(None)
+        show_jobs_without_user_hash = True
     elif user_match is not None:
         users = global_user_state.get_user_by_name_match(user_match)
         if not users:
@@ -712,6 +723,41 @@ def queue_v2(
         user_hashes = [user.id for user in users]
 
     accessible_workspaces = list(workspaces_core.get_workspaces().keys())
+
+    if handle.is_grpc_enabled_with_flag:
+        try:
+            request = managed_jobsv1_pb2.GetJobTableRequest(
+                skip_finished=skip_finished,
+                accessible_workspaces=accessible_workspaces,
+                job_ids=managed_jobsv1_pb2.JobIds(
+                    ids=job_ids) if job_ids is not None else None,
+                workspace_match=workspace_match,
+                name_match=name_match,
+                pool_match=pool_match,
+                page=page,
+                limit=limit,
+                # Remove None from user_hashes, as the gRPC server uses the
+                # show_jobs_without_user_hash flag instead.
+                user_hashes=managed_jobsv1_pb2.UserHashes(hashes=[
+                    user_hash for user_hash in user_hashes
+                    if user_hash is not None
+                ]) if user_hashes is not None else None,
+                statuses=managed_jobsv1_pb2.Statuses(
+                    statuses=statuses) if statuses is not None else None,
+                show_jobs_without_user_hash=show_jobs_without_user_hash,
+            )
+            response = backend_utils.invoke_skylet_with_retries(
+                lambda: cloud_vm_ray_backend.SkyletClient(
+                    handle.get_grpc_channel()).get_managed_job_table(request))
+            jobs = []
+            for job in response.jobs:
+                job_dict = managed_job_utils.job_proto_to_dict(job)
+                jobs.append(job_dict)
+            return jobs, response.total, dict(
+                response.status_counts), response.total_no_filter
+        except exceptions.SkyletMethodNotImplementedError:
+            pass
+
     code = managed_job_utils.ManagedJobCodeGen.get_job_table(
         skip_finished, accessible_workspaces, job_ids, workspace_match,
         name_match, pool_match, page, limit, user_hashes, statuses)
@@ -820,31 +866,95 @@ def cancel(name: Optional[str] = None,
 
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
-        if all_users:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                None, all_users=True)
-        elif all:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
-        elif job_ids:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                job_ids)
-        elif name is not None:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(name)
-        else:
-            assert pool is not None, (job_ids, name, pool, all)
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_pool(pool)
-        # The stderr is redirected to stdout
-        returncode, stdout, stderr = backend.run_on_head(handle,
-                                                         code,
-                                                         require_outputs=True,
-                                                         stream_logs=False)
-        try:
-            subprocess_utils.handle_returncode(returncode, code,
-                                               'Failed to cancel managed job',
-                                               stdout + stderr)
-        except exceptions.CommandError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(e.error_msg) from e
+
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        if handle.is_grpc_enabled_with_flag:
+            current_workspace = skypilot_config.get_active_workspace()
+            try:
+                if all_users:
+                    request = managed_jobsv1_pb2.CancelJobsByIdRequest(
+                        job_ids=None,
+                        all_users=True,
+                        current_workspace=current_workspace)
+                    response = backend_utils.invoke_skylet_with_retries(
+                        lambda: cloud_vm_ray_backend.SkyletClient(
+                            handle.get_grpc_channel(
+                            )).cancel_managed_jobs_by_id(request))
+                    stdout = response.message
+                elif all:
+                    request = managed_jobsv1_pb2.CancelJobsByIdRequest(
+                        job_ids=None,
+                        all_users=False,
+                        current_workspace=current_workspace)
+                    response = backend_utils.invoke_skylet_with_retries(
+                        lambda: cloud_vm_ray_backend.SkyletClient(
+                            handle.get_grpc_channel(
+                            )).cancel_managed_jobs_by_id(request))
+                    stdout = response.message
+                elif job_ids:
+                    request = managed_jobsv1_pb2.CancelJobsByIdRequest(
+                        job_ids=managed_jobsv1_pb2.JobIds(ids=job_ids),
+                        all_users=False,
+                        current_workspace=current_workspace)
+                    response = backend_utils.invoke_skylet_with_retries(
+                        lambda: cloud_vm_ray_backend.SkyletClient(
+                            handle.get_grpc_channel(
+                            )).cancel_managed_jobs_by_id(request))
+                    stdout = response.message
+                elif name is not None:
+                    cancel_by_name_request = (
+                        managed_jobsv1_pb2.CancelJobByNameRequest(
+                            job_name=name, current_workspace=current_workspace))
+                    cancel_by_name_response = (
+                        backend_utils.invoke_skylet_with_retries(
+                            lambda: cloud_vm_ray_backend.SkyletClient(
+                                handle.get_grpc_channel()).
+                            cancel_managed_job_by_name(cancel_by_name_request)))
+                    stdout = cancel_by_name_response.message
+                else:
+                    cancel_by_pool_request = (
+                        managed_jobsv1_pb2.CancelJobsByPoolRequest(
+                            pool_name=pool,
+                            current_workspace=current_workspace))
+                    assert pool is not None, (job_ids, name, pool, all)
+                    cancel_by_pool_response = (
+                        backend_utils.invoke_skylet_with_retries(
+                            lambda: cloud_vm_ray_backend.SkyletClient(
+                                handle.get_grpc_channel()).
+                            cancel_managed_jobs_by_pool(cancel_by_pool_request))
+                    )
+                    stdout = cancel_by_pool_response.message
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            if all_users:
+                code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
+                    None, all_users=True)
+            elif all:
+                code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
+                    None)
+            elif job_ids:
+                code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
+                    job_ids)
+            elif name is not None:
+                code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(
+                    name)
+            else:
+                assert pool is not None, (job_ids, name, pool, all)
+                code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_pool(
+                    pool)
+            # The stderr is redirected to stdout
+            returncode, stdout, stderr = backend.run_on_head(
+                handle, code, require_outputs=True, stream_logs=False)
+            try:
+                subprocess_utils.handle_returncode(
+                    returncode, code, 'Failed to cancel managed job',
+                    stdout + stderr)
+            except exceptions.CommandError as e:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(e.error_msg) from e
 
         logger.info(stdout)
         if 'Multiple jobs found with name' in stdout:
