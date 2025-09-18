@@ -386,7 +386,7 @@ def cost_report(
     if not cluster_reports:
         return []
 
-    if not dashboard_response:
+    if not abbreviate_response:
         cluster_reports = subprocess_utils.run_in_parallel(
             _process_cluster_report, cluster_reports)
 
