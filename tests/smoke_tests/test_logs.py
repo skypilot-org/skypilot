@@ -37,10 +37,11 @@ def test_log_collection_to_gcp(generic_cloud: str):
                       skypilot_smoke_test_case: {name}-case
                 """))
         additional_labels.flush()
-        logs_cmd = 'for i in {1..10}; do echo $i; done'
+        logs_cmd = 'for i in {1..10}; do echo "test output $i"; done'
         validate_logs_cmd = (
             'echo $output && echo "===Validate logs from GCP Cloud Logging===" && '
-            'for i in {1..10}; do echo $output | grep -q $i; done')
+            'for i in {1..10}; do echo $output | grep -q "test output $i"; done'
+        )
         test = smoke_tests_utils.Test(
             'log_collection_to_gcp',
             [

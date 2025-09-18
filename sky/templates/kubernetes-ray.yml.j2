@@ -823,7 +823,8 @@ available_node_types:
                 fi
                 $(prefix_cmd) cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
                 $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
-                FUSERMOUNT3_PATH=$(which fusermount3)
+                # "|| true" because fusermount3 is not always available
+                FUSERMOUNT3_PATH=$(which fusermount3) || true
                 if [ -z "$FUSERMOUNT3_PATH" ]; then
                     FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
                 fi
@@ -872,11 +873,14 @@ available_node_types:
 
                 touch /tmp/apt_ssh_setup_complete
                 echo "=== SSH setup completed ==="
-                ) > /tmp/${STEPS[0]}.log 2>&1 || {
-                  echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed
+                ) > /tmp/${STEPS[0]}.log 2>&1
+                if [ "$?" -ne "0" ]; then
+                  {
+                  echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed 2>&1
                   cat /tmp/${STEPS[0]}.log
                   exit 1
-                }
+                  }
+                fi
               ) &
 
               # STEP 2: Install conda, ray and skypilot (for dependencies); start
@@ -931,11 +935,14 @@ available_node_types:
                   set +e
                   {{ ray_worker_start_command }}
                 fi
-                ) > /tmp/${STEPS[1]}.log 2>&1 || {
-                  echo "Error: ${STEPS[1]} failed. Continuing anyway..." > /tmp/${STEPS[1]}.failed
+                ) > /tmp/${STEPS[1]}.log 2>&1
+                if [ "$?" -ne "0" ]; then
+                  {
+                  echo "Error: ${STEPS[1]} failed. Continuing anyway..." > /tmp/${STEPS[1]}.failed 2>&1
                   cat /tmp/${STEPS[1]}.log
                   exit 1
-                }
+                  }
+                fi
               ) &
 
 
@@ -953,11 +960,14 @@ available_node_types:
                   fi;
                 fi;
                 export -p > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
-                ) > /tmp/${STEPS[2]}.log 2>&1 || {
-                  echo "Error: ${STEPS[2]} failed. Continuing anyway..." > /tmp/${STEPS[2]}.failed
+                ) > /tmp/${STEPS[2]}.log 2>&1
+                if [ "$?" -ne "0" ]; then
+                  {
+                  echo "Error: ${STEPS[2]} failed. Continuing anyway..." > /tmp/${STEPS[2]}.failed 2>&1
                   cat /tmp/${STEPS[2]}.log
                   exit 1
-                }
+                  }
+                fi
               ) &
 
               function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };

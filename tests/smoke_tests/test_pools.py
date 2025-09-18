@@ -38,6 +38,7 @@ def wait_until_pool_ready(pool_name: str,
 
 
 def test_vllm_pool(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
     pool_config = textwrap.dedent(f"""
     envs:
         MODEL_NAME: NousResearch/Meta-Llama-3-8B-Instruct
@@ -70,21 +71,21 @@ def test_vllm_pool(generic_cloud: str):
         echo "Still waiting for vLLM service..."
         done
         echo "vLLM service is ready!"
-    
+
 
 
     pool:
         workers: 1
     """)
 
-    bucket_name = f'sky-test-vllm-pool-{generic_cloud}'
+    bucket_name = f'sky-test-vllm-pool-{name}'
 
     job_config = textwrap.dedent(f"""
     name: t-test-vllm-pool
 
     resources:
         cpus: 4
-        accelerators: 
+        accelerators:
             L4: 1
         any_of:
             - use_spot: true
@@ -104,6 +105,7 @@ def test_vllm_pool(generic_cloud: str):
         /output:
             name: ${{EMBEDDINGS_BUCKET_NAME}}
             mode: MOUNT
+            store: s3
 
 
     run: |
@@ -111,19 +113,19 @@ def test_vllm_pool(generic_cloud: str):
 
         # Initialize and download the model
         HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/model $MODEL_NAME
-    
+
         # Create metrics directory for monitoring service
         mkdir -p /output/metrics
-    
+
         # Set worker ID for metrics tracking
         if [ -z "$WORKER_ID" ]; then
             export WORKER_ID="worker_$(date +%s)_$(hostname)"
             echo "Generated worker ID: $WORKER_ID"
         fi
-    
+
         # Process the assigned range of documents
         echo "Processing documents from $START_IDX to $END_IDX"
-    
+
         # Process text documents and track token metrics
         python scripts/text_vector_processor.py \
             --output-path "/output/embeddings_${{START_IDX}}_${{END_IDX}}.parquet" \
@@ -148,7 +150,6 @@ def test_vllm_pool(generic_cloud: str):
             job_yaml.write(job_config.encode())
             job_yaml.flush()
 
-            name = smoke_tests_utils.get_cluster_name()
             pool_name = f'{name}-pool'
 
             test = smoke_tests_utils.Test(
@@ -161,7 +162,8 @@ def test_vllm_pool(generic_cloud: str):
                     f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."',
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=f'sky jobs pool down {pool_name} -y',
+                teardown=(f'sky jobs pool down {pool_name} -y && '
+                          f'sky storage delete -y {bucket_name} || true'),
             )
 
             smoke_tests_utils.run_one_test(test)
