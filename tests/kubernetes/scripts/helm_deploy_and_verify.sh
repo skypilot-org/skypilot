@@ -141,15 +141,16 @@ echo "API server endpoint: $ENDPOINT"
 
 # Test the API server with retry logic
 echo "Testing API server health endpoint..."
-echo "Endpoint: http://$HOST/api/health"
+echo "Endpoint: http://$WEB_USERNAME:$WEB_PASSWORD@$HOST/api/health"
 MAX_RETRIES=10  # 5 minutes with 30 second intervals
 RETRY_INTERVAL=30
 RETRY_COUNT=0
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: Testing health endpoint..."
-    HEALTH_RESPONSE=$(curl -s -u "$WEB_USERNAME:$WEB_PASSWORD" "http://$HOST/api/health")
-    echo "Health response: $HEALTH_RESPONSE"
+    HEALTH_RESPONSE=$(curl -s -u "$WEB_USERNAME:$WEB_PASSWORD" "http://$HOST/api/health" 2>&1)
+    echo "Health response: '$HEALTH_RESPONSE'"
+    echo "Response length: ${#HEALTH_RESPONSE} characters"
 
     # Check if response is valid JSON (not HTML error page)
     if echo "$HEALTH_RESPONSE" | jq . >/dev/null 2>&1; then
