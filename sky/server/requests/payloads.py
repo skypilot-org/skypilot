@@ -316,6 +316,9 @@ class StatusBody(RequestBody):
     all_users: bool = True
     # TODO (kyuds): default to False post 0.10.5
     include_credentials: bool = True
+    # Only return fields that are needed for the
+    # dashboard / CLI summary response
+    summary_response: bool = False
 
 
 class StartBody(RequestBody):
