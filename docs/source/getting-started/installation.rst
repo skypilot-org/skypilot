@@ -24,6 +24,7 @@ Install SkyPilot using pip:
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
           pip install "skypilot[oci]"
+          # Nebius is only supported for Python >= 3.10
           pip install "skypilot[nebius]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
@@ -35,6 +36,8 @@ Install SkyPilot using pip:
           # SCP is only supported for Python <= 3.11
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
+          # Seeweb is only supported for Python >= 3.10
+          pip install "skypilot[seeweb]"
           pip install "skypilot[primeintellect]"
 
           pip install "skypilot[all]"
@@ -146,17 +149,17 @@ SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast 
           # Create a virtual environment with pip pre-installed (required for SkyPilot)
           uv venv --seed --python 3.10
           source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-          
+
           # Install SkyPilot with your chosen cloud providers
           uv pip install "skypilot[kubernetes,aws,gcp]"
-          
+
           # Azure CLI has an issue with uv, and requires '--prerelease allow'.
           uv pip install --prerelease allow azure-cli
           uv pip install "skypilot[azure]"
 
         .. note::
-          
-          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment. 
+
+          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment.
           SkyPilot needs ``pip`` to build wheels for remote cluster setup.
 
     .. tab-item:: uv tool
@@ -166,16 +169,16 @@ SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast 
 
           # Install as a globally available tool with pip included
           uv tool install --with pip "skypilot[aws,gcp]"
-          
+
           # Or with all cloud providers
           uv tool install --with pip "skypilot[all]"
-          
+
           # Now you can use sky directly
           sky check
 
         .. note::
-          
-          The ``--with pip`` flag is **required** when using ``uv tool install``. 
+
+          The ``--with pip`` flag is **required** when using ``uv tool install``.
           Without it, SkyPilot will fail when building wheels for remote clusters.
 
 
@@ -232,6 +235,7 @@ This will produce a summary like:
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
+    Seeweb: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
 output hints on how to resolve them. You can also refer to the cloud setup
@@ -452,7 +456,7 @@ Together AI
 
 .. code-block:: shell
 
-  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config    
+  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config
 
 
 Paperspace
@@ -674,7 +678,6 @@ Seeweb
 
     [DEFAULT]
     api_key = <your-api-token>
-
 
 
 Request quotas for first time users
