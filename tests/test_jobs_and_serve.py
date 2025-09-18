@@ -259,7 +259,13 @@ class TestJobsOperations:
             result.output)
 
     def test_down_jobs_controller_no_job(self, mock_job_table_no_job,
-                                         mock_client_requests):
+                                         mock_client_requests,
+                                         mock_services_no_service_grpc):
+        # TODO (kyuds): after migrating to grpc for jobs, prob better to use
+        # a new monkeypatch. This is reusing.
+        # A lot of monkeypatch allows tests to be simulated via a bunch of
+        # side-effects (like this, mock_job_table_no_job) also "patches"
+        # sky serve cluster queries.
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.down, [common.JOB_CONTROLLER_NAME],
                                    input='n')
@@ -268,7 +274,7 @@ class TestJobsOperations:
         assert isinstance(result.exception,
                           SystemExit), (result.exception, result.output)
 
-    def test_down_jobs_controller_one_job(self):
+    def test_down_jobs_controller_one_job(self, mock_services_no_service_grpc):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.down, [common.JOB_CONTROLLER_NAME],
                                    input='n')
@@ -346,7 +352,8 @@ class TestServeOperations:
             result.output)
 
     def test_down_serve_controller_one_service(self, mock_controller_accessible,
-                                               mock_services_one_service):
+                                               mock_services_one_service,
+                                               mock_services_one_service_grpc):
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(command.down,
@@ -371,7 +378,8 @@ class TestServeOperations:
         assert 'Aborted' in result.output
 
     def test_down_serve_controller_no_service(self, mock_controller_accessible,
-                                              mock_services_no_service):
+                                              mock_services_no_service,
+                                              mock_services_no_service_grpc):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.down,
                                    [common.SKY_SERVE_CONTROLLER_NAME],

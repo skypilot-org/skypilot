@@ -216,9 +216,6 @@ export function ManagedJobs() {
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
 
-    // Refresh parent component data (including poolsData for link matching)
-    fetchData(true); // Pass true to indicate it's a refresh button click
-
     // Trigger a re-fetch in both tables via their refreshDataRef
     if (jobsRefreshRef.current) {
       jobsRefreshRef.current();
@@ -784,10 +781,6 @@ export function ManagedJobsTable({
                 // Call the refresh function passed from parent
                 if (onRefresh) {
                   onRefresh();
-                }
-                // Also call the local refresh function to ensure loading state is set
-                if (refreshDataRef && refreshDataRef.current) {
-                  refreshDataRef.current();
                 }
               }}
               disabled={loading}

@@ -62,7 +62,8 @@ SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
                       'curl -LsSf https://astral.sh/uv/install.sh '
                       f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh')
 SKY_UV_PIP_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip')
-SKY_UV_RUN_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run')
+SKY_UV_RUN_CMD: str = (
+    f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run --active')
 # Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH and unsetting relevant
 # VIRTUAL_ENV envvars to deactivate the environment. `deactivate` command does
 # not work when conda is used.
@@ -153,7 +154,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
     # true.
-    '{ bash Miniconda3-Linux.sh -b; '
+    '{ bash Miniconda3-Linux.sh -b || true; '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
@@ -456,7 +457,8 @@ CATALOG_SCHEMA_VERSION = 'v8'
 CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
-              'paperspace', 'do', 'nebius', 'ssh', 'hyperbolic', 'seeweb')
+              'paperspace', 'primeintellect', 'do', 'nebius', 'ssh',
+              'hyperbolic', 'seeweb')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.

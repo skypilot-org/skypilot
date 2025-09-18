@@ -38,6 +38,7 @@ Install SkyPilot using pip:
           pip install "skypilot[vsphere]"
           # Seeweb is only supported for Python >= 3.10
           pip install "skypilot[seeweb]"
+          pip install "skypilot[primeintellect]"
 
           pip install "skypilot[all]"
 
@@ -69,6 +70,8 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
+          pip install "skypilot-nightly[primeintellect]"
+
           pip install "skypilot-nightly[all]"
 
 
@@ -101,6 +104,8 @@ Install SkyPilot using pip:
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
+          pip install -e ".[primeintellect]"
+
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
@@ -646,6 +651,17 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
 
+Prime Intellect
+~~~~~~~~~~~~~~~~~~~
+
+`Prime Intellect <https://primeintellect.ai/>`__ makes it easy to find global compute resources and train state-of-the-art models through distributed training across clusters. To configure Prime Intellect access, install and configure `Prime Intellect CLI <https://docs.primeintellect.ai/cli-reference/introduction>`__:
+
+.. code-block:: shell
+
+  mkdir -p ~/.prime
+  prime login
+  # optional: set team id
+  prime config set-team-id <team_id>
 
 
 Seeweb
