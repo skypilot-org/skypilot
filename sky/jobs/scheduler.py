@@ -124,6 +124,16 @@ def get_number_of_controllers() -> int:
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
 
     total_memory_mb = common_utils.get_mem_size_gb() * 1024
+    # note: orginally, the logic is:
+    #   i) for consolidation mode, we assume we are running on remote api server
+    #      deploy mode. the amount of memory used by the api server is pre-allocated
+    #      on start. We reserved some space for the job controller.
+    #      See server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE. Now, we need
+    #      reserve more for pool/serve.
+    #  ii) for non-consolidation mode, we assume we are running on local api server
+    #      where workers are dynamically scaled. in this case we should count how
+    #      much api server worker each job controller is using. now we need to
+    #      factor in the api server worker used by pool/serve as well.
     if consolidation_mode:
         config = server_config.compute_server_config(deploy=True, quiet=True)
 
@@ -136,13 +146,20 @@ def get_number_of_controllers() -> int:
                     config.short_worker_config.burstable_parallelism) * \
             server_config.SHORT_WORKER_MEM_GB * 1024
 
-        return max(1, int((total_memory_mb - used) // JOB_MEMORY_MB))
+        # static ratio: 200 job <==> 1 serve/pool
+        # note: the JOB_MEMORY_MB is the memory for one controller, which hosts
+        # lots of jobs.
+        return max(1, int((total_memory_mb - used) // (JOB_MEMORY_MB + 1/200 serve memory usage)))
     else:
+        # note: in this we use local api server, where the api server dynbamically
+        # allocate memory for LONG/SHORT_WORKER (in api server). so we need to
+        # factor in the memory usage of the api server in jobs controller
+        # memory consumption.
         return max(
             1,
             int((total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB) /
                 ((LAUNCHES_PER_WORKER * server_config.LONG_WORKER_MEM_GB) * 1024
-                 + JOB_MEMORY_MB)))
+                 + JOB_MEMORY_MB + 1/200 serve memory usage)))
 
 
 def start_controller() -> None:

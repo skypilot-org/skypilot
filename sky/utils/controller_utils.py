@@ -1224,14 +1224,15 @@ def get_resources_lock_path() -> str:
 
 @annotations.lru_cache(scope='request')
 def _get_job_parallelism() -> int:
-    job_memory = JOB_MEMORY_MB * 1024 * 1024
+    # note: only take the memory dedicated to serve. the 1/200 portion.
+    job_memory = JOB_MEMORY_MB * 1024 * 1024 ==> memory dedicated to serve 
     job_limit = min(psutil.virtual_memory().total // job_memory, MAX_JOB_LIMIT)
     return max(job_limit, 1)
 
 
 @annotations.lru_cache(scope='request')
 def _get_launch_parallelism() -> int:
-    cpus = os.cpu_count()
+    cpus = os.cpu_count() ==> cpu dedicated to serve 
     return cpus * JOB_LAUNCHES_PER_CPU if cpus is not None else 1
 
 
