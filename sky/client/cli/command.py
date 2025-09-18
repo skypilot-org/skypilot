@@ -4850,10 +4850,12 @@ def jobs_pool_apply(
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
+    if workers is not None and pool_yaml is not None and len(pool_yaml) > 0:
+        raise click.UsageError(
+            'Cannot specify both --workers and POOL_YAML. Please use one of '
+            'them.')
+
     if pool_yaml is None or len(pool_yaml) == 0:
-        if workers is None:
-            raise click.UsageError(
-                'Either POOL_YAML or --workers must be provided.')
         if pool is None:
             raise click.UsageError(
                 'Either POOL_YAML or --pool must be provided.')
