@@ -264,9 +264,16 @@ def _execute_dag(
             f'{colorama.Style.RESET_ALL}')
 
     cluster_exists = False
+    existing_launchable_resources = None
     if cluster_name is not None:
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
         cluster_exists = cluster_record is not None
+        if cluster_exists:
+            existing_handle = cluster_record.get('handle')
+            if (isinstance(existing_handle, backends.CloudVmRayResourceHandle)
+                    and existing_handle.launched_resources is not None):
+                existing_launchable_resources = (
+                    existing_handle.launched_resources.copy())
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
@@ -397,6 +404,14 @@ def _execute_dag(
                                                        quiet=_quiet_optimizer)
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
+
+    if (Stage.PROVISION in stages and cluster_exists and
+            task.best_resources is None and
+            existing_launchable_resources is not None):
+        # Preserve the original launched resources in case the cluster handle
+        # disappears before provisioning (e.g., another terminal finishes
+        # tearing it down), so backend.provision() retains concrete specs.
+        task.best_resources = existing_launchable_resources
 
     backend.register_info(
         dag=dag,
