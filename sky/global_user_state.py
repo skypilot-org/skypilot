@@ -1645,12 +1645,11 @@ def get_clusters_from_history(
             'user_hash': user_hash,
             'user_name': user_name,
             'workspace': workspace,
-            'last_creation_yaml': None if abbreviate_response else
-                                  row.last_creation_yaml,
-            'last_creation_command': None if abbreviate_response else
-                                     row.last_creation_command,
-            'last_event': None if abbreviate_response else last_event,
         }
+        if not abbreviate_response:
+            record['last_creation_yaml'] = row.last_creation_yaml
+            record['last_creation_command'] = row.last_creation_command
+            record['last_event'] = last_event
 
         records.append(record)
 

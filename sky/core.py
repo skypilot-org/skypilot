@@ -434,10 +434,6 @@ def cost_report(
 
     for report in cluster_reports:
         _update_record_with_resources(report)
-        if abbreviate_response:
-            report.pop('last_creation_yaml')
-            report.pop('last_creation_command')
-            report.pop('last_event')
         if dashboard_response:
             report.pop('usage_intervals')
             report.pop('user_hash')
