@@ -16,6 +16,7 @@ export async function getManagedJobs(options = {}) {
   try {
     const {
       allUsers = true,
+      skipFinished = false,
       nameMatch,
       userMatch,
       workspaceMatch,
@@ -28,6 +29,7 @@ export async function getManagedJobs(options = {}) {
     const body = {
       all_users: allUsers,
       verbose: true,
+      skip_finished: skipFinished,
     };
     if (nameMatch !== undefined) body.name_match = nameMatch;
     if (userMatch !== undefined) body.user_match = userMatch;
@@ -286,7 +288,10 @@ export async function getPoolStatus() {
     // Also fetch managed jobs to get job counts by pool
     let jobsData = { jobs: [] };
     try {
-      const jobsResponse = await getManagedJobs({ allUsers: true });
+      const jobsResponse = await getManagedJobs({
+        allUsers: true,
+        skipFinished: true,
+      });
       if (!jobsResponse.controllerStopped) {
         jobsData = jobsResponse;
       }
