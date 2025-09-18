@@ -105,7 +105,8 @@ def update(
 
 
 def apply(
-    task: Union['sky.Task', 'sky.Dag'],
+    task: Optional[Union['sky.Task', 'sky.Dag']],
+    workers: Optional[int],
     service_name: str,
     mode: 'serve_utils.UpdateMode',
     pool: bool = False,
@@ -116,6 +117,27 @@ def apply(
     assert pool, 'Command `apply` is only supported for pool.'
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
+
+    # Handle the case where task is None and workers is specified
+    if task is None:
+        if workers is None:
+            raise ValueError(f'Cannot create a new {noun} without specifying '
+                           f'task or workers. Please provide either a task '
+                           f'or specify the number of workers.')
+
+        print(f'workers: {workers}')
+        body = payloads.JobsPoolApplyBody(
+            workers=workers,
+            pool_name=service_name,
+            mode=mode,
+        )
+
+        response = server_common.make_authenticated_request(
+            'POST',
+            '/jobs/pool_apply',
+            json=json.loads(body.model_dump_json()),
+            timeout=(5, None))
+        return server_common.get_request_id(response)
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(

@@ -47,19 +47,21 @@ def up(
 
 @usage_lib.entrypoint
 def update(
-        task: 'sky.Task',
+        task: Optional['sky.Task'],
         service_name: str,
-        mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
+        mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
+        workers: Optional[int] = None) -> None:
     """Updates an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
 
     Args:
-        task: sky.Task to update.
+        task: sky.Task to update, or None to create a new service.
         service_name: Name of the service.
         mode: Update mode.
+        workers: Number of workers/replicas to create when task is None.
     """
-    return impl.update(task, service_name, mode, pool=False)
+    return impl.update(task, service_name, mode, pool=False, workers=workers)
 
 
 @usage_lib.entrypoint

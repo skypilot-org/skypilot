@@ -383,15 +383,17 @@ def dashboard() -> None:
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
 def pool_apply(
-    task: Union['sky.Task', 'sky.Dag'],
+    task: Union['sky.Task', 'sky.Dag', None],
     pool_name: str,
     mode: 'serve_utils.UpdateMode',
     # Internal only:
     # pylint: disable=invalid-name
-    _need_confirmation: bool = False
+    _need_confirmation: bool = False,
+    workers: Optional[int] = None
 ) -> server_common.RequestId[None]:
     """Apply a config to a pool."""
     return impl.apply(task,
+                      workers,
                       pool_name,
                       mode,
                       pool=True,

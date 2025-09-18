@@ -32,6 +32,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import traceback
 import typing
 from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
@@ -63,8 +64,6 @@ from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
-from sky.serve import serve_state
-from sky.serve import serve_utils as serve_utils_module
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import requests
@@ -4838,124 +4837,83 @@ def jobs_pool_apply(
     yes: bool,
     async_call: bool,
 ):
-    """Either apply a config to a cluster pool for managed jobs submission 
-    or update the number of workers in the pool. One of POOL_YAML or --workers
-    must be provided.
+    """Apply a config to a cluster pool for managed jobs submission.
 
-    Config:
-        If the pool is already running, the config will be applied to the pool.
-        Otherwise, a new pool will be created.
+    If the pool is already running, the config will be applied to the pool.
+    Otherwise, a new pool will be created.
+
+    POOL_YAML must point to a valid YAML file.
 
     Workers:
         The --workers option can be used to override the number of workers
-        specified in the YAML file, or to update workers without a YAML file.
+        specified in the YAML file.
 
         Examples:
             sky jobs pool apply pool.yaml -p my-pool --workers 5
             sky jobs pool apply pool.yaml --workers 3
-            sky jobs pool apply -p my-pool --workers 5  # Update workers only
     """
-    # Validate that either YAML file or --workers is provided
-    if not pool_yaml and workers is None:
-        raise click.UsageError(
-            'Either POOL_YAML file or --workers option must be provided.')
-    
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
-    if pool is None:
-        pool = serve_lib.generate_service_name(pool=True)
-
-    # If no YAML file is provided, we load the existing pool configuration
-    if not pool_yaml:
+    print(f'pool_yaml: {pool_yaml}')
+    if pool_yaml is None or len(pool_yaml) == 0:
         if workers is None:
-            raise click.UsageError(
-                'Either POOL_YAML file or --workers option must be provided.')
+            raise click.UsageError('Either POOL_YAML or --workers must be provided.')
+        if pool is None:
+            raise click.UsageError('Either POOL_YAML or --pool must be provided.')
         
-        existing_record = serve_state.get_service_from_name(pool)
-        if existing_record is None:
-            raise click.UsageError(
-                f'Pool {pool} does not exist. Please provide a '
-                'YAML file to create a new pool.')
-        
-        if not existing_record['pool']:
-            raise click.UsageError(
-                f'{pool} is not a pool. Please provide a YAML file.')
-        
-        # Load the existing YAML configuration
-        latest_yaml_path = serve_utils_module.generate_task_yaml_file_name(
-            pool, existing_record['version'])
-        raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
-        original_config = raw_yaml_config.get('_user_specified_yaml')
-        if original_config is None:
-            # Fall back to old display format
-            original_config = raw_yaml_config
-            original_config.pop('run', None)
-            svc = original_config.pop('service')
-            if svc is not None:
-                svc.pop('pool', None)
-                original_config['pool'] = svc
-        else:
-            original_config = yaml_utils.safe_load(original_config)
-        
-        # Create a temporary YAML file with the existing configuration
-        import tempfile
-        import os
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as tmp_file:
-            yaml_utils.dump_yaml(tmp_file.name, original_config)
-            pool_yaml = (tmp_file.name,)
-            tmp_yaml_path = tmp_file.name
+        request_id = managed_jobs.pool_apply(None,
+                                        pool,
+                                        workers=workers,
+                                        mode=serve_lib.UpdateMode(mode),
+                                        _need_confirmation=not yes)
+        _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
+    else:
+        if pool is None:
+            pool = serve_lib.generate_service_name(pool=True)
 
-    task = _generate_task_with_service(
-        service_name=pool,
-        service_yaml_args=pool_yaml,
-        workdir=workdir,
-        cloud=cloud,
-        region=region,
-        zone=zone,
-        gpus=gpus,
-        cpus=cpus,
-        memory=memory,
-        instance_type=instance_type,
-        num_nodes=num_nodes,
-        use_spot=use_spot,
-        image_id=image_id,
-        env_file=env_file,
-        env=env,
-        secret=secret,
-        disk_size=disk_size,
-        disk_tier=disk_tier,
-        network_tier=network_tier,
-        ports=ports,
-        not_supported_cmd='sky jobs pool up',
-        pool=True,
-        workers=workers,
-    )
-    assert task.service is not None
-    if not task.service.pool:
-        raise click.UsageError('The YAML file needs a `pool` section.')
-    click.secho('Pool spec:', fg='cyan')
-    click.echo(task.service)
-    serve_lib.validate_service_task(task, pool=True)
+        task = _generate_task_with_service(
+            service_name=pool,
+            service_yaml_args=pool_yaml,
+            workdir=workdir,
+            cloud=cloud,
+            region=region,
+            zone=zone,
+            gpus=gpus,
+            cpus=cpus,
+            memory=memory,
+            instance_type=instance_type,
+            num_nodes=num_nodes,
+            use_spot=use_spot,
+            image_id=image_id,
+            env_file=env_file,
+            env=env,
+            secret=secret,
+            disk_size=disk_size,
+            disk_tier=disk_tier,
+            network_tier=network_tier,
+            ports=ports,
+            not_supported_cmd='sky jobs pool up',
+            pool=True,
+            workers=workers,
+        )
+        assert task.service is not None
+        if not task.service.pool:
+            raise click.UsageError('The YAML file needs a `pool` section.')
+        click.secho('Pool spec:', fg='cyan')
+        click.echo(task.service)
+        serve_lib.validate_service_task(task, pool=True)
 
-    click.secho(
-        'Each pool worker will use the following resources (estimated):',
-        fg='cyan')
-    with dag_lib.Dag() as dag:
-        dag.add(task)
+        click.secho(
+            'Each pool worker will use the following resources (estimated):',
+            fg='cyan')
+        with dag_lib.Dag() as dag:
+            dag.add(task)
 
-    request_id = managed_jobs.pool_apply(task,
-                                         pool,
-                                         mode=serve_lib.UpdateMode(mode),
-                                         _need_confirmation=not yes)
-    
-    # Clean up temporary YAML file if it was created
-    if 'tmp_yaml_path' in locals():
-        try:
-            os.unlink(tmp_yaml_path)
-        except OSError:
-            pass  # Ignore cleanup errors
-    
-    _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
+        request_id = managed_jobs.pool_apply(task,
+                                            pool,
+                                            mode=serve_lib.UpdateMode(mode),
+                                            _need_confirmation=not yes)
+        _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
 
 
 @pool.command('status', cls=_DocumentedCodeCommand)
@@ -5250,32 +5208,49 @@ def serve():
 
 
 def _generate_task_with_service(
-        service_name: str,
-        service_yaml_args: Tuple[str, ...],
-        workdir: Optional[str],
-        cloud: Optional[str],
-        region: Optional[str],
-        zone: Optional[str],
-        num_nodes: Optional[int],
-        use_spot: Optional[bool],
-        image_id: Optional[str],
-        env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]],
-        secret: Optional[List[Tuple[str, str]]],
-        gpus: Optional[str],
-        instance_type: Optional[str],
-        ports: Optional[Tuple[str]],
-        cpus: Optional[str],
-        memory: Optional[str],
-        disk_size: Optional[int],
-        disk_tier: Optional[str],
-        network_tier: Optional[str],
-        not_supported_cmd: str,
-        pool: bool,  # pylint: disable=redefined-outer-name
-        workers: Optional[int] = None,
+    service_name: str,
+    service_yaml_args: Tuple[str, ...],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    secret: Optional[List[Tuple[str, str]]],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    ports: Optional[Tuple[str]],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    network_tier: Optional[str],
+    not_supported_cmd: str,
+    pool: bool,  # pylint: disable=redefined-outer-name
+    workers: Optional[int] = None,
 ) -> task_lib.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
+    tmp_yaml = None
+    if pool:
+        if workers is not None:
+            # Rewrite service_yaml_args to include the workers
+            tmp_yaml = tempfile.NamedTemporaryFile(mode='w')
+            print(f'service_yaml_args: {service_yaml_args}')
+            service_yaml = yaml_utils.read_yaml(service_yaml_args[0])
+            if not 'pool' in service_yaml:
+                raise ValueError('Pool section not found in the YAML file, '
+                                 'please add a valid `pool` section.')
+            if not 'workers' in service_yaml['pool']:
+                raise ValueError('Workers not found in the pool section, '
+                                 'please add a valid `workers` section.')
+            service_yaml['pool']['workers'] = workers
+            yaml_utils.dump_yaml(tmp_yaml.name, service_yaml)
+            service_yaml_args = (tmp_yaml.name, )
+
     yaml_name = 'SERVICE_YAML' if not pool else 'POOL_YAML'
     if not is_yaml:
         raise click.UsageError(f'{yaml_name} must be a valid YAML file.')
@@ -5303,6 +5278,8 @@ def _generate_task_with_service(
         network_tier=network_tier,
         ports=ports,
     )
+    if tmp_yaml is not None:
+        tmp_yaml.close()
     if isinstance(task, dag_lib.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command=not_supported_cmd))
@@ -5318,9 +5295,6 @@ def _generate_task_with_service(
         if task.service.ports is not None or ports:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cannot specify ports in a cluster pool.')
-        # Override workers if provided via command line.
-        if workers is not None:
-            task.service.min_replicas = workers
         return task
 
     # NOTE(yi): we only allow one service port now.
