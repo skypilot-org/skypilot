@@ -80,20 +80,21 @@ def get_s3_mount_cmd(bucket_name: str,
         _bucket_sub_path = f':{_bucket_sub_path}'
 
     # Use rclone for ARM64 architectures since goofys doesn't support them
-    arch_check = 'ARCH=$(uname -m) && '
+    # arch_check = 'ARCH=$(uname -m); '
     rclone_mount = (
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
-        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        f'AWS_PROFILE={os.getenv("AWS_PROFILE")} rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         '--daemon --allow-other')
     goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'{bucket_name}{_bucket_sub_path} {mount_path}')
 
-    mount_cmd = (f'{arch_check}'
+    mount_cmd = (f'ARCH=$(uname -m); '
                  f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
                  f'  {rclone_mount}; '
                  f'else '
+                 f'  export AWS_PROFILE={os.getenv("AWS_PROFILE", None)}; '
                  f'  {goofys_mount}; '
                  f'fi')
     return mount_cmd
