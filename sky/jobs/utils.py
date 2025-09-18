@@ -51,6 +51,7 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from google.protobuf import descriptor
     from google.protobuf import json_format
     import grpc
     import psutil
@@ -61,6 +62,7 @@ if typing.TYPE_CHECKING:
     from sky.schemas.generated import managed_jobsv1_pb2
 else:
     json_format = adaptors_common.LazyImport('google.protobuf.json_format')
+    descriptor = adaptors_common.LazyImport('google.protobuf.descriptor')
     psutil = adaptors_common.LazyImport('psutil')
     grpc = adaptors_common.LazyImport('grpc')
     jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
@@ -1863,11 +1865,17 @@ def job_proto_to_dict(
         # Our API returns fields in snake_case.
         preserving_proto_field_name=True,
         use_integers_for_enums=True)
-    # Ensure optional fields are present with None values for
-    # backwards compatibility with older clients.
     for field in job_proto.DESCRIPTOR.fields:
+        # Ensure optional fields are present with None values for
+        # backwards compatibility with older clients.
         if field.has_presence and field.name not in job_dict:
             job_dict[field.name] = None
+        # json_format.MessageToDict is meant for encoding to JSON,
+        # and Protobuf encodes int64 as decimal strings in JSON,
+        # so we need to convert them back to ints.
+        # https://protobuf.dev/programming-guides/json/#field-representation
+        if field.type == descriptor.FieldDescriptor.TYPE_INT64:
+            job_dict[field.name] = int(job_dict[field.name])
     job_dict['status'] = managed_job_state.ManagedJobStatus.from_protobuf(
         job_dict['status'])
     return job_dict

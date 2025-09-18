@@ -1554,7 +1554,7 @@ def get_clusters_from_history(
             except (pickle.PickleError, AttributeError):
                 usage_intervals_dict[row.cluster_hash] = []
     user_hashes = set(row_to_user_hash.values())
-    user_hash_to_user = _get_users(user_hashes)
+    user_hash_to_user = get_users(user_hashes)
 
     cluster_hashes = set(row_to_user_hash.keys())
     last_cluster_event_dict = _get_last_cluster_event_multiple(
