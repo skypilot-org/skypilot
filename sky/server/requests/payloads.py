@@ -792,6 +792,7 @@ class GetConfigBody(RequestBody):
 class CostReportBody(RequestBody):
     """The request body for the cost report endpoint."""
     days: Optional[int] = 30
+    include_cost: bool = True
 
 
 class RequestPayload(BasePayload):
