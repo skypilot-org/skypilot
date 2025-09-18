@@ -1501,7 +1501,9 @@ def get_clusters(
 @_init_db
 @metrics_lib.time_me
 def get_clusters_from_history(
-        days: Optional[int] = None) -> List[Dict[str, Any]]:
+        days: Optional[int] = None,
+        abbreviate_response: bool = False,
+        cluster_hashes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
     Args:
@@ -1524,23 +1526,35 @@ def get_clusters_from_history(
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Explicitly select columns from both tables to avoid ambiguity
-        query = session.query(
-            cluster_history_table.c.cluster_hash, cluster_history_table.c.name,
-            cluster_history_table.c.num_nodes,
-            cluster_history_table.c.requested_resources,
-            cluster_history_table.c.launched_resources,
-            cluster_history_table.c.usage_intervals,
-            cluster_history_table.c.user_hash,
-            cluster_history_table.c.last_creation_yaml,
-            cluster_history_table.c.last_creation_command,
-            cluster_history_table.c.workspace.label('history_workspace'),
-            cluster_table.c.status, cluster_table.c.workspace,
-            cluster_table.c.status_updated_at).select_from(
-                cluster_history_table.join(cluster_table,
-                                           cluster_history_table.c.cluster_hash
-                                           == cluster_table.c.cluster_hash,
-                                           isouter=True))
+        if abbreviate_response:
+            query = session.query(
+                cluster_history_table.c.cluster_hash,
+                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
+                cluster_history_table.c.launched_resources,
+                cluster_history_table.c.usage_intervals,
+                cluster_history_table.c.user_hash,
+                cluster_history_table.c.workspace.label('history_workspace'),
+                cluster_table.c.status, cluster_table.c.workspace)
+        else:
+            query = session.query(
+                cluster_history_table.c.cluster_hash,
+                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
+                cluster_history_table.c.launched_resources,
+                cluster_history_table.c.usage_intervals,
+                cluster_history_table.c.user_hash,
+                cluster_history_table.c.last_creation_yaml,
+                cluster_history_table.c.last_creation_command,
+                cluster_history_table.c.workspace.label('history_workspace'),
+                cluster_table.c.status, cluster_table.c.workspace)
 
+        query = query.select_from(
+            cluster_history_table.join(cluster_table,
+                                       cluster_history_table.c.cluster_hash ==
+                                       cluster_table.c.cluster_hash,
+                                       isouter=True))
+        if cluster_hashes is not None:
+            query = query.filter(
+                cluster_history_table.c.cluster_hash.in_(cluster_hashes))
         rows = query.all()
 
     filtered_rows = []
@@ -1586,15 +1600,17 @@ def get_clusters_from_history(
     user_hashes = set(row_to_user_hash.values())
     user_hash_to_user = _get_users(user_hashes)
     cluster_hashes = set(row_to_user_hash.keys())
-    last_cluster_event_dict = _get_last_cluster_event_multiple(
-        cluster_hashes, ClusterEventType.STATUS_CHANGE)
+    if not abbreviate_response:
+        last_cluster_event_dict = _get_last_cluster_event_multiple(
+            cluster_hashes, ClusterEventType.STATUS_CHANGE)
 
     records = []
     for row in rows:
         user_hash = row_to_user_hash[row.cluster_hash]
         user = user_hash_to_user.get(user_hash, None)
         user_name = user.name if user is not None else None
-        last_event = last_cluster_event_dict.get(row.cluster_hash, None)
+        if not abbreviate_response:
+            last_event = last_cluster_event_dict.get(row.cluster_hash, None)
         usage_intervals: Optional[List[Tuple[
             int,
             Optional[int]]]] = usage_intervals_dict.get(row.cluster_hash, None)
@@ -1629,9 +1645,11 @@ def get_clusters_from_history(
             'user_hash': user_hash,
             'user_name': user_name,
             'workspace': workspace,
-            'last_creation_yaml': row.last_creation_yaml,
-            'last_creation_command': row.last_creation_command,
-            'last_event': last_event,
+            'last_creation_yaml': None if abbreviate_response else
+                                  row.last_creation_yaml,
+            'last_creation_command': None if abbreviate_response else
+                                     row.last_creation_command,
+            'last_event': None if abbreviate_response else last_event,
         }
 
         records.append(record)
