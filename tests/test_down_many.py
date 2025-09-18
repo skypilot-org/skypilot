@@ -121,7 +121,6 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
         ]
         assert set(succ_list) == {"sky-ok-1", "sky-ok-2"}
 
-
     else:
         assert "✓ Succeeded:" not in out
         assert "Scheduling autostop on cluster 'sky-ok-1'...done" in out

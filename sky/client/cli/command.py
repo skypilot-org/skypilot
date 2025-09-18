@@ -3381,7 +3381,7 @@ def _down_or_stop_clusters(
     if async_call:
         click.secho(f'{operation} requests are sent. Check the requests\' '
                     'status with `sky request get <request_id>`.')
-        
+
     click.echo('\nSummary:')
     if successes:
         click.echo('  ✓ Succeeded: ' + ', '.join(successes))
