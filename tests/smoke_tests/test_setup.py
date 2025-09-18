@@ -3,10 +3,15 @@ from smoke_tests import smoke_tests_utils
 
 
 # ---------- Test launching a cluster that has pyproject.toml in the workdir ----------
-@pytest.mark.parametrize('image_id', [
-    'docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-workdir-pyproject:latest',
-    'docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-root-pyproject:latest',
-])
+@pytest.mark.parametrize(
+    'image_id',
+    [
+        'docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-workdir-pyproject:latest',
+        'docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-root-pyproject:latest',
+        # TODO: REMOVE BEFORE MERGING
+        'docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-workdir-pyproject-dev-deps:latest',
+        'docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-root-pyproject-dev-deps:latest',
+    ])
 def test_workdir_with_pyproject(generic_cloud: str, image_id: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
