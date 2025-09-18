@@ -1238,14 +1238,15 @@ def _get_cluster_usage_intervals(
 
 
 def _get_cluster_launch_time(
-        usage_intervals: List[Tuple[int, Optional[int]]]) -> Optional[int]:
+    usage_intervals: Optional[List[Tuple[int,
+                                         Optional[int]]]]) -> Optional[int]:
     if usage_intervals is None:
         return None
     return usage_intervals[0][0]
 
 
 def _get_cluster_duration(
-        usage_intervals: List[Tuple[int, Optional[int]]]) -> int:
+        usage_intervals: Optional[List[Tuple[int, Optional[int]]]]) -> int:
     total_duration = 0
 
     if usage_intervals is None:
@@ -1546,10 +1547,10 @@ def get_clusters_from_history(
     usage_intervals_dict = {}
     row_to_user_hash = {}
     for row in rows:
-        usage_intervals = []
+        row_usage_intervals: List[Tuple[int, Optional[int]]] = []
         if row.usage_intervals:
             try:
-                usage_intervals = pickle.loads(row.usage_intervals)
+                row_usage_intervals = pickle.loads(row.usage_intervals)
             except (pickle.PickleError, AttributeError):
                 pass
         # Parse status
@@ -1564,10 +1565,10 @@ def get_clusters_from_history(
             # last use
             # Find the most recent activity time from usage_intervals
             last_activity_time = None
-            if usage_intervals:
+            if row_usage_intervals:
                 # Get the end time of the last interval (or start time if
                 # still running)
-                last_interval = usage_intervals[-1]
+                last_interval = row_usage_intervals[-1]
                 last_activity_time = (last_interval[1] if last_interval[1]
                                       is not None else last_interval[0])
 
@@ -1576,7 +1577,7 @@ def get_clusters_from_history(
                 continue
 
         filtered_rows.append(row)
-        usage_intervals_dict[row.cluster_hash] = usage_intervals
+        usage_intervals_dict[row.cluster_hash] = row_usage_intervals
         user_hash = (row.user_hash
                      if row.user_hash is not None else current_user_hash)
         row_to_user_hash[row.cluster_hash] = user_hash
@@ -1594,7 +1595,9 @@ def get_clusters_from_history(
         user = user_hash_to_user.get(user_hash, None)
         user_name = user.name if user is not None else None
         last_event = last_cluster_event_dict.get(row.cluster_hash, None)
-        usage_intervals = usage_intervals_dict.get(row.cluster_hash, None)
+        usage_intervals: Optional[List[Tuple[
+            int,
+            Optional[int]]]] = usage_intervals_dict.get(row.cluster_hash, None)
         launched_at = _get_cluster_launch_time(usage_intervals)
         duration = _get_cluster_duration(usage_intervals)
 
