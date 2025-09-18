@@ -732,8 +732,8 @@ def set_failed(
             # type with E1111 assignment-from-no-return. Python >= 3.11 does not
             # have this issue. Once we drop support for Python < 3.11, we can
             # remove this comment.
-            end_at_expr: Any = sqlalchemy.func.coalesce(
-                spot_table.c.end_at, end_time)
+            end_at_expr: Any = sqlalchemy.func.coalesce(spot_table.c.end_at,
+                                                        end_time)
             fields_to_set[spot_table.c.end_at] = end_at_expr
         else:
             fields_to_set[spot_table.c.end_at] = end_time
@@ -1686,8 +1686,8 @@ async def set_failed_async(
             # type with E1111 assignment-from-no-return. Python >= 3.11 does not
             # have this issue. Once we drop support for Python < 3.11, we can
             # remove this comment.
-            end_at_expr: Any = sqlalchemy.func.coalesce(
-                spot_table.c.end_at, end_time)
+            end_at_expr: Any = sqlalchemy.func.coalesce(spot_table.c.end_at,
+                                                        end_time)
             fields_to_set[spot_table.c.end_at] = end_at_expr
         else:
             fields_to_set[spot_table.c.end_at] = end_time
