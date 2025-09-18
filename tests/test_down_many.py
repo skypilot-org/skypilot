@@ -40,34 +40,24 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
     def fake_autostop(name, idle_minutes, wait_for, down):
         return fake_down(name)
 
-    monkeypatch.setattr(cli_mod.core, "down", fake_down, raising=True)
-    monkeypatch.setattr(cli_mod.core, "stop", fake_stop, raising=True)
-    monkeypatch.setattr(cli_mod.core, "autostop", fake_autostop, raising=True)
+    monkeypatch.setattr(cli_mod, '_async_call_or_wait',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli_mod.sdk, "down", fake_down)
+    monkeypatch.setattr(cli_mod.sdk, "stop", fake_stop)
+    monkeypatch.setattr(cli_mod.sdk, "autostop", fake_autostop)
 
-    def fake_get_cluster_records_and_set_ssh_config(clusters=None, 
-                                                    all_users=False):
-        clusters = clusters or names
-        return [{"name": n, "status": None} for n in clusters]
-
-    monkeypatch.setattr(
-        cli_mod,
-        "_get_cluster_records_and_set_ssh_config",
-        fake_get_cluster_records_and_set_ssh_config,
-        raising=True,
-    )
+    monkeypatch.setattr(cli_mod,
+                        "_get_cluster_records_and_set_ssh_config",
+                        lambda clusters=None, all_users=False:
+                          [{"name": n, "status": None} for n in (clusters or names)])
 
     class FakeControllers:
-        
         @staticmethod
         def from_name(name):
             return None
 
-    monkeypatch.setattr(
-        cli_mod,
-        "controller_utils",
-        type("X", (), {"Controllers": FakeControllers}),
-        raising=True,
-    )
+    monkeypatch.setattr(cli_mod, "controller_utils",
+                        type("X", (), {"Controllers": FakeControllers}))
 
     kwargs = dict(
         names=names,
@@ -81,10 +71,16 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
         async_call=False,
     )
 
+    monkeypatch.setattr(cli_mod.sdk,
+                        "get",
+                        lambda *args, **kwargs:
+                          [{"name": n, "status": None} for n in names])
+
     with pytest.raises(click.ClickException):
         _down_or_stop_clusters(**kwargs)
 
     captured = capsys.readouterr()
+
     out_raw = (captured.out + captured.err).replace("\r", "\n")
 
     import sys
@@ -100,10 +96,27 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
         print(out_raw)
     out = strip_ansi(out_raw)
 
-    assert "✓ sky-ok-1" in out
-    assert "✓ sky-ok-2" in out
-    assert "✗ sky-nebius-fail" in out
     assert re.search(r"nebius.*UNAUTHENTICATED", out, re.I)
     assert "Summary:" in out
-    assert "Succeeded:" in out
+    assert "✗ Failed: sky-nebius-fail" in out
     assert "Failed:" in out
+
+    if mode in ("down", "stop"):
+        if mode == "down":
+            assert "Terminating cluster sky-ok-1...done" in out
+            assert "Terminating cluster sky-ok-2...done" in out
+        else:
+            assert "Stopping cluster sky-ok-1...done" in out
+            assert "Stopping cluster sky-ok-2...done" in out
+
+        assert "✓ Succeeded:" in out
+        summary_line = next(
+            line for line in out.splitlines() if line.strip().startswith("✓ Succeeded:")
+        )
+        succ_list = [n.strip() for n in summary_line.split(":", 1)[1].split(",")]
+        assert set(succ_list) == {"sky-ok-1", "sky-ok-2"}
+
+    else: 
+        assert "✓ Succeeded:" not in out
+        assert "Scheduling autostop on cluster 'sky-ok-1'...done" in out
+        assert "Scheduling autostop on cluster 'sky-ok-2'...done" in out
