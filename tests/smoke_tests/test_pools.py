@@ -16,6 +16,11 @@ _LAUNCH_POOL_AND_CHECK_SUCCESS = (
     'echo "$s"; '
     'echo; echo; echo "$s" | grep "Successfully created pool"')
 
+_POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS = (
+    's=$(sky jobs pool apply -p {pool_name} --workers {num_workers} -y); '
+    'echo "$s"; '
+    'echo; echo; echo "$s" | grep "Successfully updated pool"')
+
 _TEARDOWN_POOL = ('sky jobs pool down {pool_name} -y')
 
 _CANCEL_POOL_JOBS = ('sky jobs pool cancel {pool_name} -y')
@@ -72,6 +77,34 @@ def wait_until_worker_status(pool_name: str,
         f'sleep {time_between_checks}; '
         'done; '
         'sleep 1')
+
+
+def wait_until_num_workers(pool_name: str,
+                           num_workers: int,
+                           timeout: int = 30,
+                           time_between_checks: int = 5):
+    status_str = f'sky jobs pool status {pool_name} | grep "^{pool_name}"'
+
+    return (
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for num workers {num_workers}"; exit 1; '
+        'fi; '
+        f's=$({status_str}); '
+        'echo "$s"; '
+        f'if echo "$s" | grep "{num_workers}/{num_workers}"; then '
+        '  break; '
+        'fi; '
+        'if echo "$s" | grep "FAILED"; then '
+        '  exit 1; '
+        'fi; '
+        'if echo "$s" | grep "SHUTTING_DOWN"; then '
+        '  exit 1; '
+        'fi; '
+        f'echo "Waiting for num workers to be {num_workers}..."; '
+        f'sleep {time_between_checks}; '
+        'done')
 
 
 def check_for_setup_message(pool_name: str,
@@ -273,4 +306,29 @@ def test_setup_logs_in_pool_exits(generic_cloud: str):
             timeout=timeout,
             teardown=_TEARDOWN_POOL.format(pool_name=pool_name))
 
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_update_workers(generic_cloud: str):
+    pool_config = basic_pool_conf(num_workers=1)
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_pool_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        test = smoke_tests_utils.Test(
+            'test_update_workers',
+            [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                wait_until_pool_ready(pool_name, timeout=timeout),
+                _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                    pool_name=pool_name, num_workers=2),
+                wait_until_num_workers(
+                    pool_name,
+                    2,
+                    timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
+        )
         smoke_tests_utils.run_one_test(test)
