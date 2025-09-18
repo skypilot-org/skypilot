@@ -41,7 +41,7 @@ def wait_until_worker_status(pool_name: str,
                              status: str,
                              timeout: int = 30,
                              time_between_checks: int = 5):
-    status_str = f'sky status | grep -A999 "^Pool Workers" | grep "^{pool_name}"'
+    status_str = f'sky jobs pool status {pool_name} | grep -A999 "^Pool Workers" | grep "^{pool_name}"'
     return (
         'start_time=$SECONDS; '
         'while true; do '
