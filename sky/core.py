@@ -300,7 +300,8 @@ def endpoints(cluster: str,
 
 
 @usage_lib.entrypoint
-def cost_report(days: Optional[int] = None, include_cost: bool = True) -> List[Dict[str, Any]]:
+def cost_report(days: Optional[int] = None,
+                dashboard_response: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -378,7 +379,7 @@ def cost_report(days: Optional[int] = None, include_cost: bool = True) -> List[D
     if not cluster_reports:
         return []
 
-    if include_cost:
+    if not dashboard_response:
         cluster_reports = subprocess_utils.run_in_parallel(
             _process_cluster_report, cluster_reports)
 
@@ -397,23 +398,22 @@ def cost_report(days: Optional[int] = None, include_cost: bool = True) -> List[D
                 # Ok to skip the fields as this is just for display
                 # purposes.
                 logger.debug(f'Failed to get resources.{field} for cluster '
-                                f'{record["name"]}: {str(e)}')
+                             f'{record["name"]}: {str(e)}')
                 record[field] = None
 
         # Add resources_str and resources_str_full for dashboard
         # compatibility
         num_nodes = record.get('num_nodes', 1)
         try:
-            resource_str_simple = resources_utils.format_resource(
-                resources, simplify=True)
-            resource_str_full = resources_utils.format_resource(
-                resources, simplify=False)
+            resource_str_simple = resources_utils.format_resource(resources,
+                                                                  simplify=True)
+            resource_str_full = resources_utils.format_resource(resources,
+                                                                simplify=False)
             record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
-            record[
-                'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+            record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to get resources_str for cluster '
-                            f'{record["name"]}: {str(e)}')
+                         f'{record["name"]}: {str(e)}')
             for field in fields:
                 record[field] = None
             record['resources_str'] = '-'

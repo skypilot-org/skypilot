@@ -1513,6 +1513,14 @@ def get_clusters_from_history(
         List of cluster records with history information.
     """
     assert _SQLALCHEMY_ENGINE is not None
+
+    current_user_hash = common_utils.get_user_hash()
+
+    # Prepare filtering parameters
+    cutoff_time = None
+    if days is not None:
+        cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
+
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Explicitly select columns from both tables to avoid ambiguity
         query = session.query(
@@ -1534,47 +1542,20 @@ def get_clusters_from_history(
 
         rows = query.all()
 
-    # Prepare filtering parameters
-    cutoff_time = None
-    if days is not None:
-        cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
-
-    current_user_hash = common_utils.get_user_hash()
-
-    row_to_user_hash = {}
+    filtered_rows = []
     usage_intervals_dict = {}
+    row_to_user_hash = {}
     for row in rows:
-        user_hash = (row.user_hash
-                     if row.user_hash is not None else current_user_hash)
-        row_to_user_hash[row.cluster_hash] = user_hash
+        usage_intervals = []
         if row.usage_intervals:
             try:
-                usage_intervals_dict[row.cluster_hash] = pickle.loads(
-                    row.usage_intervals)
+                usage_intervals = pickle.loads(row.usage_intervals)
             except (pickle.PickleError, AttributeError):
-                usage_intervals_dict[row.cluster_hash] = []
-    user_hashes = set(row_to_user_hash.values())
-    user_hash_to_user = _get_users(user_hashes)
-
-    cluster_hashes = set(row_to_user_hash.keys())
-    last_cluster_event_dict = _get_last_cluster_event_multiple(
-        cluster_hashes, ClusterEventType.STATUS_CHANGE)
-
-    records = []
-    for row in rows:
-        user_hash = row_to_user_hash[row.cluster_hash]
-        user = user_hash_to_user.get(user_hash, None)
-        user_name = user.name if user is not None else None
-        last_event = last_cluster_event_dict.get(row.cluster_hash, None)
-        usage_intervals = usage_intervals_dict.get(row.cluster_hash, None)
-        launched_at = _get_cluster_launch_time(usage_intervals)
-        duration = _get_cluster_duration(usage_intervals)
-
+                pass
         # Parse status
         status = None
         if row.status:
             status = status_lib.ClusterStatus[row.status]
-
         # Apply filtering: always include active clusters, filter historical
         # ones by time
         if cutoff_time is not None and status is None:  # Historical cluster
@@ -1593,6 +1574,34 @@ def get_clusters_from_history(
             # Skip historical clusters that haven't been used recently
             if last_activity_time is None or last_activity_time < cutoff_time:
                 continue
+
+        filtered_rows.append(row)
+        usage_intervals_dict[row.cluster_hash] = usage_intervals
+        user_hash = (row.user_hash
+                     if row.user_hash is not None else current_user_hash)
+        row_to_user_hash[row.cluster_hash] = user_hash
+
+    rows = filtered_rows
+    user_hashes = set(row_to_user_hash.values())
+    user_hash_to_user = _get_users(user_hashes)
+    cluster_hashes = set(row_to_user_hash.keys())
+    last_cluster_event_dict = _get_last_cluster_event_multiple(
+        cluster_hashes, ClusterEventType.STATUS_CHANGE)
+
+    records = []
+    for row in rows:
+        user_hash = row_to_user_hash[row.cluster_hash]
+        user = user_hash_to_user.get(user_hash, None)
+        user_name = user.name if user is not None else None
+        last_event = last_cluster_event_dict.get(row.cluster_hash, None)
+        usage_intervals = usage_intervals_dict.get(row.cluster_hash, None)
+        launched_at = _get_cluster_launch_time(usage_intervals)
+        duration = _get_cluster_duration(usage_intervals)
+
+        # Parse status
+        status = None
+        if row.status:
+            status = status_lib.ClusterStatus[row.status]
 
         # Parse launched resources safely
         launched_resources = None
