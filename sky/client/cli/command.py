@@ -4845,10 +4845,8 @@ def jobs_pool_apply(
     Workers:
         The --workers option can be used to override the number of workers
         specified in the YAML file, or to update workers without a YAML file.
-        Examples:
-            sky jobs pool apply pool.yaml -p my-pool --workers 5
-            sky jobs pool apply pool.yaml --workers 3
-            sky jobs pool apply -p my-pool --workers 5  # Update workers only
+        Example:
+            sky jobs pool apply -p my-pool --workers 5
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
