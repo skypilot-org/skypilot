@@ -202,7 +202,6 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 f' > {remote_log_path} 2>&1')
             job_lib.scheduler.queue(job_id, job_submit_cmd)
 
-            # TODO(kevin): remove this?
             if request.HasField('managed_job'):
                 managed_job = request.managed_job
                 pool = managed_job.pool if managed_job.HasField(
