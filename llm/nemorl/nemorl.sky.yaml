@@ -1,5 +1,7 @@
 # NeMo RL multi-node on Kubernetes with SkyPilot
 #
+# Runs the DPO example from NeMo RL repository on 16 H100s (with InfiniBand on supported clusters)
+#
 # Usage:
 #   HF_TOKEN=<YOUR_TOKEN> sky exec -c nemo nemorl.sky.yaml --secret HF_TOKEN
 
@@ -8,6 +10,7 @@ resources:
   memory: 64+
   infra: k8s
   cpus: 32+
+  # network_tier: best # Uncomment this for InfiniBand support on supported clusters
   image_id: docker:nvidia/cuda:12.8.0-devel-ubuntu24.04
 
 num_nodes: 2
