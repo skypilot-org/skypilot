@@ -302,7 +302,7 @@ def endpoints(cluster: str,
 @usage_lib.entrypoint
 def cost_report(
         days: Optional[int] = None,
-        dashboard_response: bool = False,
+        dashboard_summary_response: bool = False,
         cluster_hashes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
@@ -349,7 +349,7 @@ def cost_report(
     if days is None:
         days = constants.COST_REPORT_DEFAULT_DAYS
 
-    abbreviate_response = dashboard_response and cluster_hashes is None
+    abbreviate_response = dashboard_summary_response and cluster_hashes is None
 
     cluster_reports = global_user_state.get_clusters_from_history(
         days=days,
@@ -397,7 +397,7 @@ def cost_report(
         resources = record.get('resources')
         if resources is None:
             return
-        if not dashboard_response:
+        if not dashboard_summary_response:
             fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
         else:
             fields = ['cloud']
@@ -434,7 +434,7 @@ def cost_report(
 
     for report in cluster_reports:
         _update_record_with_resources(report)
-        if dashboard_response:
+        if dashboard_summary_response:
             report.pop('usage_intervals')
             report.pop('user_hash')
             report.pop('resources')

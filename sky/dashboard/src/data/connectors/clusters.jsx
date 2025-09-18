@@ -116,7 +116,7 @@ export async function getClusterHistory(clusterHash = null) {
   try {
     const requestBody = {
       days: 30,
-      dashboard_response: true,
+      dashboard_summary_response: true,
     };
 
     // If a specific cluster hash is provided, include it in the request

@@ -796,7 +796,8 @@ class CostReportBody(RequestBody):
     # the name is not unique
     cluster_hashes: Optional[List[str]] = None
     # Only return fields that are needed for the dashboard
-    dashboard_response: bool = False
+    # summary page
+    dashboard_summary_response: bool = False
 
 
 class RequestPayload(BasePayload):
