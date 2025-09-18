@@ -717,12 +717,11 @@ class JobsPoolApplyBody(RequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
         if self.task is not None:
-            dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                            self.env_vars,
-                                                            workdir_only=False)
+            dag = common.process_mounts_in_task_on_api_server(
+                self.task, self.env_vars, workdir_only=False)
             assert len(
                 dag.tasks) == 1, ('Must only specify one task in the DAG for '
-                                'a pool.', dag)
+                                  'a pool.', dag)
             kwargs['task'] = dag.tasks[0]
         else:
             kwargs['task'] = None

@@ -713,6 +713,11 @@ If no such pool exists, it will create a new one; this is equivalent to the beha
 
 Pools will automatically detect changes in the worker configuration. If only the pool configuration (e.g. number of workers) is changed, the pool will be updated in place to reuse the previous workers; otherwise, if the setup, file mounts, workdir, or resources configuration is changed, new worker clusters will be created and the old ones will be terminated gradually.
 
+You can also update the number of workers in a pool without a YAML file by using the :code:`--workers` flag:
+
+.. code-block:: console
+
+  $ sky jobs pool apply -p gpu-pool --workers 10
 
 .. note::
 

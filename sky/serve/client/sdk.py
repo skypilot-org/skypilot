@@ -55,10 +55,9 @@ def up(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def update(
-    task: Optional[Union['sky.Task', 'sky.Dag']],
+    task: Union['sky.Task', 'sky.Dag'],
     service_name: str,
     mode: 'serve_utils.UpdateMode',
-    workers: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
@@ -68,12 +67,11 @@ def update(
     Please refer to the sky.cli.serve_update for the document.
 
     Args:
-        task: sky.Task to update, or None to create a new service.
+        task: sky.Task to update.
         service_name: Name of the service.
         mode: Update mode, including:
             - sky.serve.UpdateMode.ROLLING
             - sky.serve.UpdateMode.BLUE_GREEN
-        workers: Number of workers/replicas to create when task is None.
         _need_confirmation: (Internal only) Whether to show a confirmation
             prompt before updating the service.
 
@@ -87,7 +85,6 @@ def update(
                        service_name,
                        mode,
                        pool=False,
-                       workers=workers,
                        _need_confirmation=_need_confirmation)
 
 
