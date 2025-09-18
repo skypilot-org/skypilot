@@ -397,7 +397,7 @@ def cost_report(
         resources = record.get('resources')
         if resources is None:
             return
-        if not abbreviate_response:
+        if not dashboard_response:
             fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
         else:
             fields = ['cloud']
@@ -438,6 +438,7 @@ def cost_report(
             report.pop('last_creation_yaml')
             report.pop('last_creation_command')
             report.pop('last_event')
+        if dashboard_response:
             report.pop('usage_intervals')
             report.pop('user_hash')
             report.pop('resources')
