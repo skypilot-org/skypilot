@@ -10,7 +10,7 @@ if [ -z "$STABLE_BUILD_API" ]; then
 fi
 
 names=()
-for i in {0..5}; do
+for i in {0..2}; do
   name="${PREFIX}${i}"
   names+=("$name")
 

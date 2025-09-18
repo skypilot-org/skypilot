@@ -9,16 +9,21 @@ OAIChatHistory = List[Dict[str, str]]
 
 single_lb_clusters = [
     'sgl-router',
-    'least-load',
-    'consistent-hashing',
-    'round-robin',
+    'sgl-router-sp-c',
+    'sgl-router-sp-p',
 ]
 
 single_lb_policy_and_extra_args = [
     (None, None),
-    ('least_load', None),
-    ('consistent_hashing', None),
-    ('round_robin', None),
+    ('prefix_tree', {
+        'FORCE_DISABLE_STEALING': 'true',
+        'USE_IE_QUEUE_INDICATOR': 'false',
+        'DO_PUSHING_TO_REPLICA': 'true',
+        'MAX_CONCURRENT_REQUESTS': '50',
+    }),
+    ('prefix_tree', {
+        'ENABLE_SELECTIVE_PUSHING': 'true',
+    }),
 ]
 
 
