@@ -167,7 +167,9 @@ function ClusterDetails() {
 
       setHistoryLoading(true);
       try {
-        const historyData = await dashboardCache.get(getClusterHistory, [cluster]);
+        const historyData = await dashboardCache.get(getClusterHistory, [
+          cluster,
+        ]);
         const foundHistoryCluster = historyData.find(
           (c) => c.cluster_hash === cluster || c.cluster === cluster
         );

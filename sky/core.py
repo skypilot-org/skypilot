@@ -397,7 +397,10 @@ def cost_report(
         resources = record.get('resources')
         if resources is None:
             return
-        fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+        if not abbreviate_response:
+            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+        else:
+            fields = ['cloud']
         for field in fields:
             try:
                 record[field] = str(getattr(resources, field))
@@ -414,17 +417,20 @@ def cost_report(
         try:
             resource_str_simple = resources_utils.format_resource(resources,
                                                                   simplify=True)
-            resource_str_full = resources_utils.format_resource(resources,
-                                                                simplify=False)
             record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
-            record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+            if not abbreviate_response:
+                resource_str_full = resources_utils.format_resource(
+                    resources, simplify=False)
+                record[
+                    'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to get resources_str for cluster '
                          f'{record["name"]}: {str(e)}')
             for field in fields:
                 record[field] = None
             record['resources_str'] = '-'
-            record['resources_str_full'] = '-'
+            if not abbreviate_response:
+                record['resources_str_full'] = '-'
 
     for report in cluster_reports:
         _update_record_with_resources(report)

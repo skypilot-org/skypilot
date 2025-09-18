@@ -118,12 +118,12 @@ export async function getClusterHistory(clusterHash = null) {
       days: 30,
       dashboard_response: true,
     };
-    
+
     // If a specific cluster hash is provided, include it in the request
     if (clusterHash) {
       requestBody.cluster_hashes = [clusterHash];
     }
-    
+
     const history = await apiClient.fetch('/cost_report', requestBody);
 
     console.log('Raw cluster history data:', history); // Debug log
