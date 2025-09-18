@@ -48,10 +48,13 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
 
     monkeypatch.setattr(cli_mod,
                         "_get_cluster_records_and_set_ssh_config",
-                        lambda clusters=None, all_users=False:
-                          [{"name": n, "status": None} for n in (clusters or names)])
+                        lambda clusters=None, all_users=False: [{
+                            "name": n, 
+                            "status": None
+                        } for n in (clusters or names)])
 
     class FakeControllers:
+
         @staticmethod
         def from_name(name):
             return None
@@ -71,10 +74,11 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
         async_call=False,
     )
 
-    monkeypatch.setattr(cli_mod.sdk,
-                        "get",
-                        lambda *args, **kwargs:
-                          [{"name": n, "status": None} for n in names])
+    monkeypatch.setattr(
+        cli_mod.sdk, "get", lambda *args, **kwargs: [{
+            "name": n, 
+            "status": None
+        } for n in names])
 
     with pytest.raises(click.ClickException):
         _down_or_stop_clusters(**kwargs)
@@ -110,12 +114,14 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
             assert "Stopping cluster sky-ok-2...done" in out
 
         assert "✓ Succeeded:" in out
-        summary_line = next(
-            line for line in out.splitlines() if line.strip().startswith("✓ Succeeded:")
-        )
-        succ_list = [n.strip() for n in summary_line.split(":", 1)[1].split(",")]
+        summary_line = next(line for line in out.splitlines() 
+                            if line.strip().startswith("✓ Succeeded:"))
+        succ_list = [
+            n.strip() for n in summary_line.split(":", 1)[1].split(",")
+        ]
         assert set(succ_list) == {"sky-ok-1", "sky-ok-2"}
 
+        
     else: 
         assert "✓ Succeeded:" not in out
         assert "Scheduling autostop on cluster 'sky-ok-1'...done" in out
