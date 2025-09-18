@@ -25,6 +25,7 @@ YAPF_VERSION=$(yapf --version | awk '{print $2}')
 PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
 BLACK_VERSION=$(black --version | head -n 1 | awk '{print $2}')
+ISORT_VERSION=$(isort --version | grep VERSION | awk '{print $2}')
 RUFF_VERSION=$(ruff --version | awk '{print $2}')
 
 # # params: tool name, tool version, required version
@@ -39,6 +40,7 @@ tool_version_check "yapf" $YAPF_VERSION "$(grep -m1 '^yapf==' requirements-dev.t
 tool_version_check "pylint" $PYLINT_VERSION "$(grep -m1 '^pylint==' requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "mypy" "$MYPY_VERSION" "$(grep -m1 '^mypy==' requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "black" "$BLACK_VERSION" "$(grep -m1 '^black==' requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "isort" "$ISORT_VERSION" "$(grep -m1 '^isort==' requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "ruff" "$RUFF_VERSION" "$(grep -m1 '^ruff==' requirements-dev.txt | cut -d'=' -f3)"
 
 YAPF_FLAGS=(

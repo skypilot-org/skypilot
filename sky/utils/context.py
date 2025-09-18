@@ -1,7 +1,8 @@
 """SkyPilot context for threads and coroutines."""
 
 import asyncio
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping
+from collections.abc import MutableMapping
 import contextvars
 import functools
 import os
