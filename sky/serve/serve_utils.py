@@ -464,6 +464,13 @@ def generate_remote_service_dir_name(service_name: str) -> str:
     service_name = service_name.replace('-', '_')
     return os.path.join(constants.SKYSERVE_METADATA_DIR, service_name)
 
+def get_local_service_file_name(service_name: str, version: int) -> str:
+    path = os.path.join(constants.SKYSERVE_METADATA_DIR,
+        service_name,
+        f'{service_name}-v{version}.yaml')
+    # Expand the path
+    return os.path.expanduser(path)
+
 
 def generate_remote_tmp_task_yaml_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)

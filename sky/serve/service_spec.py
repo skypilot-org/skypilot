@@ -506,3 +506,25 @@ class SkyServiceSpec:
         if not hasattr(self, '_pool'):
             return False
         return bool(self._pool)
+
+    def copy(self, **override) -> 'SkyServiceSpec':
+        return SkyServiceSpec(
+            readiness_path=override.pop('readiness_path', self._readiness_path),
+            initial_delay_seconds=override.pop('initial_delay_seconds', self._initial_delay_seconds),
+            readiness_timeout_seconds=override.pop('readiness_timeout_seconds', self._readiness_timeout_seconds),
+            min_replicas=override.pop('min_replicas', self._min_replicas),
+            max_replicas=override.pop('max_replicas', self._max_replicas),
+            num_overprovision=override.pop('num_overprovision', self._num_overprovision),
+            ports=override.pop('ports', self._ports),
+            target_qps_per_replica=override.pop('target_qps_per_replica', self._target_qps_per_replica),
+            post_data=override.pop('post_data', self._post_data),
+            tls_credential=override.pop('tls_credential', self._tls_credential),
+            readiness_headers=override.pop('readiness_headers', self._readiness_headers),
+            dynamic_ondemand_fallback=override.pop('dynamic_ondemand_fallback', self._dynamic_ondemand_fallback),
+            base_ondemand_fallback_replicas=override.pop('base_ondemand_fallback_replicas', self._base_ondemand_fallback_replicas),
+            spot_placer=override.pop('spot_placer', self._spot_placer),
+            upscale_delay_seconds=override.pop('upscale_delay_seconds', self._upscale_delay_seconds),
+            downscale_delay_seconds=override.pop('downscale_delay_seconds', self._downscale_delay_seconds),
+            load_balancing_policy=override.pop('load_balancing_policy', self._load_balancing_policy),
+            pool=override.pop('pool', self._pool),
+        )
