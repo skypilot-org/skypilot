@@ -94,7 +94,8 @@ def get_s3_mount_cmd(bucket_name: str,
     # Use rclone for ARM64 architectures since goofys doesn't support them
     rclone_mount = (
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
-        f'AWS_PROFILE={os.getenv("AWS_PROFILE")} rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        f'AWS_PROFILE={os.getenv("AWS_PROFILE")} \
+         rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         # Have to add --s3-env-auth=true to allow rclone to access private
         # buckets.
         '--daemon --allow-other --s3-env-auth=true')
