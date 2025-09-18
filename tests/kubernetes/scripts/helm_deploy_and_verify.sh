@@ -145,6 +145,7 @@ echo "Endpoint: http://$WEB_USERNAME:$WEB_PASSWORD@$HOST/api/health"
 MAX_RETRIES=10  # 5 minutes with 30 second intervals
 RETRY_INTERVAL=30
 RETRY_COUNT=0
+HEALTH_RESPONSE=""
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: Testing health endpoint..."
@@ -152,30 +153,26 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     echo "Health response: '$HEALTH_RESPONSE'"
     echo "Response length: ${#HEALTH_RESPONSE} characters"
 
-    # Check if response is valid JSON (not HTML error page)
-    if echo "$HEALTH_RESPONSE" | jq . >/dev/null 2>&1; then
-        echo "API server is responding with valid JSON!"
-        break
-    else
-        echo "API server not ready yet (received HTML error page). Waiting ${RETRY_INTERVAL} seconds..."
-        if [ $RETRY_COUNT -lt $((MAX_RETRIES - 1)) ]; then
-            sleep $RETRY_INTERVAL
+    # Check if response is valid JSON with proper version
+    if [ -n "$HEALTH_RESPONSE" ] && echo "$HEALTH_RESPONSE" | jq . >/dev/null 2>&1; then
+        RETURNED_VERSION=$(echo "$HEALTH_RESPONSE" | jq -r '.version')
+        if [ -n "$RETURNED_VERSION" ] && [ "$RETURNED_VERSION" != "null" ] && [ ${#RETURNED_VERSION} -gt 1 ]; then
+            echo "API server is ready! Version: $RETURNED_VERSION"
+            break
         fi
-        RETRY_COUNT=$((RETRY_COUNT + 1))
     fi
+
+    echo "API server not ready yet. Waiting ${RETRY_INTERVAL} seconds..."
+
+    if [ $RETRY_COUNT -lt $((MAX_RETRIES - 1)) ]; then
+        sleep $RETRY_INTERVAL
+    fi
+    RETRY_COUNT=$((RETRY_COUNT + 1))
 done
 
 if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
     echo "Error: API server failed to become ready after $((MAX_RETRIES * RETRY_INTERVAL)) seconds"
-    exit 1
-fi
-
-# Extract version from response and verify it matches (only if not using 'latest')
-RETURNED_VERSION=$(echo $HEALTH_RESPONSE | jq -r '.version')
-
-# Verify that we got a valid version string
-if [ -z "$RETURNED_VERSION" ] || [ ${#RETURNED_VERSION} -le 1 ]; then
-    echo "Error: Invalid version returned from API. Got: '$RETURNED_VERSION'"
+    echo "Final health response: '$HEALTH_RESPONSE'"
     exit 1
 fi
 
