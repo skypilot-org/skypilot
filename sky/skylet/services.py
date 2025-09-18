@@ -1,15 +1,19 @@
 """gRPC service implementations for skylet."""
 
 import os
+from typing import List, Optional
 
 import grpc
 
 from sky import sky_logging
 from sky.jobs import state as managed_job_state
+from sky.jobs import utils as managed_job_utils
 from sky.schemas.generated import autostopv1_pb2
 from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.schemas.generated import jobsv1_pb2
 from sky.schemas.generated import jobsv1_pb2_grpc
+from sky.schemas.generated import managed_jobsv1_pb2
+from sky.schemas.generated import managed_jobsv1_pb2_grpc
 from sky.schemas.generated import servev1_pb2
 from sky.schemas.generated import servev1_pb2_grpc
 from sky.serve import serve_rpc_utils
@@ -198,6 +202,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 f' > {remote_log_path} 2>&1')
             job_lib.scheduler.queue(job_id, job_submit_cmd)
 
+            # TODO(kevin): remove this?
             if request.HasField('managed_job'):
                 managed_job = request.managed_job
                 pool = managed_job.pool if managed_job.HasField(
@@ -343,3 +348,158 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 job_log_dirs=job_log_dirs)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+
+class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
+                            ):
+    """Implementation of the ManagedJobsService gRPC service."""
+
+    def GetVersion(  # type: ignore[return]
+            self, request: managed_jobsv1_pb2.GetVersionRequest,
+            context: grpc.ServicerContext
+    ) -> managed_jobsv1_pb2.GetVersionResponse:
+        try:
+            return managed_jobsv1_pb2.GetVersionResponse(
+                controller_version=constants.SKYLET_VERSION)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def GetJobTable(  # type: ignore[return]
+        self, request: managed_jobsv1_pb2.GetJobTableRequest,
+        context: grpc.ServicerContext
+    ) -> managed_jobsv1_pb2.GetJobTableResponse:
+        try:
+            accessible_workspaces = list(request.accessible_workspaces)
+            job_ids = list(request.job_ids.ids) if request.job_ids else None
+            user_hashes: Optional[List[Optional[str]]] = None
+            if request.user_hashes:
+                user_hashes = list(request.user_hashes.hashes)
+                # For backwards compatibility, we show jobs that do not have a
+                # user_hash. TODO: Remove before 0.12.0.
+                if request.show_jobs_without_user_hash:
+                    user_hashes.append(None)
+            statuses = list(
+                request.statuses.statuses) if request.statuses else None
+
+            job_queue = managed_job_utils.get_managed_job_queue(
+                skip_finished=request.skip_finished,
+                accessible_workspaces=accessible_workspaces,
+                job_ids=job_ids,
+                workspace_match=request.workspace_match
+                if request.HasField('workspace_match') else None,
+                name_match=request.name_match
+                if request.HasField('name_match') else None,
+                pool_match=request.pool_match
+                if request.HasField('pool_match') else None,
+                page=request.page if request.HasField('page') else None,
+                limit=request.limit if request.HasField('limit') else None,
+                user_hashes=user_hashes,
+                statuses=statuses)
+            jobs = managed_job_utils.decorate_jobs(job_queue['jobs'])
+            total = job_queue['total']
+            total_no_filter = job_queue['total_no_filter']
+            status_counts = job_queue['status_counts']
+
+            jobs_info = []
+            for job in jobs:
+                job_info = managed_jobsv1_pb2.ManagedJobInfo(
+                    job_id=job.get('job_id'),
+                    task_id=job.get('task_id'),
+                    job_name=job.get('job_name'),
+                    task_name=job.get('task_name'),
+                    job_duration=job.get('job_duration'),
+                    workspace=job.get('workspace'),
+                    status=job.get('status', managed_job_state.ManagedJobStatus.
+                                   PENDING).to_protobuf(),
+                    resources=job.get('resources'),
+                    cluster_resources=job.get('cluster_resources'),
+                    cluster_resources_full=job.get('cluster_resources_full'),
+                    cloud=job.get('cloud'),
+                    region=job.get('region'),
+                    infra=job.get('infra'),
+                    accelerators=job.get('accelerators'),
+                    recovery_count=job.get('recovery_count'),
+                    details=job.get('details'),
+                    failure_reason=job.get('failure_reason'),
+                    user_name=job.get('user_name'),
+                    user_hash=job.get('user_hash'),
+                    submitted_at=job.get('submitted_at'),
+                    start_at=job.get('start_at'),
+                    end_at=job.get('end_at'),
+                    user_yaml=job.get('user_yaml'),
+                    entrypoint=job.get('entrypoint'),
+                    metadata=job.get('metadata'),
+                    pool=job.get('pool'),
+                    pool_hash=job.get('pool_hash'))
+                jobs_info.append(job_info)
+
+            return managed_jobsv1_pb2.GetJobTableResponse(
+                jobs=jobs_info,
+                total=total,
+                total_no_filter=total_no_filter,
+                status_counts=status_counts)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def GetAllJobIdsByName(  # type: ignore[return]
+        self, request: managed_jobsv1_pb2.GetAllJobIdsByNameRequest,
+        context: grpc.ServicerContext
+    ) -> managed_jobsv1_pb2.GetAllJobIdsByNameResponse:
+        try:
+            job_name = request.job_name if request.HasField(
+                'job_name') else None
+            job_ids = managed_job_state.get_all_job_ids_by_name(job_name)
+            return managed_jobsv1_pb2.GetAllJobIdsByNameResponse(
+                job_ids=job_ids)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def CancelJobsById(  # type: ignore[return]
+        self, request: managed_jobsv1_pb2.CancelJobsByIdRequest,
+        context: grpc.ServicerContext
+    ) -> managed_jobsv1_pb2.CancelJobsByIdResponse:
+        try:
+            job_ids = None
+            if request.HasField('job_ids'):
+                job_ids = list(request.job_ids.ids)
+
+            message = managed_job_utils.cancel_jobs_by_id(
+                job_ids=job_ids,
+                all_users=request.all_users,
+                current_workspace=request.current_workspace)
+            return managed_jobsv1_pb2.CancelJobsByIdResponse(message=message)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def CancelJobByName(  # type: ignore[return]
+        self, request: managed_jobsv1_pb2.CancelJobByNameRequest,
+        context: grpc.ServicerContext
+    ) -> managed_jobsv1_pb2.CancelJobByNameResponse:
+        try:
+            message = managed_job_utils.cancel_job_by_name(
+                job_name=request.job_name,
+                current_workspace=request.current_workspace)
+            return managed_jobsv1_pb2.CancelJobByNameResponse(message=message)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def CancelJobsByPool(  # type: ignore[return]
+        self, request: managed_jobsv1_pb2.CancelJobsByPoolRequest,
+        context: grpc.ServicerContext
+    ) -> managed_jobsv1_pb2.CancelJobsByPoolResponse:
+        try:
+            message = managed_job_utils.cancel_jobs_by_pool(
+                pool_name=request.pool_name,
+                current_workspace=request.current_workspace)
+            return managed_jobsv1_pb2.CancelJobsByPoolResponse(message=message)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def StreamLogs(
+            self,
+            request: managed_jobsv1_pb2.
+        StreamLogsRequest,  # type: ignore[return]
+            context: grpc.ServicerContext):
+        # TODO(kevin): implement this
+        context.abort(grpc.StatusCode.UNIMPLEMENTED,
+                      'StreamLogs is not implemented')

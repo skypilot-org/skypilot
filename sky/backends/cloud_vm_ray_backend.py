@@ -91,6 +91,8 @@ if typing.TYPE_CHECKING:
     from sky.schemas.generated import autostopv1_pb2_grpc
     from sky.schemas.generated import jobsv1_pb2
     from sky.schemas.generated import jobsv1_pb2_grpc
+    from sky.schemas.generated import managed_jobsv1_pb2
+    from sky.schemas.generated import managed_jobsv1_pb2_grpc
     from sky.schemas.generated import servev1_pb2
     from sky.schemas.generated import servev1_pb2_grpc
 else:
@@ -111,6 +113,10 @@ else:
         'sky.schemas.generated.servev1_pb2')
     servev1_pb2_grpc = adaptors_common.LazyImport(
         'sky.schemas.generated.servev1_pb2_grpc')
+    managed_jobsv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2')
+    managed_jobsv1_pb2_grpc = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2_grpc')
 
 Path = str
 
@@ -3054,6 +3060,8 @@ class SkyletClient:
         self._autostop_stub = autostopv1_pb2_grpc.AutostopServiceStub(channel)
         self._jobs_stub = jobsv1_pb2_grpc.JobsServiceStub(channel)
         self._serve_stub = servev1_pb2_grpc.ServeServiceStub(channel)
+        self._managed_jobs_stub = (
+            managed_jobsv1_pb2_grpc.ManagedJobsServiceStub(channel))
 
     def set_autostop(
         self,
@@ -3187,6 +3195,50 @@ class SkyletClient:
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'servev1_pb2.UpdateServiceResponse':
         return self._serve_stub.UpdateService(request, timeout=timeout)
+
+    def get_managed_job_controller_version(
+        self,
+        request: 'managed_jobsv1_pb2.GetVersionRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.GetVersionResponse':
+        return self._managed_jobs_stub.GetVersion(request, timeout=timeout)
+
+    def get_managed_job_table(
+        self,
+        request: 'managed_jobsv1_pb2.GetJobTableRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.GetJobTableResponse':
+        return self._managed_jobs_stub.GetJobTable(request, timeout=timeout)
+
+    def get_all_managed_job_ids_by_name(
+        self,
+        request: 'managed_jobsv1_pb2.GetAllJobIdsByNameRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.GetAllJobIdsByNameResponse':
+        return self._managed_jobs_stub.GetAllJobIdsByName(request,
+                                                          timeout=timeout)
+
+    def cancel_managed_jobs_by_id(
+        self,
+        request: 'managed_jobsv1_pb2.CancelJobsByIdRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.CancelJobsByIdResponse':
+        return self._managed_jobs_stub.CancelJobsById(request, timeout=timeout)
+
+    def cancel_managed_job_by_name(
+        self,
+        request: 'managed_jobsv1_pb2.CancelJobByNameRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.CancelJobByNameResponse':
+        return self._managed_jobs_stub.CancelJobByName(request, timeout=timeout)
+
+    def cancel_managed_jobs_by_pool(
+        self,
+        request: 'managed_jobsv1_pb2.CancelJobsByPoolRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.CancelJobsByPoolResponse':
+        return self._managed_jobs_stub.CancelJobsByPool(request,
+                                                        timeout=timeout)
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
@@ -4739,6 +4791,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               tail: Optional[int] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
+        # TODO(kevin): Migrate stream_logs to gRPC
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
             job_name, job_id, follow, controller, tail)
 
@@ -4784,20 +4837,37 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert job_name is None or job_id is None, (job_name, job_id)
 
         if job_id is None:
-            # generate code to get the job_id
+            # get the job_id
             # if job_name is None, get all job_ids
             # TODO: Only get the latest job_id, since that's the only one we use
-            code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
-                job_name=job_name)
-            returncode, job_ids, stderr = self.run_on_head(handle,
-                                                           code,
-                                                           stream_logs=False,
-                                                           require_outputs=True,
-                                                           separate_stderr=True)
-            subprocess_utils.handle_returncode(returncode, code,
-                                               'Failed to sync down logs.',
-                                               stderr)
-            job_ids = message_utils.decode_payload(job_ids)
+
+            use_legacy = not handle.is_grpc_enabled_with_flag
+            logger.info(f'handle.is_grpc_enabled_with_flag: '
+                        f'{handle.is_grpc_enabled_with_flag}')
+            if handle.is_grpc_enabled_with_flag:
+                try:
+                    request = managed_jobsv1_pb2.GetAllJobIdsByNameRequest(
+                        job_name=job_name)
+                    response = backend_utils.invoke_skylet_with_retries(
+                        lambda: SkyletClient(handle.get_grpc_channel(
+                        )).get_all_managed_job_ids_by_name(request))
+                    job_ids = list(response.job_ids)
+                except exceptions.SkyletMethodNotImplementedError:
+                    use_legacy = True
+
+            if use_legacy:
+                code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
+                    job_name=job_name)
+                returncode, job_ids_payload, stderr = self.run_on_head(
+                    handle,
+                    code,
+                    stream_logs=False,
+                    require_outputs=True,
+                    separate_stderr=True)
+                subprocess_utils.handle_returncode(returncode, code,
+                                                   'Failed to sync down logs.',
+                                                   stderr)
+                job_ids = message_utils.decode_payload(job_ids_payload)
             if not job_ids:
                 logger.info(f'{colorama.Fore.YELLOW}'
                             'No matching job found'
@@ -4825,18 +4895,39 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             # get the run_timestamp
             # the function takes in [job_id]
-            code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs([str(job_id)])
-            returncode, run_timestamps_payload, stderr = self.run_on_head(
-                handle,
-                code,
-                stream_logs=False,
-                require_outputs=True,
-                separate_stderr=True)
-            subprocess_utils.handle_returncode(returncode, code,
-                                               'Failed to sync logs.', stderr)
-            # returns with a dict of {job_id: run_timestamp}
-            run_timestamps = message_utils.decode_payload(
-                run_timestamps_payload)
+            use_legacy = not handle.is_grpc_enabled_with_flag
+            if handle.is_grpc_enabled_with_flag:
+                try:
+                    log_dirs_request = jobsv1_pb2.GetLogDirsForJobsRequest(
+                        job_ids=[job_id])
+                    log_dirs_response = (
+                        backend_utils.invoke_skylet_with_retries(
+                            lambda: SkyletClient(handle.get_grpc_channel(
+                            )).get_log_dirs_for_jobs(log_dirs_request)))
+                    job_log_dirs = log_dirs_response.job_log_dirs
+                    # Convert back to the expected format
+                    # {job_id: run_timestamp}
+                    run_timestamps = {}
+                    for jid, log_dir in job_log_dirs.items():
+                        run_timestamps[int(jid)] = log_dir
+                except exceptions.SkyletMethodNotImplementedError:
+                    use_legacy = True
+
+            if use_legacy:
+                code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(
+                    [str(job_id)])
+                returncode, run_timestamps_payload, stderr = self.run_on_head(
+                    handle,
+                    code,
+                    stream_logs=False,
+                    require_outputs=True,
+                    separate_stderr=True)
+                subprocess_utils.handle_returncode(returncode, code,
+                                                   'Failed to sync logs.',
+                                                   stderr)
+                # returns with a dict of {job_id: run_timestamp}
+                run_timestamps = message_utils.decode_payload(
+                    run_timestamps_payload)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
@@ -4903,6 +4994,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         exist_ok=True)
             log_file = os.path.join(local_log_dir, 'run.log')
 
+            # TODO(kevin): Migrate stream_logs to gRPC
             code = managed_jobs.ManagedJobCodeGen.stream_logs(
                 job_name=None,
                 job_id=int(job_id),

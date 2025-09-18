@@ -51,16 +51,21 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from google.protobuf import json_format
     import grpc
     import psutil
 
     import sky
     from sky import dag as dag_lib
     from sky.schemas.generated import jobsv1_pb2
+    from sky.schemas.generated import managed_jobsv1_pb2
 else:
+    json_format = adaptors_common.LazyImport('google.protobuf.json_format')
     psutil = adaptors_common.LazyImport('psutil')
     grpc = adaptors_common.LazyImport('grpc')
     jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
+    managed_jobsv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1241,6 +1246,24 @@ def dump_managed_job_queue(
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
 ) -> str:
+    return message_utils.encode_payload(
+        get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
+                              workspace_match, name_match, pool_match, page,
+                              limit, user_hashes, statuses))
+
+
+def get_managed_job_queue(
+    skip_finished: bool = False,
+    accessible_workspaces: Optional[List[str]] = None,
+    job_ids: Optional[List[int]] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    user_hashes: Optional[List[Optional[str]]] = None,
+    statuses: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     # Make sure to get all jobs - some logic below (e.g. high priority job
     # detection) requires a full view of the jobs table.
     jobs = managed_job_state.get_managed_jobs()
@@ -1371,12 +1394,12 @@ def dump_managed_job_queue(
         else:
             job['details'] = None
 
-    return message_utils.encode_payload({
+    return {
         'jobs': jobs,
         'total': total,
         'total_no_filter': total_no_filter,
         'status_counts': status_counts
-    })
+    }
 
 
 def filter_jobs(
@@ -1479,15 +1502,23 @@ def load_managed_job_queue(
         total = len(jobs)
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
+    jobs = decorate_jobs(jobs)
+    return jobs, total, result_type, total_no_filter, status_counts
 
+
+def decorate_jobs(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    user_hash_to_user = global_user_state.get_users(
+        set(job['user_hash']
+            for job in jobs
+            if job.get('user_hash', None) is not None))
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
         if 'user_hash' in job and job['user_hash'] is not None:
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
-            user = global_user_state.get_user(job['user_hash'])
+            user = user_hash_to_user.get(job['user_hash'], None)
             job['user_name'] = user.name if user is not None else None
-    return jobs, total, result_type, total_no_filter, status_counts
+    return jobs
 
 
 def _get_job_status_from_tasks(
@@ -1822,6 +1853,24 @@ def format_job_table(
     if return_rows:
         return job_table.rows
     return output
+
+
+def job_proto_to_dict(
+        job_proto: 'managed_jobsv1_pb2.ManagedJobInfo') -> Dict[str, Any]:
+    job_dict = json_format.MessageToDict(
+        job_proto,
+        always_print_fields_with_no_presence=True,
+        # Our API returns fields in snake_case.
+        preserving_proto_field_name=True,
+        use_integers_for_enums=True)
+    # Ensure optional fields are present with None values for
+    # backwards compatibility with older clients.
+    for field in job_proto.DESCRIPTOR.fields:
+        if field.has_presence and field.name not in job_dict:
+            job_dict[field.name] = None
+    job_dict['status'] = managed_job_state.ManagedJobStatus.from_protobuf(
+        job_dict['status'])
+    return job_dict
 
 
 class ManagedJobCodeGen:

@@ -1,0 +1,155 @@
+syntax = "proto3";
+
+package managed_jobs.v1;
+
+service ManagedJobsService {
+  // Get controller version.
+  rpc GetVersion(GetVersionRequest) returns (GetVersionResponse);
+  // Get the managed job queue with advanced filtering.
+  rpc GetJobTable(GetJobTableRequest) returns (GetJobTableResponse);
+  // Get all job IDs by name.
+  rpc GetAllJobIdsByName(GetAllJobIdsByNameRequest) returns (GetAllJobIdsByNameResponse);
+  // Cancel managed jobs by IDs.
+  rpc CancelJobsById(CancelJobsByIdRequest) returns (CancelJobsByIdResponse);
+  // Cancel managed job by name.
+  rpc CancelJobByName(CancelJobByNameRequest) returns (CancelJobByNameResponse);
+  // Cancel managed jobs by pool.
+  rpc CancelJobsByPool(CancelJobsByPoolRequest) returns (CancelJobsByPoolResponse);
+  // Stream managed job logs.
+  rpc StreamLogs(StreamLogsRequest) returns (stream StreamLogsResponse);
+}
+
+enum ManagedJobStatus {
+  MANAGED_JOB_STATUS_UNSPECIFIED = 0;
+  MANAGED_JOB_STATUS_PENDING = 1;
+  MANAGED_JOB_STATUS_SUBMITTED = 2;
+  MANAGED_JOB_STATUS_STARTING = 3;
+  MANAGED_JOB_STATUS_RUNNING = 4;
+  MANAGED_JOB_STATUS_RECOVERING = 5;
+  MANAGED_JOB_STATUS_CANCELLING = 6;
+  MANAGED_JOB_STATUS_SUCCEEDED = 7;
+  MANAGED_JOB_STATUS_CANCELLED = 8;
+  MANAGED_JOB_STATUS_FAILED = 9;
+  MANAGED_JOB_STATUS_FAILED_SETUP = 10;
+  MANAGED_JOB_STATUS_FAILED_PRECHECKS = 11;
+  MANAGED_JOB_STATUS_FAILED_NO_RESOURCE = 12;
+  MANAGED_JOB_STATUS_FAILED_CONTROLLER = 13;
+}
+
+message JobIds {
+  repeated int64 ids = 1;
+}
+
+message UserHashes {
+  repeated string hashes = 1;
+}
+
+message Statuses {
+  repeated string statuses = 1;
+}
+
+message GetVersionRequest {}
+
+message GetVersionResponse {
+  string controller_version = 1;
+}
+
+message GetJobTableRequest {
+  bool skip_finished = 1;
+  repeated string accessible_workspaces = 2;
+  optional JobIds job_ids = 3;
+  optional string workspace_match = 4;
+  optional string name_match = 5;
+  optional string pool_match = 6;
+  optional int32 page = 7;
+  optional int32 limit = 8;
+  optional UserHashes user_hashes = 9;
+  optional Statuses statuses = 10;
+  bool show_jobs_without_user_hash = 11;
+}
+
+message ManagedJobInfo {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  string job_name = 3;
+  string task_name = 4;
+  double job_duration = 5;
+  optional string workspace = 6;
+  ManagedJobStatus status = 7;
+  string resources = 8;
+  string cluster_resources = 9;
+  string cluster_resources_full = 10;
+  string cloud = 11;
+  string region = 12;
+  string infra = 13;
+  map<string, float> accelerators = 14;
+  int32 recovery_count = 15;
+  optional string details = 16;
+  optional string failure_reason = 17;
+  optional string user_name = 18;
+  optional string user_hash = 19;
+  optional double submitted_at = 20;
+  optional double start_at = 21;
+  optional double end_at = 22;
+  optional string user_yaml = 23;
+  optional string entrypoint = 24;
+  map<string, string> metadata = 25;
+  optional string pool = 26;
+  optional string pool_hash = 27;
+}
+
+message GetJobTableResponse {
+  repeated ManagedJobInfo jobs = 1;
+  int32 total = 2;
+  int32 total_no_filter = 3;
+  map<string, int32> status_counts = 4;
+}
+
+message GetAllJobIdsByNameRequest {
+  optional string job_name = 1;
+}
+
+message GetAllJobIdsByNameResponse {
+  repeated int64 job_ids = 1;
+}
+
+message CancelJobsByIdRequest {
+  optional JobIds job_ids = 1;
+  bool all_users = 2;
+  string current_workspace = 3;
+}
+
+message CancelJobsByIdResponse {
+  string message = 1;
+}
+
+message CancelJobByNameRequest {
+  string job_name = 1;
+  string current_workspace = 2;
+}
+
+message CancelJobByNameResponse {
+  string message = 1;
+}
+
+message CancelJobsByPoolRequest {
+  string pool_name = 1;
+  string current_workspace = 2;
+}
+
+message CancelJobsByPoolResponse {
+  string message = 1;
+}
+
+message StreamLogsRequest {
+  optional string job_name = 1;
+  optional int64 job_id = 2;
+  bool follow = 3;
+  bool controller = 4;
+  optional int32 tail = 5;
+}
+
+message StreamLogsResponse {
+  string log_line = 1;
+  optional int32 exit_code = 2;
+}

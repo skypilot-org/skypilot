@@ -25,6 +25,7 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.schemas.generated import managed_jobsv1_pb2
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -447,6 +448,75 @@ class ManagedJobStatus(enum.Enum):
             cls.RUNNING,
             cls.RECOVERING,
         ]
+
+    @classmethod
+    def from_protobuf(
+        cls, protobuf_value: 'managed_jobsv1_pb2.ManagedJobStatus'
+    ) -> Optional['ManagedJobStatus']:
+        """Convert protobuf ManagedJobStatus enum to Python enum value."""
+        protobuf_to_enum = {
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_UNSPECIFIED: None,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING: cls.PENDING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUBMITTED:
+                cls.DEPRECATED_SUBMITTED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING: cls.STARTING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_RUNNING: cls.RUNNING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUCCEEDED: cls.SUCCEEDED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED: cls.FAILED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_CONTROLLER:
+                cls.FAILED_CONTROLLER,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_SETUP:
+                cls.FAILED_SETUP,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLED: cls.CANCELLED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_RECOVERING: cls.RECOVERING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLING: cls.CANCELLING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_PRECHECKS:
+                cls.FAILED_PRECHECKS,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_NO_RESOURCE:
+                cls.FAILED_NO_RESOURCE,
+        }
+
+        if protobuf_value not in protobuf_to_enum:
+            raise ValueError(
+                f'Unknown protobuf ManagedJobStatus value: {protobuf_value}')
+
+        return protobuf_to_enum[protobuf_value]
+
+    def to_protobuf(self) -> 'managed_jobsv1_pb2.ManagedJobStatus':
+        """Convert this Python enum value to protobuf enum value."""
+        enum_to_protobuf = {
+            ManagedJobStatus.PENDING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING,
+            ManagedJobStatus.DEPRECATED_SUBMITTED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUBMITTED,
+            ManagedJobStatus.STARTING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING,
+            ManagedJobStatus.RUNNING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_RUNNING,
+            ManagedJobStatus.SUCCEEDED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUCCEEDED,
+            ManagedJobStatus.FAILED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED,
+            ManagedJobStatus.FAILED_CONTROLLER:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_CONTROLLER,
+            ManagedJobStatus.FAILED_SETUP:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_SETUP,
+            ManagedJobStatus.CANCELLED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLED,
+            ManagedJobStatus.RECOVERING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_RECOVERING,
+            ManagedJobStatus.CANCELLING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLING,
+            ManagedJobStatus.FAILED_PRECHECKS:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_PRECHECKS,
+            ManagedJobStatus.FAILED_NO_RESOURCE:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_NO_RESOURCE,
+        }
+
+        if self not in enum_to_protobuf:
+            raise ValueError(f'Unknown ManagedJobStatus value: {self}')
+
+        return enum_to_protobuf[self]
 
 
 _SPOT_STATUS_TO_COLOR = {
