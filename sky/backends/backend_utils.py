@@ -3055,6 +3055,10 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
+    if cluster_names is not None:
+        if isinstance(cluster_names, str):
+            cluster_names = [cluster_names]
+        cluster_names = _get_glob_clusters(cluster_names, silent=True)
 
     exclude_managed_clusters = False
     if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
@@ -3067,16 +3071,15 @@ def get_clusters(
     records = global_user_state.get_clusters(
         exclude_managed_clusters=exclude_managed_clusters,
         user_hashes_filter=user_hashes_filter,
-        workspaces_filter=accessible_workspaces)
+        workspaces_filter=accessible_workspaces,
+        cluster_names=cluster_names,
+        )
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
 
     if cluster_names is not None:
-        if isinstance(cluster_names, str):
-            cluster_names = [cluster_names]
-        cluster_names = _get_glob_clusters(cluster_names, silent=True)
         new_records = []
         not_exist_cluster_names = []
         for cluster_name in cluster_names:

@@ -1409,6 +1409,7 @@ def get_clusters(
     exclude_managed_clusters: bool = False,
     workspaces_filter: Optional[Set[str]] = None,
     user_hashes_filter: Optional[Set[str]] = None,
+    cluster_names: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Get clusters from the database.
 
@@ -1419,6 +1420,8 @@ def get_clusters(
             that has workspace field set to one of the values.
         user_hashes_filter: If specified, only include clusters
             that has user_hash field set to one of the values.
+        cluster_names: If specified, only include clusters
+            that has name field set to one of the values.
     """
     # is a cluster has a null user_hash,
     # we treat it as belonging to the current user.
@@ -1437,11 +1440,13 @@ def get_clusters(
                 # If current_user_hash is in user_hashes_filter, we include
                 # clusters that have a null user_hash.
                 query = query.filter(
-                    cluster_table.c.user_hash.in_(user_hashes_filter) |
-                    (cluster_table.c.user_hash is None))
+                    (cluster_table.c.user_hash.in_(user_hashes_filter) |
+                     (cluster_table.c.user_hash is None)) &
+                    (cluster_table.c.name.in_(cluster_names) if cluster_names else True))
             else:
                 query = query.filter(
-                    cluster_table.c.user_hash.in_(user_hashes_filter))
+                    cluster_table.c.user_hash.in_(user_hashes_filter) &
+                    (cluster_table.c.name.in_(cluster_names) if cluster_names else True))
         query = query.order_by(sqlalchemy.desc(cluster_table.c.launched_at))
         rows = query.all()
     records = []
