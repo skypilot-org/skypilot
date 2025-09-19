@@ -1329,10 +1329,6 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
                 print(line, end='', flush=True)
         return ''
 
-    # For pools, we don't stream the job logs as the run section is ignored.
-    if pool:
-        return ''
-
     backend = backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
