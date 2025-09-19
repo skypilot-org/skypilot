@@ -3,7 +3,7 @@
 import dataclasses
 import shlex
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -199,13 +199,9 @@ class DockerInitializer:
         wait_for_docker_daemon: bool = False,
         separate_stderr: bool = False,
         log_err_when_fail: bool = True,
-        flock_name: str = '',
-        flock_args: str = '',
+        flock_name: Optional[str] = None,
+        flock_args: Optional[str] = None,
     ) -> str:
-
-        if flock_name != '':
-            cmd = (f'flock {flock_args} /tmp/{flock_name} '
-                   f'-c {shlex.quote(cmd)}')
 
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
@@ -216,6 +212,11 @@ class DockerInitializer:
             # TODO(zhwu): ray use the `-it` flag, we need to check why.
             cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
                    f' {shlex.quote(cmd)} ')
+
+        if flock_name is not None:
+            flock_args = flock_args or ''
+            cmd = (f'flock {flock_args} /tmp/{flock_name} '
+                   f'-c {shlex.quote(cmd)}')
 
         logger.debug(f'+ {cmd}')
         start = time.time()
