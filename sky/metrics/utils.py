@@ -12,6 +12,7 @@ import httpx
 import prometheus_client as prom
 
 from sky.skylet import constants
+from sky.utils import context_utils
 
 _SELECT_TIMEOUT = 1
 _SELECT_BUFFER_SIZE = 4096
@@ -282,8 +283,8 @@ async def send_metrics_request_with_port_forward(
     port_forward_process = None
     try:
         # Start port forward
-        port_forward_process, local_port = start_svc_port_forward(
-            context, namespace, service, service_port)
+        port_forward_process, local_port = await context_utils.to_thread(
+            start_svc_port_forward, context, namespace, service, service_port)
 
         # Build endpoint URL
         endpoint = f'http://localhost:{local_port}{endpoint_path}'
@@ -303,7 +304,8 @@ async def send_metrics_request_with_port_forward(
     finally:
         # Always clean up port forward
         if port_forward_process:
-            stop_svc_port_forward(port_forward_process)
+            await context_utils.to_thread(stop_svc_port_forward,
+                                          port_forward_process)
 
 
 async def add_cluster_name_label(metrics_text: str, context: str) -> str:
