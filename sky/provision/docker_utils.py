@@ -268,7 +268,8 @@ class DockerInitializer:
         if self._check_container_exited():
             self.initialized = True
             self._run(f'{self.docker_cmd} start {self.container_name}')
-            self._run('sudo service ssh start', run_env='docker',
+            self._run('sudo service ssh start',
+                      run_env='docker',
                       flock_name=f'{self.container_name}.sky.lifecycle.lock',
                       flock_args='-s -w 1')
             return self._run('whoami', run_env='docker')
