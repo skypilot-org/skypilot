@@ -148,10 +148,9 @@ if os.path.exists(readme_filepath):
     long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
     long_description = parse_readme(long_description)
 
-atexit.register(revert_commit_hash)
-replace_commit_hash()
-
 if __name__ == '__main__':
+    atexit.register(revert_commit_hash)
+    replace_commit_hash()
     setuptools.setup(
         # NOTE: this affects the package.whl wheel name. When changing this (if
         # ever), you must grep for '.whl' and change all corresponding wheel paths
