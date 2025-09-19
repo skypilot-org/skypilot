@@ -38,6 +38,9 @@ class Slurm(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on Slurm.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported in '
+             'Slurm.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []

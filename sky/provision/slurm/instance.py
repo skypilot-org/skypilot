@@ -357,56 +357,36 @@ def terminate_instances(
     worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, cluster_name_on_cloud
-    zone = provider_config['availability_zone']
-    project_id = provider_config['project_id']
-    use_tpu_vms = provider_config.get('_has_tpus', False)
+    cluster_name = slurm_utils.get_cluster_name_from_config(provider_config)
+    partition = slurm_utils.get_partition_from_config(provider_config)
+    # TODO(jwj): Terminate jobs with other statuses, like pending, failed, etc.
+    # NOTE: Check if termination affects other users on the same physical worker.
+    # We've provided the user during filtering, but still need to double check.
+    jobs = slurm_utils.filter_jobs(provider_config['ssh'], partition,
+                                   ['running'], cluster_name)
 
-    tpu_node = provider_config.get('tpu_node')
-    if tpu_node is not None:
-        instance_utils.delete_tpu_node(project_id, zone, tpu_node)
+    ssh_config_dict = provider_config['ssh']
+    ssh_host = ssh_config_dict['hostname']
+    ssh_port = ssh_config_dict['port']
+    ssh_user = ssh_config_dict['user']
+    ssh_key = ssh_config_dict['private_key']
+    runner = command_runner.SlurmCommandRunner((ssh_host, ssh_port),
+                                                ssh_user,
+                                                ssh_key,
+                                                cluster_name,
+                                                partition,
+                                                disable_control_master=True)
 
-    use_mig = provider_config.get('use_managed_instance_group', False)
-    if use_mig:
-        # Deleting the MIG will also delete the instances.
-        instance_utils.GCPManagedInstanceGroup.delete_mig(
-            project_id, zone, cluster_name_on_cloud)
-        return
-
-    label_filters = {
-        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
-    }
-    if worker_only:
-        label_filters[provision_constants.TAG_RAY_NODE_KIND] = 'worker'
-
-    handlers: List[Type[instance_utils.GCPInstance]] = [
-        instance_utils.GCPComputeInstance
-    ]
-    if use_tpu_vms:
-        handlers.append(instance_utils.GCPTPUVMInstance)
-
-    handler_to_instances = _filter_instances(handlers, project_id, zone,
-                                             label_filters, lambda _: None)
-    operations = collections.defaultdict(list)
     errs = []
-    for handler, instances in handler_to_instances.items():
-        for instance in instances:
-            try:
-                logger.debug(f'Terminating instance: {instance}.')
-                operations[handler].append(
-                    handler.terminate(project_id, zone, instance))
-            except gcp.http_error_exception() as e:
-                if _INSTANCE_RESOURCE_NOT_FOUND_PATTERN.search(
-                        e.reason) is None:
-                    errs.append(e)
-                else:
-                    logger.warning(f'Instance {instance} does not exist. '
-                                   'Skip terminating it.')
-    _wait_for_operations(operations, project_id, zone)
-    if errs:
-        raise RuntimeError(f'Failed to terminate instances: {errs}')
-    # We don't wait for the instances to be terminated, as it can take a long
-    # time (same as what we did in ray's node_provider).
+    for job_id in jobs:
+        rc, stdout, stderr = runner.run(f'scancel {job_id}',
+                                        require_outputs=True)
+        if rc != 0:
+            errs.append(f'Failed to terminate job {job_id}: {stderr}')
+        else:
+            logger.info(f'Terminated job {job_id}')
+    if len(errs) > 0:
+        raise RuntimeError(f'Failed to terminate jobs: {errs}')
 
 
 def open_ports(
@@ -473,10 +453,4 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    del ports  # Unused.
-    assert provider_config is not None, cluster_name_on_cloud
-    project_id = provider_config['project_id']
-    if 'firewall_rule' in provider_config:
-        firewall_rule_name = provider_config['firewall_rule']
-        instance_utils.GCPComputeInstance.delete_firewall_rule(
-            project_id, firewall_rule_name)
+    pass

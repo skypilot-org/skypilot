@@ -1235,6 +1235,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         "sbatch",
         "squeue",
         "srun",
+        "scancel",
     ]
 
     def __init__(

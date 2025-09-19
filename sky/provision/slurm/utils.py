@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import timeline
 
 # TODO(jwj): Choose commonly used default values.
 DEFAULT_CLUSTER_NAME = "localcluster"
@@ -19,7 +20,6 @@ JOB_STATES = {
     "pending",
     "running",
 }
-
 
 class SlurmInstanceType:
     """Class to represent the "Instance Type" in a Slurm cluster.
@@ -172,14 +172,18 @@ def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
     return provider_config.get('partition', DEFAULT_PARTITION)
 
 
+@timeline.event
 def filter_jobs(ssh_config_dict: Dict[str, Any],
                 partition: str,
-                state_filters: List[str],
+                state_filters: Optional[List[str]] = None,
                 cluster_name: Optional[str] = None) -> List[str]:
     """Filter Slurm jobs by job states."""
-    for state in state_filters:
-        if state not in JOB_STATES:
-            raise ValueError(f'{state} is not a valid Slurm job state.')
+    if state_filters is not None:
+        for state in state_filters:
+            if state not in JOB_STATES:
+                raise ValueError(f'{state} is not a valid Slurm job state.')
+    else:
+        state_filters = list(JOB_STATES)
     job_state_str = ','.join(state_filters)
 
     runner = command_runner.SlurmCommandRunner(
