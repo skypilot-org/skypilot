@@ -24,8 +24,8 @@ COPY . /skypilot
 RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
         echo "Removing source code (wheel installation)" && \
-        # Retain an empty /skypilot dir to keep the compatibility in stage 3 and reduce the final image size
-        cd .. && rm -rf /skypilot && mkdir /skypilot; \
+        # Retain an /skypilot/dist dir to keep the compatibility in stage 3 and reduce the final image size
+        mv /skypilot/dist /dist.backup && cd .. && rm -rf /skypilot && mkdir /skypilot && mv /dist.backup /skypilot/dist; \
     else \
         echo "Keeping source code and record commit sha (editable installation)" && \
         apt-get update -y && \
