@@ -16,9 +16,17 @@ _LAUNCH_POOL_AND_CHECK_SUCCESS = (
     'echo "$s"; '
     'echo; echo; echo "$s" | grep "Successfully created pool"')
 
+_LAUNCH_POOL_JOB_AND_CHECK_SUCCESS = (
+    's=$(sky jobs launch --pool {pool_name} {job_yaml} -y); '
+    'echo "$s"; '
+    'echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."'
+)
+
 _TEARDOWN_POOL = ('sky jobs pool down {pool_name} -y')
 
 _CANCEL_POOL_JOBS = ('sky jobs pool cancel {pool_name} -y')
+
+_DELETE_BUCKET = ('sky storage delete -y {bucket_name}')
 
 
 def wait_until_pool_ready(pool_name: str,
@@ -96,9 +104,9 @@ def basic_pool_conf(num_workers: int, setup_cmd: str = 'echo "setup message"'):
     """)
 
 
-def write_pool_yaml(pool_yaml: tempfile.NamedTemporaryFile, pool_config: str):
-    pool_yaml.write(pool_config.encode())
-    pool_yaml.flush()
+def write_yaml(yaml_file: tempfile.NamedTemporaryFile, config: str):
+    yaml_file.write(config.encode())
+    yaml_file.flush()
 
 
 def test_vllm_pool(generic_cloud: str):
@@ -209,25 +217,20 @@ def test_vllm_pool(generic_cloud: str):
 
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
-            pool_yaml.write(pool_config.encode())
-            pool_yaml.flush()
-            job_yaml.write(job_config.encode())
-            job_yaml.flush()
-
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
             pool_name = f'{name}-pool'
-
             test = smoke_tests_utils.Test(
                 'test_vllm_pool',
                 [
-                    f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully created pool"',
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name, pool_yaml=pool_yaml.name),
                     wait_until_pool_ready(
                         pool_name,
                         timeout=smoke_tests_utils.get_timeout(generic_cloud)),
-                    f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."',
+                    _LAUNCH_POOL_JOB_AND_CHECK_SUCCESS.format(pool_name=pool_name, job_yaml=job_yaml.name),
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=(f'sky jobs pool down {pool_name} -y && '
-                          f'sky storage delete -y {bucket_name} || true'),
+                teardown=f'{_TEARDOWN_POOL.format(pool_name=pool_name)} && {_DELETE_BUCKET.format(bucket_name=bucket_name)}'
             )
 
             smoke_tests_utils.run_one_test(test)
@@ -240,7 +243,7 @@ def test_setup_logs_in_starting_pool(generic_cloud: str):
         1, 'for i in {1..10000}; do echo "Noisy setup $i"; sleep 1; done')
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
-        write_pool_yaml(pool_yaml, pool_config)
+        write_yaml(pool_yaml, pool_config)
         pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
         test = smoke_tests_utils.Test('test_setup_logs_in_starting_pool', [
             _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
@@ -261,7 +264,7 @@ def test_setup_logs_in_pool_exits(generic_cloud: str):
     pool_config = basic_pool_conf(num_workers=1)
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
-        write_pool_yaml(pool_yaml, pool_config)
+        write_yaml(pool_yaml, pool_config)
         pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
         test = smoke_tests_utils.Test(
             'test_setup_logs_in_starting_pool', [
