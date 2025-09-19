@@ -12,7 +12,25 @@ RUN apt-get update && \
     apt-get clean && rm -rf /usr/lib/google-cloud-sdk/platform/bundledpythonunix \
     /var/lib/apt/lists/*
 
-# Stage 2: Main image
+# Stage 2: Process the source code for INSTALL_FROM_SOURCE
+FROM python:3.10-slim AS process-source
+
+COPY . /skypilot
+
+RUN cd /skypilot && \
+    if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
+        echo "Removing source code (wheel installation)" && \
+        # Retain an empty /skypilot dir to keep the compatibility in stage 3 and reduce the final image size
+        cd .. && rm -rf /skypilot && mkdir /skypilot; \
+    else \
+        echo "Keeping source code and record commit sha (editable installation)" && \
+        python -c "import setup; setup.replace_commit_hash()" && \
+        # Remove .git dir to reduce the final image size
+        rm -rf .git; \
+    fi
+
+
+# Stage 3: Main image
 FROM python:3.10-slim
 
 # Copy Google Cloud SDK from Stage 1
@@ -64,7 +82,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     rm -rf /var/lib/apt/lists/*
 
 # Add source code
-COPY . /skypilot
+COPY --from=process-source /skypilot /skypilot
 
 # Install SkyPilot and set up dashboard based on installation method
 RUN cd /skypilot && \
@@ -90,10 +108,7 @@ RUN cd /skypilot && \
     rm -rf ~/.cache/pip ~/.cache/uv && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-    # Remove source code if installed from wheel (not needed for wheel installs)
+    # Remove the empty /skypilot dir for backward compatibility
     if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
-        echo "Removing source code (wheel installation)" && \
         rm -rf /skypilot; \
-    else \
-        echo "Keeping source code (editable installation)"; \
     fi
