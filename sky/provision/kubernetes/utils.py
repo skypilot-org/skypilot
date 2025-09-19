@@ -696,7 +696,7 @@ class NebiusLabelFormatter(GPULabelFormatter):
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         if value.startswith('gpu-'):
-            # All Gpu platforms have fromat like 'gpu-h200-sxm'
+            # All GPU platforms have format like 'gpu-h200-sxm'
             # https://docs.nebius.com/compute/virtual-machines/types
             return value.split('-')[1].upper()
         elif value.startswith('cpu-'):
@@ -1137,14 +1137,6 @@ class CoreweaveAutoscaler(Autoscaler):
     can_query_backend: bool = False
 
 
-class NvidiaAutoscaler(Autoscaler):
-    """Generic autoscaler for clusters using Nvidia GFD
-    """
-
-    label_formatter: Any = GFDLabelFormatter
-    can_query_backend: bool = False
-
-
 class NebiusAutoscaler(Autoscaler):
     """Nebius autoscaler.
     """
@@ -1167,7 +1159,6 @@ AUTOSCALER_TYPE_TO_AUTOSCALER = {
     kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.COREWEAVE: CoreweaveAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.NEBIUS: NebiusAutoscaler,
-    kubernetes_enums.KubernetesAutoscalerType.NVIDIA: NvidiaAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.GENERIC: GenericAutoscaler,
 }
 
