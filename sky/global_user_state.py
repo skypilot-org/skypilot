@@ -1442,11 +1442,13 @@ def get_clusters(
                 query = query.filter(
                     (cluster_table.c.user_hash.in_(user_hashes_filter) |
                      (cluster_table.c.user_hash is None)) &
-                    (cluster_table.c.name.in_(cluster_names) if cluster_names else True))
+                    (cluster_table.c.name.in_(cluster_names
+                                             ) if cluster_names else True))
             else:
                 query = query.filter(
                     cluster_table.c.user_hash.in_(user_hashes_filter) &
-                    (cluster_table.c.name.in_(cluster_names) if cluster_names else True))
+                    (cluster_table.c.name.in_(cluster_names
+                                             ) if cluster_names else True))
         query = query.order_by(sqlalchemy.desc(cluster_table.c.launched_at))
         rows = query.all()
     records = []
