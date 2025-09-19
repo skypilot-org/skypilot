@@ -1331,10 +1331,18 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'allowed_contexts': {
-                    'type': 'array',
-                    'items': {
-                        'type': 'string',
-                    },
+                    'oneOf': [
+                        {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        {
+                            'type': 'string',
+                            'pattern': '^all$'
+                        }
+                    ]
                 },
                 'context_configs': {
                     'type': 'object',

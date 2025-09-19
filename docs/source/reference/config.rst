@@ -68,7 +68,6 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
       - context1
       - context2
-    :ref:`allow_all_contexts <config-yaml-kubernetes-allow-all-contexts>`: false
     :ref:`custom_metadata <config-yaml-kubernetes-custom-metadata>`:
       labels:
         mylabel: myvalue
@@ -1133,14 +1132,16 @@ List of allowed Kubernetes contexts (optional).
 
 List of context names that SkyPilot is allowed to use.
 
-.. _config-yaml-kubernetes-allow-all-contexts:
+If you want all available contexts to be allowed, set it to 'all' like this:
 
-``kubernetes.allow_all_contexts``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. code-block:: yaml
 
-Allow to use all available Kubernetes contexts (optional).
+  kubernetes:
+    allowed_contexts: all
 
-Set to true to allow SkyPilot to use all available Kubernetes contexts.
+
+You can also set ``SKYPILOT_ALLOW_ALL_CONTEXTS`` environment variable to ``"true"``
+for the same effect. Configuration option overrides the environment variable if set.
 
 .. _config-yaml-kubernetes-custom-metadata:
 
