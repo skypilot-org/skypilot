@@ -157,10 +157,18 @@ class SlurmInstanceType:
 
 
 def get_cluster_name_from_config(provider_config: Dict[str, Any]) -> str:
+    """Return the cluster name from the provider config.
+
+    The concept of cluster can be mapped to a cloud region.
+    """
     return provider_config.get('cluster_name', DEFAULT_CLUSTER_NAME)
 
 
 def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
+    """Return the partition from the provider config.
+
+    The concept of partition can be mapped to a cloud zone.
+    """
     return provider_config.get('partition', DEFAULT_PARTITION)
 
 

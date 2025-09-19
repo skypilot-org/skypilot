@@ -13,11 +13,16 @@ from sky.provision.slurm import utils as slurm_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import status_lib
+from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
 _INSTANCE_RESOURCE_NOT_FOUND_PATTERN = re.compile(
     r'The resource \'projects/.*/zones/.*/instances/.*\' was not found')
+
+
+def _get_head_job_id(job_ids: List[str]) -> Optional[str]:
+    return next((job_id for job_id in job_ids), None)
 
 
 def _filter_instances(
@@ -137,55 +142,80 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def _run_instances(region: str, cluster_name_on_cloud: str,
-                   config: common.ProvisionConfig) -> common.ProvisionRecord:
-    """See sky/provision/__init__.py"""
+@timeline.event
+def _create_jobs(region: str, cluster_name_on_cloud: str,
+                 config: common.ProvisionConfig) -> common.ProvisionRecord:
+    """Create Slurm virtual instances based on the config.
+
+    A Slurm virtual instance is created by submitting a long-running job.
+    """
     provider_config = config.provider_config
     cluster_name = slurm_utils.get_cluster_name_from_config(provider_config)
     partition = slurm_utils.get_partition_from_config(provider_config)
 
-    # Resume any stopped worker nodes or create new ones.
-    # Use sbatch to submit a long-running job.
-    ssh_config_dict = provider_config['ssh']
-    ssh_host = ssh_config_dict['hostname']
-    ssh_port = ssh_config_dict['port']
-    ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
-    runner = command_runner.SlurmCommandRunner((ssh_host, ssh_port),
-                                               ssh_user,
-                                               ssh_key,
-                                               cluster_name,
-                                               partition,
-                                               disable_control_master=True)
+    # TODO(jwj): Consider pending jobs.
+    running_jobs = slurm_utils.filter_jobs(provider_config['ssh'], partition,
+                                           ['running'], cluster_name)
+    head_job_id = _get_head_job_id(running_jobs)
 
-    provision_script = """#!/bin/bash
-#SBATCH --job-name=interactive-bash
-#SBATCH --output=interactive-bash.out
-#SBATCH --error=interactive-bash.err
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
-#SBATCH --mem-per-cpu=1G
+    to_start_count = config.count - len(running_jobs)
+    if to_start_count < 0:
+        raise RuntimeError(
+            'The number of running virtual instances (jobs) '
+            f'({config.count - to_start_count}) in cluster '
+            f'"{cluster_name_on_cloud}" is greater than the number '
+            f'requested by the user ({config.count}). '
+            'This is likely a resource leak. '
+            'Use "sky down" to terminate the cluster.')
 
-sleep infinity
-"""
-    # with tempfile.NamedTemporaryFile(mode='w+', delete=True) as f:
-    with open('./provision.sh', 'w') as f:
-        f.write(provision_script)
-        src_path = f.name
-        logger.critical(src_path)
-    tgt_path = '/tmp/provision.sh'
-    runner.rsync(src_path, tgt_path, up=True)
-    rc, stdout, stderr = runner.run(f'sbatch {tgt_path}', require_outputs=True)
-    # logger.critical(f"\n\n[RUN INSTANCE] {returncode} {stdout} {stderr}\n\n")
-    if rc == 0:
-        logger.info(stdout)
-    provision_job_id = stdout.split(' ')[-1]
+    # TODO(jwj): Handle the case where there exists running virtual instances.
+    created_instance_ids = []
+    if True:  # to_start_count > 0:
+        ssh_config_dict = provider_config['ssh']
+        ssh_host = ssh_config_dict['hostname']
+        ssh_port = ssh_config_dict['port']
+        ssh_user = ssh_config_dict['user']
+        ssh_key = ssh_config_dict['private_key']
+        runner = command_runner.SlurmCommandRunner((ssh_host, ssh_port),
+                                                   ssh_user,
+                                                   ssh_key,
+                                                   cluster_name,
+                                                   partition,
+                                                   disable_control_master=True)
+
+        provision_script = """#!/bin/bash
+    #SBATCH --job-name=interactive-bash
+    #SBATCH --output=interactive-bash.out
+    #SBATCH --error=interactive-bash.err
+    #SBATCH --ntasks=1
+    #SBATCH --cpus-per-task=2
+    #SBATCH --mem-per-cpu=1G
+
+    sleep infinity
+    """
+        # with tempfile.NamedTemporaryFile(mode='w+', delete=True) as f:
+        with open('./provision.sh', 'w') as f:
+            f.write(provision_script)
+            src_path = f.name
+            logger.critical(src_path)
+        tgt_path = '/tmp/provision.sh'
+        runner.rsync(src_path, tgt_path, up=True)
+        rc, stdout, stderr = runner.run(f'sbatch {tgt_path}',
+                                        require_outputs=True)
+        # logger.critical(f"\n\n[RUN INSTANCE] {returncode} {stdout} {stderr}\n\n")
+        if rc == 0:
+            logger.info(stdout)
+        provision_job_id = stdout.split(' ')[-1]
+        if head_job_id is None:
+            head_job_id = provision_job_id
+
+        created_instance_ids.append(
+            f'{cluster_name}-{partition}-{provision_job_id}')
 
     # Wait until the instance is running.
 
     # Handle instance identifiers.
-    head_instance_id = f'{ssh_host}-{provision_job_id}'
-    created_instance_ids = [head_instance_id]
+    head_instance_id = f'{cluster_name}-{partition}-{head_job_id}'
 
     assert head_instance_id is not None, 'head_instance_id is None'
     return common.ProvisionRecord(provider_name='slurm',
@@ -199,9 +229,9 @@ sleep infinity
 
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
-    """See sky/provision/__init__.py"""
+    """Run instances for the given cluster (Slurm in this case)."""
     try:
-        return _run_instances(region, cluster_name_on_cloud, config)
+        return _create_jobs(region, cluster_name_on_cloud, config)
     except common.ProvisionerError('Failed to launch instances.') as e:
         raise
 
