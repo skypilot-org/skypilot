@@ -39,7 +39,7 @@ def _filter_instances(cluster_name_on_cloud: str,
 
 def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     for inst_id, inst in instances.items():
-        if inst['name'].endswith('-head'):
+        if inst.get('name') and inst['name'].endswith('-head'):
             return inst_id
     return None
 
