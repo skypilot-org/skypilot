@@ -189,7 +189,6 @@ show_sphinx = False
 exclude_patterns = [
     '_gallery_original',
     'generated-examples',
-    '../sky/schemas/generated/*',
 ]
 myst_url_schemes = {
     'http': None,
