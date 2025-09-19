@@ -168,6 +168,64 @@ by specifying the ``--infra`` with the context name for that cluster.
 When launching a SkyPilot cluster or task, you can also specify the context name with ``--infra`` to launch the cluster or task in.
 
 
+Per-context configuration
+-------------------------
+
+When using multiple Kubernetes clusters, SkyPilot allows you to configure different settings for each Kubernetes context using the ``kubernetes.context_configs`` field in your ``~/.sky/config.yaml``.
+
+This is useful when different clusters have different config requirements or capabilities.
+
+You can specify per-context configurations for any Kubernetes config field, including:
+
+* ``pod_config``: Custom `pod specifications <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#pod-v1-core>`_ (labels, annotations, volume mounts, runtime class, etc.)
+* ``remote_identity``: Service account to use for the context
+* ``provision_timeout``: Timeout for provisioning pods if autoscaler is used
+
+See :ref:`Kubernetes config<config-yaml-kubernetes>` for the list of all fields supported.
+
+Example configuration:
+
+.. code-block:: yaml
+
+    kubernetes:
+      # Global defaults for all contexts
+      provision_timeout: 10
+      allowed_contexts:
+        - my-h100-cluster
+        - dev-cluster
+      
+      # Context-specific configurations
+      context_configs:
+        my-h100-cluster:
+          # Use NVIDIA runtime for H100 cluster
+          pod_config:
+            metadata:
+              labels:
+                cluster-type: production
+          remote_identity: h100-service-account # Use a custom service account for the cluster
+        # Development cluster with different proxy settings and volume mounts
+        dev-cluster:
+          pod_config:
+            spec:
+              imagePullSecrets:
+                - name: my-secret
+            containers:
+              - env:
+                  - name: HTTP_PROXY
+                    value: http://proxy-host:3128
+                volumeMounts:
+                  - mountPath: /foo
+                    name: example-volume
+                    readOnly: true
+            volumes:
+              - name: example-volume
+                hostPath:
+                    path: /tmp
+                    type: Directory
+          provision_timeout: 3600 # Large timeout for autoscaler to provision nodes
+          autoscaler: gke
+
+
 Dynamically updating clusters to use
 ----------------------------------------------
 
