@@ -19,8 +19,7 @@ _LAUNCH_POOL_AND_CHECK_SUCCESS = (
 _LAUNCH_POOL_JOB_AND_CHECK_SUCCESS = (
     's=$(sky jobs launch --pool {pool_name} {job_yaml} -y); '
     'echo "$s"; '
-    'echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."'
-)
+    'echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."')
 
 _TEARDOWN_POOL = ('sky jobs pool down {pool_name} -y')
 
@@ -221,16 +220,18 @@ def test_vllm_pool(generic_cloud: str):
             write_yaml(job_yaml, job_config)
             pool_name = f'{name}-pool'
             test = smoke_tests_utils.Test(
-                'test_vllm_pool',
-                [
-                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name, pool_yaml=pool_yaml.name),
+                'test_vllm_pool', [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
                     wait_until_pool_ready(
                         pool_name,
                         timeout=smoke_tests_utils.get_timeout(generic_cloud)),
-                    _LAUNCH_POOL_JOB_AND_CHECK_SUCCESS.format(pool_name=pool_name, job_yaml=job_yaml.name),
+                    _LAUNCH_POOL_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml.name),
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=f'{_TEARDOWN_POOL.format(pool_name=pool_name)} && {_DELETE_BUCKET.format(bucket_name=bucket_name)}'
+                teardown=
+                f'{_TEARDOWN_POOL.format(pool_name=pool_name)} && {_DELETE_BUCKET.format(bucket_name=bucket_name)}'
             )
 
             smoke_tests_utils.run_one_test(test)

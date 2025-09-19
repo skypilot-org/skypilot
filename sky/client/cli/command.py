@@ -4455,23 +4455,34 @@ def jobs_launch(
     common_utils.check_cluster_name_is_valid(name)
 
     if pool is not None:
+        for task_ in dag.tasks:
+            if task_.setup is not None:
+                click.secho(f'{colorama.Fore.RED}You cannot specify setup in a '
+                            'job submitted to a pool. To update a pool\'s'
+                            f'setup, please use `sky jobs pool apply {pool} '
+                            f'new-pool.yaml`. {colorama.Style.RESET_ALL}')
+                sys.exit(1)
+            if task_.file_mounts is not None:
+                click.secho(
+                    f'{colorama.Fore.RED}You cannot specify file_mounts'
+                    ' in a job submitted to a pool. To update a pool\'s'
+                    f'file_mounts, please use `sky jobs pool apply {pool} '
+                    f'new-pool.yaml`. {colorama.Style.RESET_ALL}')
+                sys.exit(1)
+
+            if task_.storage_mounts is not None and task_.storage_mounts != {}:
+                print(task_.storage_mounts)
+                click.secho(
+                    f'{colorama.Fore.RED}You cannot specify '
+                    'storage_mountsto update'
+                    f'storage_mounts, please use `sky jobs pool apply {pool} '
+                    f'new-pool.yaml`. {colorama.Style.RESET_ALL}')
+                sys.exit(1)
         num_job_int = num_jobs if num_jobs is not None else 1
         plural = '' if num_job_int == 1 else 's'
         click.secho(f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
                     f'{colorama.Style.RESET_ALL} with {colorama.Fore.CYAN}'
                     f'{num_job_int}{colorama.Style.RESET_ALL} job{plural}.')
-        print_setup_fm_warning = False
-        for task_ in dag.tasks:
-            if (task_.setup is not None or task_.file_mounts or
-                    task_.storage_mounts):
-                print_setup_fm_warning = True
-                break
-        if print_setup_fm_warning:
-            click.secho(
-                f'{colorama.Fore.YELLOW}setup/file_mounts/storage_mounts'
-                ' will be ignored when submit jobs to pool. To update a pool, '
-                f'please use `sky jobs pool apply {pool} new-pool.yaml`. '
-                f'{colorama.Style.RESET_ALL}')
 
     # Optimize info is only show if _need_confirmation.
     if not yes:

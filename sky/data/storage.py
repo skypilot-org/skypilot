@@ -701,6 +701,17 @@ class Storage(object):
         # external buckets, this can be deprecated.
         self.force_delete = False
 
+    @classmethod
+    def from_handle(cls, handle: StorageHandle) -> 'Storage':
+        """Create Storage from StorageHandle object.
+        """
+        obj = cls(name=handle.storage_name,
+                  source=handle.source,
+                  sync_on_reconstruction=False)
+        obj.handle = handle
+        obj._add_store_from_metadata(handle.sky_stores)
+        return obj
+
     def construct(self):
         """Constructs the storage object.
 
