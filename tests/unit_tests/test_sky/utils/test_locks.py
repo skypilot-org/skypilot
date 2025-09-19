@@ -345,6 +345,7 @@ class TestPostgresLock:
         """Test postgres force unlock."""
         connection, cursor = mock_connection
         mock_get_connection.return_value = connection
+        cursor.fetchone.return_value = [True]  # pg_advisory_unlock succeeds
 
         lock = locks.PostgresLock('test_lock')
         lock.force_unlock()
@@ -368,6 +369,63 @@ class TestPostgresLock:
             lock.force_unlock()
 
         assert "Failed to force unlock postgres lock" in str(exc_info.value)
+        connection.close.assert_called_once()
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_force_unlock_terminate_backend(
+            self, mock_get_connection, mock_connection):
+        """Test postgres force unlock that terminates another backend."""
+        connection, cursor = mock_connection
+        mock_get_connection.return_value = connection
+
+        # First unlock call fails (returns False)
+        # Second call finds a PID to terminate
+        cursor.fetchone.side_effect = [
+            [False],  # pg_advisory_unlock fails
+            [12345]  # pg_locks query returns PID
+        ]
+
+        lock = locks.PostgresLock('test_lock')
+        lock.force_unlock()
+
+        # Should call pg_advisory_unlock, then query pg_locks, then terminate
+        expected_calls = [
+            mock.call('SELECT pg_advisory_unlock(%s)', (mock.ANY,)),
+            mock.call(('SELECT pid FROM pg_locks WHERE locktype = \'advisory\' '
+                       'AND ((classid::bigint << 32) | objid::bigint) = %s'),
+                      (mock.ANY,)),
+            mock.call('SELECT pg_terminate_backend(%s)', (12345,))
+        ]
+        cursor.execute.assert_has_calls(expected_calls)
+        connection.commit.assert_called_once()
+        connection.close.assert_called_once()
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_force_unlock_no_lock_found(self, mock_get_connection,
+                                                      mock_connection):
+        """Test postgres force unlock when no lock is found in pg_locks."""
+        connection, cursor = mock_connection
+        mock_get_connection.return_value = connection
+
+        # First unlock call fails (returns False)
+        # Second call finds no lock in pg_locks
+        cursor.fetchone.side_effect = [
+            [False],  # pg_advisory_unlock fails
+            None  # pg_locks query returns no results
+        ]
+
+        lock = locks.PostgresLock('test_lock')
+        lock.force_unlock()
+
+        # Should call pg_advisory_unlock, then query pg_locks, but not terminate
+        expected_calls = [
+            mock.call('SELECT pg_advisory_unlock(%s)', (mock.ANY,)),
+            mock.call(('SELECT pid FROM pg_locks WHERE locktype = \'advisory\' '
+                       'AND ((classid::bigint << 32) | objid::bigint) = %s'),
+                      (mock.ANY,))
+        ]
+        cursor.execute.assert_has_calls(expected_calls)
+        connection.commit.assert_not_called()
         connection.close.assert_called_once()
 
     @mock.patch.object(global_user_state, 'initialize_and_get_db')

@@ -522,11 +522,17 @@ prometheus:
     - job_name: 'skypilot-api-server-gpu-metrics'
       static_configs:
         # Use the API service created by this Helm chart
-        - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:80']
+        - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
       metrics_path: '/gpu-metrics'
       scrape_interval: 15s
       scrape_timeout: 10s
       # Add labels to identify these metrics
+      metric_relabel_configs:
+      - action: replace
+        source_labels: [node, Hostname]
+        regex: ;(.+)
+        target_label: node
+        replacement: $1
   kube-state-metrics:
     enabled: true
     metricLabelsAllowlist:
