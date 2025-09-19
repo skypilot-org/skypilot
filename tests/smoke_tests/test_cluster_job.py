@@ -2430,7 +2430,7 @@ def test_kubernetes_ssh_proxy_performance():
             f'if [ "$SUCCESS" = "100.00" ] || [ "$SUCCESS" = "100" ]; then echo "Success rate OK: ${{SUCCESS}}%"; else echo "Success rate too low: ${{SUCCESS}}%"; exit 1; fi '
             f')',
         ],
-        # f'sky down -y {cluster_name}',
+        f'sky down -y {cluster_name}',
         timeout=15 * 60,  # 15 minutes timeout
     )
     smoke_tests_utils.run_one_test(test)
