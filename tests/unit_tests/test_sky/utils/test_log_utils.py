@@ -39,8 +39,10 @@ def test_readable_time_duration_returns_dash(start, end, absolute):
     "start_time,end_time,expected_relative,expected_absolute", [
         (NOW, NOW + 10, 'a few secs before', '10s'),
         (NOW, NOW + 60, '1 min before', '1m'),
+        (NOW, NOW + 60 * 2 + 1, '2 mins before', '2m 1s'),
         (NOW, NOW + 3600, '1 hr before', '1h'),
         (NOW, NOW + 3600 * 24, '1 day before', '1d'),
+        (NOW, NOW + 3600 * 25 + 51, '1 day before', '1d 1h 51s'),
         (NOW, NOW + 3600 * 24 * 7, '1 week before', '1w'),
         (NOW, NOW + 3600 * 24 * 30, '1 month before', '1mo'),
         (NOW, NOW + 3600 * 24 * 365, '1 year before', '1 year'),
