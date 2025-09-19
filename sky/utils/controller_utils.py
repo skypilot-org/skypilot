@@ -38,6 +38,7 @@ from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -230,6 +231,17 @@ def high_availability_specified(cluster_name: Optional[str]) -> bool:
     controller = Controllers.from_name(cluster_name)
     if controller is None:
         return False
+
+    if controller.value.controller_type == 'jobs':
+        # pylint: disable-next=import-outside-toplevel
+        from sky.jobs import utils as managed_job_utils
+        if managed_job_utils.is_consolidation_mode():
+            return True
+    elif controller.value.controller_type == 'serve':
+        # pylint: disable-next=import-outside-toplevel
+        from sky.serve import serve_utils
+        if serve_utils.is_consolidation_mode():
+            return True
 
     if skypilot_config.loaded():
         return skypilot_config.get_nested((controller.value.controller_type,
@@ -497,7 +509,7 @@ def shared_controller_vars_to_fill(
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX) as temp_file:
-            common_utils.dump_yaml(temp_file.name, dict(**local_user_config))
+            yaml_utils.dump_yaml(temp_file.name, dict(**local_user_config))
         local_user_config_path = temp_file.name
 
     vars_to_fill: Dict[str, Any] = {
@@ -786,9 +798,9 @@ def replace_skypilot_config_path_in_file_mounts(
             continue
         if local_path.endswith(_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX):
             with tempfile.NamedTemporaryFile('w', delete=False) as f:
-                user_config = common_utils.read_yaml(local_path)
+                user_config = yaml_utils.read_yaml(local_path)
                 config = _setup_proxy_command_on_controller(cloud, user_config)
-                common_utils.dump_yaml(f.name, dict(**config))
+                yaml_utils.dump_yaml(f.name, dict(**config))
                 file_mounts[remote_path] = f.name
                 replaced = True
     if replaced:

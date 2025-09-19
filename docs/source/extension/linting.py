@@ -49,6 +49,8 @@ ALLOWED_TERMS = {
     'Okta',
     'Prometheus',
     'Grafana',
+    # Providers/brands
+    'PrimeIntellect',
     # Framework names
     'vLLM',
     'TGI',
@@ -79,6 +81,9 @@ MULTI_WORD_TERMS = {
     'Google Auth Platform',
     'Google Cloud Logging',
     'AWS Systems Manager',
+    'Microsoft Entra ID',
+    # Providers/brands
+    'Prime Intellect',
 }
 
 

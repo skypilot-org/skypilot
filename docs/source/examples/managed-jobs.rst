@@ -800,7 +800,7 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
 How it works: The jobs controller
 ---------------------------------
 
-The jobs controller is a small on-demand CPU VM or pod running in the cloud that manages all jobs of a user.
+The jobs controller is a small on-demand CPU VM or pod created by SkyPilot to manage all jobs.
 It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
 Thus, **no user action is needed** to manage its lifecycle.
 
@@ -814,6 +814,26 @@ you can still tear it down manually with
   Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
 
 To adjust the size of the jobs controller instance, see :ref:`jobs-controller-custom-resources`.
+
+.. _managed-jobs-high-availability-controller:
+
+High availability controller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+High availability mode ensures the controller for Managed Jobs remains resilient to failures by running it as a Kubernetes Deployment with automatic restarts and persistent storage. This helps maintain management capabilities even if the controller pod crashes or the node fails.
+
+To enable high availability for Managed Jobs, simply set the ``high_availability`` flag to ``true`` under ``jobs.controller`` in your ``~/.sky/config.yaml``, and ensure the controller runs on Kubernetes:
+
+.. code-block:: yaml
+    :emphasize-lines: 4-5
+
+    jobs:
+      controller:
+        resources:
+          cloud: kubernetes
+        high_availability: true
+
+This will deploy the controller as a Kubernetes Deployment with persistent storage, allowing automatic recovery on failures. For prerequisites, setup steps, and recovery behavior, see the detailed page: :ref:`high-availability-controller`.
 
 
 Setup and best practices

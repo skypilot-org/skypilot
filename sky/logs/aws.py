@@ -6,8 +6,8 @@ import pydantic
 
 from sky.logs.agent import FluentbitAgent
 from sky.skylet import constants
-from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import yaml_utils
 
 EC2_MD_URL = '"${AWS_EC2_METADATA_SERVICE_ENDPOINT:-http://169.254.169.254/}"'
 
@@ -130,7 +130,10 @@ class CloudwatchLoggingAgent(FluentbitAgent):
 
         # If region is specified, set it in the environment
         if self.config.region:
-            pre_cmd += f' export AWS_REGION={self.config.region};'
+            pre_cmd += (f' export AWS_REGION={self.config.region}'
+                        f' AWS_DEFAULT_REGION={self.config.region};'
+                        ' command -v aws &>/dev/null && '
+                        f'aws configure set region {self.config.region};')
         else:
             # If region is not specified, check if it's available in
             # the environment or credentials file
@@ -213,7 +216,7 @@ class CloudwatchLoggingAgent(FluentbitAgent):
             }
         }
 
-        return common_utils.dump_yaml_str(cfg_dict)
+        return yaml_utils.dump_yaml_str(cfg_dict)
 
     def fluentbit_output_config(
             self, cluster_name: resources_utils.ClusterName) -> Dict[str, Any]:

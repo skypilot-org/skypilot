@@ -4,9 +4,12 @@ from click import testing as cli_testing
 import requests
 
 from sky import clouds
+from sky import models
 from sky import server
 from sky.client.cli import command
+from sky.schemas.api import responses
 from sky.utils import status_lib
+from sky.utils import ux_utils
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
@@ -35,8 +38,8 @@ def mock_server_api_version(monkeypatch, version):
 def mock_api_server_calls(monkeypatch):
     """Mock all API server related calls to prevent real network requests."""
     # Mock API server status checks
-    mock_api_info = mock.MagicMock()
-    mock_api_info.status = 'healthy'
+    mock_api_info = mock.MagicMock(spec=responses.APIHealthResponse)
+    mock_api_info.status = server.common.ApiServerStatus.HEALTHY
     mock_api_info.api_version = 1
     mock_api_info.version = '1.0.0'
     mock_api_info.commit = 'test_commit'
@@ -66,7 +69,7 @@ def mock_api_server_calls(monkeypatch):
         if '/api/health' in path:
             mock_response.json.return_value = {
                 'status': 'healthy',
-                'api_version': 1,
+                'api_version': "1",
                 'version': '1.0.0',
                 'version_on_disk': '1.0.0',
                 'commit': 'test_commit',
@@ -233,6 +236,8 @@ def mock_api_server_calls(monkeypatch):
     monkeypatch.setattr('sky.server.rest.request_without_retry',
                         mock_rest_request)
 
+    return mock_api_info
+
 
 class TestWithNoCloudEnabled:
 
@@ -318,6 +323,42 @@ class TestWithNoCloudEnabled:
         result = cli_runner.invoke(command.check, ['notarealcloud'])
         # In mocked environment, this should succeed rather than raise ValueError
         assert not result.exit_code
+
+    def test_cli_api_info(self, monkeypatch):
+        """Test that `sky api info` returns the expected output."""
+        mock_api_info = mock_api_server_calls(monkeypatch)
+
+        client_version = '1.0.0'
+        client_commit = '1234567890'
+
+        monkeypatch.setattr('sky.__version__', client_version)
+        monkeypatch.setattr('sky.__commit__', client_commit)
+
+        current_user = models.User(id='test_user_id', name='test_user')
+
+        mock_get_current_user = mock.MagicMock()
+        mock_get_current_user.return_value = current_user
+        monkeypatch.setattr(models.User, 'get_current_user',
+                            mock_get_current_user)
+
+        user = models.User.get_current_user()
+        server_url = 'http://localhost:8000'
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: server_url)
+
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(command.api_info)
+        assert not result.exit_code
+        output = result.stdout.split('\n')
+        assert output[
+            0] == f'SkyPilot client version: {client_version}, commit: {client_commit}'
+        assert output[
+            1] == f'Using SkyPilot API server and dashboard: {server_url}'
+        assert output[
+            2] == f'├── Status: {mock_api_info.status}, commit: {mock_api_info.commit}, version: {mock_api_info.version}'
+        assert output[3] == f'├── User: {current_user.name} ({current_user.id})'
+        assert output[4] == f'└── Endpoint set to default local API server.'
+        assert len(output) == 6
 
 
 class TestHelperFunctions:

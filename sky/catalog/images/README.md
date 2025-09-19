@@ -3,12 +3,12 @@
 ## Prerequisites
 You only need to do this once.
 1. Install [Packer](https://developer.hashicorp.com/packer/tutorials/aws-get-started/get-started-install-cli)
-2. Download plugins used by Packer
+2. Setup cloud credentials
+3. `cd sky/catalog/images/`
+4. Download plugins used by Packer
 ```bash
 packer init plugins.pkr.hcl
 ```
-3. Setup cloud credentials
-4. `cd sky/catalog/images/`
 
 ## Generate Images
 FYI time to packer build images:
@@ -38,9 +38,16 @@ gcloud compute images add-iam-policy-binding ${IMAGE_NAME} --member='allAuthenti
 
 ### AWS
 1. Generate the source image for a single region.
+For `x86_64` image:
 ```bash
 export TYPE=cpu  # Update this
 export IMAGE=skypilot-aws-${TYPE}-ubuntu
+packer build ${IMAGE}.pkr.hcl
+```
+For `arm64` image:
+```bash
+export TYPE=gpu  # Update this
+export IMAGE=skypilot-aws-${TYPE}-ubuntu-arm64
 packer build ${IMAGE}.pkr.hcl
 ```
 2. Copy images to all regions
@@ -48,6 +55,13 @@ packer build ${IMAGE}.pkr.hcl
 export TYPE=gpu  # Update this
 export IMAGE_ID=ami-0989556a89639b1bb   # Update this
 python aws_utils/image_gen.py --image-id ${IMAGE_ID} --processor ${TYPE}
+```
+Add `--arch arm64` for `arm64` image:
+```bash
+export TYPE=gpu  # Update this
+export IMAGE_ID=ami-0989556a89639b1bb   # Update this
+export BASE_IMAGE_ID=ami-01b2110eef525172b   # Update this
+python aws_utils/image_gen.py --image-id ${IMAGE_ID} --processor ${TYPE} --base-image-id ${BASE_IMAGE_ID} --arch arm64
 ```
 3. Add fallback images if any region failed \
 Look for "NEED_FALLBACK" in the output `images.csv` and edit. (You can use public [ubuntu images](https://cloud-images.ubuntu.com/locator/ec2/) as fallback.)
@@ -77,10 +91,10 @@ export REGION=europe  # Update this: us, europe, asia
 1. Minimal GPU test: `sky launch --image ${IMAGE_ID} --gpus=L4:1 --cloud ${CLOUD}` then run `nvidia-smi` in the launched instance.
 2. Update the image ID in `sky/clouds/gcp.py` and run the test:
 ```bash
-pytest tests/test_smoke.py::test_minimal --gcp
-pytest tests/test_smoke.py::test_huggingface --gcp
-pytest tests/test_smoke.py::test_job_queue_with_docker --gcp
-pytest tests/test_smoke.py::test_cancel_gcp
+pytest tests/smoke_tests/test_basic.py::test_minimal --gcp
+pytest tests/smoke_tests/test_cluster_job.py::test_huggingface --gcp
+pytest tests/smoke_tests/test_cluster_job.py::test_job_queue_with_docker --gcp
+pytest tests/smoke_tests/test_cluster_job.py::test_cancel_gcp
 ```
 
 ## Ship Images & Cleanup

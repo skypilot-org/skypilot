@@ -11,7 +11,7 @@ import uuid
 from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
-from sky.utils import timeline
+from sky.utils import lock_events
 
 # The cluster yaml used to create the current cluster where the module is
 # called.
@@ -107,7 +107,7 @@ class SSHConfigHelper(object):
         return auth_config['ssh_private_key']
 
     @classmethod
-    @timeline.FileLockEvent(ssh_conf_lock_path)
+    @lock_events.FileLockEvent(ssh_conf_lock_path)
     def add_cluster(
         cls,
         cluster_name: str,
@@ -144,6 +144,9 @@ class SSHConfigHelper(object):
             username = docker_user
 
         key_path = cls.generate_local_key_file(cluster_name, auth_config)
+        # Keep the unexpanded path for SSH config (with ~)
+        key_path_for_config = key_path
+        # Expand the path for internal operations that need absolute path
         key_path = os.path.expanduser(key_path)
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
@@ -208,8 +211,9 @@ class SSHConfigHelper(object):
             node_name = cluster_name if i == 0 else cluster_name + f'-worker{i}'
             # TODO(romilb): Update port number when k8s supports multinode
             codegen += cls._get_generated_config(
-                sky_autogen_comment, node_name, ip, username, key_path,
-                proxy_command, port, docker_proxy_command) + '\n'
+                sky_autogen_comment, node_name, ip, username,
+                key_path_for_config, proxy_command, port,
+                docker_proxy_command) + '\n'
 
         cluster_config_path = os.path.expanduser(
             cls.ssh_cluster_path.format(cluster_name))
@@ -334,7 +338,7 @@ class SSHConfigHelper(object):
             cluster_name: Cluster name.
         """
 
-        with timeline.FileLockEvent(
+        with lock_events.FileLockEvent(
                 cls.ssh_conf_per_cluster_lock_path.format(cluster_name)):
             cluster_config_path = os.path.expanduser(
                 cls.ssh_cluster_path.format(cluster_name))

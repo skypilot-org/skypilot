@@ -31,6 +31,7 @@ from smoke_tests import smoke_tests_utils
 from smoke_tests import test_mount_and_storage
 
 import sky
+from sky import clouds
 from sky import skypilot_config
 from sky.data import storage as storage_lib
 from sky.skylet import constants
@@ -239,6 +240,7 @@ def test_gcp_zone():
 # is running remotely. We should fix this.
 @pytest.mark.no_vast  # Requires AWS
 @pytest.mark.no_hyperbolic  # Requires AWS
+@pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -273,7 +275,19 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # created in the centralus region when getting the storage account. We
     # should set the cluster to be launched in the same region.
     region_str = f'/centralus' if generic_cloud == 'azure' else ''
-    if azure_mount_unsupported_ubuntu_version in image_id:
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+        include_s3_mount = clouds.cloud_in_iterable(clouds.AWS(),
+                                                    enabled_cloud_storages)
+        include_gcs_mount = clouds.cloud_in_iterable(clouds.GCP(),
+                                                     enabled_cloud_storages)
+        include_azure_mount = clouds.cloud_in_iterable(clouds.Azure(),
+                                                       enabled_cloud_storages)
+        content = template.render(storage_name=storage_name,
+                                  include_s3_mount=include_s3_mount,
+                                  include_gcs_mount=include_gcs_mount,
+                                  include_azure_mount=include_azure_mount)
+    elif azure_mount_unsupported_ubuntu_version in image_id:
         # The store for mount_private_mount is not specified in the template.
         # If we're running on Azure, the private mount will be created on
         # azure blob. Also, if we're running on Kubernetes, the private mount

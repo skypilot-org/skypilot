@@ -456,10 +456,6 @@ class TestVolumeCommands:
             },  # Missing name and type
             {
                 'name': 'test-volume',
-                'type': 'k8s-pvc'
-            },  # Missing infra
-            {
-                'name': 'test-volume',
                 'infra': 'k8s'
             },  # Missing type
             {

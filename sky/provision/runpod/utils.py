@@ -263,11 +263,23 @@ def _create_template_for_docker_login(
     return login_config.format_image(image_name), create_template_resp['id']
 
 
-def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
-           zone: str, disk_size: int, image_name: str,
-           ports: Optional[List[int]], public_key: str,
-           preemptible: Optional[bool], bid_per_gpu: float,
-           docker_login_config: Optional[Dict[str, str]]) -> str:
+def launch(
+    cluster_name: str,
+    node_type: str,
+    instance_type: str,
+    region: str,
+    zone: str,
+    disk_size: int,
+    image_name: str,
+    ports: Optional[List[int]],
+    public_key: str,
+    preemptible: Optional[bool],
+    bid_per_gpu: float,
+    docker_login_config: Optional[Dict[str, str]],
+    *,
+    network_volume_id: Optional[str] = None,
+    volume_mount_path: Optional[str] = None,
+) -> str:
     """Launches an instance with the given parameters.
 
     For CPU instances, we directly use the instance_type for launching the
@@ -336,6 +348,12 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
         'docker_args': docker_args,
         'template_id': template_id,
     }
+
+    # Optional network volume mount.
+    if volume_mount_path is not None:
+        params['volume_mount_path'] = volume_mount_path
+    if network_volume_id is not None:
+        params['network_volume_id'] = network_volume_id
 
     # GPU instance types start with f'{gpu_count}x',
     # CPU instance types start with 'cpu'.

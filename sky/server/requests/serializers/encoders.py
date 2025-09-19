@@ -6,10 +6,11 @@ import base64
 import dataclasses
 import pickle
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky.schemas.api import responses
 from sky.server import constants as server_constants
+from sky.utils import serialize_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -22,6 +23,9 @@ handlers: Dict[str, Any] = {}
 
 def pickle_and_encode(obj: Any) -> str:
     try:
+        # Apply backwards compatibility processing at the lowest level
+        # to catch any handles that might have bypassed the encoders
+        obj = serialize_utils.prepare_handle_for_backwards_compatibility(obj)
         return base64.b64encode(pickle.dumps(obj)).decode('utf-8')
     except TypeError as e:
         raise ValueError(f'Failed to pickle object: {obj}') from e
@@ -58,7 +62,9 @@ def encode_status(
     for cluster in clusters:
         response_cluster = cluster.model_dump()
         response_cluster['status'] = cluster['status'].value
-        response_cluster['handle'] = pickle_and_encode(cluster['handle'])
+        handle = serialize_utils.prepare_handle_for_backwards_compatibility(
+            cluster['handle'])
+        response_cluster['handle'] = pickle_and_encode(handle)
         response_cluster['storage_mounts_metadata'] = pickle_and_encode(
             response_cluster['storage_mounts_metadata'])
         response.append(response_cluster)
@@ -70,6 +76,7 @@ def encode_launch(
     job_id_handle: Tuple[Optional[int], Optional['backends.ResourceHandle']]
 ) -> Dict[str, Any]:
     job_id, handle = job_id_handle
+    handle = serialize_utils.prepare_handle_for_backwards_compatibility(handle)
     return {
         'job_id': job_id,
         'handle': pickle_and_encode(handle),
@@ -78,6 +85,9 @@ def encode_launch(
 
 @register_encoder('start')
 def encode_start(resource_handle: 'backends.CloudVmRayResourceHandle') -> str:
+    resource_handle = (
+        serialize_utils.prepare_handle_for_backwards_compatibility(
+            resource_handle))
     return pickle_and_encode(resource_handle)
 
 
@@ -111,9 +121,17 @@ def encode_status_kubernetes(
 
 
 @register_encoder('jobs.queue')
-def encode_jobs_queue(jobs_or_tuple):
+def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
+    for job in jobs:
+        job['status'] = job['status'].value
+    return jobs
+
+
+@register_encoder('jobs.queue_v2')
+def encode_jobs_queue_v2(
+        jobs_or_tuple) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     # Support returning either a plain jobs list or a (jobs, total) tuple
-    status_counts = {}
+    status_counts: Dict[str, int] = {}
     if isinstance(jobs_or_tuple, tuple):
         if len(jobs_or_tuple) == 2:
             jobs, total = jobs_or_tuple
@@ -143,7 +161,9 @@ def _encode_serve_status(
         service_status['status'] = service_status['status'].value
         for replica_info in service_status.get('replica_info', []):
             replica_info['status'] = replica_info['status'].value
-            replica_info['handle'] = pickle_and_encode(replica_info['handle'])
+            handle = serialize_utils.prepare_handle_for_backwards_compatibility(
+                replica_info['handle'])
+            replica_info['handle'] = pickle_and_encode(handle)
     return service_statuses
 
 
@@ -165,8 +185,9 @@ def encode_cost_report(
     for cluster_report in cost_report:
         if cluster_report['status'] is not None:
             cluster_report['status'] = cluster_report['status'].value
-        cluster_report['resources'] = pickle_and_encode(
-            cluster_report['resources'])
+        if 'resources' in cluster_report:
+            cluster_report['resources'] = pickle_and_encode(
+                cluster_report['resources'])
     return cost_report
 
 
@@ -197,3 +218,8 @@ def encode_job_status(return_value: Dict[int, Any]) -> Dict[int, str]:
 def encode_kubernetes_node_info(
         return_value: 'models.KubernetesNodesInfo') -> Dict[str, Any]:
     return return_value.to_dict()
+
+
+@register_encoder('endpoints')
+def encode_endpoints(return_value: Dict[int, str]) -> Dict[str, str]:
+    return {str(k): v for k, v in return_value.items()}

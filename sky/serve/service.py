@@ -21,7 +21,6 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
-from sky.jobs import scheduler as jobs_scheduler
 from sky.serve import constants
 from sky.serve import controller
 from sky.serve import load_balancer
@@ -278,7 +277,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                 pool=service_spec.pool,
                 controller_pid=os.getpid(),
                 entrypoint=entrypoint)
-        jobs_scheduler.maybe_schedule_next_jobs()
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:
@@ -359,7 +357,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                         load_balancer_log_file).run,
                     args=(controller_addr, load_balancer_port,
                           service_spec.load_balancing_policy,
-                          service_spec.tls_credential))
+                          service_spec.tls_credential,
+                          service_spec.target_qps_per_replica))
                 load_balancer_process.start()
 
             if not is_recovery:

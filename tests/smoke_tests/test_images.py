@@ -456,6 +456,7 @@ def test_image_no_conda():
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
+@pytest.mark.no_seeweb  # Seeweb does not support autodown
 def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':
@@ -540,13 +541,13 @@ def test_kubernetes_docker_image_and_ssh():
                     cluster_status=[sky.ClusterStatus.UP],
                     timeout=5 * 60),
                 f'sky logs {name}-1 1 --status',
-                f'sky launch --fast -c {name}-1 {unprefixed_yaml_path}',
+                f'sky launch -y --fast -c {name}-1 {unprefixed_yaml_path}',
                 f'sky exec {name}-1 {unprefixed_yaml_path}',
                 f'sky logs {name}-1 2 --status',
                 f'sky logs {name}-1 3 --status',
                 # Second cluster
                 f'sky logs {name}-2 1 --status',
-                f'sky launch --fast -c {name}-2 {docker_yaml_path}',
+                f'sky launch -y --fast -c {name}-2 {docker_yaml_path}',
                 f'sky exec {name}-2 {docker_yaml_path}',
                 f'sky logs {name}-2 2 --status',
                 f'sky logs {name}-2 3 --status',
@@ -696,6 +697,10 @@ def test_helm_deploy_gke(request):
 
 @pytest.mark.kubernetes
 def test_helm_deploy_okta():
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping test because it is not relevant for a remotely running API server'
+        )
     test = smoke_tests_utils.Test('helm_deploy_okta', [
         f'bash tests/kubernetes/scripts/helm_okta.sh',
     ])

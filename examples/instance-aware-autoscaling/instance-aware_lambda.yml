@@ -1,0 +1,52 @@
+resources:
+  ports: 8080
+  ordered: # Candidate resources in a preference order
+    # - infra: lambda
+    #   accelerators: H100:1
+    #   instance_type: gpu_1x_h100_sxm5
+    - infra: lambda
+      accelerators: A100:1
+      instance_type: gpu_1x_a100_sxm4
+    - infra: lambda
+      accelerators: A10:1
+
+
+service:
+  readiness_probe:
+    path: /v1/models
+  load_balancing_policy: instance_aware_least_load
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 3
+    # load_balancing_policy will also use 'load_balancing_policy' for normalized load-balancing
+    target_qps_per_replica:
+      "H100:1": 2.5
+      "A100:1": 1.25
+      "A10:1": 0.5
+    upscale_delay_seconds: 200
+    downscale_delay_seconds: 1200
+
+
+# Typical use: pip install -r requirements.txt
+# Invoked under the workdir (i.e., can use its files).
+setup: |
+  wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+  bash miniconda.sh -b -p $HOME/miniconda
+  rm miniconda.sh
+  echo "Miniconda installed"
+
+  $HOME/miniconda/bin/conda init bash
+  source ~/.bashrc
+  echo "Conda initialized"
+
+  $HOME/miniconda/bin/conda create --name vllm python=3.12 -y
+  echo "Conda environment created"
+
+  source $HOME/miniconda/bin/activate vllm
+  pip install vllm==0.7.3 # should test upper version
+  echo "vllm installed"
+
+
+run: |
+  conda activate vllm
+  vllm serve BAAI/bge-reranker-v2-m3 --port 8080

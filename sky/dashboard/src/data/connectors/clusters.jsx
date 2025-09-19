@@ -52,6 +52,7 @@ export async function getClusters({ clusterNames = null } = {}) {
     const clusters = await apiClient.fetch('/status', {
       cluster_names: clusterNames,
       all_users: true,
+      include_credentials: false,
     });
 
     const clusterData = clusters.map((cluster) => {
@@ -111,11 +112,19 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function getClusterHistory() {
+export async function getClusterHistory(clusterHash = null) {
   try {
-    const history = await apiClient.fetch('/cost_report', {
+    const requestBody = {
       days: 30,
-    });
+      dashboard_summary_response: true,
+    };
+
+    // If a specific cluster hash is provided, include it in the request
+    if (clusterHash) {
+      requestBody.cluster_hashes = [clusterHash];
+    }
+
+    const history = await apiClient.fetch('/cost_report', requestBody);
 
     console.log('Raw cluster history data:', history); // Debug log
 
@@ -218,7 +227,7 @@ export async function downloadJobLogs({
     // Step 1: schedule server-side download; result is a mapping job_id -> folder path on API server
     const mapping = await apiClient.fetch('/download_logs', {
       cluster_name: clusterName,
-      job_ids: jobIds,
+      job_ids: jobIds ? jobIds.map(String) : null, // Convert to strings as expected by server
       override_skypilot_config: {
         active_workspace: workspace || 'default',
       },

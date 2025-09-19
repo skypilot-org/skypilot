@@ -59,7 +59,6 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
-from sky.client.cli import git
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -79,7 +78,6 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import directory_utils
 from sky.utils import env_options
-from sky.utils import git as git_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -89,6 +87,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
 from sky.volumes import utils as volumes_utils
 from sky.volumes.client import sdk as volumes_sdk
@@ -142,7 +141,10 @@ def _get_cluster_records_and_set_ssh_config(
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
     if clusters is not None:
         all_users = True
-    request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
+    request_id = sdk.status(clusters,
+                            refresh=refresh,
+                            all_users=all_users,
+                            _include_credentials=True)
     cluster_records = sdk.stream_and_get(request_id)
     # Update the SSH config for all clusters
     for record in cluster_records:
@@ -286,9 +288,10 @@ def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
     del ctx, param  # Unused.
     # TODO(zhwu): we send requests to API server for completion, which can cause
     # large latency. We should investigate caching mechanism if needed.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/cluster_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
@@ -299,9 +302,10 @@ def _complete_storage_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for storage names."""
     del ctx, param  # Unused.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/storage_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
@@ -312,12 +316,31 @@ def _complete_volume_name(ctx: click.Context, param: click.Parameter,
                           incomplete: str) -> List[str]:
     """Handle shell completion for volume names."""
     del ctx, param  # Unused.
-    response = requests_lib.get(
-        f'{server_common.get_server_url()}'
+    response = server_common.make_authenticated_request(
+        'GET',
         f'/api/completion/volume_name?incomplete={incomplete}',
+        retry=False,
         timeout=2.0,
     )
     response.raise_for_status()
+    return response.json()
+
+
+def _complete_api_request(ctx: click.Context, param: click.Parameter,
+                          incomplete: str) -> List[str]:
+    """Handle shell completion for API requests."""
+    del ctx, param  # Unused.
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/api/completion/api_request?incomplete={incomplete}',
+        retry=False,
+        timeout=2.0,
+    )
+    try:
+        response.raise_for_status()
+    except requests_lib.exceptions.HTTPError:
+        # Server may be outdated/missing this API. Silently skip.
+        return []
     return response.json()
 
 
@@ -589,7 +612,7 @@ def _check_yaml_only(
     try:
         with open(entrypoint, 'r', encoding='utf-8') as f:
             try:
-                config = list(yaml.safe_load_all(f))
+                config = list(yaml_utils.safe_load_all(f))
                 if config:
                     # FIXME(zongheng): in a chain DAG YAML it only returns the
                     # first section. OK for downstream but is weird.
@@ -758,8 +781,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
     # Update the workdir config from the command line parameters.
     # And update the envs and secrets from the workdir.
-    _update_task_workdir(task, workdir, git_url, git_ref)
-    _update_task_workdir_and_secrets_from_workdir(task)
+    task.update_workdir(workdir, git_url, git_ref)
+    task.update_envs_and_secrets_from_workdir()
 
     # job launch specific.
     if job_recovery is not None:
@@ -772,73 +795,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if name is not None:
         task.name = name
     return task
-
-
-def _update_task_workdir(task: task_lib.Task, workdir: Optional[str],
-                         git_url: Optional[str], git_ref: Optional[str]):
-    """Updates the task workdir.
-
-    Args:
-        task: The task to update.
-        workdir: The workdir to update.
-        git_url: The git url to update.
-        git_ref: The git ref to update.
-    """
-    if task.workdir is None or isinstance(task.workdir, str):
-        if workdir is not None:
-            task.workdir = workdir
-            return
-        if git_url is not None:
-            task.workdir = {}
-            task.workdir['url'] = git_url
-            if git_ref is not None:
-                task.workdir['ref'] = git_ref
-            return
-        return
-    if git_url is not None:
-        task.workdir['url'] = git_url
-    if git_ref is not None:
-        task.workdir['ref'] = git_ref
-    return
-
-
-def _update_task_workdir_and_secrets_from_workdir(task: task_lib.Task):
-    """Updates the task secrets from the workdir.
-
-    Args:
-        task: The task to update.
-    """
-    if task.workdir is None:
-        return
-    if not isinstance(task.workdir, dict):
-        return
-    url = task.workdir['url']
-    ref = task.workdir.get('ref', '')
-    token = os.environ.get(git_utils.GIT_TOKEN_ENV_VAR)
-    ssh_key_path = os.environ.get(git_utils.GIT_SSH_KEY_PATH_ENV_VAR)
-    try:
-        git_repo = git.GitRepo(url, ref, token, ssh_key_path)
-        clone_info = git_repo.get_repo_clone_info()
-        if clone_info is None:
-            return
-        task.envs[git_utils.GIT_URL_ENV_VAR] = clone_info.url
-        if ref:
-            ref_type = git_repo.get_ref_type()
-            if ref_type == git.GitRefType.COMMIT:
-                task.envs[git_utils.GIT_COMMIT_HASH_ENV_VAR] = ref
-            elif ref_type == git.GitRefType.BRANCH:
-                task.envs[git_utils.GIT_BRANCH_ENV_VAR] = ref
-            elif ref_type == git.GitRefType.TAG:
-                task.envs[git_utils.GIT_TAG_ENV_VAR] = ref
-        if clone_info.token is None and clone_info.ssh_key is None:
-            return
-        if clone_info.token is not None:
-            task.secrets[git_utils.GIT_TOKEN_ENV_VAR] = clone_info.token
-        if clone_info.ssh_key is not None:
-            task.secrets[git_utils.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
-    except exceptions.GitError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'{str(e)}') from None
 
 
 class _NaturalOrderGroup(click.Group):
@@ -1611,7 +1567,7 @@ def _show_endpoint(query_clusters: Optional[List[str]],
         if endpoint:
             request_id = sdk.endpoints(cluster_record['name'], endpoint)
             cluster_endpoints = sdk.stream_and_get(request_id)
-            cluster_endpoint = cluster_endpoints.get(str(endpoint), None)
+            cluster_endpoint = cluster_endpoints.get(endpoint, None)
             if not cluster_endpoint:
                 raise click.Abort(f'Endpoint {endpoint} not found for cluster '
                                   f'{cluster_record["name"]!r}.')
@@ -1633,7 +1589,9 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     return
 
 
-def _show_enabled_infra(active_workspace: str, show_workspace: bool):
+def _show_enabled_infra(
+        active_workspace: str, show_workspace: bool,
+        enabled_clouds_request_id: server_common.RequestId[List[str]]):
     """Show the enabled infrastructure."""
     workspace_str = ''
     if show_workspace:
@@ -1641,8 +1599,7 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
     title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
              f'{workspace_str}:'
              f'{colorama.Style.RESET_ALL} ')
-    all_infras = sdk.get(
-        sdk.enabled_clouds(workspace=active_workspace, expand=True))
+    all_infras = sdk.get(enabled_clouds_request_id)
     click.echo(f'{title}{", ".join(all_infras)}\n')
 
 
@@ -1856,6 +1813,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                            f'{colorama.Style.RESET_ALL}')
             return None
 
+    active_workspace = skypilot_config.get_active_workspace()
+
+    def submit_enabled_clouds():
+        return sdk.enabled_clouds(workspace=active_workspace, expand=True)
+
     managed_jobs_queue_request_id = None
     service_status_request_id = None
     workspace_request_id = None
@@ -1871,6 +1833,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             pools_request_future = executor.submit(submit_pools)
         if not (ip or show_endpoints):
             workspace_request_future = executor.submit(submit_workspace)
+        enabled_clouds_request_future = executor.submit(submit_enabled_clouds)
 
         # Get the request IDs
         if show_managed_jobs:
@@ -1881,6 +1844,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             pool_status_request_id = pools_request_future.result()
         if not (ip or show_endpoints):
             workspace_request_id = workspace_request_future.result()
+        enabled_clouds_request_id = enabled_clouds_request_future.result()
 
     managed_jobs_queue_request_id = (server_common.RequestId()
                                      if not managed_jobs_queue_request_id else
@@ -1915,9 +1879,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         all_workspaces = sdk.get(workspace_request_id)
     else:
         all_workspaces = {constants.SKYPILOT_DEFAULT_WORKSPACE: {}}
-    active_workspace = skypilot_config.get_active_workspace()
     show_workspace = len(all_workspaces) > 1
-    _show_enabled_infra(active_workspace, show_workspace)
+    _show_enabled_infra(active_workspace, show_workspace,
+                        enabled_clouds_request_id)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                f'{colorama.Style.RESET_ALL}')
 
@@ -4212,14 +4176,13 @@ def volumes_apply(
                     f'{entrypoint_str!r} needs to be a YAML file')
         if yaml_config is not None:
             volume_config_dict = yaml_config.copy()
+    override_config = _build_volume_override_config(name, infra, type, size)
+    volume_config_dict.update(override_config)
 
     # Create Volume instance
-    volume = volume_lib.Volume.from_dict(volume_config_dict)
+    volume = volume_lib.Volume.from_yaml_config(volume_config_dict)
 
-    # Normalize the volume config with CLI options
-    volume.normalize_config(name=name, infra=infra, type=type, size=size)
-
-    logger.debug(f'Volume config: {volume.to_dict()}')
+    logger.debug(f'Volume config: {volume.to_yaml_config()}')
 
     if not yes:
         click.confirm(f'Proceed to create volume {volume.name!r}?',
@@ -4235,6 +4198,22 @@ def volumes_apply(
         logger.error(f'{colorama.Fore.RED}Error applying volume: '
                      f'{common_utils.format_exception(e, use_bracket=True)}'
                      f'{colorama.Style.RESET_ALL}')
+
+
+def _build_volume_override_config(name: Optional[str], infra: Optional[str],
+                                  volume_type: Optional[str],
+                                  size: Optional[str]) -> Dict[str, str]:
+    """Parse the volume override config."""
+    override_config = {}
+    if name is not None:
+        override_config['name'] = name
+    if infra is not None:
+        override_config['infra'] = infra
+    if volume_type is not None:
+        override_config['type'] = volume_type
+    if size is not None:
+        override_config['size'] = size
+    return override_config
 
 
 @volumes.command('ls', cls=_DocumentedCodeCommand)
@@ -6017,7 +5996,10 @@ def api_stop():
 
 @api.command('logs', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_id', required=False, type=str)
+@click.argument('request_id',
+                required=False,
+                type=str,
+                **_get_shell_complete_args(_complete_api_request))
 @click.option('--server-logs',
               is_flag=True,
               default=False,
@@ -6061,7 +6043,11 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_ids', required=False, type=str, nargs=-1)
+@click.argument('request_ids',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
 @flags.all_users_option('Cancel all requests from all users.')
 @usage_lib.entrypoint
@@ -6093,7 +6079,11 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
 
 @api.command('status', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_ids', required=False, type=str, nargs=-1)
+@click.argument('request_ids',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_api_request))
 @click.option('--all-status',
               '-a',
               is_flag=True,
@@ -6200,11 +6190,31 @@ def api_info():
         user = api_server_user
     else:
         user = models.User.get_current_user()
+    # Print client version and commit.
+    click.echo(f'SkyPilot client version: {sky.__version__}, '
+               f'commit: {sky.__commit__}')
+
+    config = skypilot_config.get_user_config()
+    config = dict(config)
+
+    # Determine where the endpoint is set.
+    if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
+        location = ('Endpoint set via the environment variable '
+                    f'{constants.SKY_API_SERVER_URL_ENV_VAR}')
+    elif 'endpoint' in config.get('api_server', {}):
+        config_path = skypilot_config.resolve_user_config_path()
+        if config_path is None:
+            location = 'Endpoint set to default local API server.'
+        else:
+            location = f'Endpoint set via {config_path}'
+    else:
+        location = 'Endpoint set to default local API server.'
     click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '
                f'version: {api_server_info.version}\n'
-               f'{ux_utils.INDENT_LAST_SYMBOL}User: {user.name} ({user.id})')
+               f'{ux_utils.INDENT_SYMBOL}User: {user.name} ({user.id})\n'
+               f'{ux_utils.INDENT_LAST_SYMBOL}{location}')
 
 
 @cli.group(cls=_NaturalOrderGroup)

@@ -1,28 +1,22 @@
 import fcntl
-import json
 import os
-import pathlib
+import shutil
 import signal
 import socket
 import subprocess
 import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from typing import List, Optional, Tuple
 
 import filelock
 import pytest
 import requests
 from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
-from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import orm
-from sqlalchemy import text as sqlalchemy_text
-import sqlalchemy_adapter
 
-from sky import global_user_state
+from sky import cloud_stores
 from sky import sky_logging
-from sky import skypilot_config
-from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 
 # Initialize logger at the top level
@@ -40,7 +34,9 @@ from common_test_fixtures import mock_job_table_one_job
 from common_test_fixtures import mock_queue
 from common_test_fixtures import mock_redirect_log_file
 from common_test_fixtures import mock_services_no_service
+from common_test_fixtures import mock_services_no_service_grpc
 from common_test_fixtures import mock_services_one_service
+from common_test_fixtures import mock_services_one_service_grpc
 from common_test_fixtures import mock_stream_utils
 from common_test_fixtures import reset_global_state
 from common_test_fixtures import skyignore_dir
@@ -66,8 +62,8 @@ from sky.server import common as server_common
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius', 'hyperbolic'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace',
+    'primeintellect', 'runpod', 'vast', 'nebius', 'hyperbolic', 'seeweb'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -89,11 +85,13 @@ cloud_to_pytest_keyword = {
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
+    'primeintellect': 'primeintellect',
     'do': 'do',
     'vast': 'vast',
     'runpod': 'runpod',
     'nebius': 'nebius',
-    'hyperbolic': 'hyperbolic'
+    'hyperbolic': 'hyperbolic',
+    'seeweb': 'seeweb'
 }
 
 
@@ -152,7 +150,7 @@ def pytest_addoption(parser):
     parser.addoption(
         '--base-branch',
         type=str,
-        default='master',
+        default=None,
         help='Base branch to test backward compatibility against',
     )
     parser.addoption(
@@ -174,6 +172,12 @@ def pytest_addoption(parser):
         help='Skip tests marked as resource_heavy',
     )
     parser.addoption(
+        '--resource-heavy',
+        action='store_true',
+        default=False,
+        help='Only run tests marked as resource_heavy',
+    )
+    parser.addoption(
         '--helm-version',
         type=str,
         default='',
@@ -192,6 +196,25 @@ def pytest_addoption(parser):
         help=('If set, the tests will be run in jobs consolidation mode '
               '(The config change is made in buildkite so this is a flag to '
               'ensure the tests will not be skipped but no actual effect)'),
+    )
+    parser.addoption(
+        '--grpc',
+        action='store_true',
+        default=False,
+        help='Run tests with GRPC enabled',
+    )
+    parser.addoption(
+        '--env-file',
+        type=str,
+        default=None,
+        help='Path to the env file to override the default env file',
+    )
+    parser.addoption(
+        '--backend-test-cluster',
+        type=str,
+        default=None,
+        help=
+        'Use existing cluster for backend integration tests instead of creating a new one',
     )
 
 
@@ -250,8 +273,15 @@ def pytest_collection_modifyitems(config, items):
         reason='skipped, because --tpu option is set')
     skip_marks['local'] = pytest.mark.skip(
         reason='test requires local API server')
+    skip_marks['no_remote_server'] = pytest.mark.skip(
+        reason='skip tests marked as no_remote_server if --remote-server is set'
+    )
     skip_marks['no_resource_heavy'] = pytest.mark.skip(
-        reason='skipped, because --no-resource-heavy option is set')
+        reason=
+        'skip tests marked as resource_heavy if --no-resource-heavy is set')
+    skip_marks['resource_heavy'] = pytest.mark.skip(
+        reason=
+        'skip tests not marked as resource_heavy if --resource-heavy is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -297,6 +327,20 @@ def pytest_collection_modifyitems(config, items):
         if 'resource_heavy' in marks and config.getoption(
                 '--no-resource-heavy'):
             item.add_marker(skip_marks['no_resource_heavy'])
+        # Skip tests not marked as resource_heavy if --resource-heavy is set
+        if 'resource_heavy' not in marks and config.getoption(
+                '--resource-heavy'):
+            item.add_marker(skip_marks['resource_heavy'])
+        # Skip tests marked as no_remote_server if --remote-server is set
+        if 'no_remote_server' in marks and config.getoption('--remote-server'):
+            item.add_marker(skip_marks['no_remote_server'])
+        # Skip tests marked as no_remote_server if --env-file is set and the env file contains
+        # api_server configuration. (max line length 80)
+        env_file = config.getoption('--env-file')
+        if env_file:
+            has_api_server, _ = _get_and_check_env_file(env_file)
+            if has_api_server and 'no_remote_server' in marks:
+                item.add_marker(skip_marks['no_remote_server'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -342,6 +386,55 @@ def _generic_cloud(config) -> str:
     if generic_cloud_option is not None:
         return generic_cloud_option
     return _get_cloud_to_run(config)[0]
+
+
+@annotations.lru_cache(scope='session')
+def _get_and_check_env_file(env_file_path: str) -> Tuple[bool, Optional[str]]:
+    """Download/get env file and check if it contains api_server configuration.
+
+    Returns:
+        tuple: (has_api_server_config, local_file_path)
+    """
+    assert isinstance(
+        env_file_path,
+        str), f'env_file_path must be a string, got {type(env_file_path)}'
+
+    # Check if it's a local file or directory (same logic as prepare_env_file)
+    expanded_path = os.path.expanduser(env_file_path)
+    if os.path.exists(expanded_path):
+        # It's a local file
+        local_file_path = expanded_path
+    else:
+        # It's a cloud storage URL - download it (same logic as prepare_env_file)
+        logger.info(
+            f'Downloading env file from cloud storage for collection: {env_file_path}'
+        )
+
+        # Create temporary directory for downloaded files
+        temp_dir = tempfile.mkdtemp(prefix='skypilot_env_collection_')
+
+        # Get the appropriate CloudStorage handler for the URL
+        cloud_storage = cloud_stores.get_storage_from_path(env_file_path)
+
+        # Generate the download command - assert it's a file
+        assert not cloud_storage.is_directory(env_file_path), (
+            f'Expected file but got directory: {env_file_path}')
+        download_cmd = cloud_storage.make_sync_file_command(
+            env_file_path, temp_dir)
+
+        # Execute the download command
+        subprocess.run(download_cmd, shell=True, check=True)
+
+        # Get the filename from the original URL
+        file_name = os.path.basename(env_file_path)
+        local_file_path = os.path.join(temp_dir, file_name)
+
+    # Check if the file contains api_server configuration
+    with open(local_file_path, 'r') as f:
+        content = f.read()
+        has_api_server = 'endpoint' in content and ('api_server' in content)
+
+    return has_api_server, local_file_path
 
 
 @pytest.fixture
@@ -608,7 +701,8 @@ def setup_docker_container(request):
 
 @pytest.fixture(scope='session', autouse=True)
 def setup_controller_cloud_env(request):
-    """Setup controller cloud environment variable if --controller-cloud is specified."""
+    """Setup controller cloud environment variable if --controller-cloud is
+    specified."""
     if not request.config.getoption('--controller-cloud'):
         yield
         return
@@ -621,9 +715,45 @@ def setup_controller_cloud_env(request):
 
 @pytest.fixture(scope='session', autouse=True)
 def setup_postgres_backend_env(request):
-    """Setup Postgres Backend environment variable if --postgres is specified."""
+    """Setup Postgres Backend environment variable if --postgres is specified.
+    """
     if not request.config.getoption('--postgres'):
         yield
         return
     os.environ['PYTEST_SKYPILOT_POSTGRES_BACKEND'] = '1'
     yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_grpc_backend_env(request):
+    """Setup gRPC enabled environment variable if --grpc is specified.
+    """
+    if not request.config.getoption('--grpc'):
+        yield
+        return
+    os.environ['PYTEST_SKYPILOT_GRPC_ENABLED'] = '1'
+    yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def prepare_env_file(request):
+    """Prepare environment file for tests.
+
+    If the env-file option is a local directory or file, use it directly.
+    Otherwise, treat it as a cloud storage URL (e.g., s3://bucket/path) and
+    download from storage.
+    """
+    env_file_path = request.config.getoption('--env-file')
+    if env_file_path is None:
+        yield
+        return
+
+    # Use the cached function to get/download the env file
+    # This avoids duplicate downloads if collection phase already downloaded it
+    has_api_server, local_file_path = _get_and_check_env_file(env_file_path)
+
+    logger.info(f'Using env file: {local_file_path}')
+    os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = local_file_path
+    if has_api_server:
+        os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
+    yield local_file_path
