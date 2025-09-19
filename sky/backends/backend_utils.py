@@ -3055,6 +3055,10 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
+    if cluster_names is not None:
+        if isinstance(cluster_names, str):
+            cluster_names = [cluster_names]
+        cluster_names = _get_glob_clusters(cluster_names, silent=True)
 
     exclude_managed_clusters = False
     if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
@@ -3063,33 +3067,26 @@ def get_clusters(
     if not all_users:
         user_hashes_filter = {common_utils.get_current_user().id}
     accessible_workspaces = workspaces_core.get_workspaces()
-
     records = global_user_state.get_clusters(
         exclude_managed_clusters=exclude_managed_clusters,
         user_hashes_filter=user_hashes_filter,
-        workspaces_filter=accessible_workspaces)
+        workspaces_filter=accessible_workspaces,
+        cluster_names=cluster_names,
+    )
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
 
     if cluster_names is not None:
-        if isinstance(cluster_names, str):
-            cluster_names = [cluster_names]
-        cluster_names = _get_glob_clusters(cluster_names, silent=True)
-        new_records = []
-        not_exist_cluster_names = []
-        for cluster_name in cluster_names:
-            for record in records:
-                if record['name'] == cluster_name:
-                    new_records.append(record)
-                    break
-            else:
-                not_exist_cluster_names.append(cluster_name)
+        record_names = {record['name'] for record in records}
+        not_exist_cluster_names = [
+            cluster_name for cluster_name in cluster_names
+            if cluster_name not in record_names
+        ]
         if not_exist_cluster_names:
             clusters_str = ', '.join(not_exist_cluster_names)
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
-        records = new_records
 
     def _get_records_with_handle(
             records: List[Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
