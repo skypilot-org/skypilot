@@ -79,6 +79,11 @@ napoleon_custom_sections = [
 # Python methods should be presented in source code order
 autodoc_member_order = 'bysource'
 
+# Mock imports for modules that should not be loaded during doc build
+autodoc_mock_imports = [
+    'sky.schemas.generated',
+]
+
 
 # -- Options for HTML output
 def render_svg_logo(path):
@@ -184,6 +189,7 @@ show_sphinx = False
 exclude_patterns = [
     '_gallery_original',
     'generated-examples',
+    '../sky/schemas/generated/*',
 ]
 myst_url_schemes = {
     'http': None,
