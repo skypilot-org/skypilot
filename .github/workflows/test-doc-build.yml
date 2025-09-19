@@ -34,6 +34,7 @@ jobs:
         uv pip install -r ./requirements-docs.txt
     - name: Build documentation
       run: |
+        set -e
         source ~/test-env/bin/activate
         cd ./docs
         ./build.sh
