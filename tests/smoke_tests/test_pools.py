@@ -37,6 +37,34 @@ def wait_until_pool_ready(pool_name: str,
         'done')
 
 
+def wait_until_num_workers(pool_name: str,
+                           num_workers: int,
+                           timeout: int = 30,
+                           time_between_checks: int = 5):
+    status_str = f'sky jobs pool status {pool_name} | grep "^{pool_name}"'
+
+    return (
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for num workers {num_workers}"; exit 1; '
+        'fi; '
+        f's=$({status_str}); '
+        'echo "$s"; '
+        f'if echo "$s" | grep "{num_workers}/{num_workers}"; then '
+        '  break; '
+        'fi; '
+        'if echo "$s" | grep "FAILED"; then '
+        '  exit 1; '
+        'fi; '
+        'if echo "$s" | grep "SHUTTING_DOWN"; then '
+        '  exit 1; '
+        'fi; '
+        f'echo "Waiting for num workers to be {num_workers}..."; '
+        f'sleep {time_between_checks}; '
+        'done')
+
+
 def test_vllm_pool(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_config = textwrap.dedent(f"""
@@ -167,3 +195,35 @@ def test_vllm_pool(generic_cloud: str):
             )
 
             smoke_tests_utils.run_one_test(test)
+
+
+def test_update_workers(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    pool_config = textwrap.dedent(f"""
+    pool:
+        workers: 1
+    """)
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        pool_yaml.write(pool_config.encode())
+        pool_yaml.flush()
+
+        pool_name = f'{name}-pool'
+
+        test = smoke_tests_utils.Test(
+            'test_update_workers',
+            [
+                f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully created pool"',
+                wait_until_pool_ready(
+                    pool_name,
+                    timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                f's=$(sky jobs pool apply -p {pool_name} --workers 2 -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully updated pool"',
+                wait_until_num_workers(
+                    pool_name,
+                    2,
+                    timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=(f'sky jobs pool down {pool_name} -y || true'),
+        )
+        smoke_tests_utils.run_one_test(test)

@@ -958,10 +958,11 @@ def download_logs(
 def pool_apply(
     task: 'sky.Task',
     pool_name: str,
+    workers: Optional[int],
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
 ) -> None:
     """Apply a config to a pool."""
-    return impl.apply(task, pool_name, mode, pool=True)
+    return impl.apply(task, workers, pool_name, mode, pool=True)
 
 
 @usage_lib.entrypoint
