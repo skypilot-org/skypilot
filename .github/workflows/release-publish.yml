@@ -122,14 +122,67 @@ jobs:
           git tag -a "v${VERSION}" -m "Release v${VERSION}"
           git push origin "v${VERSION}"
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "Release v${{ needs.extract-version.outputs.version }}"
-          tag_name: "v${{ needs.extract-version.outputs.version }}"
-          generate_release_notes: true
-          draft: true
-          token: ${{ secrets.GH_PAT_FOR_RELEASE }}
+      - name: Find previous release from git tags
+        id: find_previous_release
+        run: |
+          VERSION="${{ needs.extract-version.outputs.version }}"
+          echo "Current release version: ${VERSION}"
+
+          # Get all git tags starting with 'v' and sort them
+          ALL_TAGS=$(git tag | grep "^v" | sort -V)
+          echo "All git tags:"
+          echo "$ALL_TAGS"
+
+          # Find the highest version that's less than the current one
+          PREVIOUS_VERSION=$(echo "$ALL_TAGS" | grep -v "^v${VERSION}$" | sort -V | tail -1 | sed 's/^v//' || echo "")
+
+          if [ -n "$PREVIOUS_VERSION" ] && [ "$PREVIOUS_VERSION" != "$VERSION" ]; then
+            PREVIOUS_TAG="v${PREVIOUS_VERSION}"
+            echo "Found previous release version: ${PREVIOUS_VERSION}"
+            echo "Previous tag: ${PREVIOUS_TAG}"
+            echo "previous_tag=${PREVIOUS_TAG}" >> $GITHUB_OUTPUT
+          else
+            echo "Error: No previous release version found in git tags for comparison"
+            echo "Current version: ${VERSION}"
+            echo "Available tags:"
+            echo "$ALL_TAGS"
+            exit 1
+          fi
+
+      - name: Create GitHub Release with Previous Tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
+        run: |
+          VERSION="${{ needs.extract-version.outputs.version }}"
+          PREVIOUS_TAG="${{ steps.find_previous_release.outputs.previous_tag }}"
+
+          # Generate release notes using GitHub API
+          echo "Generating release notes from $PREVIOUS_TAG to v$VERSION"
+          GENERATED_NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name="v$VERSION" \
+            -f previous_tag_name="$PREVIOUS_TAG" \
+            --jq '.body')
+
+          # Create final release notes with custom prefix
+          cat > final_release_notes.md << EOF
+          ## SkyPilot v$VERSION
+
+          Get it now with:
+
+          \`\`\`bash
+          uv pip install "skypilot>=$VERSION"
+          \`\`\`
+
+          ---
+
+          $GENERATED_NOTES
+          EOF
+
+          echo "Creating release from $PREVIOUS_TAG to v$VERSION"
+          gh release create "v$VERSION" \
+            --title "Release v$VERSION" \
+            --notes-file final_release_notes.md \
+            --draft
 
   cleanup-branches:
     needs: extract-version
