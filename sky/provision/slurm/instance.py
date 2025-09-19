@@ -292,63 +292,8 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    assert provider_config is not None, cluster_name_on_cloud
-    zone = provider_config['availability_zone']
-    project_id = provider_config['project_id']
-    label_filters = {
-        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
-    }
-
-    tpu_node = provider_config.get('tpu_node')
-    if tpu_node is not None:
-        instance_utils.delete_tpu_node(project_id, zone, tpu_node)
-
-    if worker_only:
-        label_filters[provision_constants.TAG_RAY_NODE_KIND] = 'worker'
-
-    handlers: List[Type[instance_utils.GCPInstance]] = [
-        instance_utils.GCPComputeInstance
-    ]
-    use_tpu_vms = provider_config.get('_has_tpus', False)
-    if use_tpu_vms:
-        handlers.append(instance_utils.GCPTPUVMInstance)
-
-    handler_to_instances = _filter_instances(
-        handlers,
-        project_id,
-        zone,
-        label_filters,
-        lambda handler: handler.NEED_TO_STOP_STATES,
-    )
-    all_instances = [
-        i for instances in handler_to_instances.values() for i in instances
-    ]
-
-    operations = collections.defaultdict(list)
-    for handler, instances in handler_to_instances.items():
-        for instance in instances:
-            operations[handler].append(handler.stop(project_id, zone, instance))
-    _wait_for_operations(operations, project_id, zone)
-    # Check if the instance is actually stopped.
-    # GCP does not fully stop an instance even after
-    # the stop operation is finished.
-    for _ in range(constants.MAX_POLLS_STOP):
-        handler_to_instances = _filter_instances(
-            handler_to_instances.keys(),
-            project_id,
-            zone,
-            label_filters,
-            lambda handler: handler.NON_STOPPED_STATES,
-            included_instances=all_instances,
-        )
-        if not handler_to_instances:
-            break
-        time.sleep(constants.POLL_INTERVAL)
-    else:
-        raise RuntimeError(f'Maximum number of polls: '
-                           f'{constants.MAX_POLLS_STOP} reached. '
-                           f'Instance {all_instances} is still not in '
-                           'STOPPED status.')
+    """Keep the Slurm virtual instances running."""
+    raise NotImplementedError()
 
 
 def terminate_instances(
