@@ -30,12 +30,12 @@ jobs:
       run: |
         uv venv --seed ~/test-env
         source ~/test-env/bin/activate
-        uv pip install --prerelease=allow "azure-cli>=2.65.0"
-        uv pip install ".[all]"
+        uv pip install "."
         cd docs
         uv pip install -r ./requirements-docs.txt
     - name: Build documentation
       run: |
+        set -e
         source ~/test-env/bin/activate
         cd ./docs
         ./build.sh
