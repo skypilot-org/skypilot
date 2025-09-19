@@ -30,6 +30,7 @@ jobs:
       run: |
         uv venv --seed ~/test-env
         source ~/test-env/bin/activate
+        uv pip install "."
         cd docs
         uv pip install -r ./requirements-docs.txt
     - name: Build documentation
