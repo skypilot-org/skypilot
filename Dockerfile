@@ -12,11 +12,12 @@ RUN apt-get update && \
     apt-get clean && rm -rf /usr/lib/google-cloud-sdk/platform/bundledpythonunix \
     /var/lib/apt/lists/*
 
-# Control installation method - default to install from source
-ARG INSTALL_FROM_SOURCE=true
 
 # Stage 2: Process the source code for INSTALL_FROM_SOURCE
 FROM python:3.10-slim AS process-source
+
+# Control installation method - default to install from source
+ARG INSTALL_FROM_SOURCE=true
 
 COPY . /skypilot
 
@@ -35,6 +36,8 @@ RUN cd /skypilot && \
 
 # Stage 3: Main image
 FROM python:3.10-slim
+
+ARG INSTALL_FROM_SOURCE=true
 
 # Copy Google Cloud SDK from Stage 1
 COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
