@@ -110,12 +110,21 @@ def write_yaml(yaml_file: tempfile.NamedTemporaryFile, config: str):
 
 def test_vllm_pool(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
+    bucket_name = f'sky-test-vllm-pool-{name}'
     pool_config = textwrap.dedent(f"""
     envs:
         MODEL_NAME: NousResearch/Meta-Llama-3-8B-Instruct
+       
+        BUCKET_NAME: {bucket_name}
+
+    file_mounts:
+        /output:
+            name: ${{BUCKET_NAME}}
+            mode: MOUNT
+            store: s3
 
     resources:
-        accelerators: {{L4}}
+        accelerators: {{L4: 1}}
 
     setup: |
         uv venv --python 3.10 --seed
@@ -149,8 +158,6 @@ def test_vllm_pool(generic_cloud: str):
         workers: 1
     """)
 
-    bucket_name = f'sky-test-vllm-pool-{name}'
-
     job_config = textwrap.dedent(f"""
     name: t-test-vllm-pool
 
@@ -165,19 +172,10 @@ def test_vllm_pool(generic_cloud: str):
     envs:
         START_IDX: 0  # Will be overridden by batch launcher script
         END_IDX: 10000  # Will be overridden by batch launcher script
-        BUCKET_NAME: {bucket_name}
         MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
         DATASET_NAME: "McAuley-Lab/Amazon-Reviews-2023"
         DATASET_CONFIG: "raw_review_Books"
-        EMBEDDINGS_BUCKET_NAME: {bucket_name}
         WORKER_ID: ''
-
-    file_mounts:
-        /output:
-            name: ${{EMBEDDINGS_BUCKET_NAME}}
-            mode: MOUNT
-            store: s3
-
 
     run: |
         source .venv/bin/activate
@@ -185,21 +183,25 @@ def test_vllm_pool(generic_cloud: str):
         # Initialize and download the model
         HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/model $MODEL_NAME
 
-        # Create metrics directory for monitoring service
-        mkdir -p /output/metrics
-
         # Set worker ID for metrics tracking
         if [ -z "$WORKER_ID" ]; then
             export WORKER_ID="worker_$(date +%s)_$(hostname)"
             echo "Generated worker ID: $WORKER_ID"
         fi
 
+        output_dir="/output/${{WORKER_ID}}"
+        mkdir -p $output_dir
+
+        # Create metrics directory
+        mkdir -p $output_dir/metrics
+
+
         # Process the assigned range of documents
         echo "Processing documents from $START_IDX to $END_IDX"
 
         # Process text documents and track token metrics
         python scripts/text_vector_processor.py \
-            --output-path "/output/embeddings_${{START_IDX}}_${{END_IDX}}.parquet" \
+            --output-path "${{output_dir}}/embeddings_${{START_IDX}}_${{END_IDX}}.parquet" \
             --start-idx $START_IDX \
             --end-idx $END_IDX \
             --chunk-size 512 \
@@ -228,6 +230,7 @@ def test_vllm_pool(generic_cloud: str):
                         timeout=smoke_tests_utils.get_timeout(generic_cloud)),
                     _LAUNCH_POOL_JOB_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, job_yaml=job_yaml.name),
+                    f'aws s3 ls s3://{bucket_name} --recursive --summarize | grep "Total Objects" | awk \'{{print $3}}\'',
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
                 teardown=
