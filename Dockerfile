@@ -28,6 +28,9 @@ RUN cd /skypilot && \
         cd .. && rm -rf /skypilot && mkdir /skypilot; \
     else \
         echo "Keeping source code and record commit sha (editable installation)" && \
+        apt-get update -y && \
+        apt-get install --no-install-recommends -y git && \
+        apt-get clean && rm -rf /var/lib/apt/lists/* && \
         python -c "import setup; setup.replace_commit_hash()" && \
         # Remove .git dir to reduce the final image size
         rm -rf .git; \
