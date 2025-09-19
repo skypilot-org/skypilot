@@ -1441,14 +1441,12 @@ def get_clusters(
                 # clusters that have a null user_hash.
                 query = query.filter(
                     (cluster_table.c.user_hash.in_(user_hashes_filter) |
-                     (cluster_table.c.user_hash is None)) &
-                    (cluster_table.c.name.in_(cluster_names
-                                             ) if cluster_names else True))
+                     (cluster_table.c.user_hash is None)))
             else:
                 query = query.filter(
-                    cluster_table.c.user_hash.in_(user_hashes_filter) &
-                    (cluster_table.c.name.in_(cluster_names
-                                             ) if cluster_names else True))
+                    cluster_table.c.user_hash.in_(user_hashes_filter))
+        if cluster_names is not None:
+            query = query.filter(cluster_table.c.name.in_(cluster_names))
         query = query.order_by(sqlalchemy.desc(cluster_table.c.launched_at))
         rows = query.all()
     records = []

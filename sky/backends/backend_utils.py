@@ -3067,7 +3067,6 @@ def get_clusters(
     if not all_users:
         user_hashes_filter = {common_utils.get_current_user().id}
     accessible_workspaces = workspaces_core.get_workspaces()
-
     records = global_user_state.get_clusters(
         exclude_managed_clusters=exclude_managed_clusters,
         user_hashes_filter=user_hashes_filter,
@@ -3080,19 +3079,14 @@ def get_clusters(
     reset = colorama.Style.RESET_ALL
 
     if cluster_names is not None:
-        new_records = []
-        not_exist_cluster_names = []
-        for cluster_name in cluster_names:
-            for record in records:
-                if record['name'] == cluster_name:
-                    new_records.append(record)
-                    break
-            else:
-                not_exist_cluster_names.append(cluster_name)
+        record_names = {record['name'] for record in records}
+        not_exist_cluster_names = [
+            cluster_name for cluster_name in cluster_names
+            if cluster_name not in record_names
+        ]
         if not_exist_cluster_names:
             clusters_str = ', '.join(not_exist_cluster_names)
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
-        records = new_records
 
     def _get_records_with_handle(
             records: List[Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
