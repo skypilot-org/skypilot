@@ -29,7 +29,7 @@ from sqlalchemy.ext import declarative
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
-from sky.server import metrics as metrics_lib
+from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
