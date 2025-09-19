@@ -12,6 +12,9 @@ RUN apt-get update && \
     apt-get clean && rm -rf /usr/lib/google-cloud-sdk/platform/bundledpythonunix \
     /var/lib/apt/lists/*
 
+# Control installation method - default to install from source
+ARG INSTALL_FROM_SOURCE=true
+
 # Stage 2: Process the source code for INSTALL_FROM_SOURCE
 FROM python:3.10-slim AS process-source
 
@@ -44,9 +47,6 @@ ARG TARGETARCH
 
 # Control Next.js basePath for staging deployments
 ARG NEXT_BASE_PATH=/dashboard
-
-# Control installation method - default to install from source
-ARG INSTALL_FROM_SOURCE=true
 
 # Install system packages
 RUN apt-get update -y && \
