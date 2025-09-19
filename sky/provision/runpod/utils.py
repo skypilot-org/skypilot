@@ -322,8 +322,8 @@ def launch(
     # Use base64 to deal with the tricky quoting issues caused by runpod API.
     encoded = base64.b64encode(setup_cmd.encode('utf-8')).decode('utf-8')
 
-    docker_args = (f'bash -c \'echo {encoded} | base64 --decode > init.sh; '
-                   f'bash init.sh\'')
+    docker_args = (f"bash -c 'echo {encoded} | base64 --decode > init.sh; "
+                   f"bash init.sh'")
 
     # Port 8081 is occupied for nginx in the base image.
     custom_ports_str = ''

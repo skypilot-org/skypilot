@@ -111,7 +111,7 @@ class IBM(clouds.Cloud):
         # del accelerators  # unused
         del num_nodes  # unused
         assert use_spot is False, (
-            'current IBM implementation doesn\'t support spot instances')
+            "current IBM implementation doesn't support spot instances")
 
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,

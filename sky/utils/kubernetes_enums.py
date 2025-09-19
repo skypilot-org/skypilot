@@ -19,8 +19,8 @@ class KubernetesNetworkingMode(enum.Enum):
         else:
             raise ValueError(f'Unsupported kubernetes networking mode: '
                              f'{mode}. The mode must be either '
-                             f'\'{cls.PORTFORWARD.value}\' or '
-                             f'\'{cls.NODEPORT.value}\'. ')
+                             f"'{cls.PORTFORWARD.value}' or "
+                             f"'{cls.NODEPORT.value}'. ")
 
 
 class KubernetesServiceType(enum.Enum):

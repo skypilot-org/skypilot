@@ -319,7 +319,7 @@ class Optimizer:
             for orig_resources, launchable_list in launchable_resources.items():
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
-                        'Defaulting the task\'s estimated time to 1 hour.')
+                        "Defaulting the task's estimated time to 1 hour.")
                     estimated_runtime = 1 * 3600
                 else:
                     # We assume the time estimator takes in a partial resource
@@ -455,6 +455,7 @@ class Optimizer:
             # FIXME: Account for egress costs for multi-node clusters
             for resources, execution_cost in node_to_cost_map[node].items():
                 min_pred_cost_plus_egress = np.inf
+                best_parent_hardware: Optional[resources_lib.Resources] = None
                 for parent_resources, parent_cost in \
                     dp_best_objective[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(
@@ -464,7 +465,7 @@ class Optimizer:
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
                         min_pred_cost_plus_egress = parent_cost + egress_cost
                         best_parent_hardware = parent_resources
-
+                assert best_parent_hardware is not None
                 dp_point_backs[node][resources] = best_parent_hardware
                 dp_best_objective[node][resources] = \
                     execution_cost + min_pred_cost_plus_egress
@@ -1129,9 +1130,9 @@ class Optimizer:
         if local_best_plan is None:
             error_msg = (f'No launchable resource found for task {task}. '
                          'To fix: relax its resource requirements.\n'
-                         'Hint: \'sky show-gpus --all\' '
+                         "Hint: 'sky show-gpus --all' "
                          'to list available accelerators.\n'
-                         '      \'sky check\' to check the enabled clouds.')
+                         "      'sky check' to check the enabled clouds.")
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(error_msg)
 

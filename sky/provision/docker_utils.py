@@ -32,7 +32,7 @@ SETUP_ENV_VARS_CMD = (
 DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
                                 'the Docker daemon socket')
 
-DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
+DOCKER_SOCKET_NOT_READY_STR = 'Is the docker daemon running?'
 
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
@@ -371,7 +371,7 @@ class DockerInitializer:
         # Disable apt-get from asking user input during installation.
         # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # pylint: disable=line-too-long
         self._run(
-            f'echo \'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}\' '
+            f"echo '{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}' "
             '>> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;',
             run_env='docker')

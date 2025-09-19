@@ -111,11 +111,11 @@ USEFUL_COLUMNS = [
 
 def get_pricing_url(region: Optional[str] = None) -> str:
     filters = [
-        'serviceName eq \'Virtual Machines\'',
-        'priceType eq \'Consumption\'',
+        "serviceName eq 'Virtual Machines'",
+        "priceType eq 'Consumption'",
     ]
     if region is not None:
-        filters.append(f'armRegionName eq \'{region}\'')
+        filters.append(f"armRegionName eq '{region}'")
     filters_str = urllib.parse.quote(' and '.join(filters))
     return f'https://prices.azure.com/api/retail/prices?$filter={filters_str}'
 
@@ -129,7 +129,7 @@ def get_pricing_df(region: Optional[str] = None) -> 'pd.DataFrame':
         page += 1
         if page % 10 == 0:
             print(f'Fetched pricing pages {page}')
-        r = requests.get(url)
+        r = requests.get(url, timeout=30)
         r.raise_for_status()
         content_str = r.content.decode('ascii')
         content = json.loads(content_str)

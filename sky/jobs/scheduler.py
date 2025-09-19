@@ -156,7 +156,7 @@ def start_controller() -> None:
     os.makedirs(logs_dir, exist_ok=True)
     log_path = os.path.join(logs_dir, f'controller_{uuid.uuid4()}.log')
 
-    activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
+    activate_python_env_cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};'
     run_controller_cmd = (f'{sys.executable} -u -m'
                           'sky.jobs.controller')
 

@@ -178,16 +178,16 @@ def _get_cluster_records_and_set_ssh_config(
                 '-o StrictHostKeyChecking=no '
                 '-o UserKnownHostsFile=/dev/null '
                 '-o IdentitiesOnly=yes '
-                '-W \'[%h]:%p\' '
+                "-W '[%h]:%p' "
                 f'{handle.ssh_user}@127.0.0.1 '
                 '-o ProxyCommand='
                 # TODO(zhwu): write the template to a temp file, don't use
                 # the one in skypilot repo, to avoid changing the file when
                 # updating skypilot.
-                f'\"{escaped_executable_path} '
+                f'"{escaped_executable_path} '
                 f'{escaped_websocket_proxy_path} '
                 f'{server_common.get_server_url()} '
-                f'{handle.cluster_name}\"')
+                f'{handle.cluster_name}"')
             credentials['ssh_proxy_command'] = proxy_command
 
         cluster_utils.SSHConfigHelper.add_cluster(
@@ -240,9 +240,10 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
         try:
             return sdk.stream_and_get(request_id)
         except KeyboardInterrupt:
+            start_message = ux_utils.starting_message(
+                'Request will continue running asynchronously.')
             logger.info(
-                ux_utils.starting_message('Request will continue running '
-                                          'asynchronously.') +
+                f'{start_message}'
                 f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}View logs: '
                 f'{ux_utils.BOLD}sky api logs {short_request_id}'
                 f'{colorama.Style.RESET_ALL}'
@@ -916,7 +917,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     type=int,
     required=False,
     help=('Automatically stop the cluster after this many minutes '
-          'of idleness, i.e., no running or pending jobs in the cluster\'s job '
+          "of idleness, i.e., no running or pending jobs in the cluster's job "
           'queue. Idleness gets reset depending on the ``--wait-for`` flag. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
@@ -1260,14 +1261,14 @@ def exec(
 
     """
     if cluster_option is None and cluster is None:
-        raise click.UsageError('Missing argument \'[CLUSTER]\' and '
-                               '\'[ENTRYPOINT]...\'')
+        raise click.UsageError("Missing argument '[CLUSTER]' and "
+                               "'[ENTRYPOINT]...'")
     if cluster_option is not None:
         if cluster is not None:
             entrypoint = (cluster,) + entrypoint
         cluster = cluster_option
     if not entrypoint:
-        raise click.UsageError('Missing argument \'[ENTRYPOINT]...\'')
+        raise click.UsageError("Missing argument '[ENTRYPOINT]...'")
     assert cluster is not None, (cluster, cluster_option, entrypoint)
 
     env = _merge_env_vars(env_file, env)
@@ -2083,13 +2084,13 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
 
 @cli.command()
 @flags.config_option(expose_value=False)
-@flags.all_users_option('Show all users\' information in full.')
+@flags.all_users_option("Show all users' information in full.")
 @click.option('--skip-finished',
               '-s',
               default=False,
               is_flag=True,
               required=False,
-              help='Show only pending/running jobs\' information.')
+              help="Show only pending/running jobs' information.")
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -2156,7 +2157,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     is_flag=True,
     default=False,
     help=('If specified, do not show logs but exit with a status code for the '
-          'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
+          "job's status: 0 for succeeded, or 1 for all other statuses."))
 @click.option(
     '--follow/--no-follow',
     is_flag=True,
@@ -2380,7 +2381,7 @@ def cancel(
                    f'{colorama.Style.RESET_ALL}')
         job_identity_str = 'the latest running job'
     elif all_users:
-        job_identity_str = 'all users\' jobs'
+        job_identity_str = "all users' jobs"
     else:
         if all:
             job_identity_str = 'all your jobs'
@@ -2601,7 +2602,7 @@ def autostop(
     type=int,
     required=False,
     help=('Automatically stop the cluster after this many minutes '
-          'of idleness, i.e., no running or pending jobs in the cluster\'s job '
+          "of idleness, i.e., no running or pending jobs in the cluster's job "
           'queue. Idleness gets reset depending on the ``--wait-for`` flag. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
@@ -2841,10 +2842,10 @@ def start(
     default=False,
     required=False,
     help=('(Advanced) Forcefully remove the cluster(s) from '
-          'SkyPilot\'s cluster table, even if the actual cluster termination '
+          "SkyPilot's cluster table, even if the actual cluster termination "
           'failed on the cloud. WARNING: This flag should only be set sparingly'
           ' in certain manual troubleshooting scenarios; with it set, it is the'
-          ' user\'s responsibility to ensure there are no leaked instances and '
+          " user's responsibility to ensure there are no leaked instances and "
           'related resources.'))
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
@@ -3302,7 +3303,7 @@ def _down_or_stop_clusters(
         progress.refresh()
 
     if async_call:
-        click.secho(f'{operation} requests are sent. Check the requests\' '
+        click.secho(f"{operation} requests are sent. Check the requests' "
                     'status with `sky request get <request_id>`.')
 
 
@@ -3519,7 +3520,7 @@ def show_gpus(
                         if is_ssh else 'any allowed Kubernetes cluster')
             cloud_name = 'ssh' if is_ssh else 'kubernetes'
             err_msg = f'No GPUs found in {identity}. '
-            debug_msg = (f'To further debug, run: sky check {cloud_name}')
+            debug_msg = f'To further debug, run: sky check {cloud_name}'
             if name_filter is not None:
                 gpu_info_msg = f' {name_filter!r}'
                 if quantity_filter is not None:
@@ -3621,7 +3622,7 @@ def show_gpus(
                     'free'
                 ])
 
-        k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
+        k8s_per_node_acc_message = f'{cloud_str} per-node GPU availability'
         if hints:
             k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
 
@@ -3940,7 +3941,7 @@ def show_gpus(
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
             cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
-            yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
+            yield f"Resources '{name}'{quantity_str} not found{cloud_str} "
             yield 'To show available accelerators, run: sky show-gpus --all'
             return
 
@@ -4324,7 +4325,7 @@ def jobs():
               default=None,
               type=str,
               hidden=True,
-              help=('Alias for --name, the name of the managed job.'))
+              help='Alias for --name, the name of the managed job.')
 @click.option('--job-recovery',
               default=None,
               type=str,
@@ -4531,7 +4532,7 @@ def jobs_launch(
               default=False,
               is_flag=True,
               required=False,
-              help='Show only pending/running jobs\' information.')
+              help="Show only pending/running jobs' information.")
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @usage_lib.entrypoint
@@ -6055,11 +6056,11 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
     """Cancel a request running on SkyPilot API server."""
     if all or all_users:
-        keyword = 'ALL USERS\'' if all_users else 'YOUR'
+        keyword = "ALL USERS'" if all_users else 'YOUR'
         user_input = click.prompt(
             f'This will cancel all {keyword} requests.\n'
             f'To proceed, please type {colorama.Style.BRIGHT}'
-            f'\'cancel all requests\'{colorama.Style.RESET_ALL}',
+            f"'cancel all requests'{colorama.Style.RESET_ALL}",
             type=str)
         if user_input != 'cancel all requests':
             raise click.Abort()

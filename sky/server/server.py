@@ -96,7 +96,7 @@ def _basic_auth_401_response(content: str):
     """Return a 401 response with basic auth realm."""
     return fastapi.responses.JSONResponse(
         status_code=401,
-        headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
+        headers={'WWW-Authenticate': 'Basic realm="SkyPilot"'},
         content=content)
 
 

@@ -382,7 +382,7 @@ def get_cluster_info(
         if instance.get('sshConnection') is not None:
             print('SSH connection is ready!')
         else:
-            raise Exception(
+            raise RuntimeError(
                 f'Failed to establish SSH connection after {max_retries} '
                 f'attempts')
 

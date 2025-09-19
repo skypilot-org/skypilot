@@ -780,7 +780,7 @@ class Rclone:
         except subprocess.CalledProcessError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageError(
-                    'rclone wasn\'t detected. '
+                    "rclone wasn't detected. "
                     'Consider installing via: '
                     '"curl https://rclone.org/install.sh '
                     '| sudo bash" ') from None

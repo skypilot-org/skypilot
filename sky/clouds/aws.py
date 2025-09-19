@@ -1398,7 +1398,7 @@ class AWS(clouds.Cloud):
         error_msg = None
         if not key_valid:
             error_msg = (f'Invalid tag key {label_key} for AWS. '
-                         'Key must start with any character except \'aws:\' '
+                         "Key must start with any character except 'aws:' "
                          'and must be 128 characters or fewer in length.')
         if not value_valid:
             error_msg = (f'Invalid tag value {label_value} for AWS. '

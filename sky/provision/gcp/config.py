@@ -44,7 +44,7 @@ def wait_for_crm_operation(operation, crm):
     for _ in range(constants.MAX_POLLS):
         result = crm.operations().get(name=operation['name']).execute()
         if 'error' in result:
-            raise Exception(result['error'])
+            raise RuntimeError(result['error'])
 
         if 'done' in result and result['done']:
             logger.info('wait_for_crm_operation: Operation done.')
@@ -67,7 +67,7 @@ def wait_for_compute_global_operation(project_name, operation, compute):
             operation=operation['name'],
         ).execute())
         if 'error' in result:
-            raise Exception(result['error'])
+            raise RuntimeError(result['error'])
 
         if result['status'] == 'DONE':
             logger.info('wait_for_compute_global_operation: Operation done.')
@@ -91,7 +91,7 @@ def wait_for_compute_region_operation(project_name, region, operation, compute):
             operation=operation['name'],
         ).execute())
         if 'error' in result:
-            raise Exception(result['error'])
+            raise RuntimeError(result['error'])
 
         if result['status'] == 'DONE':
             logger.info('wait_for_compute_region_operation: Operation done.')
@@ -344,7 +344,7 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
     if config.provider_config.get(constants.HAS_TPU_PROVIDER_FIELD, False):
         roles = (constants.DEFAULT_SERVICE_ACCOUNT_ROLES +
                  constants.TPU_SERVICE_ACCOUNT_ROLES)
-        permissions = (permissions + constants.TPU_MINIMAL_PERMISSIONS)
+        permissions = permissions + constants.TPU_MINIMAL_PERMISSIONS
 
     satisfied, policy = _is_permission_satisfied(service_account, crm, iam,
                                                  permissions, roles)

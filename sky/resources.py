@@ -1138,7 +1138,7 @@ class Resources:
             reset = colorama.Style.RESET_ALL
             logger.warning(
                 f'{yellow}Request {self} cannot be satisfied by any feasible '
-                'region. To fix, check that ssh_proxy_command\'s region keys '
+                "region. To fix, check that ssh_proxy_command's region keys "
                 f'include the regions to use.{reset}')
 
         return filtered_regions
@@ -1208,7 +1208,7 @@ class Resources:
                 self._instance_type)
             if self._cpus is not None:
                 assert cpus is not None, (
-                    f'Can\'t get vCPUs from instance type: '
+                    f"Can't get vCPUs from instance type: "
                     f'{self._instance_type}, check catalog or '
                     f'specify cpus directly.')
                 if self._cpus.endswith('+'):
@@ -1226,7 +1226,7 @@ class Resources:
                             f'vCPUs, but {self._cpus} is requested.')
             if self.memory is not None:
                 assert mem is not None, (
-                    f'Can\'t get memory from instance type: '
+                    f"Can't get memory from instance type: "
                     f'{self._instance_type}, check catalog or '
                     f'specify memory directly.')
                 if self.memory.endswith(('+', 'x')):

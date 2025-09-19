@@ -340,7 +340,7 @@ def ha_recovery_for_consolidation_mode(pool: bool):
 
             script = serve_state.get_ha_recovery_script(service_name)
             if script is None:
-                f.write(f'{capnoun} {service_name}\'s recovery script does '
+                f.write(f"{capnoun} {service_name}'s recovery script does "
                         'not exist. Skipping recovery.\n')
                 continue
             rc, out, err = runner.run(script, require_outputs=True)
@@ -1279,7 +1279,7 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
     launch_log_file_name = generate_replica_launch_log_file_name(
         service_name, replica_id)
     if not os.path.exists(launch_log_file_name):
-        return (f'{colorama.Fore.RED}{caprepnoun} {replica_id} doesn\'t exist.'
+        return (f"{colorama.Fore.RED}{caprepnoun} {replica_id} doesn't exist."
                 f'{colorama.Style.RESET_ALL}')
 
     replica_cluster_name = generate_replica_cluster_name(

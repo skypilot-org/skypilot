@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.8"]
+        python-version: ["3.10"]
     steps:
     - uses: actions/checkout@v3
     - name: Install the latest version of uv
@@ -32,9 +32,8 @@ jobs:
         source ~/test-env/bin/activate
         uv pip install --prerelease=allow "azure-cli>=2.65.0"
         uv pip install ".[all]"
-        uv pip install pylint==2.14.5
-        uv pip install pylint-quotes==0.2.3
+        uv pip install pylint==3.3.8
     - name: Analysing the code with pylint
       run: |
         source ~/test-env/bin/activate
-        pylint --load-plugins pylint_quotes --ignore-paths 'sky/schemas/generated' sky
+        pylint --ignore-paths 'sky/schemas/generated' sky

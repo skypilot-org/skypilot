@@ -247,7 +247,7 @@ def ha_recovery_for_consolidation_mode():
             ]:
                 script = managed_job_state.get_ha_recovery_script(job_id)
                 if script is None:
-                    f.write(f'Job {job_id}\'s recovery script does not exist. '
+                    f.write(f"Job {job_id}'s recovery script does not exist. "
                             'Skipping recovery. Job schedule state: '
                             f'{job["schedule_state"]}\n')
                     continue
@@ -472,7 +472,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.error(f'Job {job_id} has DONE schedule state, but some '
                          f'tasks are not terminal. Task statuses: '
                          f'{", ".join(task["status"].value for task in tasks)}')
-            failure_reason = ('Inconsistent internal job state. This is a bug.')
+            failure_reason = 'Inconsistent internal job state. This is a bug.'
         elif pid is None:
             # Non-legacy job and controller process has not yet started.
             controller_status = job_lib.get_status(job_id)
@@ -499,7 +499,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 # TODO(cooperc): Find a way to detect if we get stuck in this
                 # state.
                 logger.info(f'Job {job_id} is in {schedule_state.value} state, '
-                            'but controller process hasn\'t started yet.')
+                            "but controller process hasn't started yet.")
                 continue
 
             logger.error(f'Expected to find a controller pid for state '
@@ -646,7 +646,7 @@ def event_callback_func(
         event_callback = event_callback.strip()
         pool = managed_job_state.get_pool_from_job_id(job_id)
         if pool is not None:
-            cluster_name, _ = (managed_job_state.get_pool_submit_info(job_id))
+            cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
         else:
             cluster_name = generate_managed_job_cluster_name(
                 task.name, job_id) if task.name else None
@@ -1018,10 +1018,9 @@ def stream_logs_by_id(job_id: int,
 
                     # The log for the current job is finished. We need to
                     # wait until next job to be started.
-                    logger.debug(
-                        f'INFO: Log for the current task ({task_id}) '
-                        'is finished. Waiting for the next task\'s log '
-                        'to be started.')
+                    logger.debug(f'INFO: Log for the current task ({task_id}) '
+                                 "is finished. Waiting for the next task's log "
+                                 'to be started.')
                     # Add a newline to avoid the status display below
                     # removing the last line of the task output.
                     print()

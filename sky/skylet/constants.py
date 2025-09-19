@@ -63,7 +63,7 @@ SKY_UV_CMD = ('UV_SYSTEM_PYTHON=false '
 SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
                       'curl -LsSf https://astral.sh/uv/install.sh '
                       f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh')
-SKY_UV_PIP_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip')
+SKY_UV_PIP_CMD: str = f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip'
 SKY_UV_RUN_CMD: str = (
     f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run --active '
     '--no-project --no-config')
@@ -298,11 +298,11 @@ USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
 # limits significantly.
 # TODO(zeping): Bake this configuration in SkyPilot default images.
 SET_SSH_MAX_SESSIONS_CONFIG_CMD = (
-    'sudo bash -c \''
+    "sudo bash -c '"
     'echo "MaxSessions 200" >> /etc/ssh/sshd_config; '
     'echo "MaxStartups 150:30:200" >> /etc/ssh/sshd_config; '
     '(systemctl reload sshd || service ssh reload); '
-    '\'')
+    "'")
 
 # Internal: Env var indicating the system is running with a remote API server.
 # It is used for internal purposes, including the jobs controller to mark
@@ -439,7 +439,7 @@ ENV_VAR_SERVER_AUTH_USER_HEADER = f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER'
 
 # Environment variable that is used as the DB connection string for the
 # skypilot server.
-ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
+ENV_VAR_DB_CONNECTION_URI = f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI'
 
 # Environment variable that is set to 'true' if basic
 # authentication is enabled in the API server.

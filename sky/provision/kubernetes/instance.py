@@ -198,14 +198,14 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                 out_of = {}
                 # key: resource name, value: (extra message, nice name)
                 if 'Insufficient cpu' in event_message:
-                    out_of['CPU'] = (': Run \'kubectl get nodes -o '
+                    out_of['CPU'] = (": Run 'kubectl get nodes -o "
                                      'custom-columns=NAME:.metadata.name,'
-                                     'CPU:.status.allocatable.cpu\' to check '
+                                     "CPU:.status.allocatable.cpu' to check "
                                      'the available CPUs on the node.', 'CPUs')
                 if 'Insufficient memory' in event_message:
-                    out_of['memory'] = (': Run \'kubectl get nodes -o '
+                    out_of['memory'] = (": Run 'kubectl get nodes -o "
                                         'custom-columns=NAME:.metadata.name,'
-                                        'MEMORY:.status.allocatable.memory\' '
+                                        "MEMORY:.status.allocatable.memory' "
                                         'to check the available memory on the '
                                         'node.', 'Memory')
 
@@ -225,11 +225,11 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     gpu_resource_key = kubernetes_utils.get_gpu_resource_key(
                         context)  # pylint: disable=line-too-long
                     if ((f'Insufficient {gpu_resource_key}' in event_message) or
-                        ('didn\'t match Pod\'s node affinity/selector'
+                        ("didn't match Pod's node affinity/selector"
                          in event_message) and pod.spec.node_selector):
                         if 'gpu' in gpu_resource_key.lower():
                             info_msg = (
-                                ': Run \'sky show-gpus --infra kubernetes\' to '
+                                ": Run 'sky show-gpus --infra kubernetes' to "
                                 'see the available GPUs.')
                         else:
                             info_msg = ': '
@@ -283,13 +283,13 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                 raise config_lib.KubernetesError(
                     f'{timeout_err_msg} '
                     f'Pod status: {pod_status} '
-                    f'Details: \'{event_message}\' ',
+                    f"Details: '{event_message}' ",
                     insufficent_resources=nice_names,
                 )
 
             raise config_lib.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status} '
-                                             f'Details: \'{event_message}\' ')
+                                             f"Details: '{event_message}' ")
     raise config_lib.KubernetesError(f'{timeout_err_msg}')
 
 

@@ -127,7 +127,7 @@ def create_table(cursor, conn):
                                  conn,
                                  'jobs',
                                  'metadata',
-                                 'TEXT DEFAULT \'{}\'',
+                                 "TEXT DEFAULT '{}'",
                                  value_to_replace_existing_entries='{}')
     conn.commit()
 

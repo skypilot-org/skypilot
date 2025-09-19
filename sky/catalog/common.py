@@ -309,7 +309,7 @@ def validate_region_zone_impl(
         filter_df = _filter_region_zone(filter_df, region, zone=None)
         if filter_df.empty:
             with ux_utils.print_exception_no_traceback():
-                error_msg = (f'Invalid region {region!r}')
+                error_msg = f'Invalid region {region!r}'
                 candidate_strs = _get_candidate_str(
                     region.lower(), df['Region'].str.lower().unique())
                 if not candidate_strs:
@@ -335,7 +335,7 @@ def validate_region_zone_impl(
             region_str = f' for region {region!r}' if region else ''
             df = maybe_region_df if region else df
             with ux_utils.print_exception_no_traceback():
-                error_msg = (f'Invalid zone {zone!r}{region_str}')
+                error_msg = f'Invalid zone {zone!r}{region_str}'
                 error_msg += _get_candidate_str(
                     zone, maybe_region_df['AvailabilityZone'].unique())
                 raise ValueError(error_msg)

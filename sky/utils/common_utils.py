@@ -791,7 +791,7 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
             message = e.message
             # Object in jsonschema is represented as dict in Python. Replace
             # 'object' with 'dict' for better readability.
-            message = message.replace('type \'object\'', 'type \'dict\'')
+            message = message.replace("type 'object'", "type 'dict'")
             # Example e.json_path value: '$.resources'
             err_msg = (err_msg_prefix + message +
                        f'. Check problematic field(s): {e.json_path}')

@@ -100,7 +100,7 @@ def replace_commit_hash():
             global original_init_content
             original_init_content = content
             content = re.sub(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
-                             f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
+                             f"_SKYPILOT_COMMIT_SHA = '{get_commit_hash()}'",
                              content,
                              flags=re.M)
         with open(INIT_FILE_PATH, 'w', encoding='utf-8') as fp:

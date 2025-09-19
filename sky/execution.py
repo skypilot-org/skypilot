@@ -88,7 +88,7 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
         f'{colorama.Fore.GREEN}'
         f'Successfully created image {image_id!r} for {clone_disk_from!r} '
         f'on {original_cloud}.{colorama.Style.RESET_ALL}\n'
-        'Overriding task\'s image_id.')
+        "Overriding task's image_id.")
     task_resources = task_resources.copy(image_id=image_id,
                                          _is_image_managed=True)
     task.set_resources(task_resources)
@@ -298,6 +298,7 @@ def _execute_dag(
     # autostop config from the launched resources. Before provisioning,
     # we aren't sure which resources will be launched, and different
     # resources may have different autostop configs.
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     if isinstance(backend, backends.CloudVmRayBackend):
         # No autostop config specified on command line, use the
         # config from resources.
@@ -317,7 +318,6 @@ def _execute_dag(
 
         idle_minutes_to_autostop: Optional[int] = None
         down = False
-        wait_for: Optional[autostop_lib.AutostopWaitFor] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
@@ -330,6 +330,7 @@ def _execute_dag(
                 assert not resource_autostop_config.enabled
                 idle_minutes_to_autostop = -1
                 down = False
+                wait_for = None
         if idle_minutes_to_autostop is not None:
             if idle_minutes_to_autostop == 0:
                 # idle_minutes_to_autostop=0 can cause the following problem:
@@ -412,6 +413,7 @@ def _execute_dag(
         # Optimizer should eventually choose where to store bucket
         task.sync_storage_mounts()
 
+    job_id = None
     try:
         provisioning_skipped = False
         if Stage.PROVISION in stages:

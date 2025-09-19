@@ -66,12 +66,12 @@ class QueryHelper:
                 where_clause_tags += ' && '
 
             tag_value = tag_filters[tag_key]
-            where_clause_tags += (f'(freeformTags.key = \'{tag_key}\''
-                                  f' && freeformTags.value = \'{tag_value}\')')
+            where_clause_tags += (f"(freeformTags.key = '{tag_key}'"
+                                  f" && freeformTags.value = '{tag_value}')")
 
         qv_str = (f'query instance resources where {where_clause_tags}'
-                  f' && (lifecycleState != \'TERMINATED\''
-                  f' && lifecycleState != \'TERMINATING\')')
+                  f" && (lifecycleState != 'TERMINATED'"
+                  f" && lifecycleState != 'TERMINATING')")
 
         qv = oci_adaptor.oci.resource_search.models.StructuredSearchDetails(
             query=qv_str,

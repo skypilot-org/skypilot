@@ -369,7 +369,7 @@ def cost_report(
             launched_nodes = cluster_report['num_nodes']
             launched_resources = cluster_report['resources']
 
-            cost = (launched_resources.get_cost(duration) * launched_nodes)
+            cost = launched_resources.get_cost(duration) * launched_nodes
             return cost
 
         try:
@@ -969,7 +969,7 @@ def cancel(
         user_hash = None
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
-            f'Cancelling all users\' jobs on cluster {cluster_name!r}...'
+            f"Cancelling all users' jobs on cluster {cluster_name!r}..."
             f'{colorama.Style.RESET_ALL}')
     elif all:
         sky_logging.print(

@@ -416,10 +416,10 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                                  f'matching existing public key.')
                     break
         elif 'Key with name already exists' in e.message:
-            raise Exception("""a key with chosen name
+            raise RuntimeError("""a key with chosen name
                 already registered in the specified region""") from e
         else:
-            raise Exception('Failed to register a key') from e
+            raise RuntimeError('Failed to register a key') from e
 
     config['auth']['ssh_private_key'] = private_key_path
 

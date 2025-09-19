@@ -214,7 +214,7 @@ def bulk_provision(
                     formatted_exception = common_utils.format_exception(
                         e, use_bracket=True)
                     raise provision_common.StopFailoverError(
-                        'During provisioner\'s failover, '
+                        "During provisioner's failover, "
                         f'{terminate_str.lower()} {cluster_name!r} failed. '
                         'This can cause resource leakage. Please check the '
                         'failure and the cluster status on the cloud, and '

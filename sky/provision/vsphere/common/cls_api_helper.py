@@ -262,7 +262,7 @@ class ClsApiHelper(object):
                 return file_info
             else:
                 time.sleep(sleep_interval)
-        raise Exception(
+        raise RuntimeError(
             'timed out after waiting {0} seconds for file {1} to reach'
             ' a terminal state'.format(timeout, file_name))
 
@@ -282,7 +282,7 @@ class ClsApiHelper(object):
         if item_id:
             logger.info('Library item ID: {0}'.format(item_id))
         else:
-            logger.info('Library item with name \'{0}\' not found'.format(name))
+            logger.info("Library item with name '{0}' not found".format(name))
         return item_id
 
     def deploy_ovf_template(self, vm_name, lib_item_id, ovf_summary,

@@ -49,7 +49,7 @@ COMMON_OPTIONS = [
                  required=False,
                  is_flag=True,
                  default=False,
-                 help=('Run the command asynchronously.'))
+                 help='Run the command asynchronously.')
 ]
 
 TASK_OPTIONS = [
@@ -122,7 +122,7 @@ TASK_OPTIONS = [
                  default=None,
                  type=int,
                  required=False,
-                 help=('OS disk size in GBs.')),
+                 help='OS disk size in GBs.'),
     click.option('--disk-tier',
                  default=None,
                  type=click.Choice(resources_utils.DiskTier.supported_tiers(),
@@ -215,7 +215,7 @@ EXTRA_RESOURCES_OPTIONS = [
          '(fractional counts are supported by the scheduling framework). '
          'If a new cluster is being launched by this command, this is the '
          'resources to provision. If an existing cluster is being reused, this'
-         ' is seen as the task demand, which must fit the cluster\'s total '
+         " is seen as the task demand, which must fit the cluster's total "
          'resources and is used for scheduling the task. '
          'Overrides the "accelerators" '
          'config in the YAML if both are supplied. '

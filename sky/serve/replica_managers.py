@@ -561,7 +561,7 @@ class ReplicaInfo:
                 logger.info(f'Error when probing {replica_identity}: '
                             'Cannot get the endpoint.')
                 return self, False, probe_time
-            readiness_path = (f'{url}{readiness_path}')
+            readiness_path = f'{url}{readiness_path}'
             logger.info(f'Probing {replica_identity} with {readiness_path}.')
             if post_data is not None:
                 msg += 'POST'
@@ -1432,9 +1432,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                         old_config.get('file_mounts', None) == {}):
                     logger.info(
                         f'Updating replica {info.replica_id} to version '
-                        f'{version}. Replica {info.replica_id}\'s config '
+                        f"{version}. Replica {info.replica_id}'s config "
                         f'{old_config} is the same as '
-                        f'latest version\'s {new_config}.')
+                        f"latest version's {new_config}.")
                     info.version = version
                     serve_state.add_or_update_replica(self._service_name,
                                                       info.replica_id, info)

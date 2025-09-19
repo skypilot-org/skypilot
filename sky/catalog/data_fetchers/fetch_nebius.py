@@ -211,7 +211,7 @@ def _write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
                     'TotalGpuMemoryInMiB': VRAM.get(preset.accelerator_name, 0)
                                            * preset.gpu,
                 }
-                gpu_info = json.dumps(gpu_info_dict).replace('"', '\'')
+                gpu_info = json.dumps(gpu_info_dict).replace('"', "'")
 
             writer.writerow({
                 'InstanceType': preset.fullname,

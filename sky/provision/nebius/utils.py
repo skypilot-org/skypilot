@@ -51,7 +51,7 @@ def get_project_by_region(region: str) -> str:
     for project in projects.items:
         if project.status.region == region:
             return project.metadata.id
-    raise Exception(f'No project found for region "{region}".')
+    raise RuntimeError(f'No project found for region "{region}".')
 
 
 def get_or_create_gpu_cluster(name: str, project_id: str, fabric: str) -> str:

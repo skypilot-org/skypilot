@@ -902,7 +902,7 @@ def tail_logs(
         return stream_response(request_id=request_id,
                                response=response,
                                output_stream=output_stream,
-                               resumable=(tail == 0))
+                               resumable=tail == 0)
     else:
         return rich_utils.decode_rich_status(response)
 
@@ -2122,7 +2122,7 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
 
     body = payloads.RequestCancelBody(request_ids=request_ids, user_id=user_id)
     if all_users:
-        echo('Cancelling all users\' requests...')
+        echo("Cancelling all users' requests...")
     elif request_ids is None:
         echo(f'Cancelling all requests for user {user_id!r}...')
     else:
@@ -2538,7 +2538,7 @@ def api_login(endpoint: Optional[str] = None,
                                                        token_container,
                                                        endpoint)
 
-            token_url = (f'{endpoint}/token?local_port={callback_port}')
+            token_url = f'{endpoint}/token?local_port={callback_port}'
             if webbrowser.open(token_url):
                 click.echo(f'{colorama.Fore.GREEN}A web browser has been '
                            f'opened at {token_url}. Please continue the login '

@@ -494,7 +494,7 @@ def _usable_subnets(
                 'creating an instance in your specified region to populate '
                 'the list of subnets and trying this again. If you have set '
                 '`use_internal_ips`, check that this zone has a subnet that '
-                '(1) has the substring \'private\' in its name tag and '
+                "(1) has the substring 'private' in its name tag and "
                 '(2) does not assign public IPs (`map_public_ip_on_launch` '
                 'is False).')
         elif _are_user_subnets_pruned(subnets):

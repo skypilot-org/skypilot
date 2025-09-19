@@ -1777,9 +1777,9 @@ class Task:
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')
             if len(run_msg) > 20:
-                run_msg = f'run=\'{run_msg[:20]}...\''
+                run_msg = f"run='{run_msg[:20]}...'"
             else:
-                run_msg = f'run=\'{run_msg}\''
+                run_msg = f"run='{run_msg}'"
         elif self.run is None:
             run_msg = 'run=<empty>'
         else:

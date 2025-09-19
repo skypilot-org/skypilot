@@ -195,7 +195,7 @@ def get_gpu_info(gpu_count: int, gpu_name: str, gpu_vram_mb: int = 0) -> str:
         'TotalGpuMemoryInMiB': gpu_vram_mb * gpu_count if gpu_vram_mb else 0
     }
 
-    return json.dumps(gpu_info).replace('"', '\'')
+    return json.dumps(gpu_info).replace('"', "'")
 
 
 def fetch_seeweb_data(api_key: str) -> List[Dict]:
@@ -242,7 +242,7 @@ def fetch_seeweb_data(api_key: str) -> List[Dict]:
         return plans
 
     except Exception as e:  # pylint: disable=broad-except
-        raise Exception(f'Error fetching data from Seeweb API: {e}') from e
+        raise RuntimeError(f'Error fetching data from Seeweb API: {e}') from e
 
 
 def create_catalog(api_key: str, output_path: str) -> None:
