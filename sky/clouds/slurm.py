@@ -175,9 +175,9 @@ class Slurm(clouds.Cloud):
     ) -> Dict[str, Optional[str]]:
         del cluster_name, zones, dryrun  # Unused.
 
-        # Suppose 'test' is our target SlurmctldHost alias
+        # Suppose 'localcluster' is our target SlurmctldHost alias
         ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
-        ssh_config_dict = ssh_config.lookup('test')
+        ssh_config_dict = ssh_config.lookup('localcluster')
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -273,17 +273,18 @@ class Slurm(clouds.Cloud):
         # For now, we use a single-node Slurm cluster for demo.
         ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
         # existing_allowed_clusters = list(ssh_config.get_hostnames())
-        existing_allowed_clusters = ['test']
+        existing_allowed_clusters = ['localcluster']
 
         for cluster in existing_allowed_clusters:
             # Retrieve the config options for a given SlurmctldHost name alias.
             ssh_config_dict = ssh_config.lookup(cluster)
 
             try:
-                runner = command_runner.SSHCommandRunner(
+                runner = command_runner.SlurmCommandRunner(
                     (ssh_config_dict['hostname'], ssh_config_dict['port']),
                     ssh_config_dict['user'],
                     ssh_config_dict['identityfile'][0],
+                    cluster,
                     disable_control_master=True)
                 returncode, stdout, stderr = runner.run('sinfo',
                                                         require_outputs=True)

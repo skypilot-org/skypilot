@@ -1231,6 +1231,7 @@ class SlurmCommandRunner(SSHCommandRunner):
     # For all supported user commands, please refer to
     # https://slurm.schedmd.com/quickstart.html#arch.
     USER_COMMANDS: List[str] = [
+        "sinfo",
         "sbatch",
         "squeue",
         "srun",
