@@ -614,11 +614,10 @@ class GFDLabelFormatter(GPULabelFormatter):
     def get_label_values(cls, accelerator: str) -> List[str]:
         # An accelerator can map to many Nvidia GFD labels
         # (e.g., A100-80GB-PCIE vs. A100-SXM4-80GB).
-        # TODO implement get_label_values for GFDLabelFormatter
-        # TODO: We need a mapping from SkyPilot accelerator names (e.g., l40s)
-        # to GFD label values (e.g., NVIDIA-L40S).
-        return ['NVIDIA-L40S'
-               ]  # HACK TO MANUALLY TEST AUTOSCALING ON A L40S POOL
+        # TODO: implement get_label_values for GFDLabelFormatter. We need a
+        #  mapping from SkyPilot accelerator names (e.g., l40s) to GFD labels
+        #  (e.g., NVIDIA-L40S)
+        raise NotImplementedError
 
     @classmethod
     def match_label_key(cls, label_key: str) -> bool:
