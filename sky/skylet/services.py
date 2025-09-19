@@ -1,5 +1,6 @@
 """gRPC service implementations for skylet."""
 
+import json
 import os
 from typing import List, Optional
 
@@ -427,7 +428,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     end_at=job.get('end_at'),
                     user_yaml=job.get('user_yaml'),
                     entrypoint=job.get('entrypoint'),
-                    metadata=job.get('metadata'),
+                    metadata=json.dumps(job.get('metadata', {})),
                     pool=job.get('pool'),
                     pool_hash=job.get('pool_hash'))
                 jobs_info.append(job_info)

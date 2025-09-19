@@ -100,13 +100,6 @@ class ManagedJobInfo(_message.Message):
         key: str
         value: float
         def __init__(self, key: _Optional[str] = ..., value: _Optional[float] = ...) -> None: ...
-    class MetadataEntry(_message.Message):
-        __slots__ = ("key", "value")
-        KEY_FIELD_NUMBER: _ClassVar[int]
-        VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
-        value: str
-        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     JOB_NAME_FIELD_NUMBER: _ClassVar[int]
@@ -158,10 +151,10 @@ class ManagedJobInfo(_message.Message):
     end_at: float
     user_yaml: str
     entrypoint: str
-    metadata: _containers.ScalarMap[str, str]
+    metadata: str
     pool: str
     pool_hash: str
-    def __init__(self, job_id: _Optional[int] = ..., task_id: _Optional[int] = ..., job_name: _Optional[str] = ..., task_name: _Optional[str] = ..., job_duration: _Optional[float] = ..., workspace: _Optional[str] = ..., status: _Optional[_Union[ManagedJobStatus, str]] = ..., resources: _Optional[str] = ..., cluster_resources: _Optional[str] = ..., cluster_resources_full: _Optional[str] = ..., cloud: _Optional[str] = ..., region: _Optional[str] = ..., infra: _Optional[str] = ..., accelerators: _Optional[_Mapping[str, float]] = ..., recovery_count: _Optional[int] = ..., details: _Optional[str] = ..., failure_reason: _Optional[str] = ..., user_name: _Optional[str] = ..., user_hash: _Optional[str] = ..., submitted_at: _Optional[float] = ..., start_at: _Optional[float] = ..., end_at: _Optional[float] = ..., user_yaml: _Optional[str] = ..., entrypoint: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., pool: _Optional[str] = ..., pool_hash: _Optional[str] = ...) -> None: ...
+    def __init__(self, job_id: _Optional[int] = ..., task_id: _Optional[int] = ..., job_name: _Optional[str] = ..., task_name: _Optional[str] = ..., job_duration: _Optional[float] = ..., workspace: _Optional[str] = ..., status: _Optional[_Union[ManagedJobStatus, str]] = ..., resources: _Optional[str] = ..., cluster_resources: _Optional[str] = ..., cluster_resources_full: _Optional[str] = ..., cloud: _Optional[str] = ..., region: _Optional[str] = ..., infra: _Optional[str] = ..., accelerators: _Optional[_Mapping[str, float]] = ..., recovery_count: _Optional[int] = ..., details: _Optional[str] = ..., failure_reason: _Optional[str] = ..., user_name: _Optional[str] = ..., user_hash: _Optional[str] = ..., submitted_at: _Optional[float] = ..., start_at: _Optional[float] = ..., end_at: _Optional[float] = ..., user_yaml: _Optional[str] = ..., entrypoint: _Optional[str] = ..., metadata: _Optional[str] = ..., pool: _Optional[str] = ..., pool_hash: _Optional[str] = ...) -> None: ...
 
 class GetJobTableResponse(_message.Message):
     __slots__ = ("jobs", "total", "total_no_filter", "status_counts")

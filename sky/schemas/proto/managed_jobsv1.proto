@@ -93,7 +93,7 @@ message ManagedJobInfo {
   optional double end_at = 22;
   optional string user_yaml = 23;
   optional string entrypoint = 24;
-  map<string, string> metadata = 25;
+  string metadata = 25;
   optional string pool = 26;
   optional string pool_hash = 27;
 }
