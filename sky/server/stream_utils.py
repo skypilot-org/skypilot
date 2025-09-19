@@ -8,10 +8,12 @@ from typing import AsyncGenerator, Deque, List, Optional
 import aiofiles
 import fastapi
 
+from sky import global_user_state
 from sky import sky_logging
 from sky.server.requests import requests as requests_lib
 from sky.utils import message_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -37,11 +39,13 @@ async def _yield_log_file_with_payloads_skipped(
         yield line_str
 
 
-async def log_streamer(request_id: Optional[str],
-                       log_path: pathlib.Path,
-                       plain_logs: bool = False,
-                       tail: Optional[int] = None,
-                       follow: bool = True) -> AsyncGenerator[str, None]:
+async def log_streamer(
+        request_id: Optional[str],
+        log_path: pathlib.Path,
+        plain_logs: bool = False,
+        tail: Optional[int] = None,
+        follow: bool = True,
+        cluster_name: Optional[str] = None) -> AsyncGenerator[str, None]:
     """Streams the logs of a request.
 
     Args:
@@ -51,6 +55,8 @@ async def log_streamer(request_id: Optional[str],
         plain_logs: Whether to show plain logs.
         tail: The number of lines to tail. If None, tail the whole file.
         follow: Whether to follow the log file.
+        cluster_name: The cluster name to check status for provision logs.
+            If provided and cluster status is UP, streaming will terminate.
     """
 
     if request_id is not None:
@@ -104,15 +110,17 @@ async def log_streamer(request_id: Optional[str],
 
     async with aiofiles.open(log_path, 'rb') as f:
         async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
-                                          follow):
+                                          follow, cluster_name):
             yield chunk
 
 
-async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
-                         request_id: Optional[str] = None,
-                         plain_logs: bool = False,
-                         tail: Optional[int] = None,
-                         follow: bool = True) -> AsyncGenerator[str, None]:
+async def _tail_log_file(
+        f: aiofiles.threadpool.binary.AsyncBufferedReader,
+        request_id: Optional[str] = None,
+        plain_logs: bool = False,
+        tail: Optional[int] = None,
+        follow: bool = True,
+        cluster_name: Optional[str] = None) -> AsyncGenerator[str, None]:
     """Tail the opened log file, buffer the lines and flush in chunks."""
 
     if tail is not None:
@@ -173,6 +181,15 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
                             buffer.append(
                                 f'{request_task.name!r} request {request_id}'
                                 ' cancelled\n')
+                    break
+            elif cluster_name is not None:
+                # For provision logs, terminate streaming if cluster is UP
+                cluster_record = global_user_state.get_cluster_from_name(
+                    cluster_name)
+                if (cluster_record and cluster_record['status'] in [
+                        status_lib.ClusterStatus.UP,
+                        status_lib.ClusterStatus.STOPPED
+                ]):
                     break
             if not follow:
                 break
