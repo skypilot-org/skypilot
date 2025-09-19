@@ -300,7 +300,10 @@ def endpoints(cluster: str,
 
 
 @usage_lib.entrypoint
-def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
+def cost_report(
+        days: Optional[int] = None,
+        dashboard_summary_response: bool = False,
+        cluster_hashes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -346,7 +349,12 @@ def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
     if days is None:
         days = constants.COST_REPORT_DEFAULT_DAYS
 
-    cluster_reports = global_user_state.get_clusters_from_history(days=days)
+    abbreviate_response = dashboard_summary_response and cluster_hashes is None
+
+    cluster_reports = global_user_state.get_clusters_from_history(
+        days=days,
+        abbreviate_response=abbreviate_response,
+        cluster_hashes=cluster_hashes)
     logger.debug(
         f'{len(cluster_reports)} clusters found from history with {days} days.')
 
@@ -364,43 +372,6 @@ def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
             cost = (launched_resources.get_cost(duration) * launched_nodes)
             return cost
 
-        def _update_record_with_resources(record: Dict[str, Any]) -> None:
-            """Add resource fields for dashboard compatibility."""
-            if record is None:
-                return
-            resources = record.get('resources')
-            if resources is None:
-                return
-            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
-            for field in fields:
-                try:
-                    record[field] = str(getattr(resources, field))
-                except Exception as e:  # pylint: disable=broad-except
-                    # Ok to skip the fields as this is just for display
-                    # purposes.
-                    logger.debug(f'Failed to get resources.{field} for cluster '
-                                 f'{record["name"]}: {str(e)}')
-                    record[field] = None
-
-            # Add resources_str and resources_str_full for dashboard
-            # compatibility
-            num_nodes = record.get('num_nodes', 1)
-            try:
-                resource_str_simple = resources_utils.format_resource(
-                    resources, simplify=True)
-                resource_str_full = resources_utils.format_resource(
-                    resources, simplify=False)
-                record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
-                record[
-                    'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to get resources_str for cluster '
-                             f'{record["name"]}: {str(e)}')
-                for field in fields:
-                    record[field] = None
-                record['resources_str'] = '-'
-                record['resources_str_full'] = '-'
-
         try:
             report['total_cost'] = get_total_cost(report)
         except Exception as e:  # pylint: disable=broad-except
@@ -409,17 +380,66 @@ def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
                            f'{report["name"]}: {str(e)}')
             report['total_cost'] = 0.0
 
-        _update_record_with_resources(report)
         return report
 
     # Process clusters in parallel
     if not cluster_reports:
         return []
 
-    processed_reports = subprocess_utils.run_in_parallel(
-        _process_cluster_report, cluster_reports)
+    if not abbreviate_response:
+        cluster_reports = subprocess_utils.run_in_parallel(
+            _process_cluster_report, cluster_reports)
 
-    return processed_reports
+    def _update_record_with_resources(record: Dict[str, Any]) -> None:
+        """Add resource fields for dashboard compatibility."""
+        if record is None:
+            return
+        resources = record.get('resources')
+        if resources is None:
+            return
+        if not dashboard_summary_response:
+            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+        else:
+            fields = ['cloud']
+        for field in fields:
+            try:
+                record[field] = str(getattr(resources, field))
+            except Exception as e:  # pylint: disable=broad-except
+                # Ok to skip the fields as this is just for display
+                # purposes.
+                logger.debug(f'Failed to get resources.{field} for cluster '
+                             f'{record["name"]}: {str(e)}')
+                record[field] = None
+
+        # Add resources_str and resources_str_full for dashboard
+        # compatibility
+        num_nodes = record.get('num_nodes', 1)
+        try:
+            resource_str_simple = resources_utils.format_resource(resources,
+                                                                  simplify=True)
+            record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
+            if not abbreviate_response:
+                resource_str_full = resources_utils.format_resource(
+                    resources, simplify=False)
+                record[
+                    'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get resources_str for cluster '
+                         f'{record["name"]}: {str(e)}')
+            for field in fields:
+                record[field] = None
+            record['resources_str'] = '-'
+            if not abbreviate_response:
+                record['resources_str_full'] = '-'
+
+    for report in cluster_reports:
+        _update_record_with_resources(report)
+        if dashboard_summary_response:
+            report.pop('usage_intervals')
+            report.pop('user_hash')
+            report.pop('resources')
+
+    return cluster_reports
 
 
 def _start(
