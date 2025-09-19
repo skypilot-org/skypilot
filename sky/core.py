@@ -867,8 +867,10 @@ def queue(cluster_name: str,
                     'submitted_at': job_info.submitted_at,
                     'status': job_lib.JobStatus.from_protobuf(job_info.status),
                     'run_timestamp': job_info.run_timestamp,
-                    'start_at': job_info.start_at,
-                    'end_at': job_info.end_at,
+                    'start_at': job_info.start_at
+                                if job_info.HasField('start_at') else None,
+                    'end_at': job_info.end_at
+                              if job_info.HasField('end_at') else None,
                     'resources': job_info.resources,
                     'log_path': job_info.log_path,
                     'user_hash': job_info.username,
