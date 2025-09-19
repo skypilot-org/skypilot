@@ -138,10 +138,12 @@ you can provide the registry authentication details using :ref:`task environment
     .. tab-item:: AWS ECR
         :sync: aws-ecr-tab
 
+        SkyPilot supports automatic AWS ECR authentication using command substitution. You can specify the authentication command directly in your YAML:
+
         .. code-block:: yaml
 
           resources:
-            image_id: docker:<your-ecr-repo>:<tag>
+            image_id: docker:<repo>:<tag>
 
           envs:
             # Values used in: docker login -u <user> -p <password> <registry server>
@@ -156,6 +158,22 @@ you can provide the registry authentication details using :ref:`task environment
 
           sky launch sky.yaml \
             --env SKYPILOT_DOCKER_PASSWORD="$(aws ecr get-login-password --region us-east-1)"
+
+        .. note::
+
+            If your cluster is on AWS, SkyPilot will automatically use the IAM permissions of the EC2 instance to authenticate with ECR, if the ``SKYPILOT_DOCKER_USERNAME`` and ``SKYPILOT_DOCKER_PASSWORD`` are set to empty strings:
+
+            .. code-block:: yaml
+
+              resources:
+                image_id: docker:<repo>:<tag>
+
+              envs:
+                SKYPILOT_DOCKER_USERNAME: ""
+                SKYPILOT_DOCKER_PASSWORD: ""
+                SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.<region>.amazonaws.com
+
+            **Important**: Ensure that the EC2 instance's IAM role has the necessary ECR permissions (``AmazonEC2ContainerRegistryReadOnly`` or appropriate custom policies).
 
     .. tab-item:: GCP GCR
         :sync: gcp-artifact-registry-tab

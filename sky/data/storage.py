@@ -2700,7 +2700,11 @@ class AzureBlobStore(AbstractStore):
             name=override_args.get('name', metadata.name),
             storage_account_name=override_args.get(
                 'storage_account', metadata.storage_account_name),
-            source=override_args.get('source', metadata.source),
+            # TODO(cooperc): fix the types for mypy 1.16
+            # Azure store expects a string path; metadata.source may be a Path
+            # or List[Path].
+            source=override_args.get('source',
+                                     metadata.source),  # type: ignore[arg-type]
             region=override_args.get('region', metadata.region),
             is_sky_managed=override_args.get('is_sky_managed',
                                              metadata.is_sky_managed),
@@ -4510,8 +4514,18 @@ class R2Store(S3CompatibleStore):
             extra_cli_args=['--checksum-algorithm', 'CRC32'],  # R2 specific
             cloud_name=cloudflare.NAME,
             default_region='auto',
-            mount_cmd_factory=mounting_utils.get_r2_mount_cmd,
+            mount_cmd_factory=cls._get_r2_mount_cmd,
         )
+
+    @classmethod
+    def _get_r2_mount_cmd(cls, bucket_name: str, mount_path: str,
+                          bucket_sub_path: Optional[str]) -> str:
+        """Factory method for R2 mount command."""
+        endpoint_url = cloudflare.create_endpoint()
+        return mounting_utils.get_r2_mount_cmd(cloudflare.R2_CREDENTIALS_PATH,
+                                               cloudflare.R2_PROFILE_NAME,
+                                               endpoint_url, bucket_name,
+                                               mount_path, bucket_sub_path)
 
     def mount_cached_command(self, mount_path: str) -> str:
         """R2-specific cached mount implementation using rclone."""

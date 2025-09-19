@@ -3,7 +3,6 @@ import os
 import re
 import subprocess
 import tempfile
-import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
@@ -11,6 +10,7 @@ import colorama
 from sky import catalog
 from sky import clouds
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -30,10 +30,6 @@ from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import volume as volume_lib
-
-if typing.TYPE_CHECKING:
-    # Renaming to avoid shadowing variables.
-    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -60,6 +56,8 @@ class Kubernetes(clouds.Cloud):
     # These services are named as {cluster_name_on_cloud}--skypilot-svc--{port},
     # where the suffix is 21 characters long.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
+
+    _MAX_VOLUME_NAME_LEN_LIMIT = 253
 
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
@@ -771,11 +769,25 @@ class Kubernetes(clouds.Cloud):
 
         return deploy_vars
 
+    @staticmethod
+    def _warn_on_disk_size(resources: 'resources_lib.Resources'):
+        if resources.disk_size != resources_lib.DEFAULT_DISK_SIZE_GB:
+            logger.info(f'{colorama.Style.DIM}Disk size {resources.disk_size} '
+                        'is not supported by Kubernetes. '
+                        'To add additional disk, use volumes.'
+                        f'{colorama.Style.RESET_ALL}')
+        if resources.disk_tier is not None:
+            logger.info(f'{colorama.Style.DIM}Disk tier {resources.disk_tier} '
+                        'is not supported by Kubernetes. '
+                        'To add additional disk, use volumes.'
+                        f'{colorama.Style.RESET_ALL}')
+
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
         # TODO(zhwu): This needs to be updated to return the correct region
         # (context) that has enough resources.
+        self._warn_on_disk_size(resources)
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -829,6 +841,8 @@ class Kubernetes(clouds.Cloud):
                                  from_instance_type(default_instance_type))
 
             gpu_task_cpus = k8s_instance_type.cpus
+            if resources.cpus is None:
+                gpu_task_cpus = gpu_task_cpus * acc_count
             # Special handling to bump up memory multiplier for GPU instances
             gpu_task_memory = (float(resources.memory.strip('+')) if
                                resources.memory is not None else gpu_task_cpus *
@@ -993,7 +1007,7 @@ class Kubernetes(clouds.Cloud):
 
         all_contexts = kubernetes_utils.get_all_kube_context_names()
 
-        if region not in all_contexts:
+        if region and region not in all_contexts:
             raise ValueError(
                 f'Context {region} not found in kubeconfig. Kubernetes only '
                 'supports context names as regions. Available '
@@ -1030,6 +1044,31 @@ class Kubernetes(clouds.Cloud):
             identity = [cls.get_identity_from_context(context)]
             identities.append(identity)
         return identities
+
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the volume name is valid for this cloud.
+
+        Follows Kubernetes DNS-1123 subdomain rules:
+        - must be <= 253 characters
+        - must match: '[a-z0-9]([-a-z0-9]*[a-z0-9])?(.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*' # pylint: disable=line-too-long
+        """
+        # Max length per DNS-1123 subdomain
+        if len(volume_name) > cls._MAX_VOLUME_NAME_LEN_LIMIT:
+            return (False, f'Volume name exceeds the maximum length of '
+                    f'{cls._MAX_VOLUME_NAME_LEN_LIMIT} characters '
+                    '(DNS-1123 subdomain).')
+
+        # DNS-1123 label: [a-z0-9]([-a-z0-9]*[a-z0-9])?
+        label = r'[a-z0-9]([-a-z0-9]*[a-z0-9])?'
+        # DNS-1123 subdomain: label(\.-separated label)*
+        subdomain_pattern = rf'^{label}(\.{label})*$'
+        if re.fullmatch(subdomain_pattern, volume_name) is None:
+            return (False, 'Volume name must be a valid DNS-1123 subdomain: '
+                    'lowercase alphanumeric, "-", and "."; start/end with '
+                    'alphanumeric.')
+        return True, None
 
     @classmethod
     def is_label_valid(cls, label_key: str,

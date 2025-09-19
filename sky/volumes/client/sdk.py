@@ -27,19 +27,50 @@ logger = sky_logging.init_logger(__name__)
 def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
     """Creates or registers a volume.
 
+    Example:
+        .. code-block:: python
+
+            import sky.volumes
+            cfg = {
+                'name': 'pvc',
+                'type': 'k8s-pvc',
+                'size': '100GB',
+                'labels': {
+                    'key': 'value',
+                },
+            }
+            vol = sky.volumes.Volume.from_yaml_config(cfg)
+            request_id = sky.volumes.apply(vol)
+            sky.get(request_id)
+
+            or
+
+            import sky.volumes
+            vol = sky.volumes.Volume(
+                name='vol',
+                type='runpod-network-volume',
+                infra='runpod/ca/CA-MTL-1',
+                size='100GB',
+            )
+            request_id = sky.volumes.apply(vol)
+            sky.get(request_id)
+
     Args:
         volume: The volume to apply.
 
     Returns:
         The request ID of the apply request.
     """
-    body = payloads.VolumeApplyBody(name=volume.name,
-                                    volume_type=volume.type,
-                                    cloud=volume.cloud,
-                                    region=volume.region,
-                                    zone=volume.zone,
-                                    size=volume.size,
-                                    config=volume.config)
+    body = payloads.VolumeApplyBody(
+        name=volume.name,
+        volume_type=volume.type,
+        cloud=volume.cloud,
+        region=volume.region,
+        zone=volume.zone,
+        size=volume.size,
+        config=volume.config,
+        labels=volume.labels,
+    )
     response = requests.post(f'{server_common.get_server_url()}/volumes/apply',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())

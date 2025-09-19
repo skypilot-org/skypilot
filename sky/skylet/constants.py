@@ -62,14 +62,20 @@ SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
                       'curl -LsSf https://astral.sh/uv/install.sh '
                       f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh')
 SKY_UV_PIP_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip')
-# Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH to deactivate the
-# environment. `deactivate` command does not work when conda is used.
+SKY_UV_RUN_CMD: str = (
+    f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run --active '
+    '--no-project --no-config')
+# Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH and unsetting relevant
+# VIRTUAL_ENV envvars to deactivate the environment. `deactivate` command does
+# not work when conda is used.
 DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
     'export PATH='
-    f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||")')
+    f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||") && '
+    'unset VIRTUAL_ENV && unset VIRTUAL_ENV_PROMPT')
 
 # Prefix for SkyPilot environment variables
 SKYPILOT_ENV_VAR_PREFIX = 'SKYPILOT_'
+SKYPILOT_SERVER_ENV_VAR_PREFIX = 'SKYPILOT_SERVER_'
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
@@ -90,12 +96,14 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '16'
+SKYLET_VERSION = '18'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
 SKYLET_LIB_VERSION = 4
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
+SKYLET_GRPC_PORT = 46590
+SKYLET_GRPC_TIMEOUT_SECONDS = 10
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
@@ -147,7 +155,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
     # true.
-    '{ bash Miniconda3-Linux.sh -b; '
+    '{ bash Miniconda3-Linux.sh -b || true; '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
@@ -226,7 +234,7 @@ RAY_INSTALLATION_COMMANDS = (
     'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
-    f'{{ {ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
+    f'{{ {SKY_UV_RUN_CMD} '
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
@@ -359,7 +367,7 @@ SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
 
 RCLONE_CONFIG_DIR = '~/.config/rclone'
 RCLONE_CONFIG_PATH = f'{RCLONE_CONFIG_DIR}/rclone.conf'
-RCLONE_LOG_DIR = '~/.sky/rclone_log'
+RCLONE_MOUNT_CACHED_LOG_DIR = '~/.sky/rclone_log'
 RCLONE_CACHE_DIR = '~/.cache/rclone'
 RCLONE_CACHE_REFRESH_INTERVAL = 10
 
@@ -378,6 +386,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
     ('gcp', 'placement_policy'),
+    ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
 # we skip the following keys because they are meant to be client-side configs.
@@ -415,8 +424,10 @@ LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 # Path to the generated cluster config yamls and ssh configs.
 SKY_USER_FILE_PATH = '~/.sky/generated'
 
+# TODO(cooperc): Update all env vars to begin with SKYPILOT_ or SKYPILOT_SERVER_
 # Environment variable that is set to 'true' if this is a skypilot server.
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
+OVERRIDE_CONSOLIDATION_MODE = 'IS_SKYPILOT_JOB_CONTROLLER'
 
 # Environment variable that is set to 'true' if metrics are enabled.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
@@ -434,16 +445,21 @@ ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
 SKYPILOT_INITIAL_BASIC_AUTH = 'SKYPILOT_INITIAL_BASIC_AUTH'
 ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 
+# Enable debug logging for requests.
+ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENABLE_REQUEST_DEBUG_LOGGING')
+
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
 
 # BEGIN constants used for service catalog.
 HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/catalogs'  # pylint: disable=line-too-long
 HOSTED_CATALOG_DIR_URL_S3_MIRROR = 'https://skypilot-catalog.s3.us-east-1.amazonaws.com/catalogs'  # pylint: disable=line-too-long
-CATALOG_SCHEMA_VERSION = 'v7'
+CATALOG_SCHEMA_VERSION = 'v8'
 CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
-              'paperspace', 'do', 'nebius', 'ssh', 'hyperbolic', 'slurm')
+              'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
+              'hyperbolic', 'seeweb')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.
@@ -497,3 +513,9 @@ COST_REPORT_DEFAULT_DAYS = 30
 
 # The directory for file locks.
 SKY_LOCKS_DIR = os.path.expanduser('~/.sky/locks')
+
+ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
+                                 'DEBUG_LOOP_LAG_THRESHOLD_MS')
+
+ARM64_ARCH = 'arm64'
+X86_64_ARCH = 'x86_64'

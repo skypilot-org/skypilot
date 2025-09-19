@@ -213,10 +213,20 @@ class TestVolumeCore:
         # Mock global_user_state
         mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
         monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
-        # Mock provision.get_volume_usedby
-        mock_get_usedby = mock.MagicMock(
+        # Mock provision.get_all_volumes_usedby
+        config_name = 'mock-config'
+        mock_get_all_usedby = mock.MagicMock(return_value=({
+            config_name: ['pod1', 'pod2']
+        }, {
+            config_name: ['cluster1', 'cluster2']
+        }))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
+
+        mock_map_all_usedby = mock.MagicMock(
             return_value=(['pod1', 'pod2'], ['cluster1', 'cluster2']))
-        monkeypatch.setattr(provision, 'get_volume_usedby', mock_get_usedby)
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock_map_all_usedby)
 
         # Call the function
         result = core.volume_list()
@@ -443,7 +453,7 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.core.sky.CLOUD_REGISTRY',
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Mock common_utils.make_cluster_name_on_cloud
@@ -498,7 +508,7 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.core.sky.CLOUD_REGISTRY',
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Mock global_user_state to return existing volume
@@ -537,7 +547,7 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.core.sky.CLOUD_REGISTRY',
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Mock common_utils.make_cluster_name_on_cloud

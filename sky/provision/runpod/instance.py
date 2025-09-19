@@ -1,6 +1,6 @@
 """RunPod instance provisioning."""
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
@@ -80,6 +80,21 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             created_instance_ids=[])
 
     created_instance_ids = []
+    volume_mounts = config.node_config.get('VolumeMounts', [])
+    network_volume_id = None
+    volume_mount_path = None
+    if volume_mounts:
+        if len(volume_mounts) > 1:
+            logger.warning(
+                f'RunPod only supports one network volume mount, '
+                f'but {len(volume_mounts)} are specified. Only the first one '
+                f'will be used.')
+        volume_mount = volume_mounts[0]
+        network_volume_id = volume_mount.get('VolumeIdOnCloud')
+        volume_mount_path = volume_mount.get('MountPath')
+        if network_volume_id is None or volume_mount_path is None:
+            raise RuntimeError(
+                'Network volume ID and mount path must be specified.')
     for _ in range(to_start_count):
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
@@ -97,6 +112,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 bid_per_gpu=config.node_config['BidPerGPU'],
                 docker_login_config=config.provider_config.get(
                     'docker_login_config'),
+                network_volume_id=network_volume_id,
+                volume_mount_path=volume_mount_path,
             )
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
@@ -201,11 +218,13 @@ def get_cluster_info(
 
 
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 
@@ -215,12 +234,13 @@ def query_instances(
         'PAUSED': status_lib.ClusterStatus.INIT,
         'RUNNING': status_lib.ClusterStatus.UP,
     }
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst_id, inst in instances.items():
         status = status_map[inst['status']]
         if non_terminated_only and status is None:
             continue
-        statuses[inst_id] = status
+        statuses[inst_id] = (status, None)
     return statuses
 
 

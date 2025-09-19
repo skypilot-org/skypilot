@@ -16,7 +16,7 @@ isort==5.12.0
 
 # type checking
 # match the version with .pre-commit-config.yaml
-mypy==1.4.0
+mypy==1.14.1
 types-PyYAML
 types-paramiko
 # 2.31 requires urlib3>2, which is incompatible with IBM and
@@ -27,6 +27,8 @@ types-cachetools
 types-pyvmomi
 types-aiofiles
 types-paramiko
+types-protobuf
+types-python-dateutil
 
 # testing
 pytest
@@ -52,3 +54,15 @@ psycopg2-binary==2.9.10
 # For helm okta test
 selenium==4.33.0
 webdriver-manager==4.0.2
+
+# For grpcio/protobuf code generation
+# We arrived at 1.63.0 through the following:
+# 1. pip install -e ".[all]"
+# 2. pip show protobuf -> 5.29.5, so let's use 5.x as a baseline.
+# 3. 1.63.0 is the oldest version of grpc that supports protobuf >= 5.x.y.
+# TODO(kevin): Have this value be maintained by the CI pipeline,
+# to make sure it's always up to date.
+grpcio-tools==1.63.0
+grpcio==1.63.0
+# The oldest version of protobuf that grpcio 1.63.0 supports.
+protobuf==5.26.1

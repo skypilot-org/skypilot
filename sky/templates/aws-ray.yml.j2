@@ -48,9 +48,10 @@ provider:
   # The upper-level SkyPilot code has make sure there will not be resource
   # leakage.
   disable_launch_config_check: true
+  max_efa_interfaces: {{max_efa_interfaces}}
 
 auth:
-  ssh_user: ubuntu
+  ssh_user: {{ssh_user}}
   ssh_private_key: {{ssh_private_key}}
 {% if ssh_proxy_command is not none %}
   ssh_proxy_command: {{ssh_proxy_command}}
@@ -68,7 +69,7 @@ available_node_types:
       ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
       # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
       BlockDeviceMappings:
-        - DeviceName: /dev/sda1
+        - DeviceName: {{root_device_name}}
           Ebs:
             VolumeSize: {{disk_size}}
             VolumeType: {{disk_tier}}

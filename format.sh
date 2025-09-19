@@ -49,11 +49,13 @@ YAPF_FLAGS=(
 YAPF_EXCLUDES=(
     '--exclude' 'build/**'
     '--exclude' 'sky/skylet/providers/ibm/**'
+    '--exclude' 'sky/schemas/generated/**'
 )
 
 ISORT_YAPF_EXCLUDES=(
     '--sg' 'build/**'
     '--sg' 'sky/skylet/providers/ibm/**'
+    '--sg' 'sky/schemas/generated/**'
 )
 
 BLACK_INCLUDES=(
@@ -62,6 +64,7 @@ BLACK_INCLUDES=(
 
 PYLINT_FLAGS=(
     '--load-plugins'  'pylint_quotes'
+    '--ignore-paths' 'sky/schemas/generated'
 )
 
 # Format specified files
@@ -120,7 +123,10 @@ isort --profile black -l 88 -m 3 "sky/skylet/providers/ibm"
 # TODO(zhwu): When more of the codebase is typed properly, the mypy flags
 # should be set to do a more stringent check.
 echo 'SkyPilot mypy:'
-mypy $(cat tests/mypy_files.txt)
+# Workaround for mypy 1.14.1 cache serialization bug that causes
+# "AssertionError: Internal error: unresolved placeholder type None"
+# Using --cache-dir=/dev/null disables cache writing to avoid the error
+mypy $(cat tests/mypy_files.txt) --cache-dir=/dev/null
 
 # Run Pylint
 echo 'Sky Pylint:'

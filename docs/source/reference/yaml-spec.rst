@@ -46,7 +46,9 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`ports <yaml-spec-resources-ports>`: 8081
     :ref:`labels <yaml-spec-resources-labels>`:
       my-label: my-value
-    :ref:`autostop <yaml-spec-resources-autostop>`: 10m
+    :ref:`autostop <yaml-spec-resources-autostop>`:
+      idle_minutes: 10
+      wait_for: none
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -80,26 +82,6 @@ Below is the configuration syntax and some example values.  See details under ea
       source: s3://existing-bucket
       mode: MOUNT
     /datasets-s3: s3://my-awesome-dataset
-    # Mount an existing volume to a remote directory,
-    # and sync the local directory to the volume.
-    /mnt/path1:
-      name: volume-name1
-      source: /local/path1
-      store: volume
-      persistent: True
-    # Create a new network volume with name "volume-name2"
-    # and mount it to a remote directory
-    /mnt/path2:
-      name: volume-name2
-      store: volume
-      config:
-        disk_size: 10
-        disk_tier: high
-    # Create a new instance volume and mount it to a remote directory
-    /mnt/path3:
-      store: volume
-      config:
-        storage_type: instance
 
   :ref:`setup <yaml-spec-setup>`: |
     echo "Begin setup."
@@ -277,8 +259,15 @@ Format:
 - ``<num>``: Stop after this many idle minutes
 - ``<num><unit>``: Stop after this much time
 - Object with configuration:
+
   - ``idle_minutes``: Number of idle minutes before stopping
   - ``down``: If true, tear down the cluster instead of stopping it
+  - ``wait_for``: Determines the condition for resetting the idleness timer.
+    Options:
+
+    - ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish
+    - ``jobs``: Only wait for in‑progress jobs
+    - ``none``: Wait for nothing; autostop right after ``idle_minutes``
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -316,6 +305,15 @@ OR
     autostop:
       idle_minutes: 10
       down: true  # Use autodown instead of autostop
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop:
+      idle_minutes: 10
+      wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
 
 
 .. _yaml-spec-resources-accelerators:
@@ -526,7 +524,7 @@ Units supported (case-insensitive):
 
   resources:
     disk_size: 256
-  
+
 OR
 
 .. code-block:: yaml
@@ -579,7 +577,7 @@ Could be one of ``'standard'`` or ``'best'`` (default: ``'standard'``).
 If ``'best'`` is specified, use the best network tier available on the specified infra. This currently supports:
 
 - ``infra: gcp``: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
-- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs
+- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
 - ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes
 - ``infra: k8s/my-gke-cluster``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
 
@@ -655,7 +653,7 @@ If not specified, SkyPilot will use the default debian-based image suitable for 
 
 **Docker support**
 
-You can specify docker image to use by setting the image_id to ``docker:<image name>`` for Azure, AWS and GCP. For example,
+You can specify docker image to use by setting the image_id to ``docker:<image name>`` for Azure, AWS, GCP, and RunPod. For example,
 
 .. code-block:: yaml
 
@@ -761,7 +759,7 @@ https://github.com/IBM/vpc-img-inst
 .. code-block:: yaml
 
   resources:
-    image_id: ami-0868a20f5a3bf9702  # AWS example
+    image_id: ami-0868a20f5a3bf9702  # IBM example
     # image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310  # GCP example
     # image_id: docker:pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime # Docker example
 
@@ -773,6 +771,29 @@ OR
     image_id:
       us-east-1: ami-123
       us-west-2: ami-456
+
+
+**RunPod**
+
+RunPod natively supports Docker images. You can specify any Docker image:
+
+.. code-block:: yaml
+
+  resources:
+    image_id: docker:ubuntu:22.04
+    # Or use a specific registry
+    image_id: docker:nvcr.io/nvidia/pytorch:24.10-py3
+
+For multi-region deployments, you can specify different images per region:
+
+.. code-block:: yaml
+
+  resources:
+    image_id:
+      US: docker:us-registry.io/myapp:latest
+      CA: docker:ca-registry.io/myapp:latest
+      CZ: docker:eu-registry.io/myapp:latest
+
 
 .. _yaml-spec-resources-labels:
 
@@ -1014,105 +1035,6 @@ OR
       source: ~/local_models
       store: gcs
       mode: MOUNT
-
-
-.. _yaml-spec-volumes:
-
-Volumes
-+++++++
-
-SkyPilot also supports mounting network volumes (e.g. GCP persistent disks, etc.) or instance volumes (e.g. local SSD) to the instances in the cluster.
-
-To mount an existing volume:
-
-* Ensure the volume exists
-* Specify the volume name using ``name: volume-name``
-* You must specify the ``region`` or ``zone`` in the ``resources`` section to match the volume's location
-
-To create and mount a new network volume:
-
-* Specify the volume name using ``name: volume-name``
-* Specify the desired volume configuration (disk_size, disk_tier, etc.)
-* SkyPilot will automatically create and mount the volume to the specified path
-
-To create and mount a new instance volume:
-
-* Omit the ``name`` field, which will be ignored even if specified
-* Specify the desired volume configuration (storage_type, etc.)
-* SkyPilot will automatically create and mount the volume to the specified path
-
-.. code-block:: yaml
-
-  file_mounts:
-    # Path to mount the volume on the instance
-    /mnt/path1:
-      # Name of the volume to mount
-      # It's required for the network volume,
-      # and will be ignored for the instance volume.
-      # If the volume does not exist in the specified region,
-      # it will be created in the region.
-      # optional
-      name: volume-name
-      # Source local path
-      # Do not set it if no need to sync data from local
-      # to volume, if specified, the data will be synced
-      # to the /mnt/path1/data directory.
-      # optional
-      source: /local/path1
-      # For volume mount
-      store: volume
-      # If set to False, the volume will be deleted after cluster is downed.
-      # optional, default: False
-      persistent: True
-      config:
-        # Size of the volume in GB
-        disk_size: 100
-        # Type of the volume, either 'network' or 'instance', optional, default: network
-        storage_type: network
-        # Tier of the volume, same as `resources.disk_tier`, optional, default: best
-        disk_tier: best
-        # Attach mode, either 'read_write' or 'read_only', optional, default: read_write
-        attach_mode: read_write
-
-- Mount with existing volume:
-
-.. code-block:: yaml
-
-  file_mounts:
-    /mnt/path1:
-      name: volume-name
-      store: volume
-      persistent: true
-
-- Mount with a new network volume:
-
-.. code-block:: yaml
-
-  file_mounts:
-    /mnt/path2:
-      name: new-volume
-      store: volume
-      config:
-        disk_size: 100
-
-- Mount with a new instance volume:
-
-.. code-block:: yaml
-
-  file_mounts:
-    /mnt/path3:
-      store: volume
-      config:
-        storage_type: instance
-
-.. note::
-
-  * If :ref:`GCP TPU <tpu>` is used, creating and mounting a new volume is not supported, please use the existing volume instead.
-  * If :ref:`GCP MIG <config-yaml-gcp-managed-instance-group>` is used:
-
-    * For the existing volume, the `attach_mode` needs to be `read_only`.
-    * For the new volume, the `name` field is ignored.
-  * When :ref:`GCP GPUDirect TCPX <config-yaml-gcp-enable-gpu-direct>` is enabled, the mount path is suggested to be under the `/mnt/disks` directory (e.g., `/mnt/disks/data`). This is because Container-Optimized OS (COS) used for the instances with GPUDirect TCPX enabled has some limitations for the file system. Refer to `GCP documentation <https://cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem#working_with_the_file_system>`_ for more details about the filesystem properties of COS.
 
 .. _yaml-spec-setup:
 

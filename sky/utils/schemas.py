@@ -432,7 +432,7 @@ def get_volume_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': ['name', 'type', 'infra'],
+        'required': ['name', 'type'],
         'additionalProperties': False,
         'properties': {
             'name': {
@@ -481,6 +481,7 @@ def get_volume_schema():
                     },
                 },
             },
+            **_LABELS_SCHEMA,
         }
     }
 
@@ -667,8 +668,24 @@ def get_service_schema():
                         'minimum': 0,
                     },
                     'target_qps_per_replica': {
-                        'type': 'number',
-                        'minimum': 0,
+                        'anyOf': [
+                            {
+                                'type': 'number',
+                                'minimum': 0,
+                            },
+                            {
+                                'type': 'object',
+                                'patternProperties': {
+                                    # Pattern for accelerator types like
+                                    # "H100:1", "A100:1", "H100", "A100"
+                                    '^[A-Z0-9]+(?::[0-9]+)?$': {
+                                        'type': 'number',
+                                        'minimum': 0,
+                                    }
+                                },
+                                'additionalProperties': False,
+                            }
+                        ]
                     },
                     'dynamic_ondemand_fallback': {
                         'type': 'boolean',
@@ -1205,6 +1222,9 @@ def get_config_schema():
                 'disk_encrypted': {
                     'type': 'boolean',
                 },
+                'ssh_user': {
+                    'type': 'string',
+                },
                 'security_group_name':
                     (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'vpc_name': {
@@ -1213,6 +1233,9 @@ def get_config_schema():
                     }, {
                         'type': 'null',
                     }],
+                },
+                'use_ssm': {
+                    'type': 'boolean',
                 },
                 'post_provision_runcmd': {
                     'type': 'array',
@@ -1387,7 +1410,13 @@ def get_config_schema():
             'type': 'object',
             'required': [],
             'properties': {
-                **_NETWORK_CONFIG_SCHEMA, 'tenant_id': {
+                **_NETWORK_CONFIG_SCHEMA, 'use_static_ip_address': {
+                    'type': 'boolean',
+                },
+                'tenant_id': {
+                    'type': 'string',
+                },
+                'domain': {
                     'type': 'string',
                 },
                 'region_configs': {
@@ -1532,6 +1561,12 @@ def get_config_schema():
             'requests_retention_hours': {
                 'type': 'integer',
             },
+            'cluster_event_retention_hours': {
+                'type': 'number',
+            },
+            'cluster_debug_event_retention_hours': {
+                'type': 'number',
+            },
         }
     }
 
@@ -1640,6 +1675,9 @@ def get_config_schema():
                             'type': 'string',
                         },
                         'tenant_id': {
+                            'type': 'string',
+                        },
+                        'domain': {
                             'type': 'string',
                         },
                         'disabled': {

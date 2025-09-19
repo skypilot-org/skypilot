@@ -6,11 +6,12 @@ import types
 import typing
 from typing import Any, Dict, List, Optional, Sequence
 
+from sky.backends import backend
 from sky.utils import env_options
+from sky.utils import serialize_utils
 
 if typing.TYPE_CHECKING:
     from sky import jobs as managed_jobs
-    from sky.backends import backend
     from sky.skylet import job_lib
     from sky.utils import status_lib
 
@@ -92,6 +93,10 @@ def serialize_exception(e: BaseException) -> Dict[str, Any]:
         attr_v = attributes[attr_k]
         if isinstance(attr_v, types.TracebackType):
             attributes[attr_k] = traceback.format_tb(attr_v)
+        if isinstance(attr_v, backend.ResourceHandle):
+            attributes[attr_k] = (
+                serialize_utils.prepare_handle_for_backwards_compatibility(
+                    attr_v))
 
     data = {
         'type': e.__class__.__name__,
@@ -173,6 +178,18 @@ class KubeAPIUnreachableError(ResourcesUnavailableError):
     behavior as other ResourcesUnavailableError.
     """
     pass
+
+
+class KubernetesValidationError(Exception):
+    """Raised when the Kubernetes validation fails.
+
+    It stores a list of strings that represent the path to the field which
+    caused the validation error.
+    """
+
+    def __init__(self, path: List[str], message: str):
+        super().__init__(message)
+        self.path = path
 
 
 class InvalidCloudConfigs(Exception):
@@ -649,5 +666,23 @@ class RequestInterruptedError(Exception):
     """Raised when a request is interrupted by the server.
     Client is expected to retry the request immediately when
     this error is raised.
+    """
+    pass
+
+
+class SkyletInternalError(Exception):
+    """Raised when a Skylet internal error occurs."""
+    pass
+
+
+class SkyletMethodNotImplementedError(Exception):
+    """Raised when a Skylet gRPC method is not implemented on the server."""
+    pass
+
+
+class ClientError(Exception):
+    """Raised when a there is a client error occurs.
+
+    If a request encounters a ClientError, it will not be retried to the server.
     """
     pass

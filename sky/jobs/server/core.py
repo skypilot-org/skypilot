@@ -1,9 +1,11 @@
 """SDK functions for managed jobs."""
+import ipaddress
 import os
 import pathlib
 import tempfile
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib import parse as urlparse
 import uuid
 
 import colorama
@@ -93,8 +95,8 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     return local_to_controller_file_mounts
 
 
-def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
-                              num_jobs: Optional[int]) -> Optional[List[int]]:
+def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
+                              num_jobs: int) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
 
     In normal mode the managed job submission is done in the ray job submission.
@@ -109,12 +111,13 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
     # Create local directory for the managed job.
     pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
     job_ids = []
+    pool = dag.pool
     pool_hash = None
     if pool is not None:
         pool_hash = serve_state.get_service_hash(pool)
         # Already checked in the sdk.
         assert pool_hash is not None, f'Pool {pool} not found'
-    for _ in range(num_jobs if num_jobs is not None else 1):
+    for _ in range(num_jobs):
         # TODO(tian): We should have a separate name for each job when
         # submitting multiple jobs. Current blocker is that we are sharing
         # the same dag object for all jobs. Maybe we can do copy.copy() for
@@ -172,9 +175,6 @@ def launch(
       handle: Optional[backends.ResourceHandle]; handle to the controller VM.
         None if dryrun.
     """
-    if pool is not None and not managed_job_utils.is_consolidation_mode():
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('pool is only supported in consolidation mode.')
     entrypoint = task
     # using hasattr instead of isinstance to avoid importing sky
     if hasattr(task, 'metadata'):
@@ -190,11 +190,12 @@ def launch(
 
     dag_uuid = str(uuid.uuid4().hex[:4])
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag.resolve_and_validate_volumes()
+
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(dag)
+    dag.resolve_and_validate_volumes()
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
@@ -203,6 +204,21 @@ def launch(
     # TODO(aylei): use consolidated job controller instead of performing
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
+
+    # If there is a local postgres db, when the api server tries launching on
+    # the remote jobs controller it will fail. therefore, we should remove this
+    # before sending the config to the jobs controller.
+    # TODO(luca) there are a lot of potential problems with postgres being sent
+    # to the jobs controller. for example if the postgres is whitelisted to
+    # only the API server, this will then break. the simple solution to that is
+    # telling the user to add the jobs controller to the postgres whitelist.
+    if not managed_job_utils.is_consolidation_mode():
+        db_path = mutated_user_config.get('db', None)
+        if db_path is not None:
+            parsed = urlparse.urlparse(db_path)
+            if ((parsed.hostname == 'localhost' or
+                 ipaddress.ip_address(parsed.hostname).is_loopback)):
+                mutated_user_config.pop('db', None)
 
     user_dag_str_user_specified = dag_utils.dump_chain_dag_to_yaml_str(
         dag, use_user_specified_yaml=True)
@@ -295,8 +311,13 @@ def launch(
         controller=controller,
         task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
+    num_jobs = num_jobs if num_jobs is not None else 1
+    # We do this assignment after applying the admin policy, so that we don't
+    # need to serialize the pool name in the dag. The dag object will be
+    # preserved. See sky/admin_policy.py::MutatedUserRequest::decode.
+    dag.pool = pool
     consolidation_mode_job_ids = _maybe_submit_job_locally(
-        prefix, dag, pool, num_jobs)
+        prefix, dag, num_jobs)
 
     # This is only needed for non-consolidation mode. For consolidation
     # mode, the controller uses the same catalog as API server.
@@ -373,8 +394,8 @@ def launch(
             controller_task._metadata = metadata
 
             job_identity = ''
-            if consolidation_mode_job_id is not None:
-                job_identity = f' (Job ID: {consolidation_mode_job_id})'
+            if job_rank is not None:
+                job_identity = f' (rank: {job_rank})'
             logger.info(f'{colorama.Fore.YELLOW}'
                         f'Launching managed job {dag.name!r}{job_identity} '
                         f'from jobs controller...{colorama.Style.RESET_ALL}')
@@ -421,21 +442,22 @@ def launch(
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
                     # Dump script for high availability recovery.
-                    if controller_utils.high_availability_specified(
-                            controller_name):
-                        managed_job_state.set_ha_recovery_script(
-                            consolidation_mode_job_id, run_script)
+                    managed_job_state.set_ha_recovery_script(
+                        consolidation_mode_job_id, run_script)
                     backend.run_on_head(local_handle, run_script)
                     return consolidation_mode_job_id, local_handle
 
-    if consolidation_mode_job_ids is None:
-        return _submit_one()
     if pool is None:
+        if consolidation_mode_job_ids is None:
+            return _submit_one()
         assert len(consolidation_mode_job_ids) == 1
         return _submit_one(consolidation_mode_job_ids[0])
+
     ids = []
     all_handle = None
-    for job_rank, job_id in enumerate(consolidation_mode_job_ids):
+    for job_rank in range(num_jobs):
+        job_id = (consolidation_mode_job_ids[job_rank]
+                  if consolidation_mode_job_ids is not None else None)
         jid, handle = _submit_one(job_id, job_rank)
         assert jid is not None, (job_id, handle)
         ids.append(jid)
@@ -491,7 +513,8 @@ def queue_from_kubernetes_pod(
     managed_jobs_runner = provision_lib.get_command_runners(
         'kubernetes', cluster_info)[0]
 
-    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
+    code = managed_job_utils.ManagedJobCodeGen.get_job_table(
+        skip_finished=skip_finished)
     returncode, job_table_payload, stderr = managed_jobs_runner.run(
         code,
         require_outputs=True,
@@ -507,7 +530,14 @@ def queue_from_kubernetes_pod(
     except exceptions.CommandError as e:
         raise RuntimeError(str(e)) from e
 
-    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+    jobs, _, result_type, _, _ = managed_job_utils.load_managed_job_queue(
+        job_table_payload)
+
+    if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
+        return jobs
+
+    # Backward compatibility for old jobs controller without filtering
+    # TODO(hailong): remove this after 0.12.0
     if skip_finished:
         # Filter out the finished jobs. If a multi-task job is partially
         # finished, we will include all its tasks.
@@ -547,6 +577,10 @@ def _maybe_restart_controller(
                                  'controller'))
     with skypilot_config.local_active_workspace_ctx(
             skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+        global_user_state.add_cluster_event(
+            jobs_controller_type.value.cluster_name,
+            status_lib.ClusterStatus.INIT, 'Jobs controller restarted.',
+            global_user_state.ClusterEventType.STATUS_CHANGE)
         handle = core.start(
             cluster_name=jobs_controller_type.value.cluster_name)
 
@@ -557,6 +591,8 @@ def _maybe_restart_controller(
     return handle
 
 
+# For backwards compatibility
+# TODO(hailong): Remove before 0.12.0.
 @usage_lib.entrypoint
 def queue(refresh: bool,
           skip_finished: bool = False,
@@ -591,6 +627,70 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids, None,
+                             None, None, None, None, None, None)
+
+    return jobs
+
+
+@usage_lib.entrypoint
+def queue_v2(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    job_ids: Optional[List[int]] = None,
+    user_match: Optional[str] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    statuses: Optional[List[str]] = None,
+) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Gets statuses of managed jobs with filtering.
+
+    Please refer to sky.cli.job_queue for documentation.
+
+    Returns:
+        jobs: List[Dict[str, Any]]
+            [
+                {
+                    'job_id': int,
+                    'job_name': str,
+                    'resources': str,
+                    'submitted_at': (float) timestamp of submission,
+                    'end_at': (float) timestamp of end,
+                    'job_duration': (float) duration in seconds,
+                    'recovery_count': (int) Number of retries,
+                    'status': (sky.jobs.ManagedJobStatus) of the job,
+                    'cluster_resources': (str) resources of the cluster,
+                    'region': (str) region of the cluster,
+                    'user_name': (Optional[str]) job creator's user name,
+                    'user_hash': (str) job creator's user hash,
+                    'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                    'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                }
+            ]
+        total: int, total number of jobs after filter
+        status_counts: Dict[str, int], status counts after filter
+        total_no_filter: int, total number of jobs before filter
+    Raises:
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
+            does not exist.
+        RuntimeError: if failed to get the managed jobs with ssh.
+    """
+    if limit is not None:
+        if limit < 1:
+            raise ValueError(f'Limit must be at least 1, got {limit}')
+        if page is None:
+            page = 1
+        if page < 1:
+            raise ValueError(f'Page must be at least 1, got {page}')
+    else:
+        if page is not None:
+            raise ValueError('Limit must be specified when page is specified')
+
     handle = _maybe_restart_controller(refresh,
                                        stopped_message='No in-progress '
                                        'managed jobs.',
@@ -599,7 +699,22 @@ def queue(refresh: bool,
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
+    user_hashes: Optional[List[Optional[str]]] = None
+    if not all_users:
+        user_hashes = [common_utils.get_user_hash()]
+        # For backwards compatibility, we show jobs that do not have a
+        # user_hash. TODO(cooperc): Remove before 0.12.0.
+        user_hashes.append(None)
+    elif user_match is not None:
+        users = global_user_state.get_user_by_name_match(user_match)
+        if not users:
+            return [], 0, {}, 0
+        user_hashes = [user.id for user in users]
+
+    accessible_workspaces = list(workspaces_core.get_workspaces().keys())
+    code = managed_job_utils.ManagedJobCodeGen.get_job_table(
+        skip_finished, accessible_workspaces, job_ids, workspace_match,
+        name_match, pool_match, page, limit, user_hashes, statuses)
     returncode, job_table_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -612,8 +727,14 @@ def queue(refresh: bool,
         raise RuntimeError('Failed to fetch managed jobs with returncode: '
                            f'{returncode}.\n{job_table_payload + stderr}')
 
-    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+    (jobs, total, result_type, total_no_filter, status_counts
+    ) = managed_job_utils.load_managed_job_queue(job_table_payload)
 
+    if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
+        return jobs, total, status_counts, total_no_filter
+
+    # Backward compatibility for old jobs controller without filtering
+    # TODO(hailong): remove this after 0.12.0
     if not all_users:
 
         def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
@@ -626,7 +747,6 @@ def queue(refresh: bool,
 
         jobs = list(filter(user_hash_matches_or_missing, jobs))
 
-    accessible_workspaces = workspaces_core.get_workspaces()
     jobs = list(
         filter(
             lambda job: job.get('workspace', skylet_constants.
@@ -645,7 +765,18 @@ def queue(refresh: bool,
     if job_ids:
         jobs = [job for job in jobs if job['job_id'] in job_ids]
 
-    return jobs
+    filtered_jobs, total, status_counts = managed_job_utils.filter_jobs(
+        jobs,
+        workspace_match,
+        name_match,
+        pool_match,
+        page=page,
+        limit=limit,
+        user_match=user_match,
+        enable_user_match=True,
+        statuses=statuses,
+    )
+    return filtered_jobs, total, status_counts, total_no_filter
 
 
 @usage_lib.entrypoint

@@ -28,6 +28,7 @@ Create a GKE cluster
 .. tab-set::
 
     .. tab-item:: IAM Auth
+      :sync: iam-auth
 
         Create a GKE cluster with Workload Identity enabled.
 
@@ -50,6 +51,7 @@ Create a GKE cluster
             Retroactively enabling Workload Identity on an existing cluster is complicated and is not recommended.
 
     .. tab-item:: Password Auth
+      :sync: password-auth
 
         Create a GKE cluster as you normally would.
 
@@ -61,6 +63,7 @@ In this step, a GCP service account is created to use with the API server.
 .. tab-set::
 
     .. tab-item:: IAM Auth
+      :sync: iam-auth
 
         - Go to the `Service Accounts <https://console.cloud.google.com/iam-admin/serviceaccounts>`_ page of the ``IAM and Admin`` console
         - Click on "Create Service Account"
@@ -70,6 +73,7 @@ In this step, a GCP service account is created to use with the API server.
         - Click on "Continue", then "Done" to create the service account.
 
     .. tab-item:: Password Auth
+      :sync: password-auth
 
         - Go to the `Service Accounts <https://console.cloud.google.com/iam-admin/serviceaccounts>`_ page of the ``IAM and Admin`` console
         - Click on "Create Service Account"
@@ -107,6 +111,7 @@ To create a user, use `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_ 
 .. tab-set::
 
     .. tab-item:: IAM Auth
+      :sync: iam-auth
 
         .. code-block:: bash
 
@@ -131,6 +136,7 @@ To create a user, use `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_ 
             GRANT "cloudsqlsuperuser" TO "skypilot-cloud-sql-access@<gcp-project-id>.iam"
 
     .. tab-item:: Password Auth
+      :sync: password-auth
 
         .. code-block:: bash
 
@@ -154,6 +160,7 @@ In this step, we authorize the GCP service account to be used by the API server.
 .. tab-set::
 
     .. tab-item:: IAM Auth
+      :sync: iam-auth
 
         An IAM policy binding is created on the GCP service account to bind it to the GKE service account.
 
@@ -169,6 +176,7 @@ In this step, we authorize the GCP service account to be used by the API server.
                 ${GCP_SERVICE_ACCOUNT}@${GCP_PROJECT_ID}.iam.gserviceaccount.com
 
     .. tab-item:: Password Auth
+      :sync: password-auth
 
         A secret is created in the kubernetes cluster to store the GCP service account key.
 
@@ -194,6 +202,7 @@ In this step, we create a secret to store the database connection information to
 .. tab-set::
 
     .. tab-item:: IAM Auth
+      :sync: iam-auth
 
         .. code-block:: bash
 
@@ -205,6 +214,7 @@ In this step, we create a secret to store the database connection information to
                 --from-literal connection_string="postgresql://localhost/${DB_NAME}?user=skypilot-cloud-sql-access%40${GCP_PROJECT_ID}.iam"
 
     .. tab-item:: Password Auth
+      :sync: password-auth
 
         .. code-block:: bash
 
@@ -226,6 +236,7 @@ Replace ``<GCP_PROJECT_ID>`` and ``<REGION>`` in the following ``values.yaml`` w
 .. tab-set::
 
     .. tab-item:: IAM Auth
+      :sync: iam-auth
 
         .. code-block:: yaml
 
@@ -287,6 +298,7 @@ Replace ``<GCP_PROJECT_ID>`` and ``<REGION>`` in the following ``values.yaml`` w
                     cpu: "1"
 
     .. tab-item:: Password Auth
+      :sync: password-auth
 
         .. code-block:: yaml
 
