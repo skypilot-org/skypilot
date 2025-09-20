@@ -1010,12 +1010,15 @@ def get_handle_from_cluster_name(
     assert _SQLALCHEMY_ENGINE is not None
     assert cluster_name is not None, 'cluster_name cannot be None'
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        row = (session.query(
+            cluster_table.c.handle).filter_by(name=cluster_name).first())
     if row is None:
         return None
     return pickle.loads(row.handle)
 
 
+@_init_db
+@metrics_lib.time_me
 def get_status_from_cluster_name(
         cluster_name: str) -> Optional[status_lib.ClusterStatus]:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1036,11 +1039,11 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            rows = session.query(cluster_table).filter(
+            rows = session.query(cluster_table.c.name).filter(
                 cluster_table.c.name.op('GLOB')(cluster_name)).all()
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            rows = session.query(cluster_table).filter(
+            rows = session.query(cluster_table.c.name).filter(
                 cluster_table.c.name.op('SIMILAR TO')(
                     _glob_to_similar(cluster_name))).all()
         else:
@@ -1088,7 +1091,8 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
 def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        row = session.query(
+            cluster_table.c.launched_at).filter_by(name=cluster_name).first()
     if row is None or row.launched_at is None:
         return None
     return int(row.launched_at)
@@ -1099,7 +1103,8 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
 def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        row = session.query(
+            cluster_table.c.metadata).filter_by(name=cluster_name).first()
     if row is None or row.metadata is None:
         return None
     return json.loads(row.metadata)
@@ -1179,7 +1184,8 @@ def get_cluster_storage_mounts_metadata(
         cluster_name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        row = (session.query(cluster_table.c.storage_mounts_metadata).filter_by(
+            name=cluster_name).first())
     if row is None or row.storage_mounts_metadata is None:
         return None
     return pickle.loads(row.storage_mounts_metadata)
@@ -1208,7 +1214,9 @@ def get_cluster_skylet_ssh_tunnel_metadata(
         cluster_name: str) -> Optional[Tuple[int, int]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        row = session.query(
+            cluster_table.c.skylet_ssh_tunnel_metadata).filter_by(
+                name=cluster_name).first()
     if row is None or row.skylet_ssh_tunnel_metadata is None:
         return None
     return pickle.loads(row.skylet_ssh_tunnel_metadata)
@@ -1242,7 +1250,7 @@ def _get_cluster_usage_intervals(
     if cluster_hash is None:
         return None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_history_table).filter_by(
+        row = session.query(cluster_history_table.c.usage_intervals).filter_by(
             cluster_hash=cluster_hash).first()
     if row is None or row.usage_intervals is None:
         return None
@@ -1317,7 +1325,8 @@ def set_owner_identity_for_cluster(cluster_name: str,
 def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        row = (session.query(
+            cluster_table.c.cluster_hash).filter_by(name=cluster_name).first())
     if row is None or row.cluster_hash is None:
         return None
     return row.cluster_hash
@@ -1329,8 +1338,10 @@ def get_launched_resources_from_cluster_hash(
         cluster_hash: str) -> Optional[Tuple[int, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_history_table).filter_by(
-            cluster_hash=cluster_hash).first()
+        row = session.query(
+            cluster_history_table.c.num_nodes,
+            cluster_history_table.c.launched_resources).filter_by(
+                cluster_hash=cluster_hash).first()
     if row is None:
         return None
     num_nodes = row.num_nodes
