@@ -13,9 +13,9 @@ from sky.utils import status_lib
 logger = logging.getLogger(__name__)
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
-
+    del cluster_name  # unused
     zone_id = config.node_config['zone_id']
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     head_instance_id = _get_head_instance_id(running_instances)
