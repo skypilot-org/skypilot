@@ -640,13 +640,6 @@ available_node_types:
           command: ["/bin/bash", "-c", "--"]
           args:
             - |
-              # For backwards compatibility, we put a marker file in the pod
-              # to indicate that the pod is running with the changes introduced
-              # in project nimbus: https://github.com/skypilot-org/skypilot/pull/4393
-              # TODO: Remove this marker file and it's usage in setup_commands
-              # after v0.10.0 release.
-              touch /tmp/skypilot_is_nimbus
-
               # Helper function to conditionally use sudo
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
@@ -1349,12 +1342,10 @@ setup_commands:
     fi
 
     echo "=== Logs for asynchronous ray and skypilot installation ===";
-    if [ -f /tmp/skypilot_is_nimbus ]; then
-      echo "=== Logs for asynchronous ray and skypilot installation ===";
-      [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log ||
-      { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ] || [ -f /tmp/${STEPS[1]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
-      [ -f /tmp/${STEPS[1]}.failed ] && { echo "Error: ${STEPS[1]} failed. Exiting."; exit 1; } || true;
-    fi
+    [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log ||
+    { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ] || [ -f /tmp/${STEPS[1]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+    [ -f /tmp/${STEPS[1]}.failed ] && { echo "Error: ${STEPS[1]} failed. Exiting."; exit 1; } || true;
+
     end_epoch=$(date +%s);
     echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
