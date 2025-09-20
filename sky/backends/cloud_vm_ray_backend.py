@@ -3532,7 +3532,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             error_message + '\n' + str(e),
                             failover_history=e.failover_history) from None
             if dryrun:
-                handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
                 return handle if handle is not None else None, False
 
             if config_dict['provisioning_skipped']:
@@ -3541,7 +3542,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # ('handle', 'provision_record', 'resources_vars')
                 # We need to return the handle - but it should be the existing
                 # handle for the cluster.
-                handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
                 assert handle is not None, (cluster_name, handle)
                 return handle, True
 

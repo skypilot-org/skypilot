@@ -620,15 +620,16 @@ def get_controller_resources(
     controller_resources_to_use: resources.Resources = list(
         controller_resources)[0]
 
-    controller_record = global_user_state.get_cluster_from_name(
+    controller_handle = global_user_state.get_handle_from_cluster_name(
         controller.value.cluster_name)
-    if controller_record is not None:
-        handle = controller_record.get('handle', None)
-        if handle is not None:
+    if controller_handle is not None:
+        if controller_handle is not None:
             # Use the existing resources, but override the autostop config with
             # the one currently specified in the config.
-            controller_resources_to_use = handle.launched_resources.copy(
-                autostop=controller_resources_config_copied.get('autostop'))
+            controller_resources_to_use = (
+                controller_handle.launched_resources.copy(
+                    autostop=controller_resources_config_copied.get('autostop'))
+            )
 
     # If the controller and replicas are from the same cloud (and region/zone),
     # it should provide better connectivity. We will let the controller choose
