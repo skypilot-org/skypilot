@@ -7,7 +7,7 @@ import logging
 import random
 import string
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky.clouds.utils import scp_utils
 from sky.provision import common
