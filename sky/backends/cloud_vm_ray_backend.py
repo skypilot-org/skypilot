@@ -3261,9 +3261,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Usage Collection:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, launched_resources)
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        if record is not None:
-            usage_lib.messages.usage.update_cluster_status(record['status'])
+        status = global_user_state.get_status_from_cluster_name(cluster_name)
+        if status is not None:
+            usage_lib.messages.usage.update_cluster_status(status)
 
         assert launched_resources.region is not None, handle
 
@@ -4993,10 +4993,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{handle.cluster_name!r}. Assuming the cluster is still '
                     'up.')
         if not cluster_status_fetched:
-            record = global_user_state.get_cluster_from_name(
+            status = global_user_state.get_status_from_cluster_name(
                 handle.cluster_name)
-            prev_cluster_status = record[
-                'status'] if record is not None else None
+            prev_cluster_status = status if status is not None else None
         if prev_cluster_status is None:
             # When the cluster is not in the cluster table, we guarantee that
             # all related resources / cache / config are cleaned up, i.e. it
