@@ -1337,13 +1337,13 @@ setup_commands:
     if [ -f /tmp/apt_ssh_setup_started ]; then
       echo "=== Logs for asynchronous SSH setup ===";
       [ -f /tmp/apt_ssh_setup_complete ] && cat /tmp/${STEPS[0]}.log ||
-      { tail -f -n +1 /tmp/${STEPS[0]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/apt_ssh_setup_complete ] || [ -f /tmp/${STEPS[0]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+      { tail -f -n +1 /tmp/${STEPS[0]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; sleep 0.5; until [ -f /tmp/apt_ssh_setup_complete ] || [ -f /tmp/${STEPS[0]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
       [ -f /tmp/${STEPS[0]}.failed ] && { echo "Error: ${STEPS[0]} failed. Exiting."; exit 1; } || true;
     fi
 
     echo "=== Logs for asynchronous ray and skypilot installation ===";
     [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log ||
-    { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ] || [ -f /tmp/${STEPS[1]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+    { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; sleep 0.5; until [ -f /tmp/ray_skypilot_installation_complete ] || [ -f /tmp/${STEPS[1]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
     [ -f /tmp/${STEPS[1]}.failed ] && { echo "Error: ${STEPS[1]} failed. Exiting."; exit 1; } || true;
 
     end_epoch=$(date +%s);
