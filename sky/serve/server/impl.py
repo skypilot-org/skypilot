@@ -378,21 +378,21 @@ def up(
                         'check the logs above for more details.') from None
         else:
             if not serve_utils.is_consolidation_mode(pool) and not pool:
-                socket_endpoint = backend_utils.get_endpoints(
+                assert task.service is not None
+                protocol = ('https' if task.service.tls_credential is not None
+                            else 'http')
+                endpoint_mapping = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     lb_port,
-                    skip_status_check=True).get(lb_port)
+                    skip_status_check=True)
+                socket_endpoint = endpoint_mapping.get(lb_port)
             else:
+                protocol = 'http'
                 socket_endpoint = f'localhost:{lb_port}'
             assert socket_endpoint is not None, (
                 'Did not get endpoint for controller.')
-            # Already checked by validate_service_task
-            assert task.service is not None
-            protocol = ('http'
-                        if task.service.tls_credential is None else 'https')
-            socket_endpoint = socket_endpoint.replace('https://', '').replace(
-                'http://', '')
-            endpoint = f'{protocol}://{socket_endpoint}'
+            endpoint = (socket_endpoint if '://' in socket_endpoint else
+                        f'{protocol}://{socket_endpoint}')
 
         if pool:
             logger.info(
@@ -780,20 +780,21 @@ def status(
             try:
                 lb_port = service_record['load_balancer_port']
                 if not serve_utils.is_consolidation_mode(pool):
+                    protocol = ('https'
+                                if service_record['tls_encrypted'] else 'http')
                     endpoint = backend_utils.get_endpoints(
                         cluster=common.SKY_SERVE_CONTROLLER_NAME,
                         port=lb_port).get(lb_port, None)
                 else:
+                    protocol = 'http'
                     endpoint = f'localhost:{lb_port}'
             except exceptions.ClusterNotUpError:
                 pass
             else:
-                protocol = ('https'
-                            if service_record['tls_encrypted'] else 'http')
                 if endpoint is not None:
-                    endpoint = endpoint.replace('https://',
-                                                '').replace('http://', '')
-                service_record['endpoint'] = f'{protocol}://{endpoint}'
+                    endpoint = (endpoint if '://' in endpoint else
+                                f'{protocol}://{endpoint}')
+                service_record['endpoint'] = endpoint
 
     return service_records
 
