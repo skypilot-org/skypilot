@@ -1302,6 +1302,17 @@ class Storage(object):
             global_user_state.set_storage_status(self.name, StorageStatus.READY)
 
     @classmethod
+    def from_handle(cls, handle: StorageHandle) -> 'Storage':
+        """Create Storage from StorageHandle object.
+        """
+        obj = cls(name=handle.storage_name,
+                  source=handle.source,
+                  sync_on_reconstruction=False)
+        obj.handle = handle
+        obj._add_store_from_metadata(handle.sky_stores)
+        return obj
+
+    @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
         common_utils.validate_schema(config, schemas.get_storage_schema(),
                                      'Invalid storage YAML: ')
