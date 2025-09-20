@@ -3810,3 +3810,8 @@ def should_exclude_pod_from_gpu_allocation(pod) -> bool:
         return True
 
     return False
+
+
+def are_all_contexts_allowed() -> bool:
+    return os.getenv(
+        kubernetes_constants.KUBERNETES_ALLOW_ALL_CONTEXTS_ENV_VAR) == 'true'

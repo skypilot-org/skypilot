@@ -187,6 +187,10 @@ class Kubernetes(clouds.Cloud):
             ctx for ctx in all_contexts if not ctx.startswith('ssh-')
         ]
 
+        allow_all_contexts_env = kubernetes_utils.are_all_contexts_allowed()
+        if allowed_contexts == 'all' or allow_all_contexts_env:
+            allowed_contexts = all_contexts
+
         if allowed_contexts is None:
             # Try kubeconfig if present
             current_context = (
