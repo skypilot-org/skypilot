@@ -1404,6 +1404,17 @@ def get_cluster_from_name(
 
 @_init_db
 @metrics_lib.time_me
+@context_utils.cancellation_guard
+def cluster_with_name_exists(cluster_name: str) -> bool:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(cluster_table.c.name).filter_by(name=cluster_name).first()
+    if row is None:
+        return False
+    return True
+
+@_init_db
+@metrics_lib.time_me
 def get_clusters(
     *,  # keyword only separator
     exclude_managed_clusters: bool = False,
