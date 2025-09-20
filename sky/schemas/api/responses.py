@@ -86,7 +86,7 @@ class StatusResponse(ResponseBaseModel):
     # backends.ResourceHandle, so we use Any here.
     # This is an internally facing field anyway, so it's less
     # of a problem that it's not typed.
-    handle: Any
+    handle: Optional[Any] = None
     last_use: str
     status: status_lib.ClusterStatus
     autostop: int
