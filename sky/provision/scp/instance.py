@@ -494,6 +494,7 @@ def query_instances(
     del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
+
     status_map = {
         'CREATING': status_lib.ClusterStatus.INIT,
         'EDITING': status_lib.ClusterStatus.INIT,
@@ -506,12 +507,13 @@ def query_instances(
         'TERMINATED': None,
     }
 
-    statuses = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for instance in instances:
         status = status_map[instance['virtualServerState']]
         if non_terminated_only and status is None:
             continue
-        statuses[instance['virtualServerId']] = status
+        statuses[instance['virtualServerId']] = (status, None)
     return statuses
 
 
