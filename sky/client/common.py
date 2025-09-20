@@ -14,6 +14,9 @@ from typing import Dict, Generator, Iterable
 import uuid
 import zipfile
 
+import colorama
+import filelock
+
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import service_account_auth
@@ -30,13 +33,13 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import httpx
-    import requests
+    import psutil
 
     import sky
     from sky import dag as dag_lib
 else:
     httpx = adaptors_common.LazyImport('httpx')
-    requests = adaptors_common.LazyImport('requests')
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -392,3 +395,41 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                                        is_local=True))
 
     return dag
+
+
+def local_api_server_running(kill: bool = False) -> bool:
+    """Checks if the local api server is running."""
+    for process in psutil.process_iter(attrs=['pid', 'cmdline']):
+        cmdline = process.info['cmdline']
+        if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
+            if kill:
+                subprocess_utils.kill_children_processes(
+                    parent_pids=[process.pid], force=True)
+            return True
+    return False
+
+
+def kill_api_server() -> None:
+    # We hold the lock to prevent a new API server from starting up while we
+    # are killing the old one.
+    lock = os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)
+
+    try:
+        # Force unlock.
+        os.remove(lock)
+    except FileNotFoundError:
+        # This is preferred over `if os.path.exists(lock)` as it is more atomic.
+        pass
+
+    with filelock.FileLock(lock):
+        found = local_api_server_running(kill=True)
+
+        if not found:
+            logger.info('SkyPilot API server is not running.')
+            return
+
+        # Remove the database for requests.
+        server_common.clear_local_api_server_database()
+
+        logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'
+                    f'{colorama.Style.RESET_ALL}')

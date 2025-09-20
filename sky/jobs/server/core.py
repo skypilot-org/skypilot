@@ -369,6 +369,8 @@ def launch(
                 'priority': priority,
                 'consolidation_mode_job_id': consolidation_mode_job_id,
                 'pool': pool,
+                'job_controller_indicator_file':
+                    managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
                 **controller_utils.shared_controller_vars_to_fill(
                     controller,
                     remote_user_config_path=remote_user_config_path,
