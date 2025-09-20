@@ -59,7 +59,6 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
-from sky.client.cli import git
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -79,7 +78,6 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import directory_utils
 from sky.utils import env_options
-from sky.utils import git as git_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -783,8 +781,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
     # Update the workdir config from the command line parameters.
     # And update the envs and secrets from the workdir.
-    _update_task_workdir(task, workdir, git_url, git_ref)
-    _update_task_workdir_and_secrets_from_workdir(task)
+    task.update_workdir(workdir, git_url, git_ref)
+    task.update_envs_and_secrets_from_workdir()
 
     # job launch specific.
     if job_recovery is not None:
@@ -797,73 +795,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if name is not None:
         task.name = name
     return task
-
-
-def _update_task_workdir(task: task_lib.Task, workdir: Optional[str],
-                         git_url: Optional[str], git_ref: Optional[str]):
-    """Updates the task workdir.
-
-    Args:
-        task: The task to update.
-        workdir: The workdir to update.
-        git_url: The git url to update.
-        git_ref: The git ref to update.
-    """
-    if task.workdir is None or isinstance(task.workdir, str):
-        if workdir is not None:
-            task.workdir = workdir
-            return
-        if git_url is not None:
-            task.workdir = {}
-            task.workdir['url'] = git_url
-            if git_ref is not None:
-                task.workdir['ref'] = git_ref
-            return
-        return
-    if git_url is not None:
-        task.workdir['url'] = git_url
-    if git_ref is not None:
-        task.workdir['ref'] = git_ref
-    return
-
-
-def _update_task_workdir_and_secrets_from_workdir(task: task_lib.Task):
-    """Updates the task secrets from the workdir.
-
-    Args:
-        task: The task to update.
-    """
-    if task.workdir is None:
-        return
-    if not isinstance(task.workdir, dict):
-        return
-    url = task.workdir['url']
-    ref = task.workdir.get('ref', '')
-    token = os.environ.get(git_utils.GIT_TOKEN_ENV_VAR)
-    ssh_key_path = os.environ.get(git_utils.GIT_SSH_KEY_PATH_ENV_VAR)
-    try:
-        git_repo = git.GitRepo(url, ref, token, ssh_key_path)
-        clone_info = git_repo.get_repo_clone_info()
-        if clone_info is None:
-            return
-        task.envs[git_utils.GIT_URL_ENV_VAR] = clone_info.url
-        if ref:
-            ref_type = git_repo.get_ref_type()
-            if ref_type == git.GitRefType.COMMIT:
-                task.envs[git_utils.GIT_COMMIT_HASH_ENV_VAR] = ref
-            elif ref_type == git.GitRefType.BRANCH:
-                task.envs[git_utils.GIT_BRANCH_ENV_VAR] = ref
-            elif ref_type == git.GitRefType.TAG:
-                task.envs[git_utils.GIT_TAG_ENV_VAR] = ref
-        if clone_info.token is None and clone_info.ssh_key is None:
-            return
-        if clone_info.token is not None:
-            task.secrets[git_utils.GIT_TOKEN_ENV_VAR] = clone_info.token
-        if clone_info.ssh_key is not None:
-            task.secrets[git_utils.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
-    except exceptions.GitError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'{str(e)}') from None
 
 
 class _NaturalOrderGroup(click.Group):
@@ -4245,14 +4176,13 @@ def volumes_apply(
                     f'{entrypoint_str!r} needs to be a YAML file')
         if yaml_config is not None:
             volume_config_dict = yaml_config.copy()
+    override_config = _build_volume_override_config(name, infra, type, size)
+    volume_config_dict.update(override_config)
 
     # Create Volume instance
-    volume = volume_lib.Volume.from_dict(volume_config_dict)
+    volume = volume_lib.Volume.from_yaml_config(volume_config_dict)
 
-    # Normalize the volume config with CLI options
-    volume.normalize_config(name=name, infra=infra, type=type, size=size)
-
-    logger.debug(f'Volume config: {volume.to_dict()}')
+    logger.debug(f'Volume config: {volume.to_yaml_config()}')
 
     if not yes:
         click.confirm(f'Proceed to create volume {volume.name!r}?',
@@ -4268,6 +4198,22 @@ def volumes_apply(
         logger.error(f'{colorama.Fore.RED}Error applying volume: '
                      f'{common_utils.format_exception(e, use_bracket=True)}'
                      f'{colorama.Style.RESET_ALL}')
+
+
+def _build_volume_override_config(name: Optional[str], infra: Optional[str],
+                                  volume_type: Optional[str],
+                                  size: Optional[str]) -> Dict[str, str]:
+    """Parse the volume override config."""
+    override_config = {}
+    if name is not None:
+        override_config['name'] = name
+    if infra is not None:
+        override_config['infra'] = infra
+    if volume_type is not None:
+        override_config['type'] = volume_type
+    if size is not None:
+        override_config['size'] = size
+    return override_config
 
 
 @volumes.command('ls', cls=_DocumentedCodeCommand)
@@ -6247,11 +6193,28 @@ def api_info():
     # Print client version and commit.
     click.echo(f'SkyPilot client version: {sky.__version__}, '
                f'commit: {sky.__commit__}')
+
+    config = skypilot_config.get_user_config()
+    config = dict(config)
+
+    # Determine where the endpoint is set.
+    if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
+        location = ('Endpoint set via the environment variable '
+                    f'{constants.SKY_API_SERVER_URL_ENV_VAR}')
+    elif 'endpoint' in config.get('api_server', {}):
+        config_path = skypilot_config.resolve_user_config_path()
+        if config_path is None:
+            location = 'Endpoint set to default local API server.'
+        else:
+            location = f'Endpoint set via {config_path}'
+    else:
+        location = 'Endpoint set to default local API server.'
     click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '
                f'version: {api_server_info.version}\n'
-               f'{ux_utils.INDENT_LAST_SYMBOL}User: {user.name} ({user.id})')
+               f'{ux_utils.INDENT_SYMBOL}User: {user.name} ({user.id})\n'
+               f'{ux_utils.INDENT_LAST_SYMBOL}{location}')
 
 
 @cli.group(cls=_NaturalOrderGroup)

@@ -432,7 +432,7 @@ def get_volume_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': ['name', 'type', 'infra'],
+        'required': ['name', 'type'],
         'additionalProperties': False,
         'properties': {
             'name': {
@@ -1234,6 +1234,9 @@ def get_config_schema():
                         'type': 'null',
                     }],
                 },
+                'use_ssm': {
+                    'type': 'boolean',
+                },
                 'post_provision_runcmd': {
                     'type': 'array',
                     'items': {
@@ -1407,7 +1410,10 @@ def get_config_schema():
             'type': 'object',
             'required': [],
             'properties': {
-                **_NETWORK_CONFIG_SCHEMA, 'tenant_id': {
+                **_NETWORK_CONFIG_SCHEMA, 'use_static_ip_address': {
+                    'type': 'boolean',
+                },
+                'tenant_id': {
                     'type': 'string',
                 },
                 'domain': {

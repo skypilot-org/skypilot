@@ -16,23 +16,29 @@ Git and GitHub
 How to clone private GitHub repositories in a job?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Currently, SkyPilot does not support secret management or SSH agent forwarding to your sky clusters.
-You will need to use `file_mounts` to sync your Github SSH private key to your sky cluster.
+Use ``workdir`` to clone private GitHub repositories in a job.
 
 .. code-block:: yaml
 
   # your_task.yaml
-  file_mounts:
-    ~/.ssh/id_rsa: ~/.ssh/your-ssh-private-key
-
-  setup: |
-    chmod 600 ~/.ssh/id_rsa
-    git clone git@github.com:your-proj/your-repo.git
+  workdir:
+    url: git@github.com:your-proj/your-repo.git
+    ref: main
 
   run: |
     cd your-repo
     git pull
 
+**Authentication**:
+
+*For HTTPS URLs*: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
+
+*For SSH/SCP URLs*: SkyPilot will attempt to authenticate using SSH keys in the following order:
+
+1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
+2. SSH key configured in ``~/.ssh/config`` for the git host
+3. Default SSH key at ``~/.ssh/id_rsa``
+4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
 
 How to ensure my workdir's ``.git`` is synced up for managed spot jobs?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -212,6 +218,24 @@ You will need to install a PyTorch version that is compatible with your NVIDIA d
 
 Miscellaneous
 -------------
+
+Why can't I use ``ray.init(address="auto")`` directly in my SkyPilot job?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyPilot uses Ray internally on port 6380 for cluster management. When you use ``ray.init(address="auto")``, Ray connects to SkyPilot's internal cluster, causing resource bundling conflicts where user workloads interfere with SkyPilot's resource management.
+
+**Always start your own Ray cluster** on a different port (e.g., 6379). See the :ref:`distributed Ray example <dist-jobs>` for the correct pattern:
+
+.. code-block:: yaml
+
+  run: |
+    head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+    if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+      ray start --head
+      python your_script.py
+    else
+      ray start --address $head_ip:6379
+    fi
 
 How can I launch a VS Code tunnel using a SkyPilot task definition?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -220,6 +220,8 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
     """Test that Server.run uses uvloop event loop policy."""
     from sky.server.uvicorn import Server
 
+    threads_before = len(threading.enumerate())
+
     config = uvicorn.Config(app='sky.server.server:app',
                             host='127.0.0.1',
                             port=8000)
@@ -250,6 +252,8 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
         server_instance.run()
 
     mock_asyncio_run.assert_called_once()
+    threads_after = len(threading.enumerate())
+    assert threads_after == threads_before
 
     # Check uvloop policy was set (if uvloop is available)
     if uvloop_available:

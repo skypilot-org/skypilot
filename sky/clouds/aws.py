@@ -17,6 +17,7 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
+from sky.adaptors import common
 from sky.catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
@@ -38,9 +39,11 @@ logger = sky_logging.init_logger(__name__)
 
 # Image ID tags
 _DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu'
+_DEFAULT_CPU_ARM64_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-arm64'
 # For GPU-related package version,
 # see sky/catalog/images/provisioners/cuda.sh
 _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu'
+_DEFAULT_GPU_ARM64_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-arm64'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _DEFAULT_NEURON_IMAGE_ID = 'skypilot:neuron-ubuntu-2204'
 
@@ -155,7 +158,9 @@ def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
     try:
         client = aws.client('ec2', region_name=region_name)
         response = client.describe_instance_types(
-            InstanceTypes=[instance_type],
+            # TODO(cooperc): fix the types for mypy 1.16
+            # Boto3 type stubs expect Literal instance types; using str list here.
+            InstanceTypes=[instance_type],  # type: ignore
             Filters=[{
                 'Name': 'network-info.efa-supported',
                 'Values': ['true']
@@ -361,13 +366,22 @@ class AWS(clouds.Cloud):
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
-        image_id = catalog.get_image_id_from_tag(_DEFAULT_CPU_IMAGE_ID,
-                                                 region_name,
-                                                 clouds='aws')
-        if acc is not None:
-            image_id = catalog.get_image_id_from_tag(_DEFAULT_GPU_IMAGE_ID,
+        arch = cls.get_arch_from_instance_type(instance_type)
+        if arch == constants.ARM64_ARCH:
+            image_id = catalog.get_image_id_from_tag(
+                _DEFAULT_CPU_ARM64_IMAGE_ID, region_name, clouds='aws')
+        else:
+            image_id = catalog.get_image_id_from_tag(_DEFAULT_CPU_IMAGE_ID,
                                                      region_name,
                                                      clouds='aws')
+        if acc is not None:
+            if arch == constants.ARM64_ARCH:
+                image_id = catalog.get_image_id_from_tag(
+                    _DEFAULT_GPU_ARM64_IMAGE_ID, region_name, clouds='aws')
+            else:
+                image_id = catalog.get_image_id_from_tag(_DEFAULT_GPU_IMAGE_ID,
+                                                         region_name,
+                                                         clouds='aws')
             assert len(acc) == 1, acc
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
@@ -569,6 +583,13 @@ class AWS(clouds.Cloud):
     ) -> Optional[Dict[str, Union[int, float]]]:
         return catalog.get_accelerators_from_instance_type(instance_type,
                                                            clouds='aws')
+
+    @classmethod
+    def get_arch_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        return catalog.get_arch_from_instance_type(instance_type, clouds='aws')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
@@ -787,12 +808,9 @@ class AWS(clouds.Cloud):
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
             return False, dependency_installation_hints
-        try:
-            # Checks if aws boto is installed properly
-            # pylint: disable=import-outside-toplevel, unused-import
-            import boto3
-            import botocore
-        except ImportError:
+
+        # Checks if aws boto is installed properly
+        if not common.can_import_modules(['boto3', 'botocore']):
             return False, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.

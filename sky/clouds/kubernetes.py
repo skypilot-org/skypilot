@@ -841,6 +841,8 @@ class Kubernetes(clouds.Cloud):
                                  from_instance_type(default_instance_type))
 
             gpu_task_cpus = k8s_instance_type.cpus
+            if resources.cpus is None:
+                gpu_task_cpus = gpu_task_cpus * acc_count
             # Special handling to bump up memory multiplier for GPU instances
             gpu_task_memory = (float(resources.memory.strip('+')) if
                                resources.memory is not None else gpu_task_cpus *
@@ -1005,7 +1007,7 @@ class Kubernetes(clouds.Cloud):
 
         all_contexts = kubernetes_utils.get_all_kube_context_names()
 
-        if region not in all_contexts:
+        if region and region not in all_contexts:
             raise ValueError(
                 f'Context {region} not found in kubeconfig. Kubernetes only '
                 'supports context names as regions. Available '

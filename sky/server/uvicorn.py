@@ -19,12 +19,15 @@ from uvicorn.supervisors import multiprocess
 
 from sky import sky_logging
 from sky.server import daemons
+from sky.server import metrics as metrics_lib
 from sky.server import state
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
 from sky.utils import env_options
+from sky.utils import perf_utils
 from sky.utils import subprocess_utils
+from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -87,9 +90,12 @@ class Server(uvicorn.Server):
     - Run the server process with contextually aware.
     """
 
-    def __init__(self, config: uvicorn.Config):
+    def __init__(self,
+                 config: uvicorn.Config,
+                 max_db_connections: Optional[int] = None):
         super().__init__(config=config)
         self.exiting: bool = False
+        self.max_db_connections = max_db_connections
 
     def handle_exit(self, sig: int, frame: Union[FrameType, None]) -> None:
         """Handle exit signal.
@@ -145,7 +151,8 @@ class Server(uvicorn.Server):
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-            reqs = requests_lib.get_request_tasks(status=statuses)
+            reqs = requests_lib.get_request_tasks(
+                req_filter=requests_lib.RequestTaskFilter(status=statuses))
             if not reqs:
                 break
             logger.info(f'{len(reqs)} on-going requests '
@@ -194,22 +201,39 @@ class Server(uvicorn.Server):
 
     def run(self, *args, **kwargs):
         """Run the server process."""
+        if self.max_db_connections is not None:
+            db_utils.set_max_connections(self.max_db_connections)
         add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
-        with self.capture_signals():
-            asyncio.run(self.serve(*args, **kwargs))
+        lag_threshold = perf_utils.get_loop_lag_threshold()
+        if lag_threshold is not None:
+            event_loop = asyncio.get_event_loop()
+            # Same as set PYTHONASYNCIODEBUG=1, but with custom threshold.
+            event_loop.set_debug(True)
+            event_loop.slow_callback_duration = lag_threshold
+        stop_monitor = threading.Event()
+        monitor = threading.Thread(target=metrics_lib.process_monitor,
+                                   args=('server', stop_monitor),
+                                   daemon=True)
+        monitor.start()
+        try:
+            with self.capture_signals():
+                asyncio.run(self.serve(*args, **kwargs))
+        finally:
+            stop_monitor.set()
+            monitor.join()
 
 
-def run(config: uvicorn.Config):
+def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
     """Run unvicorn server."""
     if config.reload:
         # Reload and multi-workers are mutually exclusive
         # in uvicorn. Since we do not use reload now, simply
         # guard by an exception.
         raise ValueError('Reload is not supported yet.')
-    server = Server(config=config)
+    server = Server(config=config, max_db_connections=max_db_connections)
     try:
         if config.workers is not None and config.workers > 1:
             sock = config.bind_socket()

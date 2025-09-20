@@ -49,9 +49,9 @@ Example login command:
 SSO (recommended)
 ------------------
 
-You can configure the SkyPilot API server to use an SSO providers such as :ref:`Okta or Google Workspace <oauth-oidc>` for authentication.
+You can configure the SkyPilot API server to use an SSO providers such as :ref:`Okta, Google Workspace, or Microsoft Entra ID <oauth-oidc>` for authentication.
 
-The SkyPilot implementation is flexible and will also work with most cookie-based browser auth proxies. See :ref:`oauth-user-flow` and :ref:`auth-proxy-byo` for details. To set up Okta or Google Workspace, see :ref:`oauth-oidc`.
+The SkyPilot implementation is flexible and will also work with most cookie-based browser auth proxies. See :ref:`oauth-user-flow` and :ref:`auth-proxy-byo` for details. To set up Okta, Google Workspace, or Microsoft Entra ID, see :ref:`oauth-oidc`.
 
 .. image:: ../images/client-server/oauth-user-flow.svg
     :alt: SkyPilot with OAuth
@@ -93,14 +93,16 @@ SkyPilot will automatically use the user email from the auth proxy to create a u
     :width: 70%
 
 .. _oauth-okta:
+.. _oauth-google:
+.. _oauth-microsoft:
 .. _oauth-oidc:
 
-Setting up OAuth (Okta, Google Workspace, etc)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Setting up OAuth (Okta, Google Workspace, Microsoft Entra ID, etc)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The SkyPilot API server helm chart provides out-of-the-box support for setting up OAuth on API server. An `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__ will be deployed under the hood and the API server will be configured to use it for authentication.
 
-The instructions below cover :ref:`Okta <okta-oidc-setup>` and :ref:`Google Workspace <google-oidc-setup>`, but any provider compatible with the OIDC spec should work.
+The instructions below cover :ref:`Okta <okta-oidc-setup>`, :ref:`Google Workspace <google-oidc-setup>`, and :ref:`Microsoft Entra ID <microsoft-oidc-setup>`, but any provider compatible with the OIDC spec should work.
 
 Here's how to set it up:
 
@@ -109,6 +111,8 @@ Here's how to set it up:
   * :ref:`Set up in Okta <okta-oidc-setup>`
 
   * :ref:`Set up Google Workspace login <google-oidc-setup>`
+
+  * :ref:`Set up Microsoft Entra ID <microsoft-oidc-setup>`
 
 * :ref:`Deploy in Helm <oidc-oauth2-proxy-helm>`
 
@@ -193,6 +197,7 @@ Select the necessary config values:
 * **Name:** Choose a name that will be meaningful to you, such as "SkyPilot auth proxy". This name is internal-only.
 * **Authorized redirect URIs**: Click "Add URI", and add ``<ENDPOINT>/oauth2/callback``, where ``<ENDPOINT>`` is your API server endpoint. e.g. ``http://skypilot.example.com/oauth2/callback``
 
+
 .. image:: ../images/client-server/google-auth-setup.png
     :alt: Create an OIDC client in Google Auth Platform
     :align: center
@@ -209,6 +214,50 @@ Copy down the **Client ID** and **Client secret**. After exiting this screen, yo
     You can set an :ref:`email domain filter <helm-values-ingress-oauth2-proxy-email-domain>` in the Helm chart, which is the ``<EMAIL DOMAIN>`` value in the :ref:`Helm deployment instructions below <oidc-oauth2-proxy-helm>`.
 
     To check if your audience is set to "Internal" or "External", go to the `Audience page <https://console.cloud.google.com/auth/audience>`__ under Google Auth Platform. Under "User type", you should see "Internal" or "External". You can switch between Internal and External audience, but it will affect all auth clients in the GCP project.
+
+.. _microsoft-oidc-setup:
+
+Create application in Microsoft Entra ID
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To use Microsoft Entra ID, you will need to add an "App registration" in the Microsoft Entra ID portal.
+
+.. image:: ../images/client-server/microsoft-auth-initial.png
+    :alt: Microsoft Entra ID setup
+    :align: center
+    :width: 80%
+
+1. Configure the application:
+
+   * **Name:** Choose a name that will be meaningful to you, such as "SkyPilot auth proxy". This name is internal-only.
+   * **Supported account types:** ``Accounts in this organizational directory only`` (recommended)
+   * **Redirect URI:**
+
+     * **Select a platform:** ``Web``
+     * **URI:** ``<ENDPOINT>/oauth2/callback``, where ``<ENDPOINT>`` is your API server endpoint. e.g. ``https://skypilot.example.com/oauth2/callback``
+
+     .. note::
+        Microsoft Entra ID requires HTTPS, so make sure to use ``https://`` rather than ``http://`` in your redirect URI.
+
+2. Click **Register**. You will need the **Client ID** (``Application (client) ID``) and **Tenant ID** (``Directory (tenant) ID``) from the overview page.
+
+3. In the **App registrations** detail page for the newly created application, click **Add a certificate or secret** and create a new client secret.
+   You will need the **Client Secret** in the next step.
+
+**Microsoft Entra ID example values.yaml:**
+
+.. code-block:: yaml
+
+    auth:
+      oauth:
+        enabled: true
+        oidc-issuer-url: https://login.microsoftonline.com/<TENANT_ID>/v2.0
+        client-id: <CLIENT_ID>
+        client-secret: <CLIENT_SECRET>
+        use-https: true
+        email-domain: <YOUR_DOMAIN>  # optional
+
+You can now proceed to :ref:`the Helm deployment <oidc-oauth2-proxy-helm>`.
 
 .. _oidc-oauth2-proxy-helm:
 
@@ -234,6 +283,8 @@ Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-o
 
   * **Google Workspace**: Set to ``https://accounts.google.com``
 
+  * **Microsoft Entra ID**: Set to ``https://login.microsoftonline.com/<TENANT_ID>/v2.0``, where ``<TENANT_ID>`` is your Microsoft Entra ID tenant ID
+
 * ``<EMAIL DOMAIN>``: Optionally :ref:`restrict login to specific email domains <helm-values-ingress-oauth2-proxy-email-domain>`
 
 
@@ -246,6 +297,13 @@ Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-o
       --set auth.oauth.client-id=<CLIENT ID> \
       --set auth.oauth.client-secret=<CLIENT SECRET> \
       --set auth.oauth.email-domain=<EMAIL DOMAIN> # optional
+
+If you are using Microsoft Entra ID or any other provider that requires the redirect URI to be HTTPS, you will need to set one additional Helm value:
+
+.. code-block:: console
+
+    $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+      --set auth.oauth.use-https=true
 
 .. _oauth-client-secret:
 
@@ -421,6 +479,127 @@ If the ``X-Auth-Request-Email`` header is set by your auth proxy, SkyPilot will 
     # Using environment variable - not necessary if using Helm
     export SKYPILOT_AUTH_USER_HEADER=X-Custom-User-Header
     sky api start --deploy
+
+.. _cloudflare-zero-trust:
+
+Optional: Cloudflare Zero Trust and WARP
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can configure Cloudflare Zero Trust with WARP to provide seamless authentication for your SkyPilot API server. This setup allows CLI/API requests to bypass login when the device is connected to Warp, while browser users are still challenged with SSO.
+
+Prerequisites
+^^^^^^^^^^^^^
+
+* A domain managed by Cloudflare (e.g. ``skypilot.org``)
+* Cloudflare Zero Trust subscription
+* DNS record pointing your API ingress LoadBalancer IP from the SSO setup in the same Cloudflare account as your Zero Trust setup (this example uses ``zerotrust.skypilot.org``)
+* SkyPilot API server configured with SSO (you will need your client ID and secret)
+
+
+Step 1: Create policies
+^^^^^^^^^^^^^^^^^^^^^^^
+
+* Navigate to **Zero Trust → Access → Policies → Add a policy**
+
+  * **Policy 1: allow-<yourorg>**
+
+    * **Action**: ``Allow``
+    * **Include**: 
+       
+      * **Selector**: ``Emails ending in``
+      * **Value**: ``@<yourorg>.com``
+
+  * **Policy 2: bypass-warp**
+
+    * **Action**: ``Bypass``
+    * **Include**: 
+       
+      * **Selector**: ``Warp``
+      * **Value**: ``Warp``
+
+Step 2: Configure your SSO provider as an identity provider
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Navigate to **Zero Trust → Settings → Authentication → Login methods → Add new**
+
+2. Configure the identity provider in Cloudflare:
+
+   * **App ID**: ``<SSO_CLIENT_ID>``
+   * **Client secret**: ``<SSO_CLIENT_SECRET>``
+
+3. Add Cloudflare Authorized JavaScript origins and redirect URIs to your SSO client:
+
+   * **Authorized JavaScript origins**: ``https://<your-team-name>.cloudflareaccess.com``
+   * **Redirect URIs**: ``https://<your-team-name>.cloudflareaccess.com/cdn-cgi/access/callback``
+
+.. note::
+    
+    You can find your team name under **Zero Trust → Settings → Custom Pages → Team Domain**.
+    It will be listed as ``<your-team-name>.cloudflareaccess.com``.
+
+Step 3: Create a Cloudflare access application
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Navigate to **Zero Trust → Access → Applications → Add an application**
+
+2. Configure the application:
+
+   * **Application type**: ``Self-hosted``
+   * **Application name**: ``SkyPilot API``
+   * **Session duration**: ``24 hours``
+   * **Public hostname**:
+   
+     * **Subdomain**: ``DNS_RECORD_NAME`` (e.g. ``zerotrust``)
+     * **Domain**: ``DNS_RECORD_DOMAIN`` (e.g. ``skypilot.org``)
+   * **Access policies → Select existing policies**:
+
+     * **Allow policy**: ``allow-<yourorg>``
+     * **Bypass policy**: ``bypass-warp``
+
+3. Save the application.
+
+This configuration allows:
+
+* CLI/API requests to bypass login if the device is on WARP
+* Browser users to be challenged with SSO
+
+
+Step 4: Enable device enrollment for WARP
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Navigate to **Zero Trust → Settings → WARP client → Device enrollment permissions → Manage**
+
+2. Create an enrollment rule:
+
+   * **Select existing policies**: ``allow-<yourorg>``
+
+3. Save
+
+This restricts WARP enrollment to only your team members.
+
+Step 5: Deploy WARP client to your team
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You you deploy the WARP client to your team in one of two ways:
+
+1. Manual deployment (`Cloudflare WARP client manual deployment <https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/deployment/manual-deployment/>`__)
+2. Automatic deployment (`Cloudflare WARP client MDM deployment <https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/deployment/mdm-deployment/>`__)
+
+Each user performs this setup once per device.
+
+
+Step 6: Test access
+^^^^^^^^^^^^^^^^^^^
+
+Test that the configuration is working:
+
+.. code-block:: console
+
+    $ curl -i https://zerotrust.assembletest.org/api/health
+    # Should return 200 OK
+
+    $ sky api login -e https://zerotrust.assembletest.org
+    # Should complete login without browser redirect
 
 
 SkyPilot RBAC

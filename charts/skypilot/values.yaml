@@ -190,11 +190,15 @@ auth:
     # Refer to redis-url for more details.
     # @schema type: [string, null]
     redis-secret: null
+    # Redis container image for session storage
+    # @schema type: [string, null]
+    redis-image: "redis:7-alpine"
     # Cookie timing settings (in seconds)
     # @schema type: [string, number, null]
     cookie-refresh: null  # refresh tokens after this duration (Access token lifespan minus 1 min)
     # @schema type: [string, number, null]
     cookie-expire: null  # cookie expiration time (should match refresh token lifespan)
+    use-https: false
 
   # Service account token based authentication for the API server
   # @schema type: [object, null]
@@ -312,6 +316,9 @@ ingress:
     # If set, this external Redis instance will be used
     # @schema type: [string, null]
     redis-url: null
+    # Redis container image for session storage
+    # @schema type: [string, null]
+    redis-image: "redis:7-alpine"
     # Cookie timing settings (in seconds)
     # @schema type: [string, number, null]
     cookie-refresh: null  # refresh tokens after this duration (Access token lifespan minus 1 min)
@@ -498,9 +505,10 @@ securityContext:
 runtimeClassName:
 
 # Set configuration for Prometheus helm chart
+# Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
+# @schema skipProperties:true
 prometheus:
   enabled: false
-  # Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
   # it is recommended to install and manage prometheus separately.
   # SkyPilot API server will be automatically discovered by the prometheus if it runs with the default kubernetes discovery configuration.
@@ -514,11 +522,17 @@ prometheus:
     - job_name: 'skypilot-api-server-gpu-metrics'
       static_configs:
         # Use the API service created by this Helm chart
-        - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:80']
+        - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
       metrics_path: '/gpu-metrics'
       scrape_interval: 15s
       scrape_timeout: 10s
       # Add labels to identify these metrics
+      metric_relabel_configs:
+      - action: replace
+        source_labels: [node, Hostname]
+        regex: ;(.+)
+        target_label: node
+        replacement: $1
   kube-state-metrics:
     enabled: true
     metricLabelsAllowlist:
@@ -531,9 +545,10 @@ prometheus:
     enabled: false
 
 # Set configuration for Grafana helm chart
+# Refer to https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md for available values.
+# @schema skipProperties:true
 grafana:
   enabled: false
-  # Refer to https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md for available values.
   persistence:
     enabled: true
     size: 10Gi
@@ -552,7 +567,6 @@ grafana:
     enableAuthedIngress: true
     path: "/grafana"
     ingressClassName: nginx
-    # @schema type: [string, null]
     hosts: null
   grafana.ini:
     server:
@@ -583,7 +597,6 @@ grafana:
       enabled: true
   # Add dashboard provider configuration to load dashboards from default directory
   dashboardProviders:
-    # @schema skipProperties:true
     dashboardproviders.yaml:
       apiVersion: 1
       providers:

@@ -216,9 +216,6 @@ export function ManagedJobs() {
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
 
-    // Refresh parent component data (including poolsData for link matching)
-    fetchData(true); // Pass true to indicate it's a refresh button click
-
     // Trigger a re-fetch in both tables via their refreshDataRef
     if (jobsRefreshRef.current) {
       jobsRefreshRef.current();
@@ -341,6 +338,8 @@ export function ManagedJobsTable({
     onConfirm: null,
   });
   const isMobile = useMobile();
+  // Guards multiple concurrent fetches: only latest response should commit
+  const requestSeqRef = useRef(0);
 
   const handleRestartController = async () => {
     setConfirmationModal({
@@ -367,6 +366,9 @@ export function ManagedJobsTable({
   const fetchData = React.useCallback(
     async (options = {}) => {
       const includeStatus = options.includeStatus !== false;
+      // Bump request sequence and capture a version for this fetch
+      const version = requestSeqRef.current + 1;
+      requestSeqRef.current = version;
       setLocalLoading(true);
       setLoading(true); // Set parent loading state
       try {
@@ -434,7 +436,7 @@ export function ManagedJobsTable({
           statusCounts = {},
         } = jobsResponse || {};
 
-        let isControllerStopped = !!controllerStopped;
+        let isControllerStopped = false;
         let isLaunching = false;
         if (includeStatus && clustersData) {
           const jobControllerCluster = clustersData?.find((c) =>
@@ -451,13 +453,16 @@ export function ManagedJobsTable({
           }
         }
 
-        setData(jobs);
-        setTotalCount(total || 0);
-        setTotalNoFilter(totalNoFilter || 0);
-        setControllerStopped(!!isControllerStopped);
-        setControllerLaunching(!!isLaunching);
-        setApiStatusCounts(statusCounts);
-        setIsInitialLoad(false);
+        // Only commit if this is still the latest request
+        if (version === requestSeqRef.current) {
+          setData(jobs);
+          setTotalCount(total || 0);
+          setTotalNoFilter(totalNoFilter || 0);
+          setControllerStopped(!!isControllerStopped);
+          setControllerLaunching(!!isLaunching);
+          setApiStatusCounts(statusCounts);
+          setIsInitialLoad(false);
+        }
 
         // Log cache status for debugging
         if (process.env.NODE_ENV === 'development') {
@@ -473,12 +478,16 @@ export function ManagedJobsTable({
       } catch (err) {
         console.error('Error fetching data:', err);
         // Still set data to empty array on error to show proper UI
-        setData([]);
-        setControllerStopped(false);
-        setIsInitialLoad(false);
+        if (version === requestSeqRef.current) {
+          setData([]);
+          setControllerStopped(false);
+          setIsInitialLoad(false);
+        }
       } finally {
-        setLocalLoading(false);
-        setLoading(false); // Clear parent loading state
+        if (version === requestSeqRef.current) {
+          setLocalLoading(false);
+          setLoading(false); // Clear parent loading state
+        }
       }
     },
     [
@@ -785,10 +794,6 @@ export function ManagedJobsTable({
                 if (onRefresh) {
                   onRefresh();
                 }
-                // Also call the local refresh function to ensure loading state is set
-                if (refreshDataRef && refreshDataRef.current) {
-                  refreshDataRef.current();
-                }
               }}
               disabled={loading}
               className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
@@ -1069,6 +1074,7 @@ export function ManagedJobsTable({
                             jobParent="/jobs"
                             jobId={item.id}
                             managed={true}
+                            workspace={item.workspace}
                           />
                         </TableCell>
                       </TableRow>
@@ -1257,6 +1263,7 @@ export function Status2Actions({
   jobParent,
   jobId,
   managed,
+  workspace = 'default',
 }) {
   const router = useRouter();
 
@@ -1287,7 +1294,7 @@ export function Status2Actions({
         downloadJobLogs({
           clusterName: clusterName,
           jobIds: [jobId],
-          workspace: 'default', // TODO: Get actual workspace from context
+          workspace: workspace,
         });
       }
     }
@@ -1321,36 +1328,6 @@ export function Status2Actions({
           {withLabel && <span className="ml-1.5">Download</span>}
         </button>
       </Tooltip>
-      {managed && (
-        <>
-          <Tooltip
-            key="controllerlogs"
-            content="View Controller Logs"
-            className="capitalize text-sm text-muted-foreground"
-          >
-            <button
-              onClick={(e) => handleLogsClick(e, 'controllerlogs')}
-              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
-            >
-              <MonitorPlay className="w-4 h-4" />
-              {withLabel && <span className="ml-2">Controller Logs</span>}
-            </button>
-          </Tooltip>
-          <Tooltip
-            key="downloadcontrollerlogs"
-            content="Download Controller Logs"
-            className="capitalize text-sm text-muted-foreground"
-          >
-            <button
-              onClick={(e) => handleDownloadLogs(e, true)}
-              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
-            >
-              <Download className="w-4 h-4" />
-              {withLabel && <span className="ml-1.5">Download Controller</span>}
-            </button>
-          </Tooltip>
-        </>
-      )}
     </div>
   );
 }
@@ -1362,6 +1339,7 @@ export function ClusterJobs({
   refreshClusterJobsOnly,
   userFilter = null,
   nameFilter = null,
+  workspace = 'default',
 }) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
@@ -1602,6 +1580,7 @@ export function ClusterJobs({
                         jobParent={`/clusters/${clusterName}`}
                         jobId={item.id}
                         managed={false}
+                        workspace={workspace}
                       />
                     </TableCell>
                   </TableRow>

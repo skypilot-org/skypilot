@@ -136,6 +136,20 @@ def _hint_worker_log_path(cluster_name: str, cluster_info: common.ClusterInfo,
         logger.info(f'Logs of worker nodes can be found at: {worker_log_path}')
 
 
+class SSHThreadPoolExecutor(futures.ThreadPoolExecutor):
+    """ThreadPoolExecutor that kills children processes on exit."""
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # ssh command runner eventually calls
+        # log_lib.run_with_log, which will spawn
+        # subprocesses. If we are exiting the context
+        # we need to kill the children processes
+        # to avoid leakage.
+        subprocess_utils.kill_children_processes()
+        self.shutdown()
+        return False
+
+
 def _parallel_ssh_with_cache(func,
                              cluster_name: str,
                              stage_name: str,
@@ -148,7 +162,7 @@ def _parallel_ssh_with_cache(func,
         # as 32 is too large for some machines.
         max_workers = subprocess_utils.get_parallel_threads(
             cluster_info.provider_name)
-    with futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+    with SSHThreadPoolExecutor(max_workers=max_workers) as pool:
         results = []
         runners = provision.get_command_runners(cluster_info.provider_name,
                                                 cluster_info, **ssh_credentials)

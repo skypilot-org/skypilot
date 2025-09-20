@@ -39,7 +39,8 @@ install_requires = [
     # Light weight requirement, can be replaced with "typing" once
     # we deprecate Python 3.7 (this will take a while).
     'typing_extensions',
-    'filelock >= 3.6.0',
+    # filelock 3.15.0 or higher is required for async file locking.
+    'filelock >= 3.15.0',
     'packaging',
     'psutil',
     'pulp',
@@ -62,6 +63,8 @@ install_requires = [
     'setproctitle',
     'sqlalchemy',
     'psycopg2-binary',
+    'aiosqlite',
+    'asyncpg',
     # TODO(hailong): These three dependencies should be removed after we make
     # the client-side actually not importing them.
     'casbin',
@@ -75,6 +78,7 @@ install_requires = [
     'types-paramiko',
     'alembic',
     'aiohttp',
+    'aiosqlite',
     'anyio',
 ]
 
@@ -100,14 +104,16 @@ server_dependencies = [
     'anyio',
     GRPC,
     PROTOBUF,
+    'aiosqlite',
 ]
 
 local_ray = [
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
-    # Excluded 2.6.0 as it has a bug in the cluster launcher:
+    # Ray 2.6.1+ resolved cluster launcher bugs
+    # and grpcio issues on Apple Silicon.
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
-    'ray[default] >= 2.2.0, != 2.6.0',
+    'ray[default] >= 2.6.1',
 ]
 
 remote = [
@@ -183,6 +189,7 @@ extras_require: Dict[str, List[str]] = {
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
+    'primeintellect': [],  # No dependencies needed for primeintellect
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
     'vast': ['vastai-sdk>=0.1.12'],
     'vsphere': [
@@ -195,9 +202,14 @@ extras_require: Dict[str, List[str]] = {
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
     'nebius': [
+        # Nebius requires grpcio and protobuf, so we need to include
+        # our constraints here.
         'nebius>=0.2.47',
+        GRPC,
+        PROTOBUF,
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
+    'seeweb': ['ecsapi>=0.2.0'],
     'server': server_dependencies,
 }
 
@@ -208,6 +220,7 @@ clouds_for_all.remove('remote')
 if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
     clouds_for_all.remove('nebius')
+    clouds_for_all.remove('seeweb')
 
 if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds
