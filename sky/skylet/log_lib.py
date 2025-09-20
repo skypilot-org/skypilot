@@ -38,6 +38,7 @@ PEEK_HEAD_LINES_FOR_START_STREAM = 20
 logger = sky_logging.init_logger(__name__)
 
 LOG_FILE_START_STREAMING_AT = 'Waiting for task resources on '
+LOG_FILE_SETUP_END_AT = 'Setup complete'
 
 
 class _ProcessingArgs:
@@ -453,7 +454,8 @@ def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
               managed_job_id: Optional[int] = None,
               follow: bool = True,
-              tail: int = 0) -> None:
+              tail: int = 0,
+              pool: bool = False) -> None:
     """Tail the logs of a job.
 
     Args:
@@ -504,6 +506,9 @@ def tail_logs(job_id: Optional[int],
         status = job_lib.update_job_status([job_id], silent=True)[0]
 
     start_stream_at = LOG_FILE_START_STREAMING_AT
+    end_stream_at = None
+    if pool:
+        end_stream_at = LOG_FILE_SETUP_END_AT
     # Explicitly declare the type to avoid mypy warning.
     lines: Iterable[str] = []
     if follow and status in [
@@ -527,6 +532,8 @@ def tail_logs(job_id: Optional[int],
                         start_streaming = True
                     if start_streaming:
                         print(line, end='')
+                    if end_stream_at and end_stream_at in line:
+                        return
                 # Flush the last n lines
                 print(end='', flush=True)
             # Now, the cursor is at the end of the last lines
@@ -554,6 +561,8 @@ def tail_logs(job_id: Optional[int],
                         start_streaming = True
                     if start_streaming:
                         print(line, end='', flush=True)
+                    if end_stream_at and end_stream_at in line:
+                        return
                 status_str = status.value if status is not None else 'None'
                 # Only show "Job finished" for actually terminal states
                 if status is not None and status.is_terminal():

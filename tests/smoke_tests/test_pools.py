@@ -16,9 +16,16 @@ _LAUNCH_POOL_AND_CHECK_SUCCESS = (
     'echo "$s"; '
     'echo; echo; echo "$s" | grep "Successfully created pool"')
 
+_LAUNCH_POOL_JOB_AND_CHECK_SUCCESS = (
+    's=$(sky jobs launch --pool {pool_name} {job_yaml} -y); '
+    'echo "$s"; '
+    'echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."')
+
 _TEARDOWN_POOL = ('sky jobs pool down {pool_name} -y')
 
 _CANCEL_POOL_JOBS = ('sky jobs pool cancel {pool_name} -y')
+
+_DELETE_BUCKET = ('sky storage delete -y {bucket_name}')
 
 
 def wait_until_pool_ready(pool_name: str,
@@ -96,19 +103,28 @@ def basic_pool_conf(num_workers: int, setup_cmd: str = 'echo "setup message"'):
     """)
 
 
-def write_pool_yaml(pool_yaml: tempfile.NamedTemporaryFile, pool_config: str):
-    pool_yaml.write(pool_config.encode())
-    pool_yaml.flush()
+def write_yaml(yaml_file: tempfile.NamedTemporaryFile, config: str):
+    yaml_file.write(config.encode())
+    yaml_file.flush()
 
 
 def test_vllm_pool(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
+    bucket_name = f'sky-test-vllm-pool-{name}'
     pool_config = textwrap.dedent(f"""
     envs:
         MODEL_NAME: NousResearch/Meta-Llama-3-8B-Instruct
+       
+        BUCKET_NAME: {bucket_name}
+
+    file_mounts:
+        /output:
+            name: ${{BUCKET_NAME}}
+            mode: MOUNT
+            store: s3
 
     resources:
-        accelerators: {{L4}}
+        accelerators: {{L4: 1}}
 
     setup: |
         uv venv --python 3.10 --seed
@@ -142,8 +158,6 @@ def test_vllm_pool(generic_cloud: str):
         workers: 1
     """)
 
-    bucket_name = f'sky-test-vllm-pool-{name}'
-
     job_config = textwrap.dedent(f"""
     name: t-test-vllm-pool
 
@@ -158,19 +172,10 @@ def test_vllm_pool(generic_cloud: str):
     envs:
         START_IDX: 0  # Will be overridden by batch launcher script
         END_IDX: 10000  # Will be overridden by batch launcher script
-        BUCKET_NAME: {bucket_name}
         MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
         DATASET_NAME: "McAuley-Lab/Amazon-Reviews-2023"
         DATASET_CONFIG: "raw_review_Books"
-        EMBEDDINGS_BUCKET_NAME: {bucket_name}
         WORKER_ID: ''
-
-    file_mounts:
-        /output:
-            name: ${{EMBEDDINGS_BUCKET_NAME}}
-            mode: MOUNT
-            store: s3
-
 
     run: |
         source .venv/bin/activate
@@ -178,21 +183,25 @@ def test_vllm_pool(generic_cloud: str):
         # Initialize and download the model
         HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/model $MODEL_NAME
 
-        # Create metrics directory for monitoring service
-        mkdir -p /output/metrics
-
         # Set worker ID for metrics tracking
         if [ -z "$WORKER_ID" ]; then
             export WORKER_ID="worker_$(date +%s)_$(hostname)"
             echo "Generated worker ID: $WORKER_ID"
         fi
 
+        output_dir="/output/${{WORKER_ID}}"
+        mkdir -p $output_dir
+
+        # Create metrics directory
+        mkdir -p $output_dir/metrics
+
+
         # Process the assigned range of documents
         echo "Processing documents from $START_IDX to $END_IDX"
 
         # Process text documents and track token metrics
         python scripts/text_vector_processor.py \
-            --output-path "/output/embeddings_${{START_IDX}}_${{END_IDX}}.parquet" \
+            --output-path "${{output_dir}}/embeddings_${{START_IDX}}_${{END_IDX}}.parquet" \
             --start-idx $START_IDX \
             --end-idx $END_IDX \
             --chunk-size 512 \
@@ -209,25 +218,23 @@ def test_vllm_pool(generic_cloud: str):
 
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
-            pool_yaml.write(pool_config.encode())
-            pool_yaml.flush()
-            job_yaml.write(job_config.encode())
-            job_yaml.flush()
-
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
             pool_name = f'{name}-pool'
-
             test = smoke_tests_utils.Test(
-                'test_vllm_pool',
-                [
-                    f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully created pool"',
+                'test_vllm_pool', [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
                     wait_until_pool_ready(
                         pool_name,
                         timeout=smoke_tests_utils.get_timeout(generic_cloud)),
-                    f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."',
+                    _LAUNCH_POOL_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml.name),
+                    f'aws s3 ls s3://{bucket_name} --recursive --summarize | grep "Total Objects" | awk \'{{print $3}}\'',
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=(f'sky jobs pool down {pool_name} -y && '
-                          f'sky storage delete -y {bucket_name} || true'),
+                teardown=
+                f'{_TEARDOWN_POOL.format(pool_name=pool_name)} && {_DELETE_BUCKET.format(bucket_name=bucket_name)}'
             )
 
             smoke_tests_utils.run_one_test(test)
@@ -240,7 +247,7 @@ def test_setup_logs_in_starting_pool(generic_cloud: str):
         1, 'for i in {1..10000}; do echo "Noisy setup $i"; sleep 1; done')
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
-        write_pool_yaml(pool_yaml, pool_config)
+        write_yaml(pool_yaml, pool_config)
         pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
         test = smoke_tests_utils.Test('test_setup_logs_in_starting_pool', [
             _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
@@ -261,7 +268,7 @@ def test_setup_logs_in_pool_exits(generic_cloud: str):
     pool_config = basic_pool_conf(num_workers=1)
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
-        write_pool_yaml(pool_yaml, pool_config)
+        write_yaml(pool_yaml, pool_config)
         pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
         test = smoke_tests_utils.Test(
             'test_setup_logs_in_starting_pool', [

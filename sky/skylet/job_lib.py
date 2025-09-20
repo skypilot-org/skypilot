@@ -1276,7 +1276,8 @@ class JobLibCodeGen:
                   job_id: Optional[int],
                   managed_job_id: Optional[int],
                   follow: bool = True,
-                  tail: int = 0) -> str:
+                  tail: int = 0,
+                  pool: bool = False) -> str:
         # pylint: disable=line-too-long
 
         code = [
@@ -1295,6 +1296,7 @@ class JobLibCodeGen:
             # Add a newline to leave the if indent block above.
             f'\ntail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}}}',
             f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 1: tail_log_kwargs["tail"] = {tail}',
+            f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 4: tail_log_kwargs["pool"] = {pool}',
             f'{_LINUX_NEW_LINE}log_lib.tail_logs(**tail_log_kwargs)',
             # After tailing, check the job status and exit with appropriate code
             'job_status = job_lib.get_status(job_id)',
