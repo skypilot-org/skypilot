@@ -422,11 +422,12 @@ class ReplicaInfo:
                 based on the cluster name.
         """
         if cluster_record is None:
-            cluster_record = global_user_state.get_cluster_from_name(
+            handle = global_user_state.get_handle_from_cluster_name(
                 self.cluster_name)
-        if cluster_record is None:
+        else:
+            handle = cluster_record['handle']
+        if handle is None:
             return None
-        handle = cluster_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         return handle
 
