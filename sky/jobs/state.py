@@ -607,6 +607,60 @@ class ManagedJobScheduleState(enum.Enum):
     # The job is in a terminal state. (Not necessarily SUCCEEDED.)
     DONE = 'DONE'
 
+    @classmethod
+    def from_protobuf(
+        cls, protobuf_value: 'managed_jobsv1_pb2.ManagedJobScheduleState'
+    ) -> Optional['ManagedJobScheduleState']:
+        """Convert protobuf ManagedJobScheduleState enum to Python enum value.
+        """
+        protobuf_to_enum = {
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED: None,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INVALID: cls.INVALID,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE:
+                cls.INACTIVE,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_WAITING: cls.WAITING,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING:
+                cls.ALIVE_WAITING,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_LAUNCHING:
+                cls.LAUNCHING,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_BACKOFF:
+                cls.ALIVE_BACKOFF,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE: cls.ALIVE,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_DONE: cls.DONE,
+        }
+
+        if protobuf_value not in protobuf_to_enum:
+            raise ValueError('Unknown protobuf ManagedJobScheduleState value: '
+                             f'{protobuf_value}')
+
+        return protobuf_to_enum[protobuf_value]
+
+    def to_protobuf(self) -> 'managed_jobsv1_pb2.ManagedJobScheduleState':
+        """Convert this Python enum value to protobuf enum value."""
+        enum_to_protobuf = {
+            ManagedJobScheduleState.INVALID:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INVALID,
+            ManagedJobScheduleState.INACTIVE:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE,
+            ManagedJobScheduleState.WAITING:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_WAITING,
+            ManagedJobScheduleState.ALIVE_WAITING:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING,
+            ManagedJobScheduleState.LAUNCHING:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_LAUNCHING,
+            ManagedJobScheduleState.ALIVE_BACKOFF:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_BACKOFF,
+            ManagedJobScheduleState.ALIVE:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE,
+            ManagedJobScheduleState.DONE:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_DONE,
+        }
+
+        if self not in enum_to_protobuf:
+            raise ValueError(f'Unknown ManagedJobScheduleState value: {self}')
+
+        return enum_to_protobuf[self]
+
 
 # === Status transition functions ===
 @_init_db

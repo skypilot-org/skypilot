@@ -19,6 +19,7 @@ class TestJobProtoToDict:
             task_name="sky-cmd",
             job_duration=128.0,
             status=managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUCCEEDED,
+            schedule_state=managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_DONE,
             resources="1x[CPU:1+]",
             cluster_resources="-",
             cluster_resources_full="-",
@@ -36,6 +37,7 @@ class TestJobProtoToDict:
             task_name="sky-cmd",
             job_duration=128.0,
             status=managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUCCEEDED,
+            schedule_state=managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_DONE,
             resources="1x[CPU:1+]",
             cluster_resources="-",
             cluster_resources_full="-",
@@ -64,7 +66,7 @@ class TestJobProtoToDict:
     def test_basic_required_fields(self):
         """Test conversion of required fields."""
         job_proto = self._create_minimal_job_proto()
-        job_dict = jobs_utils.job_proto_to_dict(job_proto)
+        job_dict = jobs_utils._job_proto_to_dict(job_proto)
 
         assert job_dict['job_id'] == 2
         assert job_dict['task_id'] == 0
@@ -82,11 +84,15 @@ class TestJobProtoToDict:
                           managed_job_state.ManagedJobStatus)
         assert job_dict[
             'status'] == managed_job_state.ManagedJobStatus.SUCCEEDED
+        # schedule_state is a string for backwards compatibility reasons
+        assert isinstance(job_dict['schedule_state'], str)
+        assert job_dict[
+            'schedule_state'] == managed_job_state.ManagedJobScheduleState.DONE.value
 
     def test_all_optional_fields_populated(self):
         """Test conversion when all optional fields are populated."""
         job_proto = self._create_full_job_proto()
-        job_dict = jobs_utils.job_proto_to_dict(job_proto)
+        job_dict = jobs_utils._job_proto_to_dict(job_proto)
 
         # Check optional string fields
         assert job_dict['workspace'] == "default"
@@ -112,7 +118,7 @@ class TestJobProtoToDict:
     def test_optional_fields_missing(self):
         """Test that missing optional fields are set to None."""
         job_proto = self._create_minimal_job_proto()
-        job_dict = jobs_utils.job_proto_to_dict(job_proto)
+        job_dict = jobs_utils._job_proto_to_dict(job_proto)
 
         # Check that optional fields are None when not set
         optional_fields = [
@@ -163,35 +169,35 @@ class TestJobProtoToDict:
         for proto_status, expected_status in status_mappings:
             job_proto = self._create_minimal_job_proto()
             job_proto.status = proto_status
-            job_dict = jobs_utils.job_proto_to_dict(job_proto)
+            job_dict = jobs_utils._job_proto_to_dict(job_proto)
             assert job_dict['status'] == expected_status
 
     def test_status_unspecified_converts_to_none(self):
         """Test that UNSPECIFIED status converts to None."""
         job_proto = self._create_minimal_job_proto()
         job_proto.status = managed_jobsv1_pb2.MANAGED_JOB_STATUS_UNSPECIFIED
-        job_dict = jobs_utils.job_proto_to_dict(job_proto)
+        job_dict = jobs_utils._job_proto_to_dict(job_proto)
         assert job_dict['status'] is None
 
     def test_map_fields_empty_and_populated(self):
         """Test map fields (accelerators, metadata) in various states."""
         # Test empty maps
         job_proto = self._create_minimal_job_proto()
-        job_dict = jobs_utils.job_proto_to_dict(job_proto)
+        job_dict = jobs_utils._job_proto_to_dict(job_proto)
         assert job_dict['accelerators'] == {}
         assert job_dict['metadata'] == {}
 
         # Test single entry maps
         job_proto.accelerators["H200"] = 1.0
         job_proto.metadata["key"] = "value"
-        job_dict = jobs_utils.job_proto_to_dict(job_proto)
+        job_dict = jobs_utils._job_proto_to_dict(job_proto)
         assert job_dict['accelerators'] == {"H200": 1.0}
         assert job_dict['metadata'] == {"key": "value"}
 
         # Test multiple entries
         job_proto.accelerators["H100"] = 1.0
         job_proto.metadata["another_key"] = "another_value"
-        job_dict = jobs_utils.job_proto_to_dict(job_proto)
+        job_dict = jobs_utils._job_proto_to_dict(job_proto)
         assert job_dict['accelerators'] == {"H100": 1.0, "H200": 1.0}
         assert job_dict['metadata'] == {
             "key": "value",
@@ -206,7 +212,7 @@ class TestJobProtoToDict:
         job_proto.job_duration = 999999.999999
         job_proto.submitted_at = 2147483647.0
 
-        job_dict = jobs_utils.job_proto_to_dict(job_proto)
+        job_dict = jobs_utils._job_proto_to_dict(job_proto)
 
         assert job_dict['job_id'] == 9223372036854775807
         assert job_dict['task_id'] == 0
@@ -220,7 +226,7 @@ class TestJobProtoToDict:
         job_proto.details = ""  # Empty string (present but empty)
         # user_name not set (should be None)
 
-        job_dict = jobs_utils.job_proto_to_dict(job_proto)
+        job_dict = jobs_utils._job_proto_to_dict(job_proto)
 
         assert job_dict['workspace'] == ""  # Empty string preserved
         assert job_dict['details'] == ""  # Empty string preserved

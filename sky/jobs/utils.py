@@ -16,8 +16,8 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import (Any, Deque, Dict, List, Literal, Optional, Set, TextIO,
-                    Tuple, Union)
+from typing import (Any, Deque, Dict, Iterable, List, Literal, Optional, Set,
+                    TextIO, Tuple, Union)
 
 import colorama
 import filelock
@@ -1504,23 +1504,15 @@ def load_managed_job_queue(
         total = len(jobs)
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
-    jobs = decorate_jobs(jobs)
-    return jobs, total, result_type, total_no_filter, status_counts
 
-
-def decorate_jobs(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    user_hash_to_user = global_user_state.get_users(
-        set(job['user_hash']
-            for job in jobs
-            if job.get('user_hash', None) is not None))
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
         if 'user_hash' in job and job['user_hash'] is not None:
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
-            user = user_hash_to_user.get(job['user_hash'], None)
+            user = global_user_state.get_user(job['user_hash'])
             job['user_name'] = user.name if user is not None else None
-    return jobs
+    return jobs, total, result_type, total_no_filter, status_counts
 
 
 def _get_job_status_from_tasks(
@@ -1857,7 +1849,27 @@ def format_job_table(
     return output
 
 
-def job_proto_to_dict(
+def decode_managed_job_protos(
+    job_protos: Iterable['managed_jobsv1_pb2.ManagedJobInfo']
+) -> List[Dict[str, Any]]:
+    """Decode job protos to dicts. Similar to load_managed_job_queue."""
+    user_hash_to_user = global_user_state.get_users(
+        set(job.user_hash for job in job_protos if job.user_hash))
+
+    jobs = []
+    for job_proto in job_protos:
+        job_dict = _job_proto_to_dict(job_proto)
+        user_hash = job_dict.get('user_hash', None)
+        if user_hash is not None:
+            # Skip jobs that do not have user_hash info.
+            # TODO(cooperc): Remove check before 0.12.0.
+            user = user_hash_to_user.get(user_hash, None)
+            job_dict['user_name'] = user.name if user is not None else None
+        jobs.append(job_dict)
+    return jobs
+
+
+def _job_proto_to_dict(
         job_proto: 'managed_jobsv1_pb2.ManagedJobInfo') -> Dict[str, Any]:
     job_dict = json_format.MessageToDict(
         job_proto,
@@ -1878,6 +1890,14 @@ def job_proto_to_dict(
             job_dict[field.name] = int(job_dict[field.name])
     job_dict['status'] = managed_job_state.ManagedJobStatus.from_protobuf(
         job_dict['status'])
+    # For backwards compatibility, convert schedule_state to a string,
+    # as we don't have the logic to handle it in our request
+    # encoder/decoder, unlike status.
+    schedule_state_enum = (
+        managed_job_state.ManagedJobScheduleState.from_protobuf(
+            job_dict['schedule_state']))
+    job_dict['schedule_state'] = (schedule_state_enum.value
+                                  if schedule_state_enum is not None else None)
     return job_dict
 
 

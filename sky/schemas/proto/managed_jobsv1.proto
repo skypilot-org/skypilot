@@ -36,6 +36,18 @@ enum ManagedJobStatus {
   MANAGED_JOB_STATUS_FAILED_CONTROLLER = 13;
 }
 
+enum ManagedJobScheduleState {
+  MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED = 0;
+  MANAGED_JOB_SCHEDULE_STATE_INVALID = 1;
+  MANAGED_JOB_SCHEDULE_STATE_INACTIVE = 2;
+  MANAGED_JOB_SCHEDULE_STATE_WAITING = 3;
+  MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING = 4;
+  MANAGED_JOB_SCHEDULE_STATE_LAUNCHING = 5;
+  MANAGED_JOB_SCHEDULE_STATE_ALIVE_BACKOFF = 6;
+  MANAGED_JOB_SCHEDULE_STATE_ALIVE = 7;
+  MANAGED_JOB_SCHEDULE_STATE_DONE = 8;
+}
+
 message JobIds {
   repeated int64 ids = 1;
 }
@@ -76,26 +88,27 @@ message ManagedJobInfo {
   double job_duration = 5;
   optional string workspace = 6;
   ManagedJobStatus status = 7;
-  string resources = 8;
-  string cluster_resources = 9;
-  string cluster_resources_full = 10;
-  string cloud = 11;
-  string region = 12;
-  string infra = 13;
-  map<string, float> accelerators = 14;
-  int32 recovery_count = 15;
-  optional string details = 16;
-  optional string failure_reason = 17;
-  optional string user_name = 18;
-  optional string user_hash = 19;
-  optional double submitted_at = 20;
-  optional double start_at = 21;
-  optional double end_at = 22;
-  optional string user_yaml = 23;
-  optional string entrypoint = 24;
-  string metadata = 25;
-  optional string pool = 26;
-  optional string pool_hash = 27;
+  ManagedJobScheduleState schedule_state = 8;
+  string resources = 9;
+  string cluster_resources = 10;
+  string cluster_resources_full = 11;
+  string cloud = 12;
+  string region = 13;
+  string infra = 14;
+  map<string, float> accelerators = 15;
+  int32 recovery_count = 16;
+  optional string details = 17;
+  optional string failure_reason = 18;
+  optional string user_name = 19;
+  optional string user_hash = 20;
+  optional double submitted_at = 21;
+  optional double start_at = 22;
+  optional double end_at = 23;
+  optional string user_yaml = 24;
+  optional string entrypoint = 25;
+  map<string, string> metadata = 26;
+  optional string pool = 27;
+  optional string pool_hash = 28;
 }
 
 message GetJobTableResponse {

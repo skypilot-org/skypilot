@@ -749,10 +749,7 @@ def queue_v2(
             response = backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
                     handle.get_grpc_channel()).get_managed_job_table(request))
-            jobs = []
-            for job in response.jobs:
-                job_dict = managed_job_utils.job_proto_to_dict(job)
-                jobs.append(job_dict)
+            jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
             return jobs, response.total, dict(
                 response.status_counts), response.total_no_filter
         except exceptions.SkyletMethodNotImplementedError:

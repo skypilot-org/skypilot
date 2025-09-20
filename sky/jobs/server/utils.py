@@ -55,10 +55,8 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
                 lambda: cloud_vm_ray_backend.SkyletClient(
                     handle.get_grpc_channel()).get_managed_job_table(
                         job_table_request))
-            jobs = []
-            for job in job_table_response.jobs:
-                job_dict = managed_job_utils.job_proto_to_dict(job)
-                jobs.append(job_dict)
+            jobs = managed_job_utils.decode_managed_job_protos(
+                job_table_response.jobs)
         except exceptions.SkyletMethodNotImplementedError:
             use_legacy = True
 

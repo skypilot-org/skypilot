@@ -1,6 +1,5 @@
 """gRPC service implementations for skylet."""
 
-import json
 import os
 from typing import List, Optional
 
@@ -395,7 +394,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 limit=request.limit if request.HasField('limit') else None,
                 user_hashes=user_hashes,
                 statuses=statuses)
-            jobs = managed_job_utils.decorate_jobs(job_queue['jobs'])
+            jobs = job_queue['jobs']
             total = job_queue['total']
             total_no_filter = job_queue['total_no_filter']
             status_counts = job_queue['status_counts']
@@ -409,8 +408,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     task_name=job.get('task_name'),
                     job_duration=job.get('job_duration'),
                     workspace=job.get('workspace'),
-                    status=job.get('status', managed_job_state.ManagedJobStatus.
-                                   PENDING).to_protobuf(),
+                    status=managed_job_state.ManagedJobStatus(
+                        job.get('status')).to_protobuf(),
+                    schedule_state=managed_job_state.ManagedJobScheduleState(
+                        job.get('schedule_state')).to_protobuf(),
                     resources=job.get('resources'),
                     cluster_resources=job.get('cluster_resources'),
                     cluster_resources_full=job.get('cluster_resources_full'),
@@ -428,7 +429,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     end_at=job.get('end_at'),
                     user_yaml=job.get('user_yaml'),
                     entrypoint=job.get('entrypoint'),
-                    metadata=json.dumps(job.get('metadata', {})),
+                    metadata=job.get('metadata', {}),
                     pool=job.get('pool'),
                     pool_hash=job.get('pool_hash'))
                 jobs_info.append(job_info)
