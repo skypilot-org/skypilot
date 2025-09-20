@@ -204,8 +204,18 @@ class Example:
         if not self.other_files:
             return content
 
+        # Binary file extensions to skip
+        BINARY_EXTENSIONS = {
+            '.png', '.jpg', '.jpeg', '.gif', '.mp4', '.avi', '.mov', '.pdf',
+            '.zip', '.tar', '.gz', '.bz2'
+        }
+
         content += '## Included files\n\n'
         for file in sorted(self.other_files):
+            # Skip binary files
+            if file.suffix.lower() in BINARY_EXTENSIONS:
+                continue
+
             include = 'include' if file.suffix == '.md' else 'literalinclude'
             content += f':::{{admonition}} {file.relative_to(self.path)}\n'
             content += ':class: dropdown\n\n'
