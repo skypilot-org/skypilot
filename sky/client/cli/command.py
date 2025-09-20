@@ -3228,6 +3228,9 @@ def _down_or_stop_clusters(
 
     request_ids = []
 
+    successes: List[str] = []
+    failures: List[Tuple[str, str]] = []
+
     def _down_or_stop(name: str):
         success_progress = False
         if idle_minutes_to_autostop is not None:
@@ -3238,9 +3241,10 @@ def _down_or_stop_clusters(
                 _async_call_or_wait(
                     request_id, async_call,
                     server_constants.REQUEST_NAME_PREFIX + operation)
-            except (exceptions.NotSupportedError,
-                    exceptions.ClusterNotUpError) as e:
+            except (exceptions.NotSupportedError, exceptions.ClusterNotUpError,
+                    exceptions.CloudError) as e:
                 message = str(e)
+                failures.append((name, str(e)))
             else:  # no exception raised
                 success_progress = True
                 message = (f'{colorama.Fore.GREEN}{operation} '
@@ -3276,13 +3280,17 @@ def _down_or_stop_clusters(
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
                     f'{colorama.Style.RESET_ALL}'
                     f'\nReason: {common_utils.format_exception(e)}.')
+                failures.append((name, str(e)))
             except (exceptions.NotSupportedError,
-                    exceptions.ClusterOwnerIdentityMismatchError) as e:
+                    exceptions.ClusterOwnerIdentityMismatchError,
+                    exceptions.CloudError) as e:
                 message = str(e)
+                failures.append((name, str(e)))
             else:  # no exception raised
                 message = (
                     f'{colorama.Fore.GREEN}{operation} cluster {name}...done.'
                     f'{colorama.Style.RESET_ALL}')
+                successes.append(name)
                 if not down:
                     message += ('\n  To restart the cluster, run: '
                                 f'{colorama.Style.BRIGHT}sky start {name}'
@@ -3304,6 +3312,14 @@ def _down_or_stop_clusters(
     if async_call:
         click.secho(f'{operation} requests are sent. Check the requests\' '
                     'status with `sky request get <request_id>`.')
+
+    click.echo('\nSummary:')
+    if successes:
+        click.echo('  ✓ Succeeded: ' + ', '.join(successes))
+    if failures:
+        click.echo('  ✗ Failed: ' + ', '.join(n for (n, _) in failures))
+    if failures:
+        raise click.ClickException('Some clusters failed. See summary above.')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
