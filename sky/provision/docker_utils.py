@@ -210,7 +210,7 @@ class DockerInitializer:
             # an error: `the input device is not a TTY`, and it works without
             # `-it` flag.
             # TODO(zhwu): ray use the `-it` flag, we need to check why.
-            cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
+            cmd = (f'{self.docker_cmd} exec -u 0 {self.container_name} /bin/bash -c'
                    f' {shlex.quote(cmd)} ')
 
         if flock_name is not None:
