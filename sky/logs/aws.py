@@ -5,7 +5,6 @@ from typing import Any, Dict, Optional
 import pydantic
 
 from sky.logs.agent import FluentbitAgent
-from sky.skylet import constants
 from sky.utils import resources_utils
 from sky.utils import yaml_utils
 
@@ -176,6 +175,8 @@ class CloudwatchLoggingAgent(FluentbitAgent):
         Returns:
             The Fluent Bit configuration as a YAML string.
         """
+        cfg_dict = yaml_utils.read_yaml_str(
+            super().fluentbit_config(cluster_name))
         display_name = cluster_name.display_name
         unique_name = cluster_name.name_on_cloud
         # Build tags for the log stream
@@ -197,24 +198,13 @@ class CloudwatchLoggingAgent(FluentbitAgent):
                 'value': value
             })
 
-        cfg_dict = {
-            'pipeline': {
-                'inputs': [{
-                    'name': 'tail',
-                    'path': f'{constants.SKY_LOGS_DIRECTORY}/*/*.log',
-                    'path_key': 'log_path',
-                    # Shorten the refresh interval from 60s to 1s since every
-                    # job creates a new log file and we must be responsive
-                    # for this: the VM might be autodown within a minute
-                    # right after the job completion.
-                    'refresh_interval': 1,
-                    'processors': {
-                        'logs': log_processors,
-                    }
-                }],
-                'outputs': [self.fluentbit_output_config(cluster_name)],
-            }
-        }
+        # Add log processors to config
+        processors_config = cfg_dict['pipeline']['inputs'][0].get(
+            'processors', {})
+        processors_logs_config = processors_config.get('logs', [])
+        processors_logs_config.extend(log_processors)
+        processors_config['logs'] = processors_logs_config
+        cfg_dict['pipeline']['inputs'][0]['processors'] = processors_config
 
         return yaml_utils.dump_yaml_str(cfg_dict)
 

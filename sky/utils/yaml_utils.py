@@ -44,6 +44,15 @@ def read_yaml(path: Optional[str]) -> Dict[str, Any]:
     return config
 
 
+def read_yaml_str(yaml_str: str) -> Dict[str, Any]:
+    stream = io.StringIO(yaml_str)
+    parsed_yaml = safe_load(stream)
+    if not parsed_yaml:
+        # Empty dict
+        return {}
+    return parsed_yaml
+
+
 def read_yaml_all_str(yaml_str: str) -> List[Dict[str, Any]]:
     stream = io.StringIO(yaml_str)
     config = safe_load_all(stream)
