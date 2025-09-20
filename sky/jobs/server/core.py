@@ -281,8 +281,7 @@ def launch(
         # Check whether cached jobs controller cluster is accessible
         cluster_name = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        if record is not None:
+        if global_user_state.cluster_with_name_exists(cluster_name):
             # there is a cached jobs controller cluster
             try:
                 # TODO: do something with returned status?
