@@ -1,10 +1,13 @@
 """SCP instance provisioning."""
 
+from concurrent.futures import as_completed
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 import logging
 import random
 import string
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sky.clouds.utils import scp_utils
 from sky.provision import common
@@ -42,15 +45,27 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     stopped_instances = _filter_instances(cluster_name_on_cloud, ['STOPPED'])
     if to_start_count <= len(stopped_instances):
-        head_instance_id = _get_head_instance_id(stopped_instances)
-        scp_utils.SCPClient().start_instance(head_instance_id)
-        while True:
-            instance_info = scp_utils.SCPClient().get_instance_info(
-                head_instance_id)
-            if instance_info['virtualServerState'] == 'RUNNING':
-                break
-            time.sleep(2)
-        resumed_instance_ids = [head_instance_id]
+
+        def _start(instance):
+            instance_id = instance['virtualServerId']
+            scp_utils.SCPClient().start_instance(instance_id)
+            while True:
+                info = scp_utils.SCPClient().get_instance_info(instance_id)
+                if info['virtualServerState'] == 'RUNNING':
+                    return instance_id
+                time.sleep(2)
+
+        with ThreadPoolExecutor(
+                max_workers=min(len(stopped_instances), 32)) as ex:
+            execution = [
+                ex.submit(_start, instance) for instance in stopped_instances
+            ]
+            resumed_instance_ids = [e.result() for e in execution]
+
+        resumed_instances = _filter_instances(cluster_name_on_cloud,
+                                              ['RUNNING'])
+        head_instance_id = _get_head_instance_id(resumed_instances)
+
         return common.ProvisionRecord(provider_name='scp',
                                       cluster_name=cluster_name_on_cloud,
                                       region=region,
@@ -59,35 +74,49 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                       resumed_instance_ids=resumed_instance_ids,
                                       created_instance_ids=[])
 
-    # SCP does not support multi-node
-    instance_config = config.docker_config
-    instance_config['virtualServerName'] = cluster_name_on_cloud
-
-    instance_id = None
     vpc_subnets = _get_or_create_vpc_subnets(zone_id)
-    for vpc, subnets in vpc_subnets.items():
-        sg_id = _create_security_group(zone_id, vpc)
-        if sg_id is None:
-            continue
-        try:
-            instance_config['securityGroupIds'] = [sg_id]
-            for subnet in subnets:
-                instance_config['nic']['subnetId'] = subnet
-                instance_id = _create_instance(vpc, instance_config)
-                if instance_id is not None:
-                    break
-        except Exception as e:  # pylint: disable=broad-except
-            _delete_security_group(sg_id)
-            logger.error(f'run_instances error: {e}')
-            continue
 
-    if instance_id is None:
-        raise RuntimeError('instance creation error')
+    def _create(name):
+        instance_config = deepcopy(config.docker_config)
+        instance_config['virtualServerName'] = name
+        cnt = to_start_count
 
-    if head_instance_id is None:
-        head_instance_id = instance_id
+        for vpc, subnets in vpc_subnets.items():
+            sg_id = _create_security_group(zone_id, vpc, cnt)
+            if not sg_id:
+                continue
 
-    created_instance_ids = [instance_id]
+            created_in_this_vpc = False
+            try:
+                instance_config['securityGroupIds'] = [sg_id]
+                for subnet in subnets:
+                    instance_config['nic']['subnetId'] = subnet
+                    instance_id = _create_instance(vpc, instance_config, cnt)
+                    if instance_id:
+                        created_in_this_vpc = True
+                        return instance_id
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'run_instances error ({name}): {e}')
+            finally:
+                if not created_in_this_vpc:
+                    try:
+                        _delete_security_group(sg_id)
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+
+        raise RuntimeError(f'instance creation error: {name}')
+
+    names = [_head(cluster_name_on_cloud)] + [
+        f'{_worker(cluster_name_on_cloud)}-{i:02d}'
+        for i in range(1, to_start_count)
+    ]
+
+    with ThreadPoolExecutor(max_workers=min(to_start_count, 32)) as ex:
+        execution = [ex.submit(_create, name) for name in names]
+        instance_ids = [e.result() for e in execution]
+
+    head_instance_id = instance_ids[0]
+    created_instance_ids = instance_ids
 
     return common.ProvisionRecord(provider_name='scp',
                                   cluster_name=cluster_name_on_cloud,
@@ -96,6 +125,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                   head_instance_id=head_instance_id,
                                   resumed_instance_ids=[],
                                   created_instance_ids=created_instance_ids)
+
+
+def _head(cluster_name_on_cloud):
+    return cluster_name_on_cloud.rsplit('-', 1)[0] + '-head'
+
+
+def _worker(cluster_name_on_cloud):
+    return cluster_name_on_cloud.rsplit('-', 1)[0] + '-worker'
 
 
 def _get_or_create_vpc_subnets(zone_id):
@@ -184,11 +221,13 @@ def _filter_instances(cluster_name_on_cloud,
     instances = scp_utils.SCPClient().get_instances()
     filtered_instances = []
     if status_filter is not None:
+        head_name = _head(cluster_name_on_cloud)
+        worker_prefix = _worker(cluster_name_on_cloud)
         for instance in instances:
-            if instance[
-                    'virtualServerName'] == cluster_name_on_cloud and instance[
-                        'virtualServerState'] in status_filter:
-                filtered_instances.append(instance)
+            name = instance['virtualServerName']
+            if (name == head_name) or name.startswith(worker_prefix):
+                if instance['virtualServerState'] in status_filter:
+                    filtered_instances.append(instance)
         return filtered_instances
     else:
         return instances
@@ -197,13 +236,15 @@ def _filter_instances(cluster_name_on_cloud,
 def _get_head_instance_id(instances):
     head_instance_id = None
     if len(instances) > 0:
-        head_instance_id = instances[0]['virtualServerId']
+        for instance in instances:
+            if instance['virtualServerName'].endswith('-head'):
+                head_instance_id = instance['virtualServerId']
+                break
     return head_instance_id
 
 
-def _create_security_group(zone_id, vpc):
+def _create_security_group(zone_id, vpc, cnt):
     sg_name = 'sky' + ''.join(random.choices(string.ascii_lowercase, k=8))
-
     undo_func_stack = []
     try:
         response = scp_utils.SCPClient().create_security_group(
@@ -222,8 +263,8 @@ def _create_security_group(zone_id, vpc):
                 break
             time.sleep(5)
 
-        scp_utils.SCPClient().add_security_group_rule(sg_id, 'IN', None)
-        scp_utils.SCPClient().add_security_group_rule(sg_id, 'OUT', None)
+        scp_utils.SCPClient().add_security_group_rule(sg_id, 'IN', None, cnt)
+        scp_utils.SCPClient().add_security_group_rule(sg_id, 'OUT', None, cnt)
 
         return sg_id
     except Exception as e:  # pylint: disable=broad-except
@@ -252,7 +293,7 @@ def _undo_functions(undo_func_list):
         func()
 
 
-def _create_instance(vpc_id, instance_config):
+def _create_instance(vpc_id, instance_config, cnt):
     undo_func_stack = []
     try:
         instance = scp_utils.SCPClient().create_instance(instance_config)
@@ -265,10 +306,12 @@ def _create_instance(vpc_id, instance_config):
         undo_func_stack.append(lambda: _delete_instance(instance_id))
         firewall_id = _get_firewall_id(vpc_id)
         internal_ip = instance_info['ip']
-        in_rule_id = _add_firewall_rule(firewall_id, internal_ip, 'IN', None)
+        in_rule_id = _add_firewall_rule(firewall_id, internal_ip, 'IN', None,
+                                        cnt)
         undo_func_stack.append(
             lambda: _delete_firewall_rule(firewall_id, in_rule_id))
-        out_rule_id = _add_firewall_rule(firewall_id, internal_ip, 'OUT', None)
+        out_rule_id = _add_firewall_rule(firewall_id, internal_ip, 'OUT', None,
+                                         cnt)
         undo_func_stack.append(
             lambda: _delete_firewall_rule(firewall_id, out_rule_id))
         return instance_id
@@ -305,20 +348,22 @@ def _get_firewall_id(vpc_id):
 
 
 def _add_firewall_rule(firewall_id, internal_ip, direction,
-                       ports: Optional[List[str]]):
+                       ports: Optional[List[str]], cnt: Optional[int]):
     attempts = 0
     max_attempts = 300
-
     while attempts < max_attempts:
         try:
             rule_info = scp_utils.SCPClient().add_firewall_rule(
-                firewall_id, internal_ip, direction, ports)
-            rule_id = rule_info['resourceId']
-            while True:
-                rule_info = scp_utils.SCPClient().get_firewall_rule_info(
-                    firewall_id, rule_id)
-                if rule_info['ruleState'] == 'ACTIVE':
-                    return rule_id
+                firewall_id, internal_ip, direction, ports, cnt)
+            if rule_info is not None:
+                rule_id = rule_info['resourceId']
+                while True:
+                    rule_info = scp_utils.SCPClient().get_firewall_rule_info(
+                        firewall_id, rule_id)
+                    if rule_info['ruleState'] == 'ACTIVE':
+                        return rule_id
+            else:
+                return None
         except Exception as e:  # pylint: disable=broad-except
             attempts += 1
             time.sleep(10)
@@ -330,13 +375,12 @@ def _add_firewall_rule(firewall_id, internal_ip, direction,
 def _delete_firewall_rule(firewall_id, rule_ids):
     if not isinstance(rule_ids, list):
         rule_ids = [rule_ids]
-
     attempts = 0
     max_attempts = 300
     while attempts < max_attempts:
         try:
             scp_utils.SCPClient().delete_firewall_rule(firewall_id, rule_ids)
-            if _remaining_firewall_rule(firewall_id, rule_ids) is False:
+            if not _remaining_firewall_rule(firewall_id, rule_ids):
                 return
         except Exception as e:  # pylint: disable=broad-except
             attempts += 1
@@ -385,19 +429,32 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    del provider_config, worker_only
-    instances = scp_utils.SCPClient().get_instances()
+    del provider_config
+    instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
 
-    for instance in instances:
-        if instance['virtualServerName'] == cluster_name_on_cloud:
+    if worker_only:
+        head_name = _head(cluster_name_on_cloud)
+        instances = [
+            instance for instance in instances
+            if instance['virtualServerName'] != head_name
+        ]
+
+    def _stop(instance):
+        try:
             instance_id = instance['virtualServerId']
             scp_utils.SCPClient().stop_instance(instance_id)
             while True:
-                instance_info = scp_utils.SCPClient().get_instance_info(
-                    instance_id)
+                info = scp_utils.SCPClient().get_instance_info(instance_id)
+                if info['virtualServerState'] == 'STOPPED':
+                    return instance_id
                 time.sleep(2)
-                if instance_info['virtualServerState'] == 'STOPPED':
-                    break
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'stop_instances error: {e}')
+
+    with ThreadPoolExecutor(max_workers=min(len(instances), 32)) as ex:
+        execution = [ex.submit(_stop, instance) for instance in instances]
+        for e in as_completed(execution):
+            e.result()
 
 
 def terminate_instances(
@@ -406,24 +463,26 @@ def terminate_instances(
     worker_only: bool = False,
 ) -> None:
     del provider_config, worker_only
-    instances = scp_utils.SCPClient().get_instances()
+    instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
 
-    for instance in instances:
-        if instance['virtualServerName'] == cluster_name_on_cloud:
-            try:
-                instance_id = instance['virtualServerId']
-                instance_info = scp_utils.SCPClient().get_instance_info(
-                    instance_id)
-                vpc_id = instance_info['vpcId']
-                sg_id = instance_info['securityGroupIds'][0]['securityGroupId']
-                firewall_id = _get_firewall_id(vpc_id)
-                rule_ids = _get_firewall_rule_ids(instance_info, firewall_id,
-                                                  None)
-                _delete_firewall_rule(firewall_id, rule_ids)
-                _delete_instance(instance_id)
-                _delete_security_group(sg_id)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'terminate_instances error: {e}')
+    def _terminate(instance):
+        try:
+            instance_id = instance['virtualServerId']
+            instance_info = scp_utils.SCPClient().get_instance_info(instance_id)
+            vpc_id = instance_info['vpcId']
+            sg_id = instance_info['securityGroupIds'][0]['securityGroupId']
+            firewall_id = _get_firewall_id(vpc_id)
+            rule_ids = _get_firewall_rule_ids(instance_info, firewall_id, None)
+            _delete_firewall_rule(firewall_id, rule_ids)
+            _delete_instance(instance_id)
+            _delete_security_group(sg_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'terminate_instances error: {e}')
+
+    with ThreadPoolExecutor(max_workers=min(len(instances), 32)) as ex:
+        execution = [ex.submit(_terminate, instance) for instance in instances]
+        for e in as_completed(execution):
+            e.result()
 
 
 def query_instances(
@@ -431,11 +490,10 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
+) -> Dict[str, Optional[status_lib.ClusterStatus]]:
     del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
-
     status_map = {
         'CREATING': status_lib.ClusterStatus.INIT,
         'EDITING': status_lib.ClusterStatus.INIT,
@@ -448,13 +506,12 @@ def query_instances(
         'TERMINATED': None,
     }
 
-    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
-                              Optional[str]]] = {}
+    statuses = {}
     for instance in instances:
         status = status_map[instance['virtualServerState']]
         if non_terminated_only and status is None:
             continue
-        statuses[instance['virtualServerId']] = (status, None)
+        statuses[instance['virtualServerId']] = status
     return statuses
 
 
@@ -467,7 +524,6 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     del region
-
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     head_instance_id = _get_head_instance_id(running_instances)
 
@@ -482,9 +538,19 @@ def get_cluster_info(
                 tags={})
         ]
 
+    # max-worker-port - min-worker-port should be at leat 3 * nproc
+    # RAY_worker_maximum_startup_concurrency for the performance
+    custom_ray_options = {
+        'node-manager-port': 11001,
+        'min-worker-port': 11002,
+        'max-worker-port': 11200,
+        'ray-client-server-port': 10001
+    }
+
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
+        custom_ray_options=custom_ray_options,
         provider_name='scp',
         provider_config=provider_config,
     )
@@ -495,20 +561,17 @@ def open_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-
     del provider_config
-    instances = scp_utils.SCPClient().get_instances()
-
+    instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     for instance in instances:
-        if instance['virtualServerName'] == cluster_name_on_cloud:
-            instance_info = scp_utils.SCPClient().get_instance_info(
-                instance['virtualServerId'])
-            sg_id = instance_info['securityGroupIds'][0]['securityGroupId']
-            scp_utils.SCPClient().add_security_group_rule(sg_id, 'IN', ports)
-            vpc_id = instance_info['vpcId']
-            internal_ip = instance_info['ip']
-            firewall_id = _get_firewall_id(vpc_id)
-            _add_firewall_rule(firewall_id, internal_ip, 'IN', ports)
+        instance_info = scp_utils.SCPClient().get_instance_info(
+            instance['virtualServerId'])
+        sg_id = instance_info['securityGroupIds'][0]['securityGroupId']
+        scp_utils.SCPClient().add_security_group_rule(sg_id, 'IN', ports, None)
+        vpc_id = instance_info['vpcId']
+        internal_ip = instance_info['ip']
+        firewall_id = _get_firewall_id(vpc_id)
+        _add_firewall_rule(firewall_id, internal_ip, 'IN', ports, None)
 
 
 def cleanup_ports(
@@ -516,15 +579,12 @@ def cleanup_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-
     del provider_config
-    instances = scp_utils.SCPClient().get_instances()
-
+    instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     for instance in instances:
-        if instance['virtualServerName'] == cluster_name_on_cloud:
-            instance_info = scp_utils.SCPClient().get_instance_info(
-                instance['virtualServerId'])
-            vpc_id = instance_info['vpcId']
-            firewall_id = _get_firewall_id(vpc_id)
-            rule_ids = _get_firewall_rule_ids(instance_info, firewall_id, ports)
-            _delete_firewall_rule(firewall_id, rule_ids)
+        instance_info = scp_utils.SCPClient().get_instance_info(
+            instance['virtualServerId'])
+        vpc_id = instance_info['vpcId']
+        firewall_id = _get_firewall_id(vpc_id)
+        rule_ids = _get_firewall_rule_ids(instance_info, firewall_id, ports)
+        _delete_firewall_rule(firewall_id, rule_ids)
