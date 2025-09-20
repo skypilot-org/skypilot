@@ -1016,6 +1016,18 @@ def get_handle_from_cluster_name(
     return pickle.loads(row.handle)
 
 
+def get_status_from_cluster_name(
+        cluster_name: str) -> Optional[status_lib.ClusterStatus]:
+    assert _SQLALCHEMY_ENGINE is not None
+    assert cluster_name is not None, 'cluster_name cannot be None'
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(
+            cluster_table.c.status).filter_by(name=cluster_name).first()
+    if row is None:
+        return None
+    return status_lib.ClusterStatus[row.status]
+
+
 @_init_db
 @metrics_lib.time_me
 def get_glob_cluster_names(cluster_name: str) -> List[str]:
@@ -1408,10 +1420,12 @@ def get_cluster_from_name(
 def cluster_with_name_exists(cluster_name: str) -> bool:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table.c.name).filter_by(name=cluster_name).first()
+        row = session.query(
+            cluster_table.c.name).filter_by(name=cluster_name).first()
     if row is None:
         return False
     return True
+
 
 @_init_db
 @metrics_lib.time_me

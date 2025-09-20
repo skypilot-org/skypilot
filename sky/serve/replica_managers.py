@@ -957,7 +957,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         # provision) or the cluster is preempted and cleaned up by the status
         # refresh. In this case, we skip spawning a new down process to save
         # controller resources.
-        if global_user_state.get_cluster_from_name(info.cluster_name) is None:
+        if not global_user_state.cluster_with_name_exists(info.cluster_name):
             self._handle_sky_down_finish(info, exitcode=0)
             return
 
