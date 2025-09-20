@@ -538,7 +538,7 @@ def get_cluster_info(
                 tags={})
         ]
 
-    # max-worker-port - min-worker-port should be at leat 3 * nproc
+    # max-worker-port - min-worker-port should be at least 3 * nproc
     # RAY_worker_maximum_startup_concurrency for the performance
     custom_ray_options = {
         'node-manager-port': 11001,
