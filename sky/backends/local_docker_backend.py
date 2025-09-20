@@ -274,13 +274,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     def _execute(self,
                  handle: LocalDockerResourceHandle,
                  task: 'task_lib.Task',
-                 detach_run: bool,
                  dryrun: bool = False) -> None:
         """ Launches the container."""
-        if detach_run:
-            raise NotImplementedError('detach_run=True is not supported in '
-                                      'LocalDockerBackend.')
-
         if task.num_nodes > 1:
             raise NotImplementedError(
                 'Tasks with num_nodes > 1 is currently not supported in '
