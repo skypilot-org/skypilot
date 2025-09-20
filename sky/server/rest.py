@@ -9,6 +9,7 @@ import typing
 from typing import Any, Callable, cast, Optional, TypeVar
 
 import colorama
+import urllib3.exceptions
 
 from sky import exceptions
 from sky import sky_logging
@@ -53,6 +54,7 @@ _session.headers[constants.VERSION_HEADER] = (
 _transient_errors = [
     requests.exceptions.RequestException,
     ConnectionError,
+    urllib3.exceptions.HTTPError,
 ]
 
 

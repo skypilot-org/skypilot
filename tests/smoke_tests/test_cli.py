@@ -19,6 +19,7 @@ from sky import skypilot_config
 from sky.client import sdk
 from sky.server import common as server_common
 from sky.skylet import constants
+from sky.utils import common_utils
 
 
 @pytest.mark.no_remote_server
@@ -111,3 +112,23 @@ def test_sky_login_wih_env_endpoint(generic_cloud: str):
             constants.SKY_API_SERVER_URL_ENV_VAR: "https://SUPERFAKE_ENDPOINT.unreachable"
         })
     smoke_tests_utils.run_one_test(test, check_sky_status=False)
+
+
+def test_cli_auto_retry(generic_cloud: str):
+    """Test that cli auto retry works."""
+    name = smoke_tests_utils.get_cluster_name()
+    port = common_utils.find_free_port(23456)
+    run_command = 'for i in {1..120}; do echo "output $i" && sleep 1; done'
+    test = smoke_tests_utils.Test(
+        'cli_auto_retry',
+        [
+            # Chaos proxy will kill TCP connections every 30 seconds.
+            f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 & echo $! > /tmp/{name}-chaos.pid',
+            # Both launch streaming and logs streaming should survive the chaos.
+            f'SKYPILOT_API_SERVER_ENDPOINT=http://127.0.0.1:{port} sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{run_command}\'',
+            f'kill $(cat /tmp/{name}-chaos.pid)',
+        ],
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+        teardown=f'sky down -y {name}; kill $(cat /tmp/{name}-chaos.pid) || true'
+    )
+    smoke_tests_utils.run_one_test(test)
