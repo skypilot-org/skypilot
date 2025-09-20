@@ -510,6 +510,16 @@ available_node_types:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['ray-node-type']
+            - name: SKYPILOT_POD_CPU_CORE_LIMIT
+              valueFrom:
+                resourceFieldRef:
+                  containerName: ray-node
+                  resource: requests.cpu
+            - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT
+              valueFrom:
+                resourceFieldRef:
+                  containerName: ray-node
+                  resource: requests.memory
             {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
             - name: {{ key }}
               value: {{ value }}
