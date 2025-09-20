@@ -2737,6 +2737,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             (tunnel.port, tunnel.pid) if tunnel is not None else None)
 
     def get_grpc_channel(self) -> 'grpc.Channel':
+        grpc_options = [
+            # The task YAMLs can be large, so the default
+            # max_receive_message_length of 4MB might not be enough.
+            ('grpc.max_receive_message_length', -1),
+        ]
         # It's fine to not grab the lock here, as we're only reading,
         # and writes are very rare.
         # It's acceptable to read while another process is opening a tunnel,
@@ -2753,7 +2758,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.settimeout(0.5)
                     s.connect(('localhost', tunnel.port))
-                return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                             options=grpc_options)
             except socket.error as e:
                 logger.warning(
                     'Failed to connect to SSH tunnel for cluster '
@@ -2772,19 +2778,22 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                  f'{self.cluster_name!r}, '
                                  'opening the tunnel')
                     tunnel = self._open_and_update_skylet_tunnel()
-                    return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                    return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                                 options=grpc_options)
                 try:
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                         s.settimeout(0.5)
                         s.connect(('localhost', tunnel.port))
-                        return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                        return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                                     options=grpc_options)
                 except socket.error as e:
                     logger.warning(
                         'Failed to connect to SSH tunnel for cluster '
                         f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
                         'opening new tunnel')
                     tunnel = self._open_and_update_skylet_tunnel()
-                    return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                    return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                                 options=grpc_options)
         except locks.LockTimeout as e:
             raise RuntimeError(
                 'Failed to get gRPC channel for cluster '
