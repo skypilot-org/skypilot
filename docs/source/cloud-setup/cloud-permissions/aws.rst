@@ -59,7 +59,7 @@ Using AWS Systems Manager (SSM)
 
 `AWS Systems Manager Session Manager <https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html>`_ provides secure shell access to EC2 instances without requiring direct network access through SSH ports or bastion hosts.
 
-SkyPilot can be configured to use SSM for SSH connections by setting ``use_ssm`` to true in your :ref:`config.yaml <config-yaml>` file under the ``aws`` section.
+SkyPilot can be configured to use SSM for SSH connections by setting ``use_ssm`` to true in your :ref:`config.yaml <config-yaml>` file under the ``aws`` section. One use case for SSM is to enable running SkyPilot for AWS instances that do not have public IPs. By also setting ``use_internal_ips`` to true in your :ref:`config.yaml <config-yaml>` file under the ``aws`` section SkyPilot will use private IPs to connect to the instances and will have access via SSM.
 
 Prerequisites
 ~~~~~~~~~~~~~
