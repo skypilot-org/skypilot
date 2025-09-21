@@ -128,8 +128,9 @@ message GetAllJobIdsByNameResponse {
 
 message CancelJobsByIdRequest {
   optional JobIds job_ids = 1;
-  bool all_users = 2;
-  string current_workspace = 3;
+  optional string user_hash = 2;
+  bool all_users = 3;
+  string current_workspace = 4;
 }
 
 message CancelJobsByIdResponse {

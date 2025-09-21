@@ -218,14 +218,16 @@ class GetAllJobIdsByNameResponse(_message.Message):
     def __init__(self, job_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class CancelJobsByIdRequest(_message.Message):
-    __slots__ = ("job_ids", "all_users", "current_workspace")
+    __slots__ = ("job_ids", "user_hash", "all_users", "current_workspace")
     JOB_IDS_FIELD_NUMBER: _ClassVar[int]
+    USER_HASH_FIELD_NUMBER: _ClassVar[int]
     ALL_USERS_FIELD_NUMBER: _ClassVar[int]
     CURRENT_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     job_ids: JobIds
+    user_hash: str
     all_users: bool
     current_workspace: str
-    def __init__(self, job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., all_users: bool = ..., current_workspace: _Optional[str] = ...) -> None: ...
+    def __init__(self, job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., user_hash: _Optional[str] = ..., all_users: bool = ..., current_workspace: _Optional[str] = ...) -> None: ...
 
 class CancelJobsByIdResponse(_message.Message):
     __slots__ = ("message",)

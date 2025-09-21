@@ -463,11 +463,19 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
             job_ids = None
             if request.HasField('job_ids'):
                 job_ids = list(request.job_ids.ids)
+            user_hash = request.user_hash if request.HasField(
+                'user_hash') else None
+            if job_ids is None and not request.all_users and user_hash is None:
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    'user_hash is required when job_ids is None and '
+                    'all_users is False')
 
             message = managed_job_utils.cancel_jobs_by_id(
                 job_ids=job_ids,
                 all_users=request.all_users,
-                current_workspace=request.current_workspace)
+                current_workspace=request.current_workspace,
+                user_hash=user_hash)
             return managed_jobsv1_pb2.CancelJobsByIdResponse(message=message)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))

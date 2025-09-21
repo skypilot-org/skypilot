@@ -916,8 +916,14 @@ def set_local_log_file(job_id: int, task_id: Optional[int],
 # ======== utility functions ========
 @_init_db
 def get_nonterminal_job_ids_by_name(name: Optional[str],
+                                    user_hash: Optional[str] = None,
                                     all_users: bool = False) -> List[int]:
-    """Get non-terminal job ids by name."""
+    """Get non-terminal job ids by name.
+
+    If name is None:
+    1. if all_users is False, get for the given user_hash
+    2. otherwise, get for all users
+    """
     assert _SQLALCHEMY_ENGINE is not None
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -934,8 +940,15 @@ def get_nonterminal_job_ids_by_name(name: Optional[str],
             ])
         ]
         if name is None and not all_users:
-            where_conditions.append(
-                job_info_table.c.user_hash == common_utils.get_user_hash())
+            if user_hash is None:
+                # For backwards compatibility. With codegen, USER_ID_ENV_VAR
+                # was set to the correct value by the jobs controller, as
+                # part of ManagedJobCodeGen._build(). This is no longer the
+                # case for the Skylet gRPC server, which is why we need to
+                # pass it explicitly through the request body.
+                logger.debug('user_hash is None, using current user hash')
+                user_hash = common_utils.get_user_hash()
+            where_conditions.append(job_info_table.c.user_hash == user_hash)
         if name is not None:
             # We match the job name from `job_info` for the jobs submitted after
             # #1982, and from `spot` for the jobs submitted before #1982, whose

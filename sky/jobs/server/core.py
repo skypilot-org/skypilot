@@ -882,6 +882,7 @@ def cancel(name: Optional[str] = None,
                 elif all:
                     request = managed_jobsv1_pb2.CancelJobsByIdRequest(
                         job_ids=None,
+                        user_hash=common_utils.get_user_hash(),
                         all_users=False,
                         current_workspace=current_workspace)
                     response = backend_utils.invoke_skylet_with_retries(

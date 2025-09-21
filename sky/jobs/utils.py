@@ -176,7 +176,7 @@ def _validate_consolidation_mode_config(
         if all_jobs:
             nonterminal_jobs = (
                 managed_job_state.get_nonterminal_job_ids_by_name(
-                    None, all_users=True))
+                    None, None, all_users=True))
             if nonterminal_jobs:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.InconsistentConsolidationModeError(
@@ -705,14 +705,15 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 
 def cancel_jobs_by_id(job_ids: Optional[List[int]],
                       all_users: bool = False,
-                      current_workspace: Optional[str] = None) -> str:
+                      current_workspace: Optional[str] = None,
+                      user_hash: Optional[str] = None) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
     """
     if job_ids is None:
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
-            None, all_users)
+            None, user_hash, all_users)
     job_ids = list(set(job_ids))
     if not job_ids:
         return 'No job to cancel.'
