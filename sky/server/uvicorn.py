@@ -206,7 +206,6 @@ class Server(uvicorn.Server):
         add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
         # Use default loop policy of uvicorn (use uvloop if available).
-        self.config.setup_event_loop()
         lag_threshold = perf_utils.get_loop_lag_threshold()
         if lag_threshold is not None:
             event_loop = asyncio.get_event_loop()
