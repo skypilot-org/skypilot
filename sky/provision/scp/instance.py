@@ -128,11 +128,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
 
 def _head(cluster_name_on_cloud):
-    return cluster_name_on_cloud.rsplit('-', 1)[0] + '-head'
+    return cluster_name_on_cloud[:14] + '-head'
 
 
 def _worker(cluster_name_on_cloud):
-    return cluster_name_on_cloud.rsplit('-', 1)[0] + '-worker'
+    return cluster_name_on_cloud[:14] + '-worker'
 
 
 def _get_or_create_vpc_subnets(zone_id):
