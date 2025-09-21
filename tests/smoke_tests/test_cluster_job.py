@@ -238,7 +238,7 @@ def test_scp_job_queue():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # SCP does not have T4 gpus.
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
@@ -423,7 +423,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # SCP does not have T4 gpus
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 @pytest.mark.no_do  # DO does not have T4 gpus
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus
@@ -642,7 +642,6 @@ def test_tpu_pod_slice_gke():
 
 # ---------- Simple apps. ----------
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
 def test_multi_hostname(generic_cloud: str):
@@ -665,7 +664,6 @@ def test_multi_hostname(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
 def test_multi_node_failure(generic_cloud: str):
