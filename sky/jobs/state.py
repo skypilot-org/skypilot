@@ -25,7 +25,7 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky.schemas.generated import managed_jobsv1_pb2
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -34,6 +34,11 @@ from sky.utils.db import migration_utils
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row
+
+    from sky.schemas.generated import managed_jobsv1_pb2
+else:
+    managed_jobsv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2')
 
 # Separate callback types for sync and async contexts
 SyncCallbackType = Callable[[str], None]
