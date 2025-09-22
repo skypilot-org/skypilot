@@ -5512,6 +5512,8 @@ def serve_update(
         sky serve update --mode blue_green sky-service-16aa new_service.yaml
 
     """
+    # TODO(lloyd-brown): Add a way to update number of replicas for serve
+    # the way we did for pools.
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
     task = _generate_task_with_service(
