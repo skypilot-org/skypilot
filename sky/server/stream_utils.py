@@ -183,13 +183,10 @@ async def _tail_log_file(
                                 ' cancelled\n')
                     break
             elif cluster_name is not None:
-                # For provision logs, terminate streaming if cluster is UP
+                # For provision logs, terminate streaming if
                 cluster_record = global_user_state.get_cluster_from_name(
                     cluster_name)
-                if (cluster_record and cluster_record['status'] in [
-                        status_lib.ClusterStatus.UP,
-                        status_lib.ClusterStatus.STOPPED
-                ]):
+                if cluster_record is None or cluster_record['status'] != status_lib.ClusterStatus.INIT:
                     break
             if not follow:
                 break
