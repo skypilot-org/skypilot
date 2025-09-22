@@ -3267,9 +3267,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Usage Collection:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, launched_resources)
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        if record is not None:
-            usage_lib.messages.usage.update_cluster_status(record['status'])
+        status = global_user_state.get_status_from_cluster_name(cluster_name)
+        if status is not None:
+            usage_lib.messages.usage.update_cluster_status(status)
 
         assert launched_resources.region is not None, handle
 
@@ -3538,8 +3538,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             error_message + '\n' + str(e),
                             failover_history=e.failover_history) from None
             if dryrun:
-                record = global_user_state.get_cluster_from_name(cluster_name)
-                return record['handle'] if record is not None else None, False
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
+                return handle if handle is not None else None, False
 
             if config_dict['provisioning_skipped']:
                 # Skip further provisioning.
@@ -3547,10 +3548,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # ('handle', 'provision_record', 'resources_vars')
                 # We need to return the handle - but it should be the existing
                 # handle for the cluster.
-                record = global_user_state.get_cluster_from_name(cluster_name)
-                assert record is not None and record['handle'] is not None, (
-                    cluster_name, record)
-                return record['handle'], True
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
+                assert handle is not None, (cluster_name, handle)
+                return handle, True
 
             if 'provision_record' in config_dict:
                 # New provisioner is used here.
@@ -5001,10 +5002,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{handle.cluster_name!r}. Assuming the cluster is still '
                     'up.')
         if not cluster_status_fetched:
-            record = global_user_state.get_cluster_from_name(
+            status = global_user_state.get_status_from_cluster_name(
                 handle.cluster_name)
-            prev_cluster_status = record[
-                'status'] if record is not None else None
+            prev_cluster_status = status if status is not None else None
         if prev_cluster_status is None:
             # When the cluster is not in the cluster table, we guarantee that
             # all related resources / cache / config are cleaned up, i.e. it
