@@ -158,20 +158,20 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
         [
             'echo "==== Test multi-tenant managed jobs ===="',
             *set_user(user_1, user_1_name, [
-                f'sky jobs launch -n {name}-1 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml -y',
+                f'sky jobs launch -n {name}-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml -y',
                 f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-1 | grep SUCCEEDED',
                 f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep {name}-1 | grep SUCCEEDED',
             ]),
             *set_user(user_2, user_2_name, [
                 f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
                 f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep {name}-1 | grep SUCCEEDED',
-                f'sky jobs launch -n {name}-2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml -y',
+                f'sky jobs launch -n {name}-2 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml -y',
                 f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-2 | grep SUCCEEDED',
                 f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep {name}-2 | grep SUCCEEDED',
             ]),
             'echo "==== Test cancellation ===="',
             *set_user(user_1, user_1_name, [
-                f'sky jobs launch --async -n {name}-cancel-1 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} sleep 300 -y',
+                f'sky jobs launch --async -n {name}-cancel-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} sleep 300 -y',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f'{name}-cancel-1',
@@ -185,7 +185,7 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                 user_2,
                 user_2_name,
                 [
-                    f'sky jobs launch --async -n {name}-cancel-2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} sleep 300 -y',
+                    f'sky jobs launch --async -n {name}-cancel-2 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} sleep 300 -y',
                     smoke_tests_utils.
                     get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                         job_name=f'{name}-cancel-2',
