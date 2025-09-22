@@ -49,8 +49,15 @@ install_requires = [
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'requests',
+    # SkyPilot inherits from uvicorn.Server to customize the behavior of
+    # uvicorn, so we need to pin uvicorn version to avoid potential break
+    # changes.
+    # Notes for current version check:
+    # - uvicorn 0.33.0 is the latest version that supports Python 3.8
+    # - uvicorn 0.36.0 removes setup_event_loop thus breaks SkyPilot's custom
+    #   behavior.
+    'uvicorn[standard] >=0.33.0, <0.36.0',
     'fastapi',
-    'uvicorn[standard]<0.36.0',
     # Some pydantic versions are not compatible with ray. Adopted from ray's
     # setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
