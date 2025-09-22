@@ -112,6 +112,7 @@ server_dependencies = [
     GRPC,
     PROTOBUF,
     'aiosqlite',
+    'greenlet',
 ]
 
 local_ray = [

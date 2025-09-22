@@ -1354,10 +1354,12 @@ def provision_logs(cluster_body: payloads.ClusterNameBody,
     effective_tail = None if tail is None or tail <= 0 else tail
 
     return fastapi.responses.StreamingResponse(
-        content=stream_utils.log_streamer(None,
-                                          log_path,
-                                          tail=effective_tail,
-                                          follow=follow),
+        content=stream_utils.log_streamer(
+            None,
+            log_path,
+            tail=effective_tail,
+            follow=follow,
+            cluster_name=cluster_body.cluster_name),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',

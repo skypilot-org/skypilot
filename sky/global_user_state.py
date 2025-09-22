@@ -24,6 +24,7 @@ from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
+from sqlalchemy.ext import asyncio as sql_async
 from sqlalchemy.ext import declarative
 
 from sky import models
@@ -51,6 +52,7 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_SQLALCHEMY_ENGINE_ASYNC: Optional[sql_async.AsyncEngine] = None
 _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24.0
@@ -296,6 +298,20 @@ def create_table(engine: sqlalchemy.engine.Engine):
         migration_utils.GLOBAL_USER_STATE_VERSION)
 
 
+def initialize_and_get_db_async() -> sql_async.AsyncEngine:
+    global _SQLALCHEMY_ENGINE_ASYNC
+    if _SQLALCHEMY_ENGINE_ASYNC is not None:
+        return _SQLALCHEMY_ENGINE_ASYNC
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE_ASYNC is not None:
+            return _SQLALCHEMY_ENGINE_ASYNC
+
+        _SQLALCHEMY_ENGINE_ASYNC = db_utils.get_engine('state',
+                                                       async_engine=True)
+    initialize_and_get_db()
+    return _SQLALCHEMY_ENGINE_ASYNC
+
+
 # We wrap the sqlalchemy engine initialization in a thread
 # lock to ensure that multiple threads do not initialize the
 # engine which could result in a rare race condition where
@@ -319,6 +335,22 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
         # return engine
         _SQLALCHEMY_ENGINE = engine
         return _SQLALCHEMY_ENGINE
+
+
+def _init_db_async(func):
+    """Initialize the async database."""
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        if _SQLALCHEMY_ENGINE_ASYNC is None:
+            # this may happen multiple times since there is no locking
+            # here but thats fine, this is just a short circuit for the
+            # common case.
+            await context_utils.to_thread(initialize_and_get_db_async)
+
+        return await func(*args, **kwargs)
+
+    return wrapper
 
 
 def _init_db(func):
@@ -1015,6 +1047,24 @@ def get_handle_from_cluster_name(
     if row is None:
         return None
     return pickle.loads(row.handle)
+
+
+@_init_db_async
+@metrics_lib.time_me
+async def get_status_from_cluster_name_async(
+        cluster_name: str) -> Optional[status_lib.ClusterStatus]:
+    """Get the status of a cluster."""
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    assert cluster_name is not None, 'cluster_name cannot be None'
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        result = await session.execute(
+            sqlalchemy.select(cluster_table.c.status).where(
+                cluster_table.c.name == cluster_name))
+        row = result.first()
+
+        if row is None:
+            return None
+        return status_lib.ClusterStatus(row[0])
 
 
 @_init_db
