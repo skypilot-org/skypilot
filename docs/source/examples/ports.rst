@@ -70,13 +70,6 @@ SkyPilot also supports opening ports through the CLI:
 
     $ sky launch -c jupyter --ports 8888 jupyter_lab.yaml
 
-You can then get the endpoint URL directly:
-
-.. code-block:: console
-
-    $ sky status --endpoint 8888 jupyter
-    http://35.223.97.21:8888
-
 Security and lifecycle considerations
 -------------------------------------
 
