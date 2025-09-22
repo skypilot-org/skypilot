@@ -429,7 +429,11 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     end_at=job.get('end_at'),
                     user_yaml=job.get('user_yaml'),
                     entrypoint=job.get('entrypoint'),
-                    metadata=job.get('metadata', {}),
+                    metadata={
+                        k: v
+                        for k, v in job.get('metadata', {}).items()
+                        if v is not None
+                    },
                     pool=job.get('pool'),
                     pool_hash=job.get('pool_hash'))
                 jobs_info.append(job_info)
