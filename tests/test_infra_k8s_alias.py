@@ -21,12 +21,7 @@ from sky import resources as sky_resources
 
 def _candidate_cmds(path: Path):
     yield [
-        sys.executable,
-        "-m",
-        "sky.cli",
-        "launch",
-        "--dryrun",
-        "-y",
+        sys.executable, "-m", "sky.cli", "launch", "--dryrun", "-y",
         str(path)
     ]
     if shutil.which("sky"):
@@ -112,9 +107,8 @@ def test_launch_dryrun_accepts_infra(tmp_path: Path, yaml_text, label):
         pytest.skip("Could not invoke SkyPilot CLI; ensure `sky` is on PATH.")
 
     out = (proc.stdout or "") + (proc.stderr or "")
-    assert proc.returncode == 0, (
-        "Expected success; got {}\n\n{}".format(proc.returncode, out)
-    )
+    assert proc.returncode == 0, ("Expected success; got {}\n\n{}".format(
+        proc.returncode, out))
 
 
 @pytest.mark.parametrize(
