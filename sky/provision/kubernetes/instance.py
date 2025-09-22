@@ -467,7 +467,7 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             else:
                 is_autoscaling = _cluster_had_autoscale_event(
                     namespace, context, create_pods_start)
-                msg = 'Kubernetes cluster triggered scale up'
+                msg = 'Kubernetes cluster is autoscaling'
 
             if is_autoscaling:
                 rich_utils.force_update_status(
