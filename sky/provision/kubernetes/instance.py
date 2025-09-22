@@ -318,9 +318,7 @@ def _cluster_had_autoscale_event(namespace, context, search_start):
     """
     assert namespace is not None
     autoscaling_reasons = {
-        'TriggeredScaleUp',
-        'SuccessfulRescale',
-        'ScalingReplicaSet'
+        'TriggeredScaleUp', 'SuccessfulRescale', 'ScalingReplicaSet'
     }
 
     def _convert_to_utc(timestamp):
