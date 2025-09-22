@@ -1056,12 +1056,14 @@ async def get_status_from_cluster_name_async(
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     assert cluster_name is not None, 'cluster_name cannot be None'
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        row = await session.query(cluster_table.c.status
-                                 ).filter_by(name=cluster_name).first()
+        result = await session.execute(
+            sqlalchemy.select(cluster_table.c.status).where(
+                cluster_table.c.name == cluster_name))
+        row = result.fetchone()
 
     if row is None:
         return None
-    return status_lib.ClusterStatus(row.status)
+    return status_lib.ClusterStatus(row[0])
 
 
 @_init_db
