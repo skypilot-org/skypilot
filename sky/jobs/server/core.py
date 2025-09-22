@@ -869,37 +869,22 @@ def cancel(name: Optional[str] = None,
         if handle.is_grpc_enabled_with_flag:
             current_workspace = skypilot_config.get_active_workspace()
             try:
-                if all_users:
-                    request = managed_jobsv1_pb2.CancelJobsByIdRequest(
-                        job_ids=None,
-                        all_users=True,
-                        current_workspace=current_workspace)
-                    response = backend_utils.invoke_skylet_with_retries(
-                        lambda: cloud_vm_ray_backend.SkyletClient(
-                            handle.get_grpc_channel(
-                            )).cancel_managed_jobs_by_id(request))
-                    stdout = response.message
-                elif all:
-                    request = managed_jobsv1_pb2.CancelJobsByIdRequest(
-                        job_ids=None,
-                        user_hash=common_utils.get_user_hash(),
-                        all_users=False,
-                        current_workspace=current_workspace)
-                    response = backend_utils.invoke_skylet_with_retries(
-                        lambda: cloud_vm_ray_backend.SkyletClient(
-                            handle.get_grpc_channel(
-                            )).cancel_managed_jobs_by_id(request))
-                    stdout = response.message
-                elif job_ids:
-                    request = managed_jobsv1_pb2.CancelJobsByIdRequest(
-                        job_ids=managed_jobsv1_pb2.JobIds(ids=job_ids),
-                        all_users=False,
-                        current_workspace=current_workspace)
-                    response = backend_utils.invoke_skylet_with_retries(
-                        lambda: cloud_vm_ray_backend.SkyletClient(
-                            handle.get_grpc_channel(
-                            )).cancel_managed_jobs_by_id(request))
-                    stdout = response.message
+                if all_users or all or job_ids:
+                    cancel_by_id_request = (
+                        managed_jobsv1_pb2.CancelJobsByIdRequest(
+                            job_ids=None if
+                            (all_users or all) else managed_jobsv1_pb2.JobIds(
+                                ids=job_ids),
+                            all_users=all_users,
+                            user_hash=common_utils.get_user_hash()
+                            if all else None,
+                            current_workspace=current_workspace))
+                    cancel_by_id_response = (
+                        backend_utils.invoke_skylet_with_retries(
+                            lambda: cloud_vm_ray_backend.SkyletClient(
+                                handle.get_grpc_channel()).
+                            cancel_managed_jobs_by_id(cancel_by_id_request)))
+                    stdout = cancel_by_id_response.message
                 elif name is not None:
                     cancel_by_name_request = (
                         managed_jobsv1_pb2.CancelJobByNameRequest(
@@ -911,11 +896,11 @@ def cancel(name: Optional[str] = None,
                             cancel_managed_job_by_name(cancel_by_name_request)))
                     stdout = cancel_by_name_response.message
                 else:
+                    assert pool is not None, (job_ids, name, pool, all)
                     cancel_by_pool_request = (
                         managed_jobsv1_pb2.CancelJobsByPoolRequest(
                             pool_name=pool,
                             current_workspace=current_workspace))
-                    assert pool is not None, (job_ids, name, pool, all)
                     cancel_by_pool_response = (
                         backend_utils.invoke_skylet_with_retries(
                             lambda: cloud_vm_ray_backend.SkyletClient(
@@ -927,15 +912,10 @@ def cancel(name: Optional[str] = None,
                 use_legacy = True
 
         if use_legacy:
-            if all_users:
+            if all_users or all or job_ids:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                    None, all_users=True)
-            elif all:
-                code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                    None)
-            elif job_ids:
-                code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                    job_ids)
+                    None if (all_users or all) else job_ids,
+                    all_users=all_users)
             elif name is not None:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(
                     name)
