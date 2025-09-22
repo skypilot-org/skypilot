@@ -116,6 +116,9 @@ Path = str
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = constants.SKY_REMOTE_WORKDIR
+# Unset RAY_RAYLET_PID to prevent the Ray cluster in the SkyPilot runtime
+# from interfering with the Ray cluster in the user's task (if any).
+UNSET_RAY_ENV_VARS = ['RAY_RAYLET_PID']
 
 logger = sky_logging.init_logger(__name__)
 
@@ -712,6 +715,8 @@ class RayCodeGen:
             done
             echo "skypilot: cached mount uploaded complete"
         fi""")
+        unset_ray_env_vars = ' && '.join(
+            [f'unset {var}' for var in UNSET_RAY_ENV_VARS])
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
@@ -721,6 +726,7 @@ class RayCodeGen:
             script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
 
         if script is not None:
+            script=f'{unset_ray_env_vars}; {{script}}'
             script += rclone_flush_script
             sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
 
@@ -3939,6 +3945,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         remote_setup_file_name = f'/tmp/sky_setup_{self.run_timestamp}'
         # Need this `-i` option to make sure `source ~/.bashrc` work
         setup_cmd = f'/bin/bash -i {remote_setup_file_name} 2>&1'
+        unset_ray_env_vars = ' && '.join(
+            [f'unset {var}' for var in UNSET_RAY_ENV_VARS])
+        setup_cmd = f'{unset_ray_env_vars}; {setup_cmd}'
         runners = handle.get_command_runners(avoid_ssh_control=True)
 
         def _setup_node(node_id: int) -> None:
