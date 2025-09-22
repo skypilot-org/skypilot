@@ -217,10 +217,8 @@ def test_get_clusters_cache_size(_mock_db_conn):
 
                 # Call multiple times - should hit cache
                 try:
-                    runners1 = first_handle.get_command_runners(
-                        force_cached=True)
-                    runners2 = first_handle.get_command_runners(
-                        force_cached=True)
+                    first_handle.get_command_runners()
+                    first_handle.get_command_runners()
 
                     # Verify cache behavior if cache_info is available
                     if hasattr(first_handle.get_command_runners, 'cache_info'):
