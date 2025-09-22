@@ -152,6 +152,9 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && '
             'uv pip uninstall skypilot && '
             'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
+            # Fix https://github.com/skypilot-org/skypilot/issues/7287
+            # for legacy skypilot versions.
+            'uv pip install uvicorn==0.35.0 && '
             f'{pip_install_cmd}')
 
         # Install current version in current environment
