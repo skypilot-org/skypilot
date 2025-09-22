@@ -12,7 +12,6 @@ import shutil
 import subprocess
 import sys
 
-
 from jsonschema import validate
 from jsonschema import ValidationError
 import pytest
