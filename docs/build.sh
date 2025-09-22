@@ -44,10 +44,8 @@ if [ "$AUTO_BUILD" = true ]; then
 else
     rm -rf build docs
     
-    # Set build environment
-    if [ "$CI" = "true" ] || [ "$GITHUB_ACTIONS" = "true" ] || [ "$READTHEDOCS" = "True" ]; then
-        export SPHINX_BUILD_PRODUCTION=true
-    else
+    # Set build environment (only if not already set by GitHub Actions)
+    if [ -z "$SPHINX_BUILD_PRODUCTION" ]; then
         export SPHINX_BUILD_LOCAL=true
     fi
 
