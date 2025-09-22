@@ -1059,11 +1059,11 @@ async def get_status_from_cluster_name_async(
         result = await session.execute(
             sqlalchemy.select(cluster_table.c.status).where(
                 cluster_table.c.name == cluster_name))
-        row = result.fetchone()
+        row = result.first()
 
-    if row is None:
-        return None
-    return status_lib.ClusterStatus(row[0])
+        if row is None:
+            return None
+        return status_lib.ClusterStatus(row[0])
 
 
 @_init_db
