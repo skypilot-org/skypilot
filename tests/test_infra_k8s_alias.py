@@ -23,7 +23,7 @@ from sky.utils import schemas
 
 def _candidate_cmds(path: Path):
     yield [
-        sys.executable, '-m', 'sky.cli', 'launch', '--dryrun', '-y', 
+        sys.executable, '-m', 'sky.cli', 'launch', '--dryrun', '-y',
         str(path)
     ]
     if shutil.which('sky'):
