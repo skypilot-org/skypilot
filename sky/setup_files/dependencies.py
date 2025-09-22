@@ -49,8 +49,15 @@ install_requires = [
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'requests',
+    # SkyPilot inherits from uvicorn.Server to customize the behavior of
+    # uvicorn, so we need to pin uvicorn version to avoid potential break
+    # changes.
+    # Notes for current version check:
+    # - uvicorn 0.33.0 is the latest version that supports Python 3.8
+    # - uvicorn 0.36.0 removes setup_event_loop thus breaks SkyPilot's custom
+    #   behavior.
+    'uvicorn[standard] >=0.33.0, <0.36.0',
     'fastapi',
-    'uvicorn[standard]',
     # Some pydantic versions are not compatible with ray. Adopted from ray's
     # setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
@@ -110,7 +117,8 @@ server_dependencies = [
 local_ray = [
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
-    # Ray 2.6.1+ resolved cluster launcher bugs and grpcio issues on Apple Silicon.
+    # Ray 2.6.1+ resolved cluster launcher bugs
+    # and grpcio issues on Apple Silicon.
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
     'ray[default] >= 2.6.1',
 ]
@@ -188,6 +196,7 @@ extras_require: Dict[str, List[str]] = {
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
+    'primeintellect': [],  # No dependencies needed for primeintellect
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
     'vast': ['vastai-sdk>=0.1.12'],
     'vsphere': [
@@ -200,9 +209,14 @@ extras_require: Dict[str, List[str]] = {
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
     'nebius': [
+        # Nebius requires grpcio and protobuf, so we need to include
+        # our constraints here.
         'nebius>=0.2.47',
+        GRPC,
+        PROTOBUF,
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
+    'seeweb': ['ecsapi>=0.2.0'],
     'server': server_dependencies,
 }
 
@@ -213,6 +227,7 @@ clouds_for_all.remove('remote')
 if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
     clouds_for_all.remove('nebius')
+    clouds_for_all.remove('seeweb')
 
 if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds

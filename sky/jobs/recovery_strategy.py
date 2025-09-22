@@ -543,7 +543,7 @@ class StrategyExecutor:
 
             except exceptions.NoClusterLaunchedError:
                 # Update the status to PENDING during backoff.
-                state.set_backoff_pending_async(self.job_id, self.task_id)
+                await state.set_backoff_pending_async(self.job_id, self.task_id)
                 # Calculate the backoff time and sleep.
                 gap_seconds = (backoff.current_backoff()
                                if self.pool is None else 1)
