@@ -115,7 +115,11 @@ def check_for_setup_message(pool_name: str,
         f'echo "$s"; echo; echo; echo "$s" | grep "{setup_message}"')
 
 
-def basic_pool_conf(num_workers: int, infra: str, setup_cmd: str = 'echo "setup message"',):
+def basic_pool_conf(
+    num_workers: int,
+    infra: str,
+    setup_cmd: str = 'echo "setup message"',
+):
     return textwrap.dedent(f"""
     pool:
         workers: {num_workers}
@@ -273,7 +277,10 @@ def test_setup_logs_in_starting_pool(generic_cloud: str):
     """Test that setup logs are streamed in starting state."""
     # Do a very long setup so we know the setup logs are streamed in
     pool_config = basic_pool_conf(
-        1, infra=generic_cloud, setup_cmd='for i in {1..10000}; do echo "Noisy setup $i"; sleep 1; done')
+        1,
+        infra=generic_cloud,
+        setup_cmd='for i in {1..10000}; do echo "Noisy setup $i"; sleep 1; done'
+    )
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_pool_yaml(pool_yaml, pool_config)

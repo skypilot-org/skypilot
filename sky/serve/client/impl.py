@@ -119,7 +119,12 @@ def apply(
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     noun = 'pool' if pool else 'service'
-    # Handle the case where task is None and workers is specified
+    # There are two cases here. If task is None, we should be trying to
+    # update the number of workers in the pool. If task is not None, we should
+    # be trying to apply a new config to the pool. The two code paths
+    # are slightly different with us needing to craft the dag and validate
+    # it if we have a task. In the future we could move this logic to the
+    # server side and simplify this code, for the time being we keep it here.
     if task is None:
         if workers is None:
             raise ValueError(f'Cannot create a new {noun} without specifying '
