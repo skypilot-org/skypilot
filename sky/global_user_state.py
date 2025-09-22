@@ -1048,6 +1048,22 @@ def get_handle_from_cluster_name(
     return pickle.loads(row.handle)
 
 
+@_init_db_async
+@metrics_lib.time_me
+async def get_status_from_cluster_name_async(
+        cluster_name: str) -> Optional[status_lib.ClusterStatus]:
+    """Get the status of a cluster."""
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    assert cluster_name is not None, 'cluster_name cannot be None'
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        row = await session.query(cluster_table.c.status
+                                 ).filter_by(name=cluster_name).first()
+
+    if row is None:
+        return None
+    return status_lib.ClusterStatus(row.status)
+
+
 @_init_db
 @metrics_lib.time_me
 def get_glob_cluster_names(cluster_name: str) -> List[str]:
