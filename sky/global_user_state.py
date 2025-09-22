@@ -29,7 +29,7 @@ from sqlalchemy.ext import declarative
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
-from sky.server import metrics as metrics_lib
+from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -516,7 +516,7 @@ def add_or_update_cluster(cluster_name: str,
                           task_config: Optional[Dict[str, Any]] = None,
                           is_managed: bool = False,
                           provision_log_path: Optional[str] = None,
-                          update_only: bool = False):
+                          existing_cluster_hash: Optional[str] = None):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -532,10 +532,12 @@ def add_or_update_cluster(cluster_name: str,
         is_managed: Whether the cluster is launched by the
             controller.
         provision_log_path: Absolute path to provision.log, if available.
-        update_only: Whether to update the cluster only. If True,
-            the cluster record will not be inserted if one does not exist.
+        existing_cluster_hash: If specified, the cluster will be updated
+            only if the cluster_hash matches. If a cluster does not exist,
+            it will not be inserted and an error will be raised.
     """
     assert _SQLALCHEMY_ENGINE is not None
+
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
@@ -631,17 +633,17 @@ def add_or_update_cluster(cluster_name: str,
             session.rollback()
             raise ValueError('Unsupported database dialect')
 
-        if update_only:
+        if existing_cluster_hash is not None:
             count = session.query(cluster_table).filter_by(
-                name=cluster_name).update({
+                name=cluster_name, cluster_hash=existing_cluster_hash).update({
                     **conditional_values, cluster_table.c.handle: handle,
                     cluster_table.c.status: status.value,
-                    cluster_table.c.cluster_hash: cluster_hash,
                     cluster_table.c.status_updated_at: status_updated_at
                 })
             assert count <= 1
             if count == 0:
-                raise ValueError(f'Cluster {cluster_name} not found.')
+                raise ValueError(f'Cluster {cluster_name} with hash '
+                                 f'{existing_cluster_hash} not found.')
         else:
             insert_stmnt = insert_func(cluster_table).values(
                 name=cluster_name,
@@ -1235,16 +1237,17 @@ def _get_cluster_usage_intervals(
     return pickle.loads(row.usage_intervals)
 
 
-def _get_cluster_launch_time(cluster_hash: str) -> Optional[int]:
-    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+def _get_cluster_launch_time(
+    usage_intervals: Optional[List[Tuple[int,
+                                         Optional[int]]]]) -> Optional[int]:
     if usage_intervals is None:
         return None
     return usage_intervals[0][0]
 
 
-def _get_cluster_duration(cluster_hash: str) -> int:
+def _get_cluster_duration(
+        usage_intervals: Optional[List[Tuple[int, Optional[int]]]]) -> int:
     total_duration = 0
-    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     if usage_intervals is None:
         return total_duration
@@ -1406,6 +1409,7 @@ def get_clusters(
     exclude_managed_clusters: bool = False,
     workspaces_filter: Optional[Set[str]] = None,
     user_hashes_filter: Optional[Set[str]] = None,
+    cluster_names: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Get clusters from the database.
 
@@ -1416,6 +1420,8 @@ def get_clusters(
             that has workspace field set to one of the values.
         user_hashes_filter: If specified, only include clusters
             that has user_hash field set to one of the values.
+        cluster_names: If specified, only include clusters
+            that has name field set to one of the values.
     """
     # is a cluster has a null user_hash,
     # we treat it as belonging to the current user.
@@ -1434,11 +1440,13 @@ def get_clusters(
                 # If current_user_hash is in user_hashes_filter, we include
                 # clusters that have a null user_hash.
                 query = query.filter(
-                    cluster_table.c.user_hash.in_(user_hashes_filter) |
-                    (cluster_table.c.user_hash is None))
+                    (cluster_table.c.user_hash.in_(user_hashes_filter) |
+                     (cluster_table.c.user_hash is None)))
             else:
                 query = query.filter(
                     cluster_table.c.user_hash.in_(user_hashes_filter))
+        if cluster_names is not None:
+            query = query.filter(cluster_table.c.name.in_(cluster_names))
         query = query.order_by(sqlalchemy.desc(cluster_table.c.launched_at))
         rows = query.all()
     records = []
@@ -1498,7 +1506,9 @@ def get_clusters(
 @_init_db
 @metrics_lib.time_me
 def get_clusters_from_history(
-        days: Optional[int] = None) -> List[Dict[str, Any]]:
+        days: Optional[int] = None,
+        abbreviate_response: bool = False,
+        cluster_hashes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
     Args:
@@ -1511,68 +1521,111 @@ def get_clusters_from_history(
         List of cluster records with history information.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        # Explicitly select columns from both tables to avoid ambiguity
-        query = session.query(
-            cluster_history_table.c.cluster_hash, cluster_history_table.c.name,
-            cluster_history_table.c.num_nodes,
-            cluster_history_table.c.requested_resources,
-            cluster_history_table.c.launched_resources,
-            cluster_history_table.c.usage_intervals,
-            cluster_history_table.c.user_hash,
-            cluster_history_table.c.last_creation_yaml,
-            cluster_history_table.c.last_creation_command,
-            cluster_history_table.c.workspace.label('history_workspace'),
-            cluster_table.c.status, cluster_table.c.workspace,
-            cluster_table.c.status_updated_at).select_from(
-                cluster_history_table.join(cluster_table,
-                                           cluster_history_table.c.cluster_hash
-                                           == cluster_table.c.cluster_hash,
-                                           isouter=True))
 
-        rows = query.all()
+    current_user_hash = common_utils.get_user_hash()
 
     # Prepare filtering parameters
     cutoff_time = None
     if days is not None:
         cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
 
-    records = []
-    for row in rows:
-        user_hash = _get_user_hash_or_current_user(row.user_hash)
-        launched_at = _get_cluster_launch_time(row.cluster_hash)
-        duration = _get_cluster_duration(row.cluster_hash)
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Explicitly select columns from both tables to avoid ambiguity
+        if abbreviate_response:
+            query = session.query(
+                cluster_history_table.c.cluster_hash,
+                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
+                cluster_history_table.c.launched_resources,
+                cluster_history_table.c.usage_intervals,
+                cluster_history_table.c.user_hash,
+                cluster_history_table.c.workspace.label('history_workspace'),
+                cluster_table.c.status, cluster_table.c.workspace)
+        else:
+            query = session.query(
+                cluster_history_table.c.cluster_hash,
+                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
+                cluster_history_table.c.launched_resources,
+                cluster_history_table.c.usage_intervals,
+                cluster_history_table.c.user_hash,
+                cluster_history_table.c.last_creation_yaml,
+                cluster_history_table.c.last_creation_command,
+                cluster_history_table.c.workspace.label('history_workspace'),
+                cluster_table.c.status, cluster_table.c.workspace)
 
+        query = query.select_from(
+            cluster_history_table.join(cluster_table,
+                                       cluster_history_table.c.cluster_hash ==
+                                       cluster_table.c.cluster_hash,
+                                       isouter=True))
+        if cluster_hashes is not None:
+            query = query.filter(
+                cluster_history_table.c.cluster_hash.in_(cluster_hashes))
+        rows = query.all()
+
+    filtered_rows = []
+    usage_intervals_dict = {}
+    row_to_user_hash = {}
+    for row in rows:
+        row_usage_intervals: List[Tuple[int, Optional[int]]] = []
+        if row.usage_intervals:
+            try:
+                row_usage_intervals = pickle.loads(row.usage_intervals)
+            except (pickle.PickleError, AttributeError):
+                pass
         # Parse status
         status = None
         if row.status:
             status = status_lib.ClusterStatus[row.status]
-
         # Apply filtering: always include active clusters, filter historical
         # ones by time
         if cutoff_time is not None and status is None:  # Historical cluster
             # For historical clusters, check if they were used recently
             # Use the most recent activity from usage_intervals to determine
             # last use
-            usage_intervals = []
-            if row.usage_intervals:
-                try:
-                    usage_intervals = pickle.loads(row.usage_intervals)
-                except (pickle.PickleError, AttributeError):
-                    usage_intervals = []
-
             # Find the most recent activity time from usage_intervals
             last_activity_time = None
-            if usage_intervals:
+            if row_usage_intervals:
                 # Get the end time of the last interval (or start time if
                 # still running)
-                last_interval = usage_intervals[-1]
+                last_interval = row_usage_intervals[-1]
                 last_activity_time = (last_interval[1] if last_interval[1]
                                       is not None else last_interval[0])
 
             # Skip historical clusters that haven't been used recently
             if last_activity_time is None or last_activity_time < cutoff_time:
                 continue
+
+        filtered_rows.append(row)
+        usage_intervals_dict[row.cluster_hash] = row_usage_intervals
+        user_hash = (row.user_hash
+                     if row.user_hash is not None else current_user_hash)
+        row_to_user_hash[row.cluster_hash] = user_hash
+
+    rows = filtered_rows
+    user_hashes = set(row_to_user_hash.values())
+    user_hash_to_user = _get_users(user_hashes)
+    cluster_hashes = set(row_to_user_hash.keys())
+    if not abbreviate_response:
+        last_cluster_event_dict = _get_last_cluster_event_multiple(
+            cluster_hashes, ClusterEventType.STATUS_CHANGE)
+
+    records = []
+    for row in rows:
+        user_hash = row_to_user_hash[row.cluster_hash]
+        user = user_hash_to_user.get(user_hash, None)
+        user_name = user.name if user is not None else None
+        if not abbreviate_response:
+            last_event = last_cluster_event_dict.get(row.cluster_hash, None)
+        usage_intervals: Optional[List[Tuple[
+            int,
+            Optional[int]]]] = usage_intervals_dict.get(row.cluster_hash, None)
+        launched_at = _get_cluster_launch_time(usage_intervals)
+        duration = _get_cluster_duration(usage_intervals)
+
+        # Parse status
+        status = None
+        if row.status:
+            status = status_lib.ClusterStatus[row.status]
 
         # Parse launched resources safely
         launched_resources = None
@@ -1582,17 +1635,6 @@ def get_clusters_from_history(
             except (pickle.PickleError, AttributeError):
                 launched_resources = None
 
-        # Parse usage intervals safely
-        usage_intervals = []
-        if row.usage_intervals:
-            try:
-                usage_intervals = pickle.loads(row.usage_intervals)
-            except (pickle.PickleError, AttributeError):
-                usage_intervals = []
-
-        # Get user name from user hash
-        user = get_user(user_hash)
-        user_name = user.name if user is not None else None
         workspace = (row.history_workspace
                      if row.history_workspace else row.workspace)
 
@@ -1608,11 +1650,11 @@ def get_clusters_from_history(
             'user_hash': user_hash,
             'user_name': user_name,
             'workspace': workspace,
-            'last_creation_yaml': row.last_creation_yaml,
-            'last_creation_command': row.last_creation_command,
-            'last_event': get_last_cluster_event(
-                row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE),
         }
+        if not abbreviate_response:
+            record['last_creation_yaml'] = row.last_creation_yaml
+            record['last_creation_command'] = row.last_creation_command
+            record['last_event'] = last_event
 
         records.append(record)
 

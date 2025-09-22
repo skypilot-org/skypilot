@@ -1733,6 +1733,9 @@ def test_aws_custom_image():
         # Test python>=3.12 where SkyPilot should automatically create a separate
         # conda env for runtime with python 3.10.
         'docker:continuumio/miniconda3:latest',
+        # Test image with custom MOTD that can potentially interfere with
+        # SSH user/rsync path detection.
+        'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
@@ -2027,8 +2030,13 @@ def test_long_setup_run_script(generic_cloud: str):
     'examples/distributed-pytorch/train.yaml',
     'examples/distributed-pytorch/train-rdzv.yaml'
 ])
-def test_min_gpt(generic_cloud: str, train_file: str):
-    accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
+def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
+                                                                        str]):
+    if generic_cloud == 'kubernetes':
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    else:
+        accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
 
     def read_and_modify(file_path: str) -> str:

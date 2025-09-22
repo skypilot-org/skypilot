@@ -50,7 +50,7 @@ install_requires = [
     'pyyaml > 3.13, != 5.4.*',
     'requests',
     'fastapi',
-    'uvicorn[standard]',
+    'uvicorn[standard]<0.36.0',
     # Some pydantic versions are not compatible with ray. Adopted from ray's
     # setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
@@ -189,6 +189,7 @@ extras_require: Dict[str, List[str]] = {
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
+    'primeintellect': [],  # No dependencies needed for primeintellect
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
     'vast': ['vastai-sdk>=0.1.12'],
     'vsphere': [
