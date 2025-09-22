@@ -179,7 +179,9 @@ class UsageMessageToReport(MessageToReport):
             self.client_entrypoint = common_utils.get_current_client_entrypoint(
                 msg)
         self.entrypoint = msg
-        self.skypilot_config = dict(skypilot_config.to_dict())
+        config = prepare_json_from_yaml_config(dict(skypilot_config.to_dict()))
+        if config:
+            self.skypilot_config = config[0]
 
     def set_internal(self):
         self.internal = True
