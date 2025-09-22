@@ -115,7 +115,7 @@ def check_for_setup_message(pool_name: str,
         f'echo "$s"; echo; echo; echo "$s" | grep "{setup_message}"')
 
 
-def basic_pool_conf(num_workers: int, setup_cmd: str = 'echo "setup message"'):
+def basic_pool_conf(num_workers: int, infra: str, setup_cmd: str = 'echo "setup message"',):
     return textwrap.dedent(f"""
     pool:
         workers: {num_workers}
@@ -123,6 +123,7 @@ def basic_pool_conf(num_workers: int, setup_cmd: str = 'echo "setup message"'):
     resources:
         cpus: 2+
         memory: 4GB+
+        infra: {infra}
 
     setup: |
         {setup_cmd}
@@ -142,6 +143,7 @@ def test_vllm_pool(generic_cloud: str):
 
     resources:
         accelerators: {{L4}}
+        infra: {generic_cloud}
 
     setup: |
         uv venv --python 3.10 --seed
@@ -187,6 +189,7 @@ def test_vllm_pool(generic_cloud: str):
         any_of:
             - use_spot: true
             - use_spot: false
+        infra: {generic_cloud}
 
     envs:
         START_IDX: 0  # Will be overridden by batch launcher script
@@ -270,7 +273,7 @@ def test_setup_logs_in_starting_pool(generic_cloud: str):
     """Test that setup logs are streamed in starting state."""
     # Do a very long setup so we know the setup logs are streamed in
     pool_config = basic_pool_conf(
-        1, 'for i in {1..10000}; do echo "Noisy setup $i"; sleep 1; done')
+        1, infra=generic_cloud, setup_cmd='for i in {1..10000}; do echo "Noisy setup $i"; sleep 1; done')
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_pool_yaml(pool_yaml, pool_config)
@@ -291,7 +294,7 @@ def test_setup_logs_in_starting_pool(generic_cloud: str):
 def test_setup_logs_in_pool_exits(generic_cloud: str):
     """Test that setup logs are streamed and exit once the setup is complete."""
     """We omit --no-follow to test that we exit."""
-    pool_config = basic_pool_conf(num_workers=1)
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_pool_yaml(pool_yaml, pool_config)
@@ -313,7 +316,7 @@ def test_update_workers(generic_cloud: str):
     """Test that we can update the number of workers in a pool, both 
     up and down.
     """
-    pool_config = basic_pool_conf(num_workers=1)
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_pool_yaml(pool_yaml, pool_config)
@@ -330,7 +333,7 @@ def test_update_workers(generic_cloud: str):
                 _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
                     pool_name=pool_name, num_workers=1),
                 # Shutting down takes a while, so we give it a longer timeout.
-                wait_until_num_workers(pool_name, 1, timeout=timeout * 1.5),
+                wait_until_num_workers(pool_name, 1, timeout=timeout * 2),
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
             teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
@@ -341,7 +344,7 @@ def test_update_workers(generic_cloud: str):
 def test_update_workers_and_yaml(generic_cloud: str):
     """Test that we error if the user specifies a yaml and --workers.
     """
-    pool_config = basic_pool_conf(num_workers=1)
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_pool_yaml(pool_yaml, pool_config)
@@ -360,7 +363,7 @@ def test_update_workers_and_yaml(generic_cloud: str):
 def test_update_workers_no_pool(generic_cloud: str):
     """Test that we error if the user specifies a yaml and --workers.
     """
-    pool_config = basic_pool_conf(num_workers=1)
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_pool_yaml(pool_yaml, pool_config)
