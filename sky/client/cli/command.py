@@ -4858,7 +4858,7 @@ def jobs_pool_apply(
     if pool_yaml is None or len(pool_yaml) == 0:
         if pool is None:
             raise click.UsageError(
-                'Either POOL_YAML or --pool must be provided.')
+                'A pool name must be provided to update the number of workers.')
         task = None
         click.secho(f'Attempting to update {pool} to have {workers} workers',
                     fg='cyan')

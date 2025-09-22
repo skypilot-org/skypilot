@@ -310,6 +310,9 @@ def test_setup_logs_in_pool_exits(generic_cloud: str):
 
 
 def test_update_workers(generic_cloud: str):
+    """Test that we can update the number of workers in a pool, both 
+    up and down.
+    """
     pool_config = basic_pool_conf(num_workers=1)
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
@@ -323,12 +326,51 @@ def test_update_workers(generic_cloud: str):
                 wait_until_pool_ready(pool_name, timeout=timeout),
                 _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
                     pool_name=pool_name, num_workers=2),
-                wait_until_num_workers(
-                    pool_name,
-                    2,
-                    timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                wait_until_num_workers(pool_name, 2, timeout=timeout),
+                _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                    pool_name=pool_name, num_workers=1),
+                # Shutting down takes a while, so we give it a longer timeout.
+                wait_until_num_workers(pool_name, 1, timeout=timeout * 1.5),
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
             teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
         )
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_update_workers_and_yaml(generic_cloud: str):
+    """Test that we error if the user specifies a yaml and --workers.
+    """
+    pool_config = basic_pool_conf(num_workers=1)
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_pool_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        test = smoke_tests_utils.Test('test_update_workers_and_yaml', [
+            _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                  pool_yaml=pool_yaml.name),
+            f's=$(sky jobs pool apply {pool_yaml.name} -p {pool_name} --workers 2 -y 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Cannot specify both --workers and POOL_YAML"',
+        ],
+                                      timeout=timeout,
+                                      teardown=_TEARDOWN_POOL.format(
+                                          pool_name=pool_name))
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_update_workers_no_pool(generic_cloud: str):
+    """Test that we error if the user specifies a yaml and --workers.
+    """
+    pool_config = basic_pool_conf(num_workers=1)
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_pool_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        test = smoke_tests_utils.Test('test_update_workers_and_yaml', [
+            _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                  pool_yaml=pool_yaml.name),
+            f's=$(sky jobs pool apply --workers 2 -y 2>&1); echo "$s"; echo; echo; echo "$s" | grep "A pool name must be provided to update the number of workers."',
+        ],
+                                      timeout=timeout,
+                                      teardown=_TEARDOWN_POOL.format(
+                                          pool_name=pool_name))
         smoke_tests_utils.run_one_test(test)
