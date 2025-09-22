@@ -792,6 +792,12 @@ class GetConfigBody(RequestBody):
 class CostReportBody(RequestBody):
     """The request body for the cost report endpoint."""
     days: Optional[int] = 30
+    # we use hashes instead of names to avoid the case where
+    # the name is not unique
+    cluster_hashes: Optional[List[str]] = None
+    # Only return fields that are needed for the dashboard
+    # summary page
+    dashboard_summary_response: bool = False
 
 
 class RequestPayload(BasePayload):

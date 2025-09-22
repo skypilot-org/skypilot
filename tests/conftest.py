@@ -34,7 +34,9 @@ from common_test_fixtures import mock_job_table_one_job
 from common_test_fixtures import mock_queue
 from common_test_fixtures import mock_redirect_log_file
 from common_test_fixtures import mock_services_no_service
+from common_test_fixtures import mock_services_no_service_grpc
 from common_test_fixtures import mock_services_one_service
+from common_test_fixtures import mock_services_one_service_grpc
 from common_test_fixtures import mock_stream_utils
 from common_test_fixtures import reset_global_state
 from common_test_fixtures import skyignore_dir
