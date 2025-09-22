@@ -3,6 +3,7 @@
 import os
 
 import grpc
+
 from sky import exceptions
 from sky import sky_logging
 from sky.jobs import state as managed_job_state
