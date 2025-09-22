@@ -3153,8 +3153,8 @@ def get_clusters(
                         'ssh_private_key_content']
             record['credentials'] = credential
 
-    def _update_records_with_resources(records: List[Optional[Dict[str, Any]]],
-                                       summary_response: bool = False) -> None:
+    def _update_records_with_resources(
+        records: List[Optional[Dict[str, Any]]],) -> None:
         """Add the resources to the record."""
         for record in _get_records_with_handle(records):
             handle = record['handle']
@@ -3179,7 +3179,7 @@ def get_clusters(
         _update_records_with_credentials(records)
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
-        _update_records_with_resources(records, summary_response)
+        _update_records_with_resources(records)
         return records
 
     plural = 's' if len(records) > 1 else ''
@@ -3274,7 +3274,7 @@ def get_clusters(
             logger.warning(f'  {bright}{cluster_name}{reset}: {e}')
 
     # Add resources to the records
-    _update_records_with_resources(kept_records, summary_response)
+    _update_records_with_resources(kept_records)
     return kept_records
 
 
