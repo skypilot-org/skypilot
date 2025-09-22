@@ -4088,6 +4088,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.info(
             ux_utils.finishing_message('Setup completed.', setup_log_path))
 
+    def _download_file(self, handle: CloudVmRayResourceHandle,
+                       local_file_path: str, remote_file_path: str) -> None:
+        """Syncs file from remote to local."""
+        runners = handle.get_command_runners()
+        head_runner = runners[0]
+        head_runner.rsync(
+            source=local_file_path,
+            target=remote_file_path,
+            up=False,
+            stream_logs=False,
+        )
+
     def _exec_code_on_head(
         self,
         handle: CloudVmRayResourceHandle,

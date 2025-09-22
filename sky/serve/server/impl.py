@@ -1,5 +1,4 @@
 """Implementation of the SkyServe core APIs."""
-import os
 import pathlib
 import re
 import shlex
@@ -190,21 +189,13 @@ def up(
     tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
         service_name, task)
 
-    # Persist the service file to the local filesystem for easy updates.
-    service_file_name = serve_utils.get_local_service_file_name(service_name, 1)
-
-    # Make sure folder exists.
-    if not os.path.exists(os.path.dirname(service_file_name)):
-        raise RuntimeError(f'Directory {os.path.dirname(service_file_name)}'
-                           'does not exist, can\'t persist service yaml.')
-
-    logger.debug(f'Persisting service yaml to {service_file_name}')
-
-    with open(service_file_name, 'w',
-              encoding='utf-8') as service_file, tempfile.NamedTemporaryFile(
-                  prefix=f'controller-task-{service_name}-',
-                  mode='w',
-              ) as controller_file:
+    with tempfile.NamedTemporaryFile(
+            prefix=f'service-task-{service_name}-',
+            mode='w',
+    ) as service_file, tempfile.NamedTemporaryFile(
+            prefix=f'controller-task-{service_name}-',
+            mode='w',
+    ) as controller_file:
         controller = controller_utils.get_controller_for_pool(pool)
         controller_name = controller.value.cluster_name
         task_config = task.to_yaml_config()
@@ -512,15 +503,28 @@ def update(
                     f'{workers} is not supported. Ignoring the update.')
 
         # Load the existing task configuration from the service's YAML file
-        latest_yaml_path = serve_utils.get_local_service_file_name(
-            service_name, service_record['version'])
+        latest_yaml_path = serve_utils.generate_task_yaml_file_name(
+            service_name, service_record['version'], expand_user=False)
 
         logger.debug('Loading existing task configuration from '
                      f'{latest_yaml_path} to create a new modified task.')
 
-        # Load the existing task configuration
-        existing_config = yaml_utils.read_yaml(latest_yaml_path)
-        task = task_lib.Task.from_yaml_config(existing_config)
+        # Get the path locally.
+        with tempfile.NamedTemporaryFile(
+                prefix=f'service-task-{service_name}-',
+                mode='w',
+        ) as service_file:
+            try:
+                backend.download_file(handle, latest_yaml_path,
+                                      service_file.name)
+            except exceptions.CommandError as e:
+                raise RuntimeError(
+                    f'Failed to download the old task configuration from '
+                    f'{latest_yaml_path}: {e.error_msg}') from e
+
+            # Load the existing task configuration
+            existing_config = yaml_utils.read_yaml(service_file.name)
+            task = task_lib.Task.from_yaml_config(existing_config)
 
         if task.service is None:
             with ux_utils.print_exception_no_traceback():
@@ -617,10 +621,9 @@ def update(
                 raise ValueError(f'Failed to parse version: {version_string}; '
                                  f'Returncode: {returncode}') from e
 
-    with open(serve_utils.get_local_service_file_name(service_name,
-                                                      current_version),
-              'w',
-              encoding='utf-8') as service_file:
+    with tempfile.NamedTemporaryFile(
+            prefix=f'{service_name}-v{current_version}',
+            mode='w') as service_file:
         task_config = task.to_yaml_config()
         yaml_utils.dump_yaml(service_file.name, task_config)
         remote_task_yaml_path = serve_utils.generate_task_yaml_file_name(
@@ -658,16 +661,6 @@ def update(
                                                    stream_logs=True)
             except exceptions.CommandError as e:
                 raise RuntimeError(e.error_msg) from e
-
-    # Remove the old service file so we only maintain one at a time.
-    try:
-        os.remove(
-            serve_utils.get_local_service_file_name(service_name,
-                                                    current_version - 1))
-    except FileNotFoundError:
-        logger.debug(
-            f'Tried to remove {service_name} '
-            f'version {current_version - 1} but failed to find it. Skip.')
 
     cmd = 'sky jobs pool status' if pool else 'sky serve status'
     logger.info(
