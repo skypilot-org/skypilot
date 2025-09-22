@@ -305,7 +305,7 @@ def _raise_command_running_error(message: str, command: str, pod_name: str,
 
 def _cluster_had_autoscale_event(namespace, context, search_start):
     """Detects whether the cluster had a autoscaling event after a
-    specified datetime.
+    specified datetime. This only works when using cluster-autoscaler.
 
     Args:
         namespace: kubernetes namespace
@@ -317,9 +317,6 @@ def _cluster_had_autoscale_event(namespace, context, search_start):
         A boolean whether the cluster has an autoscaling event or not.
     """
     assert namespace is not None
-    autoscaling_reasons = {
-        'TriggeredScaleUp', 'SuccessfulRescale', 'ScalingReplicaSet'
-    }
 
     def _convert_to_utc(timestamp):
         if timestamp.tzinfo is None:
@@ -328,16 +325,15 @@ def _cluster_had_autoscale_event(namespace, context, search_start):
 
     try:
         events = kubernetes.core_api(context).list_namespaced_event(
-            namespace=namespace)
+            namespace=namespace, field_selector='reason=TriggeredScaleUp')
         for event in events.items:
             ts = event.last_timestamp
             if ts and _convert_to_utc(ts) > search_start:
-                if event.reason in autoscaling_reasons:
-                    return True
-        return False
+                return True
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Error occurred while detecting cluster autoscaler: {e}')
-        return False
+
+    return False
 
 
 @timeline.event
