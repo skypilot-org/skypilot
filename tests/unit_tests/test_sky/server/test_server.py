@@ -13,7 +13,6 @@ import uvicorn
 from sky.server import server
 from sky.utils import common_utils
 from sky.utils import config_utils
-from sky.utils import context
 
 
 @mock.patch('uvicorn.run')
@@ -215,8 +214,7 @@ async def test_logs():
 
 
 @mock.patch('sky.utils.context_utils.hijack_sys_attrs')
-@mock.patch('asyncio.run')
-def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
+def test_server_run_uses_uvloop(mock_hijack_sys_attrs):
     """Test that Server.run uses uvloop event loop policy."""
     from sky.server.uvicorn import Server
 
@@ -226,32 +224,23 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
                             host='127.0.0.1',
                             port=8000)
     server_instance = Server(config)
-    original_setup = config.setup_event_loop
 
     uvloop_policy_set = False
     uvloop_available = True
 
-    def setup_and_check():
-        # Call original setup to configure event loop
-        original_setup()
-        # Check if uvloop policy is now set
+    async def mock_serve(*args, **kwargs):
         nonlocal uvloop_policy_set, uvloop_available
-        import asyncio
         try:
             import uvloop
-            policy = asyncio.get_event_loop_policy()
-            uvloop_policy_set = isinstance(policy, uvloop.EventLoopPolicy)
+            running_loop = asyncio.get_running_loop()
+            uvloop_policy_set = isinstance(running_loop, uvloop.Loop)
         except ImportError:
             # uvloop not available
             uvloop_available = False
 
-    with mock.patch.object(config,
-                           'setup_event_loop',
-                           side_effect=setup_and_check):
-        # Call server.run
-        server_instance.run()
+    server_instance.serve = mock_serve
+    server_instance.run()
 
-    mock_asyncio_run.assert_called_once()
     threads_after = len(threading.enumerate())
     assert threads_after == threads_before
 
