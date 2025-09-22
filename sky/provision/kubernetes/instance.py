@@ -311,10 +311,17 @@ def _detect_cluster_event_reason_occurred(namespace, context, search_start,
             return timestamp.replace(tzinfo=datetime.timezone.utc)
         return timestamp.astimezone(datetime.timezone.utc)
 
+    def _get_event_timestamp(event):
+        if event.last_timestamp:
+            return event.last_timestamp
+        elif event.metadata.creation_timestamp:
+            return event.metadata.creation_timestamp
+        return None
+
     events = kubernetes.core_api(context).list_namespaced_event(
         namespace=namespace, field_selector=f'reason={reason}')
     for event in events.items:
-        ts = event.last_timestamp
+        ts = _get_event_timestamp(event)
         if ts and _convert_to_utc(ts) > search_start:
             return True
     return False
