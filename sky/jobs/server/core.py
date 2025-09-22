@@ -861,6 +861,8 @@ def cancel(name: Optional[str] = None,
                     'Can only specify one of JOB_IDS, name, pool, or all/'
                     f'all_users. Provided {" ".join(arguments)!r}.')
 
+        job_ids = None if (all_users or all) else job_ids
+
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 
@@ -872,9 +874,8 @@ def cancel(name: Optional[str] = None,
                 if all_users or all or job_ids:
                     cancel_by_id_request = (
                         managed_jobsv1_pb2.CancelJobsByIdRequest(
-                            job_ids=None if
-                            (all_users or all) else managed_jobsv1_pb2.JobIds(
-                                ids=job_ids),
+                            job_ids=None if job_ids is None else
+                            managed_jobsv1_pb2.JobIds(ids=job_ids),
                             all_users=all_users,
                             user_hash=common_utils.get_user_hash()
                             if all else None,
@@ -914,8 +915,7 @@ def cancel(name: Optional[str] = None,
         if use_legacy:
             if all_users or all or job_ids:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                    None if (all_users or all) else job_ids,
-                    all_users=all_users)
+                    job_ids, all_users=all_users)
             elif name is not None:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(
                     name)
