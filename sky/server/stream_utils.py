@@ -194,8 +194,6 @@ async def _tail_log_file(
             if cluster_name is not None and check_status:
                 cluster_record = await global_user_state.get_status_from_cluster_name_async(
                     cluster_name)
-                logger.info(
-                    f'PROVISION LOG: getting cluster record for {cluster_name}')
                 if cluster_record is None or cluster_record != status_lib.ClusterStatus.INIT:
                     break
                 last_cluster_status_check_time = current_time
