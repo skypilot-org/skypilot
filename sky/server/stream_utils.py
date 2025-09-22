@@ -24,6 +24,7 @@ logger = sky_logging.init_logger(__name__)
 _BUFFER_SIZE = 8 * 1024  # 8KB
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
+_CLUSTER_STATUS_INTERVAL = 1
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -136,6 +137,7 @@ async def _tail_log_file(
             yield line_str
 
     last_heartbeat_time = asyncio.get_event_loop().time()
+    last_cluster_status_check_time = asyncio.get_event_loop().time()
 
     # Buffer the lines in memory and flush them in chunks to improve log
     # tailing throughput.
@@ -186,11 +188,23 @@ async def _tail_log_file(
                 # For provision logs, terminate streaming if
                 cluster_record = global_user_state.get_cluster_from_name(
                     cluster_name)
-                if cluster_record is None or cluster_record['status'] != status_lib.ClusterStatus.INIT:
+                logger.info(
+                    f'PROVISION LOG: getting cluster record for {cluster_name}')
+                if cluster_record is None or cluster_record[
+                        'status'] != status_lib.ClusterStatus.INIT:
                     break
             if not follow:
                 break
-
+            # Provision logs pass in cluster_name, check cluster status
+            # periodically to see if provisioning is done. We only
+            # check once a second to avoid overloading the DB.
+            check_status = (current_time - last_cluster_status_check_time
+                           ) >= _CLUSTER_STATUS_INTERVAL
+            if cluster_name is not None and check_status:
+                if cluster_record is None or cluster_record[
+                        'status'] != status_lib.ClusterStatus.INIT:
+                    break
+                last_cluster_status_check_time = current_time
             if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
                 # Currently just used to keep the connection busy, refer to
                 # https://github.com/skypilot-org/skypilot/issues/5750 for
