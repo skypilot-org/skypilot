@@ -29,7 +29,7 @@ from sqlalchemy.ext import declarative
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
-from sky.server import metrics as metrics_lib
+from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -1409,6 +1409,7 @@ def get_clusters(
     exclude_managed_clusters: bool = False,
     workspaces_filter: Optional[Set[str]] = None,
     user_hashes_filter: Optional[Set[str]] = None,
+    cluster_names: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Get clusters from the database.
 
@@ -1419,6 +1420,8 @@ def get_clusters(
             that has workspace field set to one of the values.
         user_hashes_filter: If specified, only include clusters
             that has user_hash field set to one of the values.
+        cluster_names: If specified, only include clusters
+            that has name field set to one of the values.
     """
     # is a cluster has a null user_hash,
     # we treat it as belonging to the current user.
@@ -1437,11 +1440,13 @@ def get_clusters(
                 # If current_user_hash is in user_hashes_filter, we include
                 # clusters that have a null user_hash.
                 query = query.filter(
-                    cluster_table.c.user_hash.in_(user_hashes_filter) |
-                    (cluster_table.c.user_hash is None))
+                    (cluster_table.c.user_hash.in_(user_hashes_filter) |
+                     (cluster_table.c.user_hash is None)))
             else:
                 query = query.filter(
                     cluster_table.c.user_hash.in_(user_hashes_filter))
+        if cluster_names is not None:
+            query = query.filter(cluster_table.c.name.in_(cluster_names))
         query = query.order_by(sqlalchemy.desc(cluster_table.c.launched_at))
         rows = query.all()
     records = []

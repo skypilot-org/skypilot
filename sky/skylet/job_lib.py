@@ -559,21 +559,20 @@ def get_jobs_info(user_hash: Optional[str] = None,
     jobs_info = []
     for job in jobs:
         jobs_info.append(
-            jobsv1_pb2.JobInfo(
-                job_id=job['job_id'],
-                job_name=job['job_name'],
-                username=job['username'],
-                submitted_at=job['submitted_at'],
-                status=job['status'].to_protobuf(),
-                run_timestamp=job['run_timestamp'],
-                start_at=job['start_at']
-                if job['start_at'] is not None else -1.0,
-                end_at=job['end_at'] if job['end_at'] is not None else 0.0,
-                resources=job['resources'] or '',
-                pid=job['pid'],
-                log_path=os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                      job['run_timestamp']),
-                metadata=json.dumps(job['metadata'])))
+            jobsv1_pb2.JobInfo(job_id=job['job_id'],
+                               job_name=job['job_name'],
+                               username=job['username'],
+                               submitted_at=job['submitted_at'],
+                               status=job['status'].to_protobuf(),
+                               run_timestamp=job['run_timestamp'],
+                               start_at=job['start_at'],
+                               end_at=job['end_at'],
+                               resources=job['resources'],
+                               pid=job['pid'],
+                               log_path=os.path.join(
+                                   constants.SKY_LOGS_DIRECTORY,
+                                   job['run_timestamp']),
+                               metadata=json.dumps(job['metadata'])))
     return jobs_info
 
 
