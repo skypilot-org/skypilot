@@ -99,9 +99,6 @@ def wait_until_num_workers(pool_name: str,
         'if echo "$s" | grep "FAILED"; then '
         '  exit 1; '
         'fi; '
-        'if echo "$s" | grep "SHUTTING_DOWN"; then '
-        '  exit 1; '
-        'fi; '
         f'echo "Waiting for num workers to be {num_workers}..."; '
         f'sleep {time_between_checks}; '
         'done')
