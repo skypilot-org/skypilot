@@ -116,6 +116,8 @@ Path = str
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = constants.SKY_REMOTE_WORKDIR
+# Unset RAY_RAYLET_PID to prevent the Ray cluster in the SkyPilot runtime
+# from interfering with the Ray cluster in the user's task (if any).
 UNSET_RAY_ENV_VARS = ['RAY_RAYLET_PID']
 
 logger = sky_logging.init_logger(__name__)
