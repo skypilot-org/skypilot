@@ -226,6 +226,7 @@ If multiple jobs are queued for one cluster, the latest version of the working d
 For example, when running the following commands:
 
 .. code-block:: bash
+
   $ echo "version 1" > version.txt
   $ sky exec mycluster --async --workdir . "cat version.txt"
   $ echo "version 2" > version.txt
@@ -237,6 +238,7 @@ The first ``exec`` prints "version 1" if the job starts running before the secon
 To pass information that varies between jobs, use the ``--env`` or ``--env-file`` field to pass job-specific information.
 
 .. code-block:: bash
+
   $ cat script.sh
   echo $VERSION
   $ sky exec mycluster --async --workdir . --env VERSION=1 "bash script.sh"
