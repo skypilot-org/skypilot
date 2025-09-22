@@ -4,7 +4,7 @@ overloaded type hints for run_with_log(), as we need to determine
 the return type based on the value of require_outputs.
 """
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 
 from typing_extensions import Literal
 
@@ -167,3 +167,8 @@ class LogBuffer:
 
     def close(self):
         ...
+
+
+def buffered_iter_with_timeout(buffer: LogBuffer, iterable: Iterable[str],
+                               timeout: float) -> Iterable[str]:
+    ...

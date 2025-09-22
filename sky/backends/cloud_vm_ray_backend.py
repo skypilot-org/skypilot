@@ -4721,8 +4721,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         lambda: SkyletClient(handle.get_grpc_channel()
                                             ).tail_logs(request, timeout=None)):
                     if resp.log_line:
-                        sys.stdout.write(resp.log_line)
-                        sys.stdout.flush()
+                        print(resp.log_line, end='', flush=True)
                     last_exit_code = resp.exit_code
                 return last_exit_code
             except exceptions.SkyletMethodNotImplementedError:

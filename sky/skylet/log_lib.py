@@ -8,11 +8,13 @@ import functools
 import io
 import multiprocessing.pool
 import os
+import queue as queue_lib
 import shlex
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
                     Tuple, Union)
@@ -728,3 +730,47 @@ class LogBuffer:
 
     def close(self):
         self._buffer.close()
+
+
+def buffered_iter_with_timeout(buffer: LogBuffer, iterable: Iterable[str],
+                               timeout: float) -> Iterable[str]:
+    """Iterates over an iterable, writing each item to a buffer,
+        and flushing the buffer when it is full or no item is
+        yielded within the timeout duration."""
+    # TODO(kevin): Simplify this using asyncio.timeout, once we move
+    # the skylet event loop and gRPC server to asyncio.
+    # https://docs.python.org/3/library/asyncio-task.html#timeouts
+
+    queue: queue_lib.Queue = queue_lib.Queue()
+    sentinel = object()
+
+    def producer():
+        try:
+            for item in iterable:
+                queue.put(item)
+        finally:
+            queue.put(sentinel)
+
+    thread = threading.Thread(target=producer, daemon=True)
+    thread.start()
+
+    while True:
+        try:
+            item = queue.get(timeout=timeout)
+        except queue_lib.Empty:
+            out = buffer.flush()
+            if out:
+                yield out
+            continue
+
+        if item is sentinel:
+            thread.join()
+            out = buffer.flush()
+            if out:
+                yield out
+            return
+
+        if buffer.write(item):
+            out = buffer.flush()
+            if out:
+                yield out

@@ -1,12 +1,8 @@
 """gRPC service implementations for skylet."""
 
 import os
-import queue as queue_lib
-import threading
-from typing import Iterable
 
 import grpc
-
 from sky import exceptions
 from sky import sky_logging
 from sky.jobs import state as managed_job_state
@@ -280,50 +276,6 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def _buffered_iter_with_timeout(self, buffer: log_lib.LogBuffer,
-                                    iterable: Iterable[str],
-                                    timeout: float) -> Iterable[str]:
-        """Iterates over an iterable, writing each item to a buffer,
-        and flushing the buffer when it is full or no item is
-        yielded within the timeout duration."""
-        # TODO(kevin): Simplify this using asyncio.timeout, once we move
-        # the skylet event loop and gRPC server to asyncio.
-        # https://docs.python.org/3/library/asyncio-task.html#timeouts
-
-        queue: queue_lib.Queue = queue_lib.Queue()
-        sentinel = object()
-
-        def producer():
-            try:
-                for item in iterable:
-                    queue.put(item)
-            finally:
-                queue.put(sentinel)
-
-        thread = threading.Thread(target=producer, daemon=True)
-        thread.start()
-
-        while True:
-            try:
-                item = queue.get(timeout=timeout)
-            except queue_lib.Empty:
-                out = buffer.flush()
-                if out:
-                    yield out
-                continue
-
-            if item is sentinel:
-                thread.join()
-                out = buffer.flush()
-                if out:
-                    yield out
-                return
-
-            if buffer.write(item):
-                out = buffer.flush()
-                if out:
-                    yield out
-
     def TailLogs(
             self,
             request: jobsv1_pb2.TailLogsRequest,  # type: ignore[return]
@@ -340,7 +292,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 log_dir = None if run_timestamp is None else os.path.join(
                     constants.SKY_LOGS_DIRECTORY, run_timestamp)
 
-            for line in self._buffered_iter_with_timeout(
+            for line in log_lib.buffered_iter_with_timeout(
                     buffer,
                     log_lib.tail_logs_iter(job_id, log_dir, managed_job_id,
                                            request.follow, request.tail),
