@@ -6,17 +6,19 @@ Covers:
 - Parser accepts `k8s` inputs without requiring immediate cloud resolution
 """
 import os
+from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
-from pathlib import Path
-import shutil
 
+
+from jsonschema import validate
+from jsonschema import ValidationError
 import pytest
-from jsonschema import validate, ValidationError
 
-from sky.utils import schemas
 from sky import resources as sky_resources
+from sky.utils import schemas
 
 
 def _candidate_cmds(path: Path):
