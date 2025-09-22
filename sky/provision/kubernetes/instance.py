@@ -317,8 +317,11 @@ def _cluster_had_autoscale_event(namespace, context, search_start):
         A boolean whether the cluster has an autoscaling event or not.
     """
     assert namespace is not None
-    autoscaling_reasons = set(
-        ['TriggeredScaleUp', 'SuccessfulRescale', 'ScalingReplicaSet'])
+    autoscaling_reasons = {
+        'TriggeredScaleUp',
+        'SuccessfulRescale',
+        'ScalingReplicaSet'
+    }
 
     def _convert_to_utc(timestamp):
         if timestamp.tzinfo is None:
