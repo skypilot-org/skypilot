@@ -3172,8 +3172,6 @@ def get_clusters(
             record['accelerators'] = (
                 f'{handle.launched_resources.accelerators}'
                 if handle.launched_resources.accelerators else None)
-            if summary_response:
-                record.pop('handle')
 
     # Add auth_config to the records
     _update_records_with_resources_str(records)
