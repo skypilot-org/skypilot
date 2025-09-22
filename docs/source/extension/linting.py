@@ -60,6 +60,8 @@ ALLOWED_TERMS = {
     'Qwen',
     # Area
     'Europe',
+    'WARP',
+    'Cloudflare'
 }
 
 # Add multi-word terms that should be treated as a single entity
@@ -84,6 +86,7 @@ MULTI_WORD_TERMS = {
     'Microsoft Entra ID',
     # Providers/brands
     'Prime Intellect',
+    'Cloudflare Zero Trust',
 }
 
 

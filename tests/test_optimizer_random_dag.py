@@ -71,9 +71,6 @@ def generate_random_dag(
 
             candidate_resources = set()
             for candidate in candidate_instance_types:
-                # TODO(aylei): remove this after #7177 get fixed
-                if candidate.accelerator_name == 'L40s':
-                    continue
                 instance_type = candidate.instance_type
                 if pd.isna(instance_type):
                     assert candidate.cloud == 'GCP', candidate

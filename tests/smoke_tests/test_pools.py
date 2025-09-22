@@ -11,6 +11,15 @@ from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import yaml_utils
 
+_LAUNCH_POOL_AND_CHECK_SUCCESS = (
+    's=$(sky jobs pool apply -p {pool_name} {pool_yaml} -y); '
+    'echo "$s"; '
+    'echo; echo; echo "$s" | grep "Successfully created pool"')
+
+_TEARDOWN_POOL = ('sky jobs pool down {pool_name} -y')
+
+_CANCEL_POOL_JOBS = ('sky jobs pool cancel {pool_name} -y')
+
 
 def wait_until_pool_ready(pool_name: str,
                           timeout: int = 30,
@@ -37,7 +46,63 @@ def wait_until_pool_ready(pool_name: str,
         'done')
 
 
+def wait_until_worker_status(pool_name: str,
+                             status: str,
+                             timeout: int = 30,
+                             time_between_checks: int = 5):
+    status_str = f'sky jobs pool status {pool_name} | grep -A999 "^Pool Workers" | grep "^{pool_name}"'
+    return (
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for worker status \'{status}\'"; exit 1; '
+        'fi; '
+        f's=$({status_str}); '
+        'echo "$s"; '
+        f'if echo "$s" | grep "{status}"; then '
+        '  break; '
+        'fi; '
+        'if echo "$s" | grep "FAILED"; then '
+        '  exit 1; '
+        'fi; '
+        'if echo "$s" | grep "SHUTTING_DOWN"; then '
+        '  exit 1; '
+        'fi; '
+        f'echo "Waiting for worker status to be {status}..."; '
+        f'sleep {time_between_checks}; '
+        'done; '
+        'sleep 1')
+
+
+def check_for_setup_message(pool_name: str,
+                            setup_message: str,
+                            follow: bool = True):
+    return (
+        f's=$(sky jobs pool logs {pool_name} 1 {"--no-follow" if not follow else ""}); '
+        f'echo "$s"; echo; echo; echo "$s" | grep "{setup_message}"')
+
+
+def basic_pool_conf(num_workers: int, setup_cmd: str = 'echo "setup message"'):
+    return textwrap.dedent(f"""
+    pool:
+        workers: {num_workers}
+
+    resources:
+        cpus: 2+
+        memory: 4GB+
+
+    setup: |
+        {setup_cmd}
+    """)
+
+
+def write_pool_yaml(pool_yaml: tempfile.NamedTemporaryFile, pool_config: str):
+    pool_yaml.write(pool_config.encode())
+    pool_yaml.flush()
+
+
 def test_vllm_pool(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
     pool_config = textwrap.dedent(f"""
     envs:
         MODEL_NAME: NousResearch/Meta-Llama-3-8B-Instruct
@@ -70,21 +135,21 @@ def test_vllm_pool(generic_cloud: str):
         echo "Still waiting for vLLM service..."
         done
         echo "vLLM service is ready!"
-    
+
 
 
     pool:
         workers: 1
     """)
 
-    bucket_name = f'sky-test-vllm-pool-{generic_cloud}'
+    bucket_name = f'sky-test-vllm-pool-{name}'
 
     job_config = textwrap.dedent(f"""
     name: t-test-vllm-pool
 
     resources:
         cpus: 4
-        accelerators: 
+        accelerators:
             L4: 1
         any_of:
             - use_spot: true
@@ -104,6 +169,7 @@ def test_vllm_pool(generic_cloud: str):
         /output:
             name: ${{EMBEDDINGS_BUCKET_NAME}}
             mode: MOUNT
+            store: s3
 
 
     run: |
@@ -111,19 +177,19 @@ def test_vllm_pool(generic_cloud: str):
 
         # Initialize and download the model
         HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/model $MODEL_NAME
-    
+
         # Create metrics directory for monitoring service
         mkdir -p /output/metrics
-    
+
         # Set worker ID for metrics tracking
         if [ -z "$WORKER_ID" ]; then
             export WORKER_ID="worker_$(date +%s)_$(hostname)"
             echo "Generated worker ID: $WORKER_ID"
         fi
-    
+
         # Process the assigned range of documents
         echo "Processing documents from $START_IDX to $END_IDX"
-    
+
         # Process text documents and track token metrics
         python scripts/text_vector_processor.py \
             --output-path "/output/embeddings_${{START_IDX}}_${{END_IDX}}.parquet" \
@@ -148,7 +214,6 @@ def test_vllm_pool(generic_cloud: str):
             job_yaml.write(job_config.encode())
             job_yaml.flush()
 
-            name = smoke_tests_utils.get_cluster_name()
             pool_name = f'{name}-pool'
 
             test = smoke_tests_utils.Test(
@@ -161,7 +226,51 @@ def test_vllm_pool(generic_cloud: str):
                     f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."',
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=f'sky jobs pool down {pool_name} -y',
+                teardown=(f'sky jobs pool down {pool_name} -y && '
+                          f'sky storage delete -y {bucket_name} || true'),
             )
 
             smoke_tests_utils.run_one_test(test)
+
+
+def test_setup_logs_in_starting_pool(generic_cloud: str):
+    """Test that setup logs are streamed in starting state."""
+    # Do a very long setup so we know the setup logs are streamed in
+    pool_config = basic_pool_conf(
+        1, 'for i in {1..10000}; do echo "Noisy setup $i"; sleep 1; done')
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_pool_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        test = smoke_tests_utils.Test('test_setup_logs_in_starting_pool', [
+            _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                  pool_yaml=pool_yaml.name),
+            wait_until_worker_status(pool_name, 'STARTING', timeout=timeout),
+            check_for_setup_message(pool_name, 'Noisy setup 1', follow=False),
+        ],
+                                      timeout=timeout,
+                                      teardown=_TEARDOWN_POOL.format(
+                                          pool_name=pool_name))
+
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_setup_logs_in_pool_exits(generic_cloud: str):
+    """Test that setup logs are streamed and exit once the setup is complete."""
+    """We omit --no-follow to test that we exit."""
+    pool_config = basic_pool_conf(num_workers=1)
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_pool_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        test = smoke_tests_utils.Test(
+            'test_setup_logs_in_starting_pool', [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                wait_until_worker_status(pool_name, 'READY', timeout=timeout),
+                check_for_setup_message(pool_name, 'setup message'),
+            ],
+            timeout=timeout,
+            teardown=_TEARDOWN_POOL.format(pool_name=pool_name))
+
+        smoke_tests_utils.run_one_test(test)

@@ -1,0 +1,64 @@
+# NeMo RL multi-node on Kubernetes with SkyPilot
+#
+# Runs the DPO example from NeMo RL repository on 16 H100s (with InfiniBand on supported clusters)
+#
+# Usage:
+#   HF_TOKEN=<YOUR_TOKEN> sky exec -c nemo nemorl.sky.yaml --secret HF_TOKEN
+
+resources:
+  accelerators: H100:8
+  memory: 64+
+  infra: k8s
+  cpus: 32+
+  # network_tier: best # Uncomment this for InfiniBand support on supported clusters
+  image_id: docker:nvidia/cuda:12.8.0-devel-ubuntu24.04
+
+num_nodes: 2
+
+secrets:
+  HF_TOKEN: null
+
+setup: |
+  sudo apt update
+  # Install libibverbs-dev for InfiniBand support
+  sudo apt install -y git libibverbs-dev python3-dev
+
+  conda activate ray
+  if [ $? -ne 0 ]; then
+    conda create -n ray python=3.10 -y
+    conda activate ray
+  fi
+
+  uv pip install "ray[train]"
+  uv pip install tqdm
+
+  # Set up NeMo RL
+  git clone https://github.com/NVIDIA-NeMo/RL nemo-rl
+  cd nemo-rl
+  git checkout ee8f5aa75a7c8ab070a460f49b5fcf226c5b3018
+  git submodule update --init --recursive
+  uv venv
+  # Build flash-attn and warm the uv cache before first run
+  bash tools/build-flash-attn-in-uv-cache.sh
+  cd ..
+
+run: |
+  sudo chmod 777 -R /var/tmp
+  conda activate ray
+  cd nemo-rl
+  head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+    ps aux | grep ray | grep 6379 &> /dev/null || uv run ray start --head  --disable-usage-stats --port 6379
+    sleep 5
+    uv run python examples/run_dpo.py  \
+      cluster.gpus_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
+      cluster.num_nodes=${SKYPILOT_NUM_NODES} \
+      dpo.val_global_batch_size=32 \
+      checkpointing.checkpoint_dir='results/dpo_llama81'
+  else
+    sleep 5
+    ps aux | grep ray | grep 6379 &> /dev/null || uv run ray start --address $head_ip:6379 --disable-usage-stats
+    # Add sleep to after `ray start` to give ray enough time to daemonize 
+    sleep 5
+  fi
