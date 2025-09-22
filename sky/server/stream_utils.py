@@ -184,15 +184,6 @@ async def _tail_log_file(
                                 f'{request_task.name!r} request {request_id}'
                                 ' cancelled\n')
                     break
-            elif cluster_name is not None:
-                # For provision logs, terminate streaming if
-                cluster_record = global_user_state.get_cluster_from_name(
-                    cluster_name)
-                logger.info(
-                    f'PROVISION LOG: getting cluster record for {cluster_name}')
-                if cluster_record is None or cluster_record[
-                        'status'] != status_lib.ClusterStatus.INIT:
-                    break
             if not follow:
                 break
             # Provision logs pass in cluster_name, check cluster status
@@ -201,6 +192,8 @@ async def _tail_log_file(
             check_status = (current_time - last_cluster_status_check_time
                            ) >= _CLUSTER_STATUS_INTERVAL
             if cluster_name is not None and check_status:
+                cluster_record = global_user_state.get_cluster_from_name(
+                    cluster_name)
                 if cluster_record is None or cluster_record[
                         'status'] != status_lib.ClusterStatus.INIT:
                     break
