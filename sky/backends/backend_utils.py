@@ -2679,7 +2679,8 @@ def refresh_cluster_record(
                 return record
 
             if not acquire_per_cluster_status_lock:
-                return _update_cluster_status(cluster_name, include_user_info, summary_response)
+                return _update_cluster_status(cluster_name, include_user_info,
+                                              summary_response)
 
             # Try to acquire the lock so we can fetch the status.
             try:
