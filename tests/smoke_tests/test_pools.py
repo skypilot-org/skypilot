@@ -337,9 +337,9 @@ def test_update_workers(generic_cloud: str):
                 _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
                     pool_name=pool_name, num_workers=1),
                 # Shutting down takes a while, so we give it a longer timeout.
-                wait_until_num_workers(pool_name, 1, timeout=timeout * 5),
+                wait_until_num_workers(pool_name, 1, timeout=timeout),
             ],
-            timeout=timeout * 6,
+            timeout=timeout,
             teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
         )
         smoke_tests_utils.run_one_test(test)
