@@ -127,6 +127,7 @@ def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
+    verbose: bool = False,
 ) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
@@ -144,7 +145,8 @@ def _get_cluster_records_and_set_ssh_config(
     request_id = sdk.status(clusters,
                             refresh=refresh,
                             all_users=all_users,
-                            _include_credentials=True)
+                            _include_credentials=True,
+                            _summary_response=not verbose)
     cluster_records = sdk.stream_and_get(request_id)
     # Update the SSH config for all clusters
     for record in cluster_records:
@@ -1858,7 +1860,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     # Phase 3: Get cluster records and handle special cases
     cluster_records = _get_cluster_records_and_set_ssh_config(
-        query_clusters, refresh_mode, all_users)
+        query_clusters, refresh_mode, all_users, verbose)
 
     # TOOD(zhwu): setup the ssh config for status
     if ip or show_endpoints:

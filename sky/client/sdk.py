@@ -1429,6 +1429,7 @@ def status(
     all_users: bool = False,
     *,
     _include_credentials: bool = False,
+    _summary_response: bool = False,
 ) -> server_common.RequestId[List[responses.StatusResponse]]:
     """Gets cluster statuses.
 
@@ -1514,6 +1515,7 @@ def status(
         refresh=refresh,
         all_users=all_users,
         include_credentials=_include_credentials,
+        summary_response=_summary_response,
     )
     response = server_common.make_authenticated_request(
         'POST', '/status', json=json.loads(body.model_dump_json()))
