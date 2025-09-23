@@ -477,7 +477,7 @@ class ReplicaInfo:
                      with_handle: bool,
                      with_url: bool = True) -> Dict[str, Any]:
         cluster_record = global_user_state.get_cluster_from_name(
-            self.cluster_name)
+            self.cluster_name, include_user_info=False, summary_response=True)
         info_dict = {
             'replica_id': self.replica_id,
             'name': self.cluster_name,
