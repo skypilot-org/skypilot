@@ -2679,7 +2679,7 @@ def refresh_cluster_record(
                 return record
 
             if not acquire_per_cluster_status_lock:
-                return _update_cluster_status(cluster_name, summary_response)
+                return _update_cluster_status(cluster_name, include_user_info, summary_response)
 
             # Try to acquire the lock so we can fetch the status.
             try:
@@ -3061,25 +3061,6 @@ def _refresh_cluster(
         force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]],
         include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
-    # TODO(syang): we should try not to leak
-    # request info in backend_utils.py.
-    # Refactor this to use some other info to
-    # determine if a launch is in progress.
-    request = requests_lib.get_request_tasks(
-        req_filter=requests_lib.RequestTaskFilter(
-            status=[requests_lib.RequestStatus.RUNNING],
-            cluster_names=[cluster_name],
-            include_request_names=['sky.launch']))
-    if len(request) > 0:
-        # There is an active launch request on the cluster,
-        # so we don't want to update the cluster status until
-        # the request is completed.
-        logger.debug(f'skipping refresh for cluster {cluster_name} '
-                     'as there is an active launch request')
-        return global_user_state.get_cluster_from_name(
-            cluster_name,
-            include_user_info=include_user_info,
-            summary_response=summary_response)
     try:
         record = refresh_cluster_record(
             cluster_name,
@@ -3116,6 +3097,23 @@ def refresh_cluster_records() -> None:
     cluster_names = global_user_state.get_cluster_names(
         exclude_managed_clusters=exclude_managed_clusters,)
 
+    # TODO(syang): we should try not to leak
+    # request info in backend_utils.py.
+    # Refactor this to use some other info to
+    # determine if a launch is in progress.
+    request = requests_lib.get_request_tasks(
+        req_filter=requests_lib.RequestTaskFilter(
+            status=[requests_lib.RequestStatus.RUNNING],
+            cluster_names=cluster_names,
+            include_request_names=['sky.launch']))
+    cluster_names_with_launch_request = {
+        request.cluster_name for request in request
+    }
+    cluster_names_without_launch_request = [
+        cluster_name for cluster_name in cluster_names
+        if cluster_name not in cluster_names_with_launch_request
+    ]
+
     def _refresh_cluster_record(cluster_name):
         return _refresh_cluster(cluster_name,
                                 force_refresh_statuses=set(
@@ -3124,7 +3122,9 @@ def refresh_cluster_records() -> None:
                                 summary_response=True)
 
     if len(cluster_names) > 0:
-        subprocess_utils.run_in_parallel(_refresh_cluster_record, cluster_names)
+        # Do not refresh the clusters that have an active launch request.
+        subprocess_utils.run_in_parallel(_refresh_cluster_record,
+                                         cluster_names_without_launch_request)
 
 
 def get_clusters(
@@ -3314,11 +3314,31 @@ def get_clusters(
         return record
 
     cluster_names = [record['name'] for record in records]
-    updated_records = []
-    if len(cluster_names) > 0:
+    # TODO(syang): we should try not to leak
+    # request info in backend_utils.py.
+    # Refactor this to use some other info to
+    # determine if a launch is in progress.
+    request = requests_lib.get_request_tasks(
+        req_filter=requests_lib.RequestTaskFilter(
+            status=[requests_lib.RequestStatus.RUNNING],
+            cluster_names=cluster_names,
+            include_request_names=['sky.launch']))
+    cluster_names_with_launch_request = {
+        request.cluster_name for request in request
+    }
+    cluster_names_without_launch_request = [
+        cluster_name for cluster_name in cluster_names
+        if cluster_name not in cluster_names_with_launch_request
+    ]
+    # for clusters that have an active launch request, we do not refresh the status
+    updated_records = [
+        record for record in records
+        if record['name'] in cluster_names_with_launch_request
+    ]
+    if len(cluster_names_without_launch_request) > 0:
         with progress:
             updated_records = subprocess_utils.run_in_parallel(
-                _refresh_cluster_record, cluster_names)
+                _refresh_cluster_record, cluster_names_without_launch_request)
 
     # Show information for removed clusters.
     kept_records = []

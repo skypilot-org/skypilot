@@ -1482,7 +1482,7 @@ def get_cluster_from_name(
         user_hash = _get_user_hash_or_current_user(row.user_hash)
         user = get_user(user_hash)
         user_name = user.name if user is not None else None
-    if summary_response:
+    if not summary_response:
         last_event = get_last_cluster_event(
             row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
     # TODO: use namedtuple instead of dict
@@ -1675,7 +1675,6 @@ def get_cluster_names(exclude_managed_clusters: bool = False,) -> List[str]:
         if exclude_managed_clusters:
             query = query.filter(cluster_table.c.is_managed == int(False))
         rows = query.all()
-    print(rows)
     return [row[0] for row in rows]
 
 
