@@ -108,6 +108,7 @@ def show_status_table(cluster_records: List[responses.StatusResponse],
         cluster_names = {record['name'] for record in cluster_records}
         not_found_clusters = ux_utils.get_non_matched_query(
             query_clusters, cluster_names)
+        not_found_clusters = [repr(cluster) for cluster in not_found_clusters]
         if not_found_clusters:
             cluster_str = 'Cluster'
             if len(not_found_clusters) > 1:
