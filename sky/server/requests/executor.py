@@ -502,7 +502,35 @@ def _record_memory_metrics(request_name: str, proc: psutil.Process,
         name=request_name).observe(max(peak_rss - rss_begin, 0))
 
 
-async def execute_request_coroutine(request: api_requests.Request):
+class CoroutineTask:
+    """Wrapper of a background task runs in coroutine"""
+
+    def __init__(self, task: asyncio.Task):
+        self.task = task
+
+    async def cancel(self):
+        try:
+            self.task.cancel()
+            await self.task
+        except asyncio.CancelledError:
+            pass
+
+
+def execute_request_in_coroutine(
+        request: api_requests.Request) -> CoroutineTask:
+    """Execute a request in current event loop.
+
+    Args:
+        request: The request to execute.
+
+    Returns:
+        A CoroutineTask handle to operate the background task.
+    """
+    task = asyncio.create_task(_execute_request_coroutine(request))
+    return CoroutineTask(task)
+
+
+async def _execute_request_coroutine(request: api_requests.Request):
     """Execute a request in current event loop.
 
     Similar to _request_execution_wrapper, but executed as coroutine in current
@@ -640,13 +668,35 @@ def schedule_request(request_id: str,
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    prepare_request(request_id, request_name, request_body, func,
-                    request_cluster_name, schedule_type, is_skypilot_system)
+    request_task = prepare_request(request_id, request_name, request_body, func,
+                                   request_cluster_name, schedule_type,
+                                   is_skypilot_system)
+    schedule_request_task(request_task, ignore_return_value, precondition,
+                          retryable)
+
+
+def schedule_request_task(request_task: api_requests.Request,
+                          ignore_return_value: bool = False,
+                          precondition: Optional[
+                              preconditions.Precondition] = None,
+                          retryable: bool = False) -> None:
+    """Enqueue a request to the request queue
+
+    Args:
+        request_task: The request task to schedule.
+        ignore_return_value: If True, the return value of the function will be
+            ignored.
+        precondition: If a precondition is provided, the request will only be
+            scheduled for execution when the precondition is met (returns True).
+            The precondition is waited asynchronously and does not block the
+            caller.
+        retryable: Whether the request should be retried if it fails.
+    """
 
     def enqueue():
-        input_tuple = (request_id, ignore_return_value, retryable)
-        logger.info(f'Queuing request: {request_id}')
-        _get_queue(schedule_type).put(input_tuple)
+        input_tuple = (request_task.request_id, ignore_return_value, retryable)
+        logger.info(f'Queuing request: {request_task.request_id}')
+        _get_queue(request_task.schedule_type).put(input_tuple)
 
     if precondition is not None:
         # Wait async to avoid blocking caller.
