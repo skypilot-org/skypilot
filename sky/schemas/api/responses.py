@@ -118,6 +118,7 @@ class StatusResponse(ResponseBaseModel):
     cpus: Optional[str] = None
     memory: Optional[str] = None
     accelerators: Optional[str] = None
+    cluster_name_on_cloud: Optional[str] = None
 
 
 class UploadStatus(enum.Enum):

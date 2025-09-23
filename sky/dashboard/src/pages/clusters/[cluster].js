@@ -467,6 +467,14 @@ function ActiveTab({
                 </div>
               </div>
               <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Cluster Name on Cloud
+                </div>
+                <div className="text-base mt-1">
+                  {clusterData.cluster_name_on_cloud || '-'}
+                </div>
+              </div>
+              <div>
                 <div className="text-gray-600 font-medium text-base">User</div>
                 <div className="text-base mt-1">
                   <UserDisplay
