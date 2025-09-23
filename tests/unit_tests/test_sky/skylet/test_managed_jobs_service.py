@@ -317,8 +317,8 @@ class TestGetJobTable:
         assert target_job.end_at == 0.0
         assert target_job.user_yaml == ''
         assert target_job.entrypoint == 'ep1'
-        assert target_job.pool == ''
-        assert target_job.pool_hash == ''
+        assert target_job.pool == 'test-pool'
+        assert target_job.pool_hash == 'hash123'
 
         # Validate that workspaces are correct
         workspaces = [job.workspace for job in response.jobs]
