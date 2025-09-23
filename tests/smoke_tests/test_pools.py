@@ -102,7 +102,6 @@ def write_pool_yaml(pool_yaml: tempfile.NamedTemporaryFile, pool_config: str):
 
 
 @pytest.mark.resource_heavy
-@pytest.mark.no_remote_server
 def test_vllm_pool(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_config = textwrap.dedent(f"""
