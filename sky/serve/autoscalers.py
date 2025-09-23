@@ -411,6 +411,8 @@ class _AutoscalerWithHysteresis(Autoscaler):
         # `_set_target_num_replicas_with_hysteresis` to have the replicas
         # quickly scale after each update.
         self.target_num_replicas = self._calculate_target_num_replicas()
+        logger.debug(f'Target number of replicas: {self.target_num_replicas}'
+                     'after update_version.')
         # Cleanup hysteresis counters.
         self.upscale_counter = 0
         self.downscale_counter = 0
