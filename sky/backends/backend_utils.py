@@ -3046,11 +3046,15 @@ class CloudFilter(enum.Enum):
     LOCAL = 'local'
 
 
-def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
+def _get_glob_clusters(
+        clusters: List[str],
+        silent: bool = False,
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
-        glob_cluster = global_user_state.get_glob_cluster_names(cluster)
+        glob_cluster = global_user_state.get_glob_cluster_names(
+            cluster, workspaces_filter=workspaces_filter)
         if len(glob_cluster) == 0 and not silent:
             logger.info(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
@@ -3161,6 +3165,7 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
+    accessible_workspaces = workspaces_core.get_workspaces()
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
@@ -3173,7 +3178,10 @@ def get_clusters(
                 non_glob_cluster_names.append(cluster_name)
         cluster_names = non_glob_cluster_names
         if glob_cluster_names:
-            cluster_names += _get_glob_clusters(glob_cluster_names, silent=True)
+            cluster_names += _get_glob_clusters(
+                glob_cluster_names,
+                silent=True,
+                workspaces_filter=accessible_workspaces)
 
     exclude_managed_clusters = False
     if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
@@ -3181,7 +3189,6 @@ def get_clusters(
     user_hashes_filter = None
     if not all_users:
         user_hashes_filter = {common_utils.get_current_user().id}
-    accessible_workspaces = workspaces_core.get_workspaces()
     records = global_user_state.get_clusters(
         exclude_managed_clusters=exclude_managed_clusters,
         user_hashes_filter=user_hashes_filter,
