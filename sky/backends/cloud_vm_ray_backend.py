@@ -5589,8 +5589,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.InvalidClusterNameError: If the cluster name is invalid.
             # TODO(zhwu): complete the list of exceptions.
         """
-        record = global_user_state.get_cluster_from_name(cluster_name,
-                                                         summary_response=True)
+        record = global_user_state.get_cluster_from_name(
+            cluster_name, include_user_info=False, summary_response=True)
         if record is None:
             handle_before_refresh = None
             status_before_refresh = None
@@ -5611,6 +5611,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 cluster_name,
                 force_refresh_statuses={status_lib.ClusterStatus.INIT},
                 acquire_per_cluster_status_lock=False,
+                include_user_info=False,
                 summary_response=True,
             )
             if record is not None:

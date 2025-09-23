@@ -1436,6 +1436,8 @@ def _load_storage_mounts_metadata(
 @context_utils.cancellation_guard
 def get_cluster_from_name(
         cluster_name: Optional[str],
+        *,
+        include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1476,9 +1478,10 @@ def get_cluster_from_name(
         row = query.filter_by(name=cluster_name).first()
     if row is None:
         return None
-    user_hash = _get_user_hash_or_current_user(row.user_hash)
-    user = get_user(user_hash)
-    user_name = user.name if user is not None else None
+    if include_user_info:
+        user_hash = _get_user_hash_or_current_user(row.user_hash)
+        user = get_user(user_hash)
+        user_name = user.name if user is not None else None
     if summary_response:
         last_event = get_last_cluster_event(
             row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
@@ -1508,6 +1511,9 @@ def get_cluster_from_name(
         record['last_creation_yaml'] = row.last_creation_yaml
         record['last_creation_command'] = row.last_creation_command
         record['last_event'] = last_event
+    if include_user_info:
+        record['user_hash'] = user_hash
+        record['user_name'] = user_name
 
     return record
 
