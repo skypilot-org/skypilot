@@ -444,6 +444,12 @@ class ReplicaInfo:
         handle = self.handle()
         if handle is None:
             return None
+        if self.replica_port == '-':
+            # This is a pool replica so there is no endpoint and it's filled
+            # with this dummy value. We return None here so that we can
+            # get the active ready replicas and perform autoscaling. Otherwise,
+            # would error out when trying to get the endpoint.
+            return None
         replica_port_int = int(self.replica_port)
         try:
             endpoint_dict = backend_utils.get_endpoints(handle.cluster_name,

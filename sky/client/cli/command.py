@@ -4782,7 +4782,7 @@ def pool():
 @pool.command('apply', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('pool_yaml',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
@@ -4801,13 +4801,18 @@ def pool():
                     'with rolling update. If "blue_green", cluster pool will '
                     'be updated with blue-green update. This option is only '
                     'valid when the pool is already running.'))
+@click.option('--workers',
+              default=None,
+              type=int,
+              required=False,
+              help='Can be used to update the number of workers in the pool.')
 @_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS +
                     flags.COMMON_OPTIONS)
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
 def jobs_pool_apply(
-    pool_yaml: Tuple[str, ...],
+    pool_yaml: Optional[Tuple[str, ...]],
     pool: Optional[str],  # pylint: disable=redefined-outer-name
     workdir: Optional[str],
     infra: Optional[str],
@@ -4829,60 +4834,80 @@ def jobs_pool_apply(
     disk_tier: Optional[str],
     network_tier: Optional[str],
     mode: str,
+    workers: Optional[int],
     yes: bool,
     async_call: bool,
 ):
-    """Apply a config to a cluster pool for managed jobs submission.
-
-    If the pool is already running, the config will be applied to the pool.
-    Otherwise, a new pool will be created.
-
-    POOL_YAML must point to a valid YAML file.
+    """Either apply a config to a cluster pool for managed jobs submission
+    or update the number of workers in the pool. One of POOL_YAML or --workers
+    must be provided.
+    Config:
+        If the pool is already running, the config will be applied to the pool.
+        Otherwise, a new pool will be created.
+    Workers:
+        The --workers option can be used to override the number of workers
+        specified in the YAML file, or to update workers without a YAML file.
+        Example:
+            sky jobs pool apply -p my-pool --workers 5
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
-    if pool is None:
-        pool = serve_lib.generate_service_name(pool=True)
+    if workers is not None and pool_yaml is not None and len(pool_yaml) > 0:
+        raise click.UsageError(
+            'Cannot specify both --workers and POOL_YAML. Please use one of '
+            'them.')
 
-    task = _generate_task_with_service(
-        service_name=pool,
-        service_yaml_args=pool_yaml,
-        workdir=workdir,
-        cloud=cloud,
-        region=region,
-        zone=zone,
-        gpus=gpus,
-        cpus=cpus,
-        memory=memory,
-        instance_type=instance_type,
-        num_nodes=num_nodes,
-        use_spot=use_spot,
-        image_id=image_id,
-        env_file=env_file,
-        env=env,
-        secret=secret,
-        disk_size=disk_size,
-        disk_tier=disk_tier,
-        network_tier=network_tier,
-        ports=ports,
-        not_supported_cmd='sky jobs pool up',
-        pool=True,
-    )
-    assert task.service is not None
-    if not task.service.pool:
-        raise click.UsageError('The YAML file needs a `pool` section.')
-    click.secho('Pool spec:', fg='cyan')
-    click.echo(task.service)
-    serve_lib.validate_service_task(task, pool=True)
+    if pool_yaml is None or len(pool_yaml) == 0:
+        if pool is None:
+            raise click.UsageError(
+                'A pool name must be provided to update the number of workers.')
+        task = None
+        click.secho(f'Attempting to update {pool} to have {workers} workers',
+                    fg='cyan')
+    else:
+        if pool is None:
+            pool = serve_lib.generate_service_name(pool=True)
 
-    click.secho(
-        'Each pool worker will use the following resources (estimated):',
-        fg='cyan')
-    with dag_lib.Dag() as dag:
-        dag.add(task)
+        task = _generate_task_with_service(
+            service_name=pool,
+            service_yaml_args=pool_yaml,
+            workdir=workdir,
+            cloud=cloud,
+            region=region,
+            zone=zone,
+            gpus=gpus,
+            cpus=cpus,
+            memory=memory,
+            instance_type=instance_type,
+            num_nodes=num_nodes,
+            use_spot=use_spot,
+            image_id=image_id,
+            env_file=env_file,
+            env=env,
+            secret=secret,
+            disk_size=disk_size,
+            disk_tier=disk_tier,
+            network_tier=network_tier,
+            ports=ports,
+            not_supported_cmd='sky jobs pool up',
+            pool=True,
+        )
+        assert task.service is not None
+        if not task.service.pool:
+            raise click.UsageError('The YAML file needs a `pool` section.')
+        click.secho('Pool spec:', fg='cyan')
+        click.echo(task.service)
+        serve_lib.validate_service_task(task, pool=True)
+
+        click.secho(
+            'Each pool worker will use the following resources (estimated):',
+            fg='cyan')
+        with dag_lib.Dag() as dag:
+            dag.add(task)
 
     request_id = managed_jobs.pool_apply(task,
                                          pool,
+                                         workers=workers,
                                          mode=serve_lib.UpdateMode(mode),
                                          _need_confirmation=not yes)
     _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
@@ -5489,6 +5514,8 @@ def serve_update(
         sky serve update --mode blue_green sky-service-16aa new_service.yaml
 
     """
+    # TODO(lloyd-brown): Add a way to update number of replicas for serve
+    # the way we did for pools.
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
     task = _generate_task_with_service(
