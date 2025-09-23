@@ -3351,10 +3351,8 @@ def check(infra_list: Tuple[str],
     api_server_url = server_common.get_server_url()
     # Redact potential basic auth credentials in URL before printing.
     try:
-        from urllib.parse import (
-            urlsplit)  # pylint: disable=import-outside-toplevel
-        from urllib.parse import (
-            urlunsplit)  # pylint: disable=import-outside-toplevel
+        from urllib.parse import (urlsplit)  # pylint: disable=import-outside-toplevel
+        from urllib.parse import (urlunsplit)  # pylint: disable=import-outside-toplevel
         u = urlsplit(api_server_url)
         # Remove any userinfo from netloc
         safe_host = u.hostname or ''
