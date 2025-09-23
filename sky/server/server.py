@@ -445,6 +445,22 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
     loop.call_at(target, tick)
 
 
+def schedule_on_boot_check():
+    try:
+        executor.schedule_request(
+            request_id='skypilot-server-on-boot-check',
+            request_name='check',
+            request_body=payloads.RequestBody(),
+            func=sky_check.check,
+            schedule_type=requests_lib.ScheduleType.SHORT,
+            is_skypilot_system=True,
+        )
+    except exceptions.RequestAlreadyExistsError:
+        # Lifespan will be executed in each uvicorn worker process, we
+        # can safely ignore the error if the task is already scheduled.
+        logger.debug('Request skypilot-server-on-boot-check already exists.')
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
@@ -469,6 +485,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             # Lifespan will be executed in each uvicorn worker process, we
             # can safely ignore the error if the task is already scheduled.
             logger.debug(f'Request {event.id} already exists.')
+    schedule_on_boot_check()
     asyncio.create_task(cleanup_upload_ids())
     if metrics_utils.METRICS_ENABLED:
         # Start monitoring the event loop lag in each server worker
