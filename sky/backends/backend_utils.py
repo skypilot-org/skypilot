@@ -3186,7 +3186,6 @@ def get_clusters(
         user_hashes_filter=user_hashes_filter,
         workspaces_filter=accessible_workspaces,
         cluster_names=cluster_names,
-        include_user_info=True,
         summary_response=summary_response)
 
     yellow = colorama.Fore.YELLOW

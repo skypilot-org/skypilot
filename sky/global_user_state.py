@@ -1501,8 +1501,6 @@ def get_cluster_from_name(
             row.storage_mounts_metadata),
         'cluster_ever_up': bool(row.cluster_ever_up),
         'status_updated_at': row.status_updated_at,
-        'user_hash': user_hash,
-        'user_name': user_name,
         'workspace': row.workspace,
         'is_managed': bool(row.is_managed),
         'config_hash': row.config_hash,
